@@ -35,7 +35,7 @@ func TestRegisterAgent_KindDefaultsToAgent(t *testing.T) {
 	store := &fakeAgentStore{}
 	svc := NewService(store, zap.NewNop())
 
-	agent, err := svc.RegisterAgent(context.Background(), "agent-1", "Agent One", "")
+	agent, err := svc.RegisterAgent(context.Background(), "agent-1", "Agent One", "default", "")
 	if err != nil {
 		t.Fatalf("RegisterAgent: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestRegisterAgent_KindHuman(t *testing.T) {
 	store := &fakeAgentStore{}
 	svc := NewService(store, zap.NewNop())
 
-	agent, err := svc.RegisterAgent(context.Background(), "human-1", "Ada", domain.AgentKindHuman)
+	agent, err := svc.RegisterAgent(context.Background(), "human-1", "Ada", "default", domain.AgentKindHuman)
 	if err != nil {
 		t.Fatalf("RegisterAgent: %v", err)
 	}

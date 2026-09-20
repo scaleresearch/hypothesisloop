@@ -87,11 +87,11 @@ func seedRun(t *testing.T, pool *Pool, suffix string, commit bool) (agentID, peI
 	agentID = "watch-test-agent-" + suffix
 	peID = "watch-test-pe-" + suffix
 	hypothesisID = "watch-test-hypothesis-" + suffix
-	if _, err := tx.Exec(ctx, `INSERT INTO agents (id, name) VALUES ($1, $1)`, agentID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO agents (id, name, org_id) VALUES ($1, $1, 'default')`, agentID); err != nil {
 		t.Fatalf("insert agent: got = %v, want = nil", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO platform_experiments (id, name, budget_accelerator_hours, starts_at, ends_at)
-VALUES ($1, $1, 1, now(), now() + interval '1 hour')`, peID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO platform_experiments (id, project_id, name, budget_accelerator_hours, starts_at, ends_at)
+VALUES ($1, 'default', $1, 1, now(), now() + interval '1 hour')`, peID); err != nil {
 		t.Fatalf("insert platform experiment: got = %v, want = nil", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, text)

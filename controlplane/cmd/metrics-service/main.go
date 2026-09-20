@@ -17,7 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -66,7 +66,12 @@ func main() {
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
 
-	controllerServer, runCancel := newControllerServer(store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, auth.NewStoreDirectory(pool))
+	if err != nil {
+		logger.Fatal("metrics-service: configure auth", zap.Error(err))
+	}
+
+	controllerServer, runCancel := newControllerServer(authenticator, store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -90,7 +95,7 @@ func main() {
 	logger.Info("metrics-service: stopped")
 }
 
-func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
@@ -130,7 +135,7 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.Handle("/internal/node-metrics", metrics.NewPushHandler(metricsDBURL))
+	mux.Handle("/internal/node-metrics", authenticator.RequireRuntime(metrics.NewPushHandler(metricsDBURL)))
 	// Both spellings, same as the API server — a caller should never have to remember which
 	// of /health and /healthz a given process happens to answer.
 	health := func(w http.ResponseWriter, _ *http.Request) {
@@ -143,7 +148,7 @@ func newControllerServer(store *db.Store, peFullStore *db.PlatformExperimentsFul
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      api.CORSMiddleware(mux),
+		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,

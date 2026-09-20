@@ -29,6 +29,8 @@ func (e *reasonError) GetStatus() int { return e.status }
 // RegisterHuma registers every quota-service operation (agents,
 // platform-experiments, donations, resource catalog) on the shared Huma doc.
 func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler) {
+	access := doc.Access
+
 	// ---- agents ----
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -38,9 +40,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description:   "Identity registration. Returns 409 if the id already exists, which after a restart just means you are registered. Do this once before signing up to a platform experiment. A human participant registers exactly the same way, with kind=\"human\".",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			ID   string `json:"id" doc:"Stable unique agent id"`
-			Name string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
-			Kind string `json:"kind,omitempty" required:"false" doc:"\"agent\" (default) or \"human\""`
+			ID    string `json:"id" doc:"Stable unique agent id"`
+			Name  string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
+			Kind  string `json:"kind,omitempty" required:"false" doc:"\"agent\" (default) or \"human\""`
+			OrgID string `json:"org_id,omitempty" required:"false" doc:"The org the agent belongs to. Needed only from a token that is not bound to a single org."`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
 		// Validated here rather than only where it is used: an agent id is pasted verbatim into
@@ -58,7 +61,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if name == "" {
 			name = in.Body.ID
 		}
-		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, domain.AgentKind(in.Body.Kind))
+		if err := access.Self(ctx, in.Body.ID); err != nil {
+			return nil, err
+		}
+		orgID, err := access.Org(ctx, in.Body.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, orgID, domain.AgentKind(in.Body.Kind))
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
@@ -78,6 +88,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against id and name."`
+		ProjectID            string `query:"project_id" doc:"Only the agents signed up to a platform experiment of this project."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
@@ -87,7 +98,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		filter := db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Limit: in.Limit, Offset: in.Offset}
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		filter := db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Scope: scope, Limit: in.Limit, Offset: in.Offset}
 		agents, err := h.svc.store.ListAgents(ctx, filter)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list agents")
@@ -110,8 +125,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against id and name."`
+		ProjectID            string `query:"project_id" doc:"Only the agents signed up to a platform experiment of this project."`
 	}) (*struct{ Body *domain.AgentStats }, error) {
-		stats, err := h.svc.store.AgentStats(ctx, db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search})
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		stats, err := h.svc.store.AgentStats(ctx, db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Scope: scope})
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to count agents")
 		}
@@ -124,13 +144,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "Operator/dashboard endpoint. name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
+		Description: "Operator/dashboard endpoint. project_id, name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
 			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\".",
 	}, func(ctx context.Context, in *struct {
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
 			return nil, huma.Error400BadRequest("name and budget_accelerator_hours are required")
+		}
+		if in.Body.ProjectID == "" {
+			return nil, huma.Error400BadRequest("project_id is required")
+		}
+		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
+			return nil, err
 		}
 		pe, err := peh.svc.Create(ctx, in.Body)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
@@ -150,11 +176,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"- for descending (default -created_at). Total match count is returned in the " +
 			"X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Status string `query:"status" doc:"draft, open, running or closed."`
-		Search string `query:"q" doc:"Case-insensitive substring match against name and description."`
-		Limit  int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
-		Offset int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
-		Sort   string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
+		Status    string `query:"status" doc:"draft, open, running or closed."`
+		Search    string `query:"q" doc:"Case-insensitive substring match against name and description."`
+		ProjectID string `query:"project_id" doc:"Only the platform experiments of this project."`
+		Limit     int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Offset    int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+		Sort      string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
 	}) (*struct {
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
@@ -168,7 +195,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		filter := db.PlatformExperimentsFilter{
+			Scope:  scope,
 			Status: in.Status,
 			Search: in.Search,
 			Limit:  in.Limit,
@@ -201,6 +233,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *JobCost }, error) {
+		if err := access.Experiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		cost, err := peh.svc.JobCost(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -218,6 +253,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -247,6 +285,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		ID   string `path:"id"`
 		Body CreatePlatformExperimentRequest
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
 		if err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
@@ -285,6 +326,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if !domain.ValidQuotaTierOverride(in.Body.QuotaTier) {
 			return nil, huma.Error400BadRequest("quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got " + in.Body.QuotaTier)
 		}
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
+			return nil, err
+		}
 		role, err := domain.ParseSignupRole(in.Body.Role)
 		if err != nil {
 			return nil, &reasonError{status: 400, Reason: "unknown_role", Message: err.Error()}
@@ -315,6 +362,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Role    string `json:"role"`
 		}
 	}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		role, found, err := peh.svc.store.GetSignupRole(ctx, in.ID, in.AgentID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -348,6 +398,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Quotas []*domain.AgentQuota `json:"quotas"`
 		}
 	}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		quotas, err := peh.svc.Start(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
@@ -380,6 +433,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Status string `json:"status"`
 		}
 	}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		var topResults []AgentResult
 		if in.Body != nil {
 			topResults = in.Body.TopResults
@@ -405,6 +461,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *PlatformExperimentResults }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		results, err := peh.svc.Results(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -427,6 +486,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Status string `json:"status"`
 		}
 	}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		if err := peh.svc.SetSummary(ctx, in.ID, in.Body.Summary); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
@@ -446,6 +508,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body []*domain.AgentQuota }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		quotas, err := peh.svc.ListQuotas(ctx, in.ID)
 		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
@@ -467,6 +532,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		ID      string `path:"id"`
 		AgentID string `path:"agentID"`
 	}) (*struct{ Body *domain.AgentQuota }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		aq, err := peh.svc.GetAgentQuota(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -484,6 +552,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body StagesStatusResponse }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -544,6 +615,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only requests within this platform experiment."`
 		Status               string `query:"status" doc:"open, fulfilled or cancelled."`
+		ProjectID            string `query:"project_id" doc:"Only requests within this project's platform experiments."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
@@ -553,14 +625,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		reqs, err := peh.svc.store.ListDonationRequests(ctx, in.PlatformExperimentID, in.Status, in.Limit, in.Offset)
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		reqs, err := peh.svc.store.ListDonationRequests(ctx, scope, in.PlatformExperimentID, in.Status, in.Limit, in.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to list donations")
 		}
 		if reqs == nil {
 			reqs = []*domain.DonationRequest{}
 		}
-		total, err := peh.svc.store.CountDonationRequests(ctx, in.PlatformExperimentID, in.Status)
+		total, err := peh.svc.store.CountDonationRequests(ctx, scope, in.PlatformExperimentID, in.Status)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to count donations")
 		}
@@ -587,6 +663,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if b.AgentID == "" || b.PlatformExperimentID == "" || b.CreditsWant <= 0 || b.Reason == "" {
 			return nil, huma.Error400BadRequest("agent_id, platform_experiment_id, credits_want (>0), and reason are required")
 		}
+		if err := access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
+			return nil, err
+		}
+		if err := access.Agent(ctx, b.AgentID); err != nil {
+			return nil, err
+		}
 		now := time.Now().UTC()
 		req := &domain.DonationRequest{
 			ID: uuid.New().String(), AgentID: b.AgentID, PlatformExperimentID: b.PlatformExperimentID,
@@ -610,6 +692,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			Status string `json:"status"`
 		}
 	}, error) {
+		if err := access.Donation(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		if err := peh.svc.store.UpdateDonationStatus(ctx, in.ID, "cancelled"); err != nil {
 			return nil, huma.Error500InternalServerError("failed to cancel donation request")
 		}
@@ -638,6 +723,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, error) {
 		if in.Body.DonorAgentID == "" {
 			return nil, huma.Error400BadRequest("donor_agent_id is required")
+		}
+		if err := access.Donation(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if err := access.Agent(ctx, in.Body.DonorAgentID); err != nil {
+			return nil, err
 		}
 		if err := peh.svc.FulfillDonation(ctx, in.ID, in.Body.DonorAgentID); err != nil {
 			var donErr *DonationError

@@ -41,7 +41,7 @@ WHERE id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
 
 // ListExperimentsWithStatus returns all experiments in the given status.
 func (s *ExperimentsStore) ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error) {
-	return s.ListExperiments(ctx, domain.ExperimentFilter{Status: status})
+	return s.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.AllTenants, Status: status})
 }
 
 // UpdateExperimentPriority writes a changed priority_score. updated_at stays: it is the time of

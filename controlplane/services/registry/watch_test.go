@@ -23,6 +23,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -146,7 +148,7 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 
 func watchServer(t *testing.T, source *fakeEvents) *httptest.Server {
 	t.Helper()
-	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
+	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
 	if source.listenGate == nil {
@@ -185,6 +187,7 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Protocol: " + WatchSubprotocol + ", test\r\n" +
 		"Sec-WebSocket-Version: 13\r\n\r\n"
 	if _, err := conn.Write([]byte(request)); err != nil {
 		t.Fatalf("write handshake: got = %v, want = nil", err)
@@ -471,7 +474,12 @@ func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromTh
 // subscription is the only answer that tells the caller anything.
 func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 	server := watchServer(t, newFakeEvents())
-	response, err := http.Get(server.URL + "/watch?platform_experiment_id=pe-1&kinds=experiment.finished")
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/watch?platform_experiment_id=pe-1&kinds=experiment.finished", nil)
+	if err != nil {
+		t.Fatalf("build request: got = %v, want = nil", err)
+	}
+	request.Header.Set("Sec-WebSocket-Protocol", WatchSubprotocol+", test")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("request: got = %v, want = nil", err)
 	}
@@ -531,7 +539,7 @@ func runHLWatchEnv(t *testing.T, env []string, serverURL string, args ...string)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, hlBinary, append([]string{"watch", "--url", serverURL}, args...)...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(append(os.Environ(), "HL_TOKEN=test"), env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1003,7 +1011,7 @@ func TestAControlFrameNamingAnUnknownKindIsRefusedAndLeavesTheFilterAlone(t *tes
 func TestListingSubscriptionsReportsTheLiveConnectionsAndForgetsThemWhenTheyClose(t *testing.T) {
 	source := newFakeEvents()
 	handler := NewWatchHandler(source,
-		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, zap.NewNop())
+		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	handler.Start(ctx)

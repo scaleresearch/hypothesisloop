@@ -57,6 +57,8 @@ type submitRequest struct {
 // RegisterHuma registers the public, research-agent-facing scheduler operations
 // at their full paths (/experiments...).
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
+	access := doc.Access
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
 		Summary: "Submit one job", Tags: []string{"experiments"},
@@ -70,6 +72,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("experiment id is required")
 		}
 		meta := req.Metadata
+		if err := access.PlatformExperiment(ctx, meta.PlatformExperimentID); err != nil {
+			return nil, err
+		}
+		if err := access.Agent(ctx, meta.AgentID); err != nil {
+			return nil, err
+		}
 		exp := domain.Experiment{
 			ID:                     req.ID,
 			ParentID:               meta.ParentID,
@@ -166,11 +174,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			since = parsed
 		}
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		filter := domain.ExperimentFilter{
+			Scope:                scope,
 			AgentID:              in.Agent,
 			PlatformExperimentID: in.PlatformExperimentID,
 			HypothesisID:         in.HypothesisID,
-			ProjectID:            in.ProjectID,
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
@@ -240,11 +252,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			since = parsed
 		}
+		scope, err := access.ListScope(ctx, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		stats, err := h.svc.store.ExperimentStats(ctx, domain.ExperimentFilter{
+			Scope:                scope,
 			AgentID:              in.Agent,
 			PlatformExperimentID: in.PlatformExperimentID,
 			HypothesisID:         in.HypothesisID,
-			ProjectID:            in.ProjectID,
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
@@ -264,6 +280,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {
+		if err := access.Experiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		exp, err := h.svc.GetExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -284,6 +303,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			ClusterName string `json:"cluster_name"`
 		}
 	}) (*struct{ Body *domain.Experiment }, error) {
+		if err := access.Experiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if in.Body.ClusterName != "" {
+			if err := access.Cluster(ctx, in.Body.ClusterName); err != nil {
+				return nil, err
+			}
+		}
 		return h.admit(ctx, in.ID, in.Body.ClusterName)
 	})
 
@@ -298,6 +325,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status string `json:"status"`
 		}
 	}, error) {
+		if err := access.Experiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		if err := h.svc.CancelExperiment(ctx, in.ID); err != nil {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
@@ -324,6 +354,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Summary string `json:"summary"`
 		}
 	}) (*struct{ Body summaryReply }, error) {
+		if err := access.Experiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		if in.Body.Summary == "" {
 			return nil, huma.Error400BadRequest("summary is required")
 		}
@@ -374,6 +407,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct {
 		Body domain.ClusterSettings
 	}, error) {
+		if err := access.Cluster(ctx, in.ClusterID); err != nil {
+			return nil, err
+		}
 		cs, err := h.svc.GetClusterSettings(ctx, in.ClusterID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -406,6 +442,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}) (*struct {
 		Body domain.ClusterSettings
 	}, error) {
+		if err := access.Cluster(ctx, in.ClusterID); err != nil {
+			return nil, err
+		}
 		cs := &domain.ClusterSettings{
 			ClusterID:                  in.ClusterID,
 			ScaleUpTimeoutSeconds:      in.Body.ScaleUpTimeoutSeconds,

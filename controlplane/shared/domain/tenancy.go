@@ -1,0 +1,107 @@
+package domain
+
+import "time"
+
+// User is a person known to the identity provider. ID is the provider's subject.
+type User struct {
+	ID        string    `json:"id"`
+	Staff     bool      `json:"staff"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type OrgRole string
+
+const (
+	OrgRoleOwner  OrgRole = "owner"
+	OrgRoleMember OrgRole = "member"
+)
+
+func ValidOrgRole(r OrgRole) bool { return r == OrgRoleOwner || r == OrgRoleMember }
+
+// Org owns projects, agents, API keys and clusters. Role is the asking user's own role and is
+// set only on a per-user listing.
+type Org struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Role      OrgRole   `json:"role,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Project groups an org's platform experiments.
+type Project struct {
+	ID        string    `json:"id"`
+	OrgID     string    `json:"org_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// DefaultProjectName is the project every org starts with.
+const DefaultProjectName = "default"
+
+// APIKey is a customer's credential. The token is returned once at creation and only its hash is
+// stored. An empty ProjectID reaches every project of the org.
+type APIKey struct {
+	ID        string     `json:"id"`
+	OrgID     string     `json:"org_id"`
+	ProjectID string     `json:"project_id,omitempty"`
+	CreatedBy string     `json:"created_by"`
+	Name      string     `json:"name"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+}
+
+// Cluster is a runtime's registered name and the org that added it.
+type Cluster struct {
+	Name      string    `json:"name"`
+	OrgID     string    `json:"org_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Tenancy places one platform experiment: org is always derived through its project.
+type Tenancy struct {
+	PlatformExperimentID string
+	ProjectID            string
+	OrgID                string
+}
+
+// TenantScope is what one caller may see. AllOrgs lifts the org restriction; ProjectID and
+// PlatformExperimentID each narrow further when set.
+type TenantScope struct {
+	AllOrgs              bool
+	OrgIDs               []string
+	ProjectID            string
+	PlatformExperimentID string
+}
+
+// AllTenants is the scope of the platform's own loops and of staff.
+var AllTenants = TenantScope{AllOrgs: true}
+
+// Unrestricted reports whether the scope admits every row.
+func (s TenantScope) Unrestricted() bool {
+	return s.AllOrgs && s.ProjectID == "" && s.PlatformExperimentID == ""
+}
+
+// Admits reports whether a platform experiment placed at t is inside the scope.
+func (s TenantScope) Admits(t Tenancy) bool {
+	if !s.AllOrgs && !contains(s.OrgIDs, t.OrgID) {
+		return false
+	}
+	if s.ProjectID != "" && s.ProjectID != t.ProjectID {
+		return false
+	}
+	return s.PlatformExperimentID == "" || s.PlatformExperimentID == t.PlatformExperimentID
+}
+
+// AdmitsOrg reports whether an org-level resource (an agent, a cluster) is inside the scope.
+func (s TenantScope) AdmitsOrg(orgID string) bool {
+	return s.AllOrgs || contains(s.OrgIDs, orgID)
+}
+
+func contains(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
+	}
+	return false
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -194,9 +196,11 @@ type WatchHandler struct {
 	// experiments resolves the platform experiment a job belongs to, so a caller that knows
 	// only its own job id — which is all a running job is told — can subscribe without first
 	// having to look that up itself.
-	experiments experimentLookup
-	hub         *hub
-	logger      *zap.Logger
+	experiments   experimentLookup
+	authenticator apidocs.Authenticator
+	access        *auth.Access
+	hub           *hub
+	logger        *zap.Logger
 }
 
 type experimentLookup interface {
@@ -204,8 +208,8 @@ type experimentLookup interface {
 }
 
 // NewWatchHandler returns a handler over source. Start must be called once to begin listening.
-func NewWatchHandler(source EventSource, experiments experimentLookup, logger *zap.Logger) *WatchHandler {
-	return &WatchHandler{source: source, experiments: experiments, hub: newHub(), logger: logger}
+func NewWatchHandler(source EventSource, experiments experimentLookup, authenticator apidocs.Authenticator, access *auth.Access, logger *zap.Logger) *WatchHandler {
+	return &WatchHandler{source: source, experiments: experiments, authenticator: authenticator, access: access, hub: newHub(), logger: logger}
 }
 
 // Start runs the single LISTEN connection for this process until ctx ends, re-establishing it
@@ -257,11 +261,44 @@ func (h *WatchHandler) Start(ctx context.Context) {
 // is written as desired state the runtime fetches; anything a job or an agent could be *told* down
 // this socket would be a second path to an effect that already has one, and the two would disagree
 // the first time this connection dropped.
+// authenticate resolves the caller from the token offered as a WebSocket subprotocol and admits
+// the callers the agent audience does. A browser cannot set a header on a WebSocket, so the
+// subprotocol is the one place every client, hl included, puts its token.
+func (h *WatchHandler) authenticate(r *http.Request) (context.Context, auth.Principal, error) {
+	token, err := watchToken(r.Header)
+	if err != nil {
+		return nil, auth.Principal{}, err
+	}
+	principal, err := h.authenticator.Authenticate(r.Context(), token)
+	if err != nil {
+		return nil, auth.Principal{}, err
+	}
+	if !apidocs.AudienceAgent.Admits(principal, "") {
+		return nil, auth.Principal{}, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
+	}
+	return auth.WithPrincipal(r.Context(), principal), principal, nil
+}
+
 func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, principal, err := h.authenticate(r)
+	if err != nil {
+		auth.WriteError(w, err)
+		return
+	}
+	r = r.WithContext(ctx)
 	filter, since, err := parseWatchQuery(r)
 	if err != nil {
 		writeWatchError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if principal.Kind == auth.KindAgent {
+		filter.AgentID = principal.AgentID
+	}
+	if filter.ExperimentID != "" {
+		if err := h.access.Experiment(ctx, filter.ExperimentID); err != nil {
+			auth.WriteError(w, err)
+			return
+		}
 	}
 	if filter.PlatformExperimentID == "" {
 		exp, err := h.experiments.GetExperiment(r.Context(), filter.ExperimentID)
@@ -275,6 +312,10 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.PlatformExperimentID = exp.PlatformExperimentID
+	}
+	if err := h.access.PlatformExperiment(ctx, filter.PlatformExperimentID); err != nil {
+		auth.WriteError(w, err)
+		return
 	}
 
 	sub := h.hub.subscribe(filter, since)
@@ -560,7 +601,20 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 			"here and there cannot be one: a subscription that outlived its socket would have nowhere to deliver to, " +
 			"and `since=<cursor>` already makes a reconnect lossless. So an entry appears when a socket opens and is " +
 			"gone the moment it closes — if your watcher died, it is not listed, and that is the answer.",
-	}, func(_ context.Context, in *listWatchSubscriptionsInput) (*struct{ Body []WatchSubscription }, error) {
+	}, func(ctx context.Context, in *listWatchSubscriptionsInput) (*struct{ Body []WatchSubscription }, error) {
+		within, restricted, err := doc.Access.PlatformExperimentIDs(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if restricted {
+			visible := []WatchSubscription{}
+			for _, sub := range watch.hub.list(in.PlatformExperimentID, in.AgentID) {
+				if slices.Contains(within, sub.PlatformExperimentID) {
+					visible = append(visible, sub)
+				}
+			}
+			return &struct{ Body []WatchSubscription }{Body: visible}, nil
+		}
 		return &struct{ Body []WatchSubscription }{Body: watch.hub.list(in.PlatformExperimentID, in.AgentID)}, nil
 	})
 }

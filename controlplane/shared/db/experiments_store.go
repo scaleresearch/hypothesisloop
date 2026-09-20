@@ -302,11 +302,6 @@ func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 		args = append(args, filter.AgentID)
 		n++
 	}
-	if filter.ProjectID != "" {
-		clauses = append(clauses, fmt.Sprintf("project_id = $%d", n))
-		args = append(args, filter.ProjectID)
-		n++
-	}
 	if filter.Status != "" {
 		clauses = append(clauses, fmt.Sprintf("status = $%d", n))
 		args = append(args, string(filter.Status))
@@ -333,7 +328,9 @@ func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 	if filter.Search != "" {
 		clauses = append(clauses, fmt.Sprintf("(hypothesis ILIKE $%d OR objective ILIKE $%d OR theory ILIKE $%d)", n, n, n))
 		args = append(args, "%"+filter.Search+"%")
-		n++
+	}
+	if clause, scoped := tenantClause(filter.Scope, "platform_experiment_id", args); clause != "" {
+		clauses, args = append(clauses, clause), scoped
 	}
 
 	return clauses, args

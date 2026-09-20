@@ -136,6 +136,7 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 // PlatformExperiment is the operator-defined compute envelope agents compete within.
 type PlatformExperiment struct {
 	ID                     string  `json:"id"`
+	ProjectID              string  `json:"project_id"`
 	Name                   string  `json:"name"`
 	Description            string  `json:"description"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent

@@ -77,6 +77,9 @@ type Experiment struct {
 	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
 	// Nil on every other read of an experiment.
 	Data *DataAccess `json:"data,omitempty"`
+	// Token is the job's own platform token, good for reporting its metrics and nothing else.
+	// Like Data it is assembled on the way out to a runtime and absent on every other read.
+	Token string `json:"token,omitempty"`
 	// DataKey is the job's permanent object-store key, created at submission and stored with
 	// the row. Never serialized: only Data carries it, and only to the runtime.
 	DataKey DataKey `json:"-"`
@@ -216,8 +219,9 @@ func (e *Experiment) Footprint() Footprint {
 // ExperimentFilter constrains which experiments are returned from the store.
 // It is the unified filter type used by all services; unused fields are ignored.
 type ExperimentFilter struct {
+	// Scope keeps the experiments of the platform experiments the caller may see.
+	Scope                TenantScope
 	AgentID              string
-	ProjectID            string
 	PlatformExperimentID string
 	HypothesisID         string
 	Status               ExperimentStatus

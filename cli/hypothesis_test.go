@@ -540,6 +540,7 @@ func TestHelpGoesToStdout(t *testing.T) {
 
 func TestSubcommandHelpExitsZero(t *testing.T) {
 	t.Setenv("API_URL", "http://example.invalid")
+	t.Setenv("HL_TOKEN", "test-token")
 	for _, args := range [][]string{
 		{"job", "submit", "--help"}, {"job", "list", "-h"}, {"hypothesis", "query", "--help"},
 		{"hypothesis", "get", "--help"}, {"platform-experiments", "update", "--help"}, {"watch", "--help"},

@@ -28,10 +28,10 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 		filter AgentsFilter
 		want   []string
 	}{
-		{"signed up", AgentsFilter{PlatformExperimentID: pe}, []string{in}},
-		{"search, any case", AgentsFilter{Search: "BETA-" + suffix}, []string{out}},
-		{"search across both, newest first", AgentsFilter{Search: suffix}, []string{out, in}},
-		{"signed up and search miss", AgentsFilter{PlatformExperimentID: pe, Search: "beta"}, nil},
+		{"signed up", AgentsFilter{Scope: domain.AllTenants, PlatformExperimentID: pe}, []string{in}},
+		{"search, any case", AgentsFilter{Scope: domain.AllTenants, Search: "BETA-" + suffix}, []string{out}},
+		{"search across both, newest first", AgentsFilter{Scope: domain.AllTenants, Search: suffix}, []string{out, in}},
+		{"signed up and search miss", AgentsFilter{Scope: domain.AllTenants, PlatformExperimentID: pe, Search: "beta"}, nil},
 	} {
 		got, err := agents.ListAgents(ctx, tc.filter)
 		if err != nil {
@@ -69,7 +69,7 @@ func TestAgentStatsCountsTop3AndAveragesScoreOverTheWholeSet(t *testing.T) {
 		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, pe)
 	})
 
-	got, err := NewAgentsStore(pool).AgentStats(ctx, AgentsFilter{Search: suffix})
+	got, err := NewAgentsStore(pool).AgentStats(ctx, AgentsFilter{Scope: domain.AllTenants, Search: suffix})
 	want := domain.AgentStats{Total: 2, Top3Eligible: 1, AvgPerformanceScore: 0.75}
 	if err != nil || *got != want {
 		t.Fatalf("stats = (%+v, %v), want %+v", got, err, want)

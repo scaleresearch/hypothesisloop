@@ -122,6 +122,7 @@ func TestRunReceivesEventAndSatisfiesUntil(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
+		Token:      "test-token",
 		URL:        url,
 		Experiment: "exp-1",
 		Until:      "status in COMPLETED,FAILED,EVICTED",
@@ -139,9 +140,45 @@ func TestRunReceivesEventAndSatisfiesUntil(t *testing.T) {
 
 func TestRunMissingTarget(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(Options{URL: "http://localhost:1", Timeout: time.Second, Stdout: &stdout, Stderr: &stderr})
+	code := Run(Options{Token: "test-token", URL: "http://localhost:1", Timeout: time.Second, Stdout: &stdout, Stderr: &stderr})
 	if code != UsageExitCode {
 		t.Fatalf("exit code = %d, want %d", code, UsageExitCode)
+	}
+}
+
+func TestRunWithoutATokenIsAUsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{URL: "http://localhost:1", Experiment: "exp-1", Timeout: time.Second, Stdout: &stdout, Stderr: &stderr})
+	if code != UsageExitCode || !strings.Contains(stderr.String(), "HL_TOKEN") {
+		t.Fatalf("exit code = %d, stderr = %q, want %d naming HL_TOKEN", code, stderr.String(), UsageExitCode)
+	}
+}
+
+// The token travels as the second subprotocol, where a browser can put it too.
+func TestTheTokenIsOfferedAsASubprotocol(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	offered := make(chan string, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err != nil {
+			return
+		}
+		offered <- req.Header.Get("Sec-WebSocket-Protocol") + "|" + req.Header.Get("Authorization")
+		_, _ = conn.Write([]byte("HTTP/1.1 400 Refused\r\nContent-Length: 0\r\n\r\n"))
+	}()
+	var stdout, stderr bytes.Buffer
+	Run(Options{Token: "the-token", URL: "ws://" + ln.Addr().String(), Experiment: "exp-1", Timeout: time.Second, Stdout: &stdout, Stderr: &stderr})
+	if got := <-offered; got != "hypothesisloop.watch, the-token|" {
+		t.Fatalf("handshake offered %q, want the subprotocol then the token and no Authorization header", got)
 	}
 }
 
@@ -150,6 +187,7 @@ func TestRunRefused(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
+		Token:      "test-token",
 		URL:        url,
 		Experiment: "exp-1",
 		Timeout:    5 * time.Second,
@@ -174,7 +212,7 @@ func TestAWatchThatNeverConnectedFails(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	start := time.Now()
-	code := Run(Options{URL: "ws://" + addr, Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
+	code := Run(Options{Token: "test-token", URL: "ws://" + addr, Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
 	if code != 1 || !strings.Contains(stderr.String(), "never connected") {
 		t.Fatalf("got = exit %d, stderr %q, want = exit 1 naming the outage", code, stderr.String())
 	}
@@ -195,7 +233,7 @@ func TestAnEventThatCouldNotBeWrittenDoesNotMoveTheCursor(t *testing.T) {
 	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 
 	var stderr bytes.Buffer
-	code := Run(Options{URL: url, PlatformExperiment: "pe-1", Agent: "agent-a", Timeout: 5 * time.Second,
+	code := Run(Options{Token: "test-token", URL: url, PlatformExperiment: "pe-1", Agent: "agent-a", Timeout: 5 * time.Second,
 		CursorFile: cursorFile, Stdout: brokenWriter{}, Stderr: &stderr})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1, stderr = %s", code, stderr.String())
@@ -223,6 +261,7 @@ func TestRunTimesOutWithoutUntil(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	start := time.Now()
 	code := Run(Options{
+		Token:      "test-token",
 		URL:        "ws://" + ln.Addr().String(),
 		Experiment: "exp-1",
 		Timeout:    300 * time.Millisecond,
@@ -266,6 +305,7 @@ func TestPingsKeepAQuietStreamOpen(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
+		Token:      "test-token",
 		URL:        "ws://" + ln.Addr().String(),
 		Experiment: "exp-1",
 		Until:      "status in COMPLETED",
@@ -303,7 +343,7 @@ func TestTheWatchWindowEndingIsNotAReconnect(t *testing.T) {
 	}()
 
 	var stdout, stderr bytes.Buffer
-	code := Run(Options{URL: "ws://" + ln.Addr().String(), Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
+	code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), Experiment: "exp-1", Timeout: 300 * time.Millisecond, Stdout: &stdout, Stderr: &stderr})
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -351,6 +391,7 @@ func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
+		Token:      "test-token",
 		URL:        "ws://" + ln.Addr().String(),
 		Experiment: "exp-1",
 		Until:      "status in COMPLETED",
@@ -406,7 +447,7 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	start := time.Now()
-	code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+	code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
 		Timeout: 10 * time.Second, Stdout: &stdout, Stderr: &stderr})
 	elapsed := time.Since(start)
 	if code != 0 {
@@ -447,7 +488,7 @@ func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testi
 
 	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 	var stdout, stderr bytes.Buffer
-	code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+	code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
 		Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
@@ -497,7 +538,7 @@ func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
 		cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 		var stdout, stderr bytes.Buffer
 		start := time.Now()
-		code := Run(Options{URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a", NoWait: true,
+		code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a", NoWait: true,
 			Timeout: 10 * time.Second, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
 		if code != 0 {
 			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())

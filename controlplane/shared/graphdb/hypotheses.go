@@ -272,8 +272,12 @@ type ListFilter struct {
 	PlatformExperimentID string
 	AgentID              string
 	Status               domain.HypothesisStatus
-	Limit                int
-	Offset               int
+	// Within, when Restricted, keeps only hypotheses of these platform experiments: the caller's
+	// scope, which this store cannot derive because it holds no orgs or projects.
+	Restricted bool
+	Within     []string
+	Limit      int
+	Offset     int
 }
 
 func (f ListFilter) where() (string, map[string]any) {
@@ -282,6 +286,10 @@ func (f ListFilter) where() (string, map[string]any) {
 	if f.PlatformExperimentID != "" {
 		clauses = append(clauses, "h.platform_experiment_id = $pe")
 		params["pe"] = f.PlatformExperimentID
+	}
+	if f.Restricted {
+		clauses = append(clauses, "h.platform_experiment_id IN $within")
+		params["within"] = f.Within
 	}
 	if f.AgentID != "" {
 		clauses = append(clauses, "h.agent_id = $agent_id")

@@ -80,7 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	apiURL := os.Getenv("API_URL")
-	client := apiclient.New(apiURL)
+	token := os.Getenv("HL_TOKEN")
+	client := apiclient.New(apiURL, token)
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
@@ -105,7 +106,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "job":
 		return runGroup("job", jobCommands, client, rest, stdout, stderr)
 	case "watch":
-		return cmdWatch(apiURL, rest, stdout, stderr)
+		return cmdWatch(apiURL, token, rest, stdout, stderr)
 	case "experiments", "experiment":
 		fmt.Fprintln(stderr, "hl: an experiment is a job here: hl job list, hl job status ID, hl job submit FILE")
 		return 2
@@ -187,6 +188,8 @@ func runGroup(group string, subs []subcommand, c *apiclient.Client, args []strin
 const (
 	agentEnv              = "AGENT_ID"
 	platformExperimentEnv = "PLATFORM_EXPERIMENT_ID"
+	orgEnv                = "HL_ORG"
+	projectEnv            = "HL_PROJECT"
 )
 
 // orEnv is a flag's value, or the named environment variable when the flag was omitted.
@@ -439,7 +442,8 @@ func writeString(b *bytes.Buffer, s string) {
 // --- register ----------------------------------------------------------------------------------
 
 func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("register", "usage: hl register --id ID [--name NAME] [--kind agent|human]", stderr)
+	fs := newFlags("register", "usage: hl register --id ID [--name NAME] [--kind agent|human] [--org ORG]", stderr)
+	org := fs.String("org", "", "org the agent belongs to, needed only when the token spans several orgs (default $HL_ORG)")
 	id := fs.String("id", "", "stable unique agent id (required)")
 	name := fs.String("name", "", "human-readable display name; defaults to id")
 	kind := fs.String("kind", "human", "agent or human")
@@ -452,6 +456,9 @@ func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	body := map[string]string{"id": *id, "name": *name, "kind": *kind}
 	if body["name"] == "" {
 		body["name"] = *id
+	}
+	if *org = orEnv(*org, orgEnv); *org != "" {
+		body["org_id"] = *org
 	}
 	var out json.RawMessage
 	if err := c.Do("POST", "/agents", body, &out); err != nil {
@@ -580,9 +587,11 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 // file shaped like the POST /platform-experiments body — see
 // controlplane/settings/examples/experiment.yaml for the full DSL reference.
 func cmdPlatformExperimentsCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [FILE|-]
+	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [--project PROJECT] [FILE|-]
 
-FILE is a YAML file shaped exactly like the POST /platform-experiments body. Minimal shape:
+FILE is a YAML file shaped exactly like the POST /platform-experiments body. Every platform
+experiment belongs to a project: project_id in the file, else --project, else $HL_PROJECT.
+Minimal shape:
 
   name: my-platform-experiment
   description: what this research program is testing
@@ -608,10 +617,12 @@ doesn't set its own:
 A bare top-level YAML list of mappings works the same way, without shared defaults.
 
 See controlplane/settings/examples/experiment.yaml for the full DSL reference.`, stderr)
+	project := fs.String("project", "", "project the platform experiments belong to (default $HL_PROJECT)")
 	path, err := parseOne(fs, args, "FILE", "-")
 	if err != nil {
 		return parseExit(err)
 	}
+	*project = orEnv(*project, projectEnv)
 	items, err := readYAMLItems(path, "experiments")
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
@@ -619,6 +630,12 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 	}
 	results := make([]any, 0, len(items))
 	for _, body := range items {
+		if _, ok := body["project_id"]; !ok {
+			if *project == "" {
+				return parseExit(misuse(fs, "a project is required: project_id in the file, --project, or $HL_PROJECT"))
+			}
+			body["project_id"] = *project
+		}
 		if _, ok := body["starts_at"]; !ok {
 			body["starts_at"] = "0001-01-01T00:00:00Z"
 		}
@@ -814,7 +831,7 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 
 // --- watch -----------------------------------------------------------------------------------------
 
-func cmdWatch(apiURL string, args []string, stdout, stderr io.Writer) int {
+func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("watch", `usage: hl watch [--agent A | --all] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
@@ -857,6 +874,7 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 
 	return watchclient.Run(watchclient.Options{
 		URL:                *watchURL,
+		Token:              token,
 		Experiment:         *experiment,
 		PlatformExperiment: *platformExperiment,
 		Agent:              *agent,

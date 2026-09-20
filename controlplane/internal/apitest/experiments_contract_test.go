@@ -2,6 +2,7 @@ package apitest
 
 import (
 	"go.uber.org/zap"
+	"reflect"
 
 	"context"
 	"encoding/json"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -57,7 +60,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	}))
 	t.Cleanup(metrics.Close)
 	r := chi.NewRouter()
-	d := apidocs.New(r, "scheduler", "1.0.0", "")
+	d := apidocs.New(r, "scheduler", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}))
 	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{DefaultShutdownSeconds: 5, MaxShutdownSeconds: 30, MaxCheckpointSeconds: 600}, metrics.URL, zap.NewNop()).WithLoop(noopLoop{})))
 	return r
 }
@@ -74,12 +77,13 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 	}
 
 	want := domain.ExperimentFilter{
+		Scope:   domain.TenantScope{AllOrgs: true, ProjectID: "proj-1"},
 		AgentID: "a1", PlatformExperimentID: "pe-1", Status: domain.ExperimentStatus("RUNNING"),
-		HypothesisID: "h-1", ProjectID: "proj-1",
-		Since:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-		Search: "min_lr", Limit: 10, Offset: 20, Sort: "-created_at",
+		HypothesisID: "h-1",
+		Since:        time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		Search:       "min_lr", Limit: 10, Offset: 20, Sort: "-created_at",
 	}
-	if spy.gotList != want {
+	if !reflect.DeepEqual(spy.gotList, want) {
 		t.Errorf("ListExperiments filter =\n %+v\nwant\n %+v", spy.gotList, want)
 	}
 	// The total must describe the whole match set, so Count sees the same predicates. It
@@ -112,7 +116,7 @@ func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 	r := schedulerRouter(t, spy)
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest("GET", "/experiments?limit=2", nil))
+	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("GET", "/experiments?limit=2", nil)))
 	if got := rec.Header().Get("X-Total-Count"); got != "45" {
 		t.Errorf("X-Total-Count = %q, want %q — a page must report the full match count", got, "45")
 	}
@@ -138,8 +142,8 @@ func TestListExperimentsDefaultsToOneSmallPageNewestFirst(t *testing.T) {
 	if code, _ := get(t, r, "/experiments"); code != 200 {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	want := domain.ExperimentFilter{Limit: 20, Sort: "-created_at"}
-	if spy.gotList != want {
+	want := domain.ExperimentFilter{Scope: domain.AllTenants, Limit: 20, Sort: "-created_at"}
+	if !reflect.DeepEqual(spy.gotList, want) {
 		t.Errorf("bare list built filter %+v, want %+v", spy.gotList, want)
 	}
 }

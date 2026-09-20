@@ -37,7 +37,7 @@ func TestExperimentStatsGroupsByAgentAndHypothesis(t *testing.T) {
 		}
 	}
 	store := NewExperimentsStore(pool)
-	filter := domain.ExperimentFilter{PlatformExperimentID: peID}
+	filter := domain.ExperimentFilter{Scope: domain.AllTenants, PlatformExperimentID: peID}
 
 	plain, err := store.ExperimentStats(ctx, filter, "")
 	if err != nil {

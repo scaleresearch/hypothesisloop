@@ -23,6 +23,9 @@ import (
 	"time"
 )
 
+// subprotocol is the WebSocket subprotocol /watch speaks; the token is offered beside it.
+const subprotocol = "hypothesisloop.watch"
+
 const (
 	TimeoutExitCode = 124
 	UsageExitCode   = 2
@@ -53,7 +56,10 @@ func (e *Refused) Error() string { return e.msg }
 
 // Options are hl watch's flags.
 type Options struct {
-	URL                string
+	URL string
+	// Token authenticates the connection. It travels as a WebSocket subprotocol, the one place
+	// a browser can put it too, so the platform reads every client's token the same way.
+	Token              string
 	Experiment         string
 	PlatformExperiment string
 	Agent              string
@@ -81,6 +87,10 @@ type Options struct {
 func Run(opts Options) int {
 	if opts.URL == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL or pass --url)")
+		return UsageExitCode
+	}
+	if opts.Token == "" {
+		fmt.Fprintln(opts.Stderr, "hl watch: no token given (set HL_TOKEN)")
 		return UsageExitCode
 	}
 	if opts.Timeout <= 0 {
@@ -159,7 +169,7 @@ func (w *watch) run() int {
 		} else {
 			query.Del("since")
 		}
-		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), deadline.Sub(time.Now()))
+		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), w.opts.Token, deadline.Sub(time.Now()))
 		if err != nil {
 			var refused *Refused
 			if errors.As(err, &refused) && refused.code == http.StatusGone && w.resumed {
@@ -373,7 +383,7 @@ type webSocket struct {
 	buf  []byte
 }
 
-func connect(base, path string, budget time.Duration) (*webSocket, error) {
+func connect(base, path, token string, budget time.Duration) (*webSocket, error) {
 	u, err := url.Parse(base)
 	if err != nil {
 		return nil, err
@@ -414,6 +424,7 @@ func connect(base, path string, budget time.Duration) (*webSocket, error) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: " + key + "\r\n" +
+		"Sec-WebSocket-Protocol: " + subprotocol + ", " + token + "\r\n" +
 		"Sec-WebSocket-Version: 13\r\n\r\n"
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()

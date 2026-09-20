@@ -52,6 +52,8 @@ func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, max
 
 // RegisterDataUsageHuma registers the durable-data usage operation on doc.
 func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
+	access := doc.Access
+
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-data-usage", Method: "GET", Path: "/platform-experiments/{id}/data-usage",
 		Summary: "Get durable-data bytes held, per agent", Tags: []string{"platform-experiments"},
@@ -61,6 +63,9 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *DataUsage }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		usage, err := h.Usage(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
@@ -83,7 +88,13 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		if in.Body.AgentID == "" {
 			return nil, huma.Error400BadRequest("agent_id is required")
 		}
-		access, err := h.AgentDataAccess(ctx, in.ID, in.Body.AgentID)
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
+			return nil, err
+		}
+		dataAccess, err := h.AgentDataAccess(ctx, in.ID, in.Body.AgentID)
 		switch {
 		case errors.Is(err, db.ErrNotSignedUp):
 			return nil, huma.Error404NotFound(err.Error())
@@ -92,7 +103,7 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		case err != nil:
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body *domain.DataAccess }{Body: access}, nil
+		return &struct{ Body *domain.DataAccess }{Body: dataAccess}, nil
 	})
 }
 

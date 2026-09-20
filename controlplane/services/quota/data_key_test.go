@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -50,12 +52,12 @@ func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", ""), NewDataUsageHandler(client, keys, 0))
+	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{})), NewDataUsageHandler(client, keys, 0))
 	return r, &created
 }
 
 func postDataKey(r http.Handler, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/platform-experiments/pe-1/data-key", strings.NewReader(body))
+	req := authtest.Authorize(httptest.NewRequest(http.MethodPost, "/platform-experiments/pe-1/data-key", strings.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

@@ -21,7 +21,7 @@ func createTestAgent(t *testing.T, pool *Pool, id string, kind domain.AgentKind)
 	t.Helper()
 	agents := NewAgentsStore(pool)
 	if err := agents.CreateAgent(context.Background(), &domain.Agent{
-		ID: id, Name: id, Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC(),
+		ID: id, Name: id, OrgID: "default", Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create agent %s: got = %v, want = nil", id, err)
 	}
@@ -32,7 +32,7 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 	pes := NewPlatformExperimentsStore(pool)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
-		ID: id, Name: id, Description: "quota tier test", BudgetAcceleratorHours: budget,
+		ID: id, ProjectID: "default", Name: id, Description: "quota tier test", BudgetAcceleratorHours: budget,
 		MaxAgents: 10, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics:               []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}},
 		ReportIntervalSeconds: 30,

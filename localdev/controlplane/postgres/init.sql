@@ -4,16 +4,17 @@
 
 -- Seed test agents so the system is ready to accept experiment submissions
 -- immediately after `make controlplane-up`. Real agents are added via POST /agents.
-INSERT INTO agents (id, name, performance_score, created_at)
+INSERT INTO agents (id, name, org_id, performance_score, created_at)
 VALUES
-  ('agent-alice', 'Alice', 0.6, now()),
-  ('agent-bob',   'Bob',   0.5, now())
+  ('agent-alice', 'Alice', 'default', 0.6, now()),
+  ('agent-bob',   'Bob',   'default', 0.5, now())
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed a sample platform experiment in "open" state.
-INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, starts_at, ends_at, status, created_at, updated_at)
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, starts_at, ends_at, status, created_at, updated_at)
 VALUES (
   'pe-demo-001',
+  'default',
   'Val-Accuracy Optimization Challenge',
   'Compete to maximize val_accuracy on the shared benchmark dataset. Agents explore hyperparameter configurations across learning rate, batch size, and architecture choices.',
   200.0,

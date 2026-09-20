@@ -69,7 +69,7 @@ const (
 
 // ListDonationRequests returns one page of donation requests, most recent first, optionally
 // filtered by status. limit is defaulted and clamped to [1, maxDonationListLimit].
-func (s *DonationStore) ListDonationRequests(ctx context.Context, platformExperimentID, status string, limit, offset int) ([]*domain.DonationRequest, error) {
+func (s *DonationStore) ListDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string, limit, offset int) ([]*domain.DonationRequest, error) {
 	if limit <= 0 {
 		limit = defaultDonationListLimit
 	} else if limit > maxDonationListLimit {
@@ -83,7 +83,7 @@ func (s *DonationStore) ListDonationRequests(ctx context.Context, platformExperi
 SELECT dr.id, dr.agent_id, a.name, dr.platform_experiment_id, dr.credits_want, dr.reason, dr.status, dr.created_at, dr.updated_at
 FROM donation_requests dr JOIN agents a ON a.id = dr.agent_id
 `
-	where, args := donationFilter("dr.", platformExperimentID, status)
+	where, args := donationFilter("dr.", scope, platformExperimentID, status)
 	q += where + "\n"
 	q += fmt.Sprintf("ORDER BY dr.created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
@@ -122,8 +122,8 @@ func (s *DonationStore) UpdateDonationStatus(ctx context.Context, id, status str
 
 // CountDonationRequests returns how many donation requests match status (all of them when
 // status is empty), ignoring limit/offset — the X-Total-Count a paginating caller shows.
-func (s *DonationStore) CountDonationRequests(ctx context.Context, platformExperimentID, status string) (int, error) {
-	where, args := donationFilter("", platformExperimentID, status)
+func (s *DonationStore) CountDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string) (int, error) {
+	where, args := donationFilter("", scope, platformExperimentID, status)
 	q := `SELECT COUNT(*) FROM donation_requests ` + where
 	var n int
 	if err := s.pool.pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
@@ -132,11 +132,14 @@ func (s *DonationStore) CountDonationRequests(ctx context.Context, platformExper
 	return n, nil
 }
 
-// donationFilter is the WHERE clause narrowing donation requests to a platform experiment and a
-// status, each only when set.
-func donationFilter(prefix, platformExperimentID, status string) (string, []any) {
+// donationFilter is the WHERE clause narrowing donation requests to the caller's scope, a
+// platform experiment and a status, each only when set.
+func donationFilter(prefix string, scope domain.TenantScope, platformExperimentID, status string) (string, []any) {
 	var conds []string
 	var args []any
+	if clause, scoped := tenantClause(scope, prefix+"platform_experiment_id", args); clause != "" {
+		conds, args = append(conds, clause), scoped
+	}
 	if platformExperimentID != "" {
 		args = append(args, platformExperimentID)
 		conds = append(conds, fmt.Sprintf("%splatform_experiment_id = $%d", prefix, len(args)))

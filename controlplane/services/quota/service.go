@@ -34,13 +34,14 @@ func NewService(store Store, logger *zap.Logger) *Service {
 // RegisterAgent creates a new agent.
 // kind distinguishes a human participant from an AI agent (domain.AgentKind); an empty kind
 // defaults to domain.AgentKindAgent, same as the pre-existing single-kind behavior.
-func (s *Service) RegisterAgent(ctx context.Context, id, name string, kind domain.AgentKind) (*domain.Agent, error) {
+func (s *Service) RegisterAgent(ctx context.Context, id, name, orgID string, kind domain.AgentKind) (*domain.Agent, error) {
 	if kind == "" {
 		kind = domain.AgentKindAgent
 	}
 	agent := &domain.Agent{
 		ID:               id,
 		Name:             name,
+		OrgID:            orgID,
 		Kind:             kind,
 		PerformanceScore: 0.5,
 		CreatedAt:        time.Now().UTC(),

@@ -42,8 +42,8 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // CreatePlatformExperiment inserts a new platform experiment.
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -59,7 +59,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		return fmt.Errorf("platform_experiments_store.Create: marshal stages: %w", err)
 	}
 	_, err = s.pool.pool.Exec(ctx, q,
-		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
+		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
 		stages, 1,
@@ -75,7 +75,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier
+SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier
 FROM platform_experiments
 WHERE id = $1`
 
@@ -83,7 +83,7 @@ WHERE id = $1`
 	var status, hypothesisPolicy, jobPolicy string
 	var metricsRaw, stagesRaw []byte
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
-		&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
+		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
@@ -147,6 +147,8 @@ type PlatformExperimentsFilter struct {
 	Status string
 	// Search matches against name/description, case-insensitively, substring match.
 	Search string
+	// Scope keeps the platform experiments the caller may see.
+	Scope  domain.TenantScope
 	Limit  int
 	Offset int
 	// Sort selects the ORDER BY column and direction, as "field" (ascending) or "-field"
@@ -197,7 +199,9 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 	if filter.Search != "" {
 		clauses = append(clauses, fmt.Sprintf("(pe.name ILIKE $%d OR pe.description ILIKE $%d)", n, n))
 		args = append(args, "%"+filter.Search+"%")
-		n++
+	}
+	if clause, scoped := tenantClause(filter.Scope, "pe.id", args); clause != "" {
+		clauses, args = append(clauses, clause), scoped
 	}
 	return clauses, args
 }
@@ -251,13 +255,13 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 // loop acts on all of its subjects or on none of them, so it must never read them through a
 // paginated query.
 func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
-	clauses, args := platformExperimentFilterClauses(PlatformExperimentsFilter{Status: string(status)})
+	clauses, args := platformExperimentFilterClauses(PlatformExperimentsFilter{Scope: domain.AllTenants, Status: string(status)})
 	return s.queryPlatformExperiments(ctx, platformExperimentSelect(clauses, ""), args...)
 }
 
 func platformExperimentSelect(clauses []string, sort string) string {
 	return `
-SELECT pe.id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents,
+SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents,
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
@@ -284,7 +288,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		var status, hypothesisPolicy, jobPolicy string
 		var metricsRaw, stagesRaw []byte
 		if err := rows.Scan(
-			&pe.ID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
+			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,

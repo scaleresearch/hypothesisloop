@@ -12,7 +12,7 @@ import (
 // RePrioritize re-evaluates and persists priority scores for all QUEUED experiments.
 // It is intended to be called periodically (e.g. every minute).
 func (s *Service) RePrioritize(ctx context.Context) error {
-	queued, err := s.store.ListExperiments(ctx, domain.ExperimentFilter{Status: domain.StatusQueued})
+	queued, err := s.store.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.AllTenants, Status: domain.StatusQueued})
 	if err != nil {
 		return fmt.Errorf("scheduler: list queued for reprioritize: %w", err)
 	}

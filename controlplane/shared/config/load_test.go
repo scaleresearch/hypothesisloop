@@ -116,3 +116,31 @@ func TestExpandEnvLeavesCommentsAndKeysAlone(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestLoadRequiresASigningSecretOfUsableLength(t *testing.T) {
+	for _, secret := range []string{`""`, "too-short"} {
+		text := strings.Replace(productionConfig(t), "  signing_secret: local-development-signing-secret-do-not-deploy", "  signing_secret: "+secret, 1)
+		if err := loadText(t, text); err == nil {
+			t.Fatalf("Load accepted signing_secret %s", secret)
+		}
+	}
+}
+
+func TestLoadRequiresTheUIOrigin(t *testing.T) {
+	text := strings.Replace(productionConfig(t), "  ui_origin: http://localhost:3000", `  ui_origin: ""`, 1)
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted an empty ui_origin")
+	}
+}
+
+func TestLoadRequiresAnIssuerOnceJWTKeysAreListed(t *testing.T) {
+	keys := "  jwt_keys:\n    - {kid: k1, kty: EC, alg: ES256, crv: P-256, x: AA, y: AA}"
+	text := strings.Replace(productionConfig(t), "  jwt_keys: []", keys, 1)
+	if err := loadText(t, text); err == nil {
+		t.Fatal("Load accepted jwt_keys with no issuer")
+	}
+	text = strings.Replace(text, `  issuer: ""`, "  issuer: https://issuer.example/auth/v1", 1)
+	if err := loadText(t, text); err != nil {
+		t.Fatalf("Load rejected jwt_keys with an issuer: %v", err)
+	}
+}

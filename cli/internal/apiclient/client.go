@@ -13,14 +13,15 @@ import (
 	"time"
 )
 
-// Client talks to the controlplane HTTP API at BaseURL.
+// Client talks to the controlplane HTTP API at BaseURL, as whoever Token names.
 type Client struct {
 	BaseURL string
+	Token   string
 	HTTP    *http.Client
 }
 
-func New(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, HTTP: &http.Client{Timeout: 30 * time.Second}}
+func New(baseURL, token string) *Client {
+	return &Client{BaseURL: baseURL, Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}}
 }
 
 // HTTPError is returned when the platform answers with a non-2xx status; it carries the response
@@ -47,6 +48,9 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	if c.BaseURL == "" {
 		return nil, errors.New("no API URL given (set API_URL)")
 	}
+	if c.Token == "" {
+		return nil, errors.New("no token given (set HL_TOKEN)")
+	}
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -59,6 +63,7 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
 	if reader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

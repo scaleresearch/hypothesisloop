@@ -7,6 +7,22 @@ services:
   metrics_db_url: http://greptimedb:4000
   graph_db_url: bolt://memgraph:7687
 
+# Who may call the API. Every request carries one token, and there is no setting that turns the
+# check off.
+#
+#   issuer, jwt_keys  verify a person's JWT from the identity provider. The public keys are listed
+#                     here, as the provider's JWKS document gives them (kid, kty, alg and crv/x/y
+#                     for ES256 or n/e for RS256), and are never fetched: rotating one is an edit
+#                     here and a restart. With none listed no JWT is accepted.
+#   signing_secret    derives the hls_ tokens handed to what the platform launches (jobs, agents,
+#                     coordinators, runtimes) and the staff token local development uses. The
+#                     value below is for local development only; a deployment sets its own.
+#   ui_origin         the one browser origin allowed to call the API.
+auth:
+  issuer: ""
+  jwt_keys: []
+  signing_secret: local-development-signing-secret-do-not-deploy
+  ui_origin: http://localhost:3000
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #

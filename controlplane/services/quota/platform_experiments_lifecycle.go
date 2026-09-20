@@ -72,6 +72,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	}
 	pe := &domain.PlatformExperiment{
 		ID:                        "pe-" + uuid.New().String()[:8],
+		ProjectID:                 req.ProjectID,
 		Name:                      req.Name,
 		Description:               req.Description,
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,

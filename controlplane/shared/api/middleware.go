@@ -11,11 +11,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// CORSMiddleware adds permissive CORS headers to every response. Suitable for
-// PoC use; tighten allowed origins before production.
-func CORSMiddleware(next http.Handler) http.Handler {
+// CORSMiddleware lets one browser origin, the UI's, call the API.
+func CORSMiddleware(origin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler { return corsHandler(origin, next) }
+}
+
+func corsHandler(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		// Without this a browser cannot read X-Total-Count, so paginated views silently see only

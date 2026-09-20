@@ -23,6 +23,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -114,7 +115,14 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	apiServer := newAPIServer(runCtx, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	directory := auth.NewStoreDirectory(pool)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, directory)
+	if err != nil {
+		logger.Fatal("control-service: configure auth", zap.Error(err))
+	}
+	gate := apiGate{authenticator: authenticator, access: auth.NewAccess(directory)}
+
+	apiServer := newAPIServer(runCtx, gate, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -138,7 +146,13 @@ func main() {
 	logger.Info("control-service: stopped")
 }
 
-func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+// apiGate is what every API surface is built with: who is calling, and what they may reach.
+type apiGate struct {
+	authenticator *auth.Authenticator
+	access        *auth.Access
+}
+
+func newAPIServer(runCtx context.Context, gate apiGate, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -167,21 +181,21 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph 
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin)
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see services/registry/watch.go.
 	events := db.NewEventsStore(pool, graph)
 	registrySvc := registry.New(store, graph, logger, metricsDBURL, dataStore).WithEvents(events)
 	registryHandler := registry.NewHandler(registrySvc, logger)
-	watchHandler := registry.NewWatchHandler(events, store, logger)
+	watchHandler := registry.NewWatchHandler(events, store, gate.authenticator, gate.access, logger)
 	watchHandler.Start(runCtx)
 	dataUsageHandler := quota.NewDataUsageHandler(dataStore, store, pcfg.DataStore.MaxBytesPerAgent)
 
 	r := chi.NewRouter()
 	r.Use(api.RecoveryMiddleware(logger))
 	r.Use(api.LoggingMiddleware(logger))
-	r.Use(api.CORSMiddleware)
+	r.Use(api.CORSMiddleware(pcfg.Auth.UIOrigin))
 	r.Handle("/metrics", promhttp.Handler())
 	for _, path := range []string{"/health", "/healthz"} {
 		r.Get(path, func(w http.ResponseWriter, _ *http.Request) {
@@ -202,7 +216,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph 
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules)
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access)
 	quota.RegisterHuma(doc, handler, peHandler)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	scheduler.RegisterHuma(doc, schedulerHandler)
@@ -229,7 +243,7 @@ func newAPIServer(runCtx context.Context, pool *db.Pool, store *db.Store, graph 
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, gate apiGate, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -298,9 +312,9 @@ func newSchedulerParts(runCtx context.Context, pool *db.Pool, store *db.Store, g
 	clusterAgentHandler := clusteragentapi.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, logger)
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, logger)
 	clusterAgentRouter := chi.NewRouter()
-	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "")
+	caDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.authenticator, gate.access)
 	clusteragentapi.RegisterHuma(caDoc, clusterAgentHandler)
 	caDoc.MountExplore(clusterAgentRouter)
 

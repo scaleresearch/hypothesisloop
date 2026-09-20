@@ -3,10 +3,11 @@
 // /openapi.json) plus a compact, LLM-friendly Markdown digest served at
 // /explore, so nobody reads a hand-maintained doc that can drift out of date.
 //
-// Every Register call declares an Audience (agent/coordinator/internal) — required, no
-// default — so /explore can be rendered per audience from the same registrations
-// (MountExploreAudience) and a research agent's own digest can never contain an operation it
-// isn't permitted to call.
+// Every Register call declares an Audience — required, no default. The audience is the
+// operation's authorization class: Register puts a check in front of the handler that resolves
+// the caller's token and refuses a kind of caller the audience does not admit. The same
+// declaration renders /explore per audience (MountExploreAudience), so a research agent's
+// digest cannot contain an operation its token would be refused on.
 //
 // It also pins the platform's error-response shape to the historical
 // {"error": "..."} envelope (see init) so existing consumers — the Python
@@ -16,6 +17,7 @@ package apidocs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -24,6 +26,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // errorModel serializes to the {"error": "..."} shape the Python agent and the
@@ -60,24 +64,63 @@ type Audience string
 
 const (
 	// AudienceAgent: research agents and hl, their client — it must contain nothing an agent
-	// shouldn't call.
+	// shouldn't call. Admits everyone AudienceCoordinator does, and an agent token.
 	AudienceAgent Audience = "agent"
+	// AudienceJob: AudienceAgent plus a job token. The one thing a job may say to the platform
+	// is a metric, so exactly one operation carries this audience.
+	AudienceJob Audience = "job"
 	// AudienceCoordinator: the coordinator/operator/dashboard — experiment lifecycle admin
 	// (create/start/close/summary), donation administration, and other operator-only actions.
+	// Admits a signed-in user, an API key, a coordinator token and staff.
 	AudienceCoordinator Audience = "coordinator"
 	// AudienceInternal: cluster-agent binaries only (the reconcile/status-push contract) —
-	// never fetched by a research agent or the coordinator.
+	// never fetched by a research agent or the coordinator. Admits a runtime token on the
+	// cluster its {name} path parameter names, and staff.
 	AudienceInternal Audience = "internal"
 )
 
 func validAudience(a Audience) bool {
 	switch a {
-	case AudienceAgent, AudienceCoordinator, AudienceInternal:
+	case AudienceAgent, AudienceJob, AudienceCoordinator, AudienceInternal:
 		return true
 	default:
 		return false
 	}
 }
+
+// Admits reports whether the audience lets this principal in. clusterName is the operation's
+// {name} path parameter, empty on an operation that has none.
+func (a Audience) Admits(p auth.Principal, clusterName string) bool {
+	switch p.Kind {
+	case auth.KindStaff:
+		return true
+	case auth.KindUser, auth.KindKey, auth.KindCoordinator:
+		return a != AudienceInternal
+	case auth.KindAgent:
+		return a == AudienceAgent || a == AudienceJob
+	case auth.KindJob:
+		return a == AudienceJob
+	case auth.KindRuntime:
+		return a == AudienceInternal && clusterName != "" && clusterName == p.ClusterName
+	default:
+		return false
+	}
+}
+
+// shownTo reports whether an operation of this audience belongs in the digest for reader.
+func (a Audience) shownTo(reader Audience) bool {
+	return reader == "" || a == reader || (reader == AudienceAgent && a == AudienceJob)
+}
+
+// Authenticator resolves a request's token. *auth.Authenticator is the one used in service.
+type Authenticator interface {
+	Authenticate(ctx context.Context, token string) (auth.Principal, error)
+}
+
+// clusterNameParam is the path parameter an AudienceInternal operation names its cluster with.
+const clusterNameParam = "name"
+
+const bearerScheme = "bearer"
 
 // opMeta is the compact metadata retained per registered operation to render
 // the /explore digest.
@@ -91,22 +134,64 @@ type opMeta struct {
 // Doc wraps a huma.API and accumulates operation metadata as they are
 // registered, so the same registrations drive both /openapi.json and /explore.
 type Doc struct {
-	API      huma.API
-	title    string
-	preamble string
-	ops      []opMeta
+	API           huma.API
+	title         string
+	preamble      string
+	ops           []opMeta
+	authenticator Authenticator
+	// Access is what each handler asks whether its caller may reach the resource it loads.
+	Access *auth.Access
 }
 
 // New builds a Huma API over an existing chi router (preserving its middleware,
 // /metrics, /healthz and mount paths) and returns a Doc. Huma automatically
 // exposes /openapi.json, /openapi.yaml and /docs on the same router.
-func New(r chi.Router, title, version, preamble string) *Doc {
+func New(r chi.Router, title, version, preamble string, authenticator Authenticator, access *auth.Access) *Doc {
+	if authenticator == nil || access == nil {
+		panic("apidocs.New: an authenticator and an access check are required")
+	}
 	cfg := huma.DefaultConfig(title, version)
+	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		bearerScheme: {Type: "http", Scheme: "bearer"},
+	}
 	// A filter the server doesn't know is a filter that wasn't applied, and returning unfiltered
 	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
 	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
 	cfg.RejectUnknownQueryParameters = true
-	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble}
+	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble, authenticator: authenticator, Access: access}
+}
+
+// authorize is the one place a request is let in: it resolves the token, refuses a caller the
+// audience does not admit, and hands the handler a context carrying the principal. What the
+// principal may reach within the operation is the handler's question (auth.Access).
+func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		token, err := auth.BearerToken(ctx.Header("Authorization"))
+		if err != nil {
+			d.refuse(ctx, err)
+			return
+		}
+		principal, err := d.authenticator.Authenticate(ctx.Context(), token)
+		if err != nil {
+			d.refuse(ctx, err)
+			return
+		}
+		if !audience.Admits(principal, ctx.Param(clusterNameParam)) {
+			_ = huma.WriteErr(d.API, ctx, http.StatusForbidden,
+				fmt.Sprintf("forbidden: a %s token may not call %s %s", principal.Kind, ctx.Operation().Method, ctx.Operation().Path))
+			return
+		}
+		next(huma.WithContext(ctx, auth.WithPrincipal(ctx.Context(), principal)))
+	}
+}
+
+func (d *Doc) refuse(ctx huma.Context, err error) {
+	var refusal *auth.Error
+	if errors.As(err, &refusal) {
+		_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
+		return
+	}
+	_ = huma.WriteErr(d.API, ctx, http.StatusInternalServerError, "could not authenticate the request: "+err.Error())
 }
 
 // Register registers a Huma operation and records its metadata for the digest. audience is
@@ -116,6 +201,8 @@ func Register[I, O any](d *Doc, audience Audience, op huma.Operation, handler fu
 	if !validAudience(audience) {
 		panic(fmt.Sprintf("apidocs.Register %s %s: invalid audience %q", op.Method, op.Path, audience))
 	}
+	op.Middlewares = append(op.Middlewares, d.authorize(audience))
+	op.Security = []map[string][]string{{bearerScheme: {}}}
 	huma.Register(d.API, op, handler)
 	d.ops = append(d.ops, opMeta{
 		Method:      op.Method,
@@ -181,7 +268,7 @@ func (d *Doc) render(audience Audience) string {
 	bySection := map[string][]opMeta{}
 	var sections []string
 	for _, op := range d.ops {
-		if audience != "" && op.Audience != audience {
+		if !op.Audience.shownTo(audience) {
 			continue
 		}
 		s := sectionOf(op)

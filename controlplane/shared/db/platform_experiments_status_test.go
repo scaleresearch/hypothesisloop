@@ -26,9 +26,9 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 
 	id := eventsTestPrefix + "pe-status-" + time.Now().UTC().Format("150405.000000")
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO platform_experiments
-		(id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds,
+		(id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds,
 		 starts_at, ends_at, status, stages, current_stage, created_at, updated_at)
-		VALUES ($1, $1, '', 1, 1, '[]'::jsonb, 10, NOW(), NOW() + interval '1 hour', 'open',
+		VALUES ($1, 'default', $1, '', 1, 1, '[]'::jsonb, 10, NOW(), NOW() + interval '1 hour', 'open',
 		        '[]'::jsonb, 1, NOW(), NOW())`, id); err != nil {
 		t.Fatalf("seed platform experiment: %v", err)
 	}

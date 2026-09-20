@@ -191,6 +191,35 @@ type DataStoreConfig struct {
 	MaxBytesPerAgent int64 `yaml:"max_bytes_per_agent"`
 }
 
+// JWTKey is one public key of the identity provider, as its JWKS document lists it. ES256 on
+// P-256 and RS256 are accepted.
+type JWTKey struct {
+	Kid string `yaml:"kid"`
+	Kty string `yaml:"kty"`
+	Alg string `yaml:"alg"`
+	Crv string `yaml:"crv"`
+	X   string `yaml:"x"`
+	Y   string `yaml:"y"`
+	N   string `yaml:"n"`
+	E   string `yaml:"e"`
+}
+
+// AuthConfig is everything a token is checked against. There is no switch that turns the check
+// off: local development authenticates with a staff token derived from SigningSecret.
+type AuthConfig struct {
+	// Issuer and JWTKeys verify a person's JWT. The keys are listed here and never fetched, so
+	// rotating one is a config change and a restart. With no keys listed no JWT is accepted.
+	Issuer  string   `yaml:"issuer"`
+	JWTKeys []JWTKey `yaml:"jwt_keys"`
+	// SigningSecret derives every hls_ token the platform hands to what it launches.
+	SigningSecret string `yaml:"signing_secret"`
+	// UIOrigin is the one browser origin allowed to call the API.
+	UIOrigin string `yaml:"ui_origin"`
+}
+
+// MinSigningSecretLength keeps the HMAC key at least as long as its output.
+const MinSigningSecretLength = 32
+
 // Config is the top-level parsed config from hypothesisloop.yaml.
 type Config struct {
 	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
@@ -199,6 +228,7 @@ type Config struct {
 	Scheduler        SchedulerConfig         `yaml:"scheduler"`
 	Stages           StagesConfig            `yaml:"stages"`
 	Services         ServicesConfig          `yaml:"services"`
+	Auth             AuthConfig              `yaml:"auth"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate

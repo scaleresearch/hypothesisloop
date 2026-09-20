@@ -12,6 +12,7 @@ import "time"
 type Agent struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
+	OrgID            string    `json:"org_id"`
 	Kind             AgentKind `json:"kind"`
 	PerformanceScore float64   `json:"performance_score"`
 	Top3Count        int       `json:"top3_count"` // number of top-3 placements ever

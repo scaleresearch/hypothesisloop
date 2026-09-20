@@ -25,6 +25,7 @@ func setAPIURL(t *testing.T, url string) {
 	old := os.Getenv("API_URL")
 	os.Setenv("API_URL", url)
 	t.Cleanup(func() { os.Setenv("API_URL", old) })
+	t.Setenv("HL_TOKEN", "test-token")
 }
 
 func TestRegister(t *testing.T) {
@@ -51,6 +52,66 @@ func TestRegister(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"jane"`) {
 		t.Fatalf("stdout missing echoed id: %s", stdout.String())
+	}
+}
+
+func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
+	var gotAuthorization string
+	var gotBody map[string]string
+	calls := 0
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		gotAuthorization = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	setAPIURL(t, url)
+	t.Setenv("HL_ORG", "org-1")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"register", "--id", "jane"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotAuthorization != "Bearer test-token" {
+		t.Errorf("Authorization: got = %q, want = %q", gotAuthorization, "Bearer test-token")
+	}
+	if gotBody["org_id"] != "org-1" {
+		t.Errorf("org_id: got = %q, want $HL_ORG", gotBody["org_id"])
+	}
+
+	t.Setenv("HL_TOKEN", "")
+	stderr.Reset()
+	if code := run([]string{"register", "--id", "jane"}, &stdout, &stderr); code == 0 {
+		t.Fatal("exit code with no HL_TOKEN: got = 0, want a failure")
+	}
+	if !strings.Contains(stderr.String(), "HL_TOKEN") || calls != 1 {
+		t.Errorf("with no HL_TOKEN: stderr = %q after %d calls, want it to name HL_TOKEN and send nothing", stderr.String(), calls)
+	}
+}
+
+func TestPlatformExperimentsCreateNeedsAProject(t *testing.T) {
+	var gotBody map[string]any
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"id":"pe-1"}`))
+	})
+	setAPIURL(t, url)
+	file := t.TempDir() + "/pe.yaml"
+	if err := os.WriteFile(file, []byte("name: one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HL_PROJECT", "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr); code != 2 || gotBody != nil {
+		t.Fatalf("with no project: exit code = %d, sent = %v, want 2 and nothing sent", code, gotBody)
+	}
+	t.Setenv("HL_PROJECT", "prj-env")
+	if code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr); code != 0 || gotBody["project_id"] != "prj-env" {
+		t.Fatalf("with $HL_PROJECT: exit code = %d, project_id = %v, stderr = %s", code, gotBody["project_id"], stderr.String())
+	}
+	if code := run([]string{"platform-experiments", "create", "--project", "prj-flag", file}, &stdout, &stderr); code != 0 || gotBody["project_id"] != "prj-flag" {
+		t.Fatalf("with --project: exit code = %d, project_id = %v", code, gotBody["project_id"])
 	}
 }
 
@@ -149,6 +210,7 @@ func TestPlatformExperimentsCreateManyFromYAMLList(t *testing.T) {
 	dir := t.TempDir()
 	file := dir + "/experiments.yaml"
 	yamlContent := "budget_accelerator_hours: 10\n" +
+		"project_id: prj-1\n" +
 		"experiments:\n" +
 		"  - name: first\n" +
 		"  - name: second\n" +

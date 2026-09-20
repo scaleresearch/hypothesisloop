@@ -181,5 +181,14 @@ func (c *Config) build() error {
 		services.MetricsDBURL == "" || services.GraphDBURL == "" {
 		return fmt.Errorf("service ports must be in 1-65535 and metrics_db_url and graph_db_url are required")
 	}
+	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
+		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
+	}
+	if c.Auth.UIOrigin == "" {
+		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
+	}
+	if len(c.Auth.JWTKeys) > 0 && c.Auth.Issuer == "" {
+		return fmt.Errorf("auth issuer is required when jwt_keys are listed")
+	}
 	return nil
 }

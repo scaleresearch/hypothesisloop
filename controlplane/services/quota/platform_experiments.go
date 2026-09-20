@@ -66,8 +66,8 @@ type PlatformExperimentsStore interface {
 	// Donation persistence (experiment-scoped donations).
 	CreateDonationRequest(ctx context.Context, req *domain.DonationRequest) error
 	GetDonationRequest(ctx context.Context, id string) (*domain.DonationRequest, error)
-	ListDonationRequests(ctx context.Context, platformExperimentID, status string, limit, offset int) ([]*domain.DonationRequest, error)
-	CountDonationRequests(ctx context.Context, platformExperimentID, status string) (int, error)
+	ListDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string, limit, offset int) ([]*domain.DonationRequest, error)
+	CountDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string) (int, error)
 	UpdateDonationStatus(ctx context.Context, id, status string) error
 }
 
@@ -104,6 +104,8 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 
 // CreatePlatformExperimentRequest is the input for Create.
 type CreatePlatformExperimentRequest struct {
+	// ProjectID places the platform experiment. Required on create, and fixed from then on.
+	ProjectID              string  `json:"project_id,omitempty"`
 	Name                   string  `json:"name"`
 	Description            string  `json:"description"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`

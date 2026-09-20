@@ -817,4 +817,80 @@ DROP TRIGGER IF EXISTS pe_cuts_notify ON platform_experiment_cuts;
 CREATE TRIGGER pe_cuts_notify AFTER INSERT ON platform_experiment_cuts
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_cuts_notify();
 
+-- ---------------------------------------------------------------------------
+-- Tenancy
+-- ---------------------------------------------------------------------------
+
+-- id is the identity provider's subject. No email and no name: the provider owns those and the
+-- JWT carries them on every request, so a copy here would be a second home for the same fact.
+CREATE TABLE IF NOT EXISTS users (
+    id         TEXT        PRIMARY KEY,
+    staff      BOOLEAN     NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS orgs (
+    id         TEXT        PRIMARY KEY,
+    name       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS org_members (
+    org_id     TEXT        NOT NULL REFERENCES orgs(id),
+    user_id    TEXT        NOT NULL REFERENCES users(id),
+    role       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, user_id),
+    CONSTRAINT org_members_role CHECK (role IN ('owner', 'member'))
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id         TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL REFERENCES orgs(id),
+    name       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (org_id, name)
+);
+
+-- key_hash is the sha256 of the whole token; the token itself is shown once and stored nowhere.
+-- project_id NULL means the key reaches every project of its org.
+CREATE TABLE IF NOT EXISTS api_keys (
+    id         TEXT        PRIMARY KEY,
+    key_hash   TEXT        NOT NULL UNIQUE,
+    org_id     TEXT        NOT NULL REFERENCES orgs(id),
+    project_id TEXT        REFERENCES projects(id),
+    created_by TEXT        NOT NULL REFERENCES users(id),
+    name       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(org_id);
+
+-- A cluster exists for the platform once an org registers its name: a runtime token for an
+-- unregistered name is refused, so a mistyped name cannot bring a cluster into being.
+CREATE TABLE IF NOT EXISTS clusters (
+    name       TEXT        PRIMARY KEY,
+    org_id     TEXT        NOT NULL REFERENCES orgs(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_clusters_org ON clusters(org_id);
+
+-- Everything that predates tenancy belongs to org 'default' and its project 'default'. Org is
+-- always derived (job -> platform experiment -> project -> org), so these two columns are the
+-- only places it is written. Both are added nullable, backfilled, then tightened, which leaves a
+-- fresh database and an upgraded one on the same definition.
+INSERT INTO orgs (id, name) VALUES ('default', 'default') ON CONFLICT (id) DO NOTHING;
+INSERT INTO projects (id, org_id, name) VALUES ('default', 'default', 'default') ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS project_id TEXT REFERENCES projects(id);
+UPDATE platform_experiments SET project_id = 'default' WHERE project_id IS NULL;
+ALTER TABLE platform_experiments ALTER COLUMN project_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_platform_experiments_project ON platform_experiments(project_id);
+
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS org_id TEXT REFERENCES orgs(id);
+UPDATE agents SET org_id = 'default' WHERE org_id IS NULL;
+ALTER TABLE agents ALTER COLUMN org_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org_id);
+
 COMMIT;

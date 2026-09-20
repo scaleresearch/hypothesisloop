@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -71,18 +72,20 @@ type Handler struct {
 	pricedAcceleratorTypes map[string]bool
 	// maxLogLineChars splits longer reported log lines, never truncating them.
 	maxLogLineChars int
+	// signingSecret derives each job's own token, handed out beside its data key.
+	signingSecret string
 }
 
 // NewHandler constructs a Handler. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, logger *zap.Logger) *Handler {
+func NewHandler(store Store, connectedWithin time.Duration, metricsDBURL string, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret string, logger *zap.Logger) *Handler {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
 		priced[strings.ToLower(name)] = true
 	}
 	return &Handler{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, logger: logger}
+		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, logger: logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
@@ -133,6 +136,19 @@ func (h *Handler) attachDataAccess(exps []*domain.Experiment) {
 			SecretAccessKey: exp.DataKey.SecretAccessKey,
 		}
 	}
+}
+
+// attachTokens hands each workload the token its job reports metrics with. The token is derived
+// from the job's id, so every reconcile answers with the same one.
+func (h *Handler) attachTokens(exps []*domain.Experiment) error {
+	for _, exp := range exps {
+		token, err := auth.Mint(h.signingSecret, auth.JobScope(exp.ID))
+		if err != nil {
+			return err
+		}
+		exp.Token = token
+	}
+	return nil
 }
 
 // RegisterHuma registers the cluster-agent-facing operations on doc. Paths are relative to
@@ -327,6 +343,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Body reconcileBody
 		}{}
 		h.attachDataAccess(exps)
+		if err := h.attachTokens(exps); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		resp.Body.Experiments = exps
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 		return resp, nil
