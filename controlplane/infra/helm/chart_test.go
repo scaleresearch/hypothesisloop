@@ -192,7 +192,7 @@ func TestEachRuntimeProcessTakesItsTokenFromTheControlPlanesTool(t *testing.T) {
 			"/hl-admin cluster add vast default > /token/token && /hl-admin cluster share vast on",
 			`RUNTIME_TOKEN="$(cat /token/token)" exec /cloud-agent`},
 		"hypothesisloop-agent-launcher": {
-			"/hl-admin token launcher:main > /token/token",
+			"/hl-admin launcher add main > /token/token",
 			`LAUNCHER_TOKEN="$(cat /token/token)" exec /agent-launcher`},
 	} {
 		script, env := release.TokenInit(t, deployment, secretNames[charttest.External])

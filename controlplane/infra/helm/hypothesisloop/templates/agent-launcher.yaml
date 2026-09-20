@@ -30,7 +30,7 @@ spec:
         {{- include "hypothesisloop.secretAnnotations" . | nindent 8 }}
     spec:
       initContainers:
-        {{- include "hypothesisloop.tokenInit" (dict "script" (printf "/hl-admin token launcher:%s > /token/token" .Values.agents.launcher) "root" $) | nindent 8 }}
+        {{- include "hypothesisloop.tokenInit" (dict "script" (printf "/hl-admin launcher add %s > /token/token" .Values.agents.launcher) "root" $) | nindent 8 }}
       containers:
         - name: agent-launcher
           image: {{ include "hypothesisloop.image" (dict "name" "agent-launcher" "root" $) }}

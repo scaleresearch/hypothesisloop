@@ -43,7 +43,7 @@ is in no file: both read it from the environment.
 The init container of a runtime process: the control plane's own tool, started with what
 control-service is started with, leaves the process's token in /token/token. The token is derived
 from the signing secret, so no one has to carry it into the Secret.
-call as: include "hypothesisloop.tokenInit" (dict "script" "/hl-admin token launcher:main > /token/token" "root" $)
+call as: include "hypothesisloop.tokenInit" (dict "script" "/hl-admin launcher add main > /token/token" "root" $)
 */}}
 {{- define "hypothesisloop.tokenInit" -}}
 - name: token
