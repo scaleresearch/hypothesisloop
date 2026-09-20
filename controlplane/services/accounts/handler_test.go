@@ -20,6 +20,8 @@ import (
 
 const testSigningSecret = "accounts-test-signing-secret"
 
+var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid"}
+
 // world is two orgs on one API. org A has an owner, a member, a second project, three API keys
 // and a cluster; org B has its own owner, key and cluster. Each caller is a token named after
 // what it is.
@@ -105,7 +107,7 @@ func newWorld(t *testing.T) *world {
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret))
+	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses))
 	w.router = router
 	return w
 }
@@ -549,6 +551,9 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 		if registered.RuntimeToken != want || registered.OrgID != w.orgA || registered.Shared {
 			t.Fatalf("registered by %s: got = %+v, want the derived token, owned by %s and not shared", caller, registered, w.orgA)
 		}
+		if registered.APIURL != testRuntimeAddresses.APIURL || registered.MetricsURL != testRuntimeAddresses.MetricsURL {
+			t.Fatalf("registered by %s: got = %s and %s, want the addresses runtimes are configured to use", caller, registered.APIURL, registered.MetricsURL)
+		}
 	}
 
 	rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": "gpu-east"})
@@ -589,6 +594,87 @@ func TestClustersAreListedForTheirOrgWithConnectivity(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "runtime_token") || strings.Contains(rec.Body.String(), "hls_") {
 		t.Fatalf("the listing carries a runtime token: %s", rec.Body)
+	}
+}
+
+func TestASharedClusterIsListedToEveryOrgWithoutItsOwnerOrItsSettingsKey(t *testing.T) {
+	w := newWorld(t)
+	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
+	w.store.clusters[w.clusterB].ReportedID = "id-of-b"
+	list := func(caller, orgID string) (map[string]ListedCluster, string) {
+		t.Helper()
+		rec := w.call(caller, "GET", "/orgs/"+orgID+"/clusters", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s lists clusters of %s: got = %d %s, want = 200", caller, orgID, rec.Code, rec.Body)
+		}
+		var listed struct {
+			Clusters []ListedCluster `json:"clusters"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+			t.Fatal(err)
+		}
+		byName := map[string]ListedCluster{}
+		for _, c := range listed.Clusters {
+			byName[c.Name] = c
+		}
+		return byName, rec.Body.String()
+	}
+
+	for _, caller := range []string{"outsider", "foreign-key"} {
+		if listed, _ := list(caller, w.orgB); len(listed) != 1 || !listed[w.clusterB].Owned {
+			t.Fatalf("%s before anything is shared: got = %+v, want only its own cluster", caller, listed)
+		}
+	}
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
+
+	for _, caller := range []string{"outsider", "foreign-key"} {
+		listed, body := list(caller, w.orgB)
+		shared, own := listed[w.clusterA], listed[w.clusterB]
+		if len(listed) != 2 || !shared.Shared || shared.Owned || !shared.Connected {
+			t.Fatalf("%s lists the shared cluster: got = %+v, want it shared, connected and not owned", caller, shared)
+		}
+		if strings.Contains(body, w.orgA) || strings.Contains(body, "id-of-a") {
+			t.Fatalf("%s is shown the owner or the settings key of another org's cluster: %s", caller, body)
+		}
+		if !own.Owned || own.OrgID != w.orgB || own.ClusterID != "id-of-b" || own.Shared || own.Connected {
+			t.Fatalf("%s lists its own cluster: got = %+v, want it owned by %s with its settings key", caller, own, w.orgB)
+		}
+	}
+	if listed, _ := list("owner", w.orgA); len(listed) != 1 || !listed[w.clusterA].Owned || listed[w.clusterA].OrgID != w.orgA || listed[w.clusterA].ClusterID != "id-of-a" {
+		t.Fatalf("the owner lists its shared cluster: got = %+v, want it owned with its settings key and nothing of org b", listed)
+	}
+	if listed, _ := list("staff", w.orgB); listed[w.clusterA].OrgID != w.orgA || listed[w.clusterA].ClusterID != "id-of-a" || listed[w.clusterA].Owned {
+		t.Fatalf("staff list the clusters org b runs on: got = %+v, want the shared one with its owner", listed)
+	}
+	if rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": w.clusterA}); rec.Code != http.StatusConflict {
+		t.Fatalf("registering the name of a shared cluster: got = %d %s, want = 409", rec.Code, rec.Body)
+	}
+
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": false}, http.StatusOK, nil)
+	if listed, _ := list("outsider", w.orgB); len(listed) != 1 {
+		t.Fatalf("after sharing ended: got = %+v, want only org b's own cluster", listed)
+	}
+}
+
+func TestAnOrgThatDoesNotExistIsNotFoundForStaffToo(t *testing.T) {
+	w := newWorld(t)
+	for _, c := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PATCH", "/orgs/org-missing", name{"name": "n"}},
+		{"GET", "/orgs/org-missing/projects", nil},
+		{"POST", "/orgs/org-missing/projects", name{"name": "n"}},
+		{"GET", "/orgs/org-missing/api-keys", nil},
+		{"POST", "/orgs/org-missing/api-keys", name{"name": "n"}},
+		{"GET", "/orgs/org-missing/clusters", nil},
+		{"POST", "/orgs/org-missing/clusters", name{"name": "n"}},
+	} {
+		for _, caller := range []string{"staff", "staff-user", "owner", "org-key"} {
+			if rec := w.call(caller, c.method, c.path, c.body); rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s %s: got = %d %s, want = 404", caller, c.method, c.path, rec.Code, rec.Body)
+			}
+		}
 	}
 }
 

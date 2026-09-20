@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 )
@@ -68,7 +67,7 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"api-key", "revoke", "abc123"}, "DELETE", "/api-keys/abc123", nil},
 		{[]string{"api-key", "revoke", "--id", "abc123"}, "DELETE", "/api-keys/abc123", nil},
 		{[]string{"cluster", "list", "--org", "org-1"}, "GET", "/orgs/org-1/clusters", nil},
-		{[]string{"cluster", "add", "gpu-east", "--org", "org-1", "--metrics-url", "http://m"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
+		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			calls := accountsServer(t, nil, `{"id":"x","projects":[],"api_keys":[],"clusters":[],"name":"gpu-east","runtime_token":"hls_t"}`)
@@ -116,7 +115,7 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 		calls := accountsServer(t, orgs, `{}`)
 		for _, args := range [][]string{
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
-			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x", "--metrics-url", "http://m"},
+			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
 		} {
 			before := len(*calls)
 			code, stdout, stderr := hl(t, args...)
@@ -166,23 +165,14 @@ func TestAPIKeyCreateNeverNarrowsTheKeyFromTheEnvironment(t *testing.T) {
 }
 
 func TestClusterAddPrintsTheCommandThatStartsItsAgent(t *testing.T) {
-	calls := accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln"}`)
-	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1", "--api-url", "https://api.example", "--metrics-url", "https://metrics.example")
+	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example","metrics_url":"https://metrics.example"}`)
+	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
-	want := "make cluster-agent-up CLUSTER=gpu-east API_URL=https://api.example METRICS_URL=https://metrics.example RUNTIME_TOKEN=hls_cnVudGltZQ.c2ln\n"
+	want := "RUNTIME_TOKEN=hls_cnVudGltZQ.c2ln make cluster-agent-up CLUSTER=gpu-east API_URL=https://api.example METRICS_URL=https://metrics.example\n"
 	if stdout != want {
-		t.Fatalf("stdout: got = %q, want = %q", stdout, want)
-	}
-
-	code, stdout, _ = hl(t, "cluster", "add", "gpu-east", "--org", "org-1", "--metrics-url", "https://metrics.example")
-	if code != 0 || !strings.Contains(stdout, " API_URL="+os.Getenv("API_URL")+" ") {
-		t.Fatalf("without --api-url: exit code = %d, stdout = %q, want $API_URL in the command", code, stdout)
-	}
-	before := len(*calls)
-	if code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1"); code != 2 || stdout != "" || !strings.Contains(stderr, "--metrics-url") || len(*calls) != before {
-		t.Fatalf("without --metrics-url: exit code = %d, stdout = %q, stderr = %q, want a usage error before any call", code, stdout, stderr)
+		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered and not the one hl itself called", stdout, want)
 	}
 }
 
@@ -193,7 +183,7 @@ func TestARefusalFromTheAccountsAPIIsPrintedAndFails(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"cluster name is registered to another org"}`))
 	})
 	setAPIURL(t, url)
-	code, stdout, stderr := hl(t, "cluster", "add", "taken", "--org", "org-1", "--metrics-url", "http://m")
+	code, stdout, stderr := hl(t, "cluster", "add", "taken", "--org", "org-1")
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "registered to another org") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal and no command printed", code, stdout, stderr)
 	}

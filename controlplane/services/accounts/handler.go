@@ -23,7 +23,6 @@ type Accounts interface {
 	RoleReader
 	CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error)
 	RenameOrg(ctx context.Context, id, name string) error
-	GetOrg(ctx context.Context, id string) (*domain.Org, error)
 	ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error)
 	ListAllOrgs(ctx context.Context) ([]*domain.Org, error)
 	ListUserOrgs(ctx context.Context, userID string) ([]*domain.Org, error)
@@ -42,7 +41,7 @@ type Accounts interface {
 type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
-	ListClusters(ctx context.Context, orgIDs []string) ([]*domain.Cluster, error)
+	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
 	SetClusterShared(ctx context.Context, name string, shared bool) (*domain.Cluster, error)
 }
 
@@ -52,16 +51,23 @@ type Connectivity func(ctx context.Context) (map[string]bool, error)
 // maxNameLength bounds the display name of an org, a project and an API key.
 const maxNameLength = 100
 
+// RuntimeAddresses is where a cluster's agents reach the platform from inside their cluster.
+type RuntimeAddresses struct {
+	APIURL     string
+	MetricsURL string
+}
+
 type Handler struct {
 	accounts      Accounts
 	clusters      Clusters
 	connected     Connectivity
 	signingSecret string
+	runtimes      RuntimeAddresses
 	policy        policy
 }
 
-func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string) *Handler {
-	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, policy: policy{roles: accounts}}
+func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses) *Handler {
+	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, policy: policy{roles: accounts}}
 }
 
 // Me is the caller and what it reaches.
@@ -86,7 +92,7 @@ type CreatedAPIKey struct {
 // reported, the key of its settings, absent until its agent first connects.
 type ClusterView struct {
 	Name      string    `json:"name"`
-	OrgID     string    `json:"org_id"`
+	OrgID     string    `json:"org_id,omitempty"`
 	Shared    bool      `json:"shared" doc:"The platform places every org's jobs on a shared cluster. Staff decide it."`
 	ClusterID string    `json:"cluster_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -96,16 +102,30 @@ func viewOf(c *domain.Cluster) ClusterView {
 	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
 }
 
-// RegisteredCluster is a cluster with the token its agents present.
+// RegisteredCluster is a cluster with everything its agents are started with.
 type RegisteredCluster struct {
 	ClusterView
-	RuntimeToken string `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the name, so registering again returns the same one."`
+	RuntimeToken string `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
+	APIURL       string `json:"api_url" doc:"The address this cluster's agents reach the API at."`
+	MetricsURL   string `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
 }
 
-// ListedCluster is a registered cluster and whether its agent is connected right now.
+// ListedCluster is a cluster an org's jobs can be placed on and whether its agent is connected
+// right now.
 type ListedCluster struct {
 	ClusterView
+	Owned     bool `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id and cluster_id are left out."`
 	Connected bool `json:"connected"`
+}
+
+// listedFor shows a cluster to a caller listing the clusters of orgID. Another org's shared
+// cluster keeps its owner and its settings key to itself, except from staff.
+func listedFor(c *domain.Cluster, orgID string, staff, connected bool) ListedCluster {
+	listed := ListedCluster{ClusterView: viewOf(c), Owned: c.OrgID == orgID, Connected: connected}
+	if !listed.Owned && !staff {
+		listed.OrgID, listed.ClusterID = "", ""
+	}
+	return listed
 }
 
 type nameBody struct {
@@ -304,7 +324,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "create-api-key", Method: "POST", Path: "/orgs/{id}/api-keys", DefaultStatus: http.StatusCreated,
 		Summary: "Create an API key", Tags: []string{"accounts"},
-		Description: "Returns the token once. With project_id the key reaches that project only, without it the whole org. " +
+		Description: "Returns the token once: the platform keeps its hash only, so a lost token is replaced by a new key. " +
+			"It is the one secret of this API that cannot be read again; a cluster's runtime token and an agent's token are derived and are returned whenever asked. " +
+			"With project_id the key reaches that project only, without it the whole org. " +
 			"A key may mint keys no wider than itself, and revoking a key revokes every key minted from it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -362,8 +384,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "register-cluster", Method: "POST", Path: "/orgs/{id}/clusters",
 		Summary: "Register a cluster for an org", Tags: []string{"clusters"},
 		Description: "A cluster exists for the platform once its name is registered, and takes the jobs of its org only. " +
-			"Returns the runtime token its agents start with. Registering a name the org already owns returns the same " +
-			"token; a name another org owns answers 409.",
+			"Returns what its agents are started with: the runtime token and the two addresses they reach the platform at. " +
+			"The token is derived from the name, so it is never lost: registering a name the org already owns changes nothing " +
+			"and returns the same token and addresses. A name another org owns answers 409.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body nameBody
@@ -382,13 +405,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{ClusterView: viewOf(cluster), RuntimeToken: token}}, nil
+		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
+			ClusterView: viewOf(cluster), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
+		}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
-		Summary: "List an org's clusters", Tags: []string{"clusters"},
-		Description: "The clusters the org registered, by name, with whether an agent is connected right now and whether the platform shares the cluster with every org.",
+		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
+		Description: "The clusters the org registered and the ones the platform shares with every org, by name, with whether an agent is connected right now. " +
+			"The org may change only the ones it owns.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {
@@ -396,10 +422,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Clusters []ListedCluster `json:"clusters"`
 		}
 	}, error) {
-		if _, err := h.policy.readOrg(ctx, in.ID); err != nil {
+		caller, err := h.policy.readOrg(ctx, in.ID)
+		if err != nil {
 			return nil, err
 		}
-		clusters, err := h.clusters.ListClusters(ctx, []string{in.ID})
+		clusters, err := h.clusters.ClustersHosting(ctx, in.ID)
 		if err != nil {
 			return nil, storeError(err)
 		}
@@ -414,7 +441,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{}
 		out.Body.Clusters = make([]ListedCluster, len(clusters))
 		for i, c := range clusters {
-			out.Body.Clusters[i] = ListedCluster{ClusterView: viewOf(c), Connected: connected[c.Name]}
+			out.Body.Clusters[i] = listedFor(c, in.ID, caller.Kind == auth.KindStaff, connected[c.Name])
 		}
 		return out, nil
 	})

@@ -115,17 +115,17 @@ func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]doma
 }
 
 // ListClusters returns the clusters of the given orgs by name.
-func (s *ClustersStore) ListClusters(ctx context.Context, orgIDs []string) ([]*domain.Cluster, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = ANY($1) ORDER BY name`, orgIDs)
+func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY name`, orgID)
 	if err != nil {
-		return nil, fmt.Errorf("clusters_store.ListClusters: %w", err)
+		return nil, fmt.Errorf("clusters_store.ClustersHosting: %w", err)
 	}
 	defer rows.Close()
 	out := []*domain.Cluster{}
 	for rows.Next() {
 		c, err := scanCluster(rows)
 		if err != nil {
-			return nil, fmt.Errorf("clusters_store.ListClusters: scan: %w", err)
+			return nil, fmt.Errorf("clusters_store.ClustersHosting: scan: %w", err)
 		}
 		out = append(out, c)
 	}

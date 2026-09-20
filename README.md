@@ -178,7 +178,7 @@ hl donation list | request --credits 0.5 --reason "..." | fulfill d-1 | cancel d
 hl org list | rename "New name"                            # the orgs this token reaches
 hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
-hl cluster add my-cluster --metrics-url URL | list         # register a cluster, print the command that starts its agent
+hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
@@ -341,9 +341,9 @@ On macOS:
 
 ```bash
 make controlplane-up
-# Register the cluster for your org. This prints the command that installs its agent,
-# with the cluster's runtime token filled in:
-hl cluster add my-cluster --api-url https://your-control-plane:8081 --metrics-url https://your-control-plane:8084
+# Register the cluster for your org. This prints the command that installs its agent, with
+# the cluster's runtime token and the addresses its agent reaches the platform at filled in:
+hl cluster add my-cluster
 # Point kubectl at the cluster and run what it printed:
 RUNTIME_TOKEN=hls_... make cluster-agent-up CLUSTER=my-cluster \
   API_URL=https://your-control-plane:8081 METRICS_URL=https://your-control-plane:8084
@@ -362,9 +362,10 @@ it. Repeat both for every additional target cluster. Capacity is read from the a
 #### Clusters belong to an org
 
 A cluster exists for the platform once an org registers its name: `hl cluster add` or
-`POST /orgs/{id}/clusters`. Registering returns the cluster's
-runtime token. The token is derived from the name, so registering the same name again returns
-the same token, and a name another org holds is refused. The control plane refuses a token for
+`POST /orgs/{id}/clusters`. Registering returns the cluster's runtime token and the two addresses
+its agent reaches the platform at, which are the `runtimes` section of the control plane's
+settings. The token is derived from the name, so it is never lost: registering the same name
+again returns the same token. A name another org holds is refused. The control plane refuses a token for
 a name nobody registered, so a typo'd `CLUSTER=` is an error and never a second cluster.
 An operator who holds the signing secret and the database can do the same without an API key:
 `make -s runtime-token CLUSTER=my-cluster ORG=<org id>`.
@@ -381,8 +382,8 @@ the job's org or on a shared cluster, and a job whose org has neither waits with
 `{"shared": true}`. Jobs already placed on a cluster stay there when it stops being shared.
 
 `hl capacity` and `GET /resource-catalog/capacity` show the clusters your jobs can land on:
-your org's own and the shared ones. `hl cluster list` shows your org's clusters and whether each
-is connected. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
+your org's own and the shared ones. `hl cluster list` shows the same clusters and whether each
+is connected; `owned` marks the ones your org registered and may change. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
 registered the cluster and stay reachable while its agent is away; `cluster_id` is the identity
 the cluster's runtime reported, shown by `hl cluster list` once it has connected.
 

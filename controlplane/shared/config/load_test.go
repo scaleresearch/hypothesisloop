@@ -165,6 +165,36 @@ func TestLoadRequiresAnIssuerAndAnAudienceOnceJWTKeysAreListed(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
+	const api, metrics = "  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081\n  metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084", "  metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084"
+	for name, edit := range map[string][2]string{
+		"no section":            {"runtimes:\n" + api, ""},
+		"no api url":            {api, "  metrics_url: http://metrics.example.invalid"},
+		"no metrics url":        {metrics, `  metrics_url: ""`},
+		"metrics url no host":   {metrics, "  metrics_url: /metrics"},
+		"metrics url not http":  {metrics, "  metrics_url: grpc://metrics.example.invalid"},
+		"metrics url localhost": {metrics, "  metrics_url: http://localhost:8084"},
+		"metrics url loopback":  {metrics, "  metrics_url: http://127.0.0.1:8084"},
+		"api url loopback":      {api, "  api_url: http://[::1]:8081\n  metrics_url: http://metrics.example.invalid"},
+		"misspelled key":        {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "metric_url") {
+			t.Errorf("%s: Load = %v, want it refused naming the runtimes section", name, err)
+		}
+	}
+	cfg, err := Load(filepath.Join("..", "..", "settings", "hypothesisloop.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtimes.APIURL != "http://REPLACE-WITH-HOST-ADDRESS:8081" || cfg.Runtimes.MetricsURL != "http://REPLACE-WITH-HOST-ADDRESS:8084" {
+		t.Errorf("runtimes = %+v, want both addresses of the settings file", cfg.Runtimes)
+	}
+}
+
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
 		"no launcher":           {"  launcher: main", `  launcher: ""`},

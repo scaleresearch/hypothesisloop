@@ -60,13 +60,12 @@ silently improvise.
    `$KUBE_CONTEXT`.
    **A cluster runs the jobs of the org that registered it, and no other.** The platform
    experiment's project decides the org of every job in it, so the cluster must be registered
-   for that org, or be shared by staff. `hl cluster list` shows the org's clusters and whether
-   each is connected; the capacity check in step 1 lists only clusters the token's jobs can be
+   for that org, or be shared by staff. `hl cluster list` shows the clusters the org's jobs run
+   on and whether each is connected; the capacity check in step 1 lists only clusters the token's jobs can be
    placed on, so a cluster missing there is unregistered, another org's, or disconnected. A job
    with nowhere to go stays QUEUED with `not_admitted_reason: no_cluster_for_org`. To add a
-   cluster, `hl cluster add <name> --api-url <url> --metrics-url <url>` registers the name and
-   prints the `make cluster-agent-up` command with the cluster's runtime token filled in; run
-   it with `kubectl` pointed at the cluster. The local stack registers its own clusters for the
+   cluster, `hl cluster add <name>` registers the name and prints the `make cluster-agent-up`
+   command with the cluster's runtime token and the platform's addresses filled in; run it with `kubectl` pointed at the cluster. The local stack registers its own clusters for the
    org `default`.
    **After any host reboot, check these too — none of them auto-restart:** the Tenstorrent DRA
    driver pod (kubelet sometimes fails to re-register it; `kubectl delete pod -n

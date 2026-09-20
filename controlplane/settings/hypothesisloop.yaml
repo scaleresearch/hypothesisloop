@@ -44,6 +44,16 @@ agents:
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
 
+# Where a cluster's runtime reaches the platform. Registering a cluster returns both beside its
+# runtime token, so the command that starts the cluster's agents has one source. Both must be
+# reachable outbound from inside every cluster, so a loopback address is rejected at load.
+#
+#   api_url       this API.
+#   metrics_url   the metrics service.
+runtimes:
+  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
+  metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084
+
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #
 # An S3-compatible object store, addressed rather than attached: a volume belongs to one cluster

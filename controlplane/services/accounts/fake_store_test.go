@@ -245,10 +245,10 @@ func (s *memStore) GetCluster(_ context.Context, name string) (*domain.Cluster, 
 	return &out, nil
 }
 
-func (s *memStore) ListClusters(_ context.Context, orgIDs []string) ([]*domain.Cluster, error) {
+func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.Cluster, error) {
 	out := []*domain.Cluster{}
 	for _, c := range s.clusters {
-		if contains(orgIDs, c.OrgID) {
+		if c.Hosts(orgID) {
 			copied := *c
 			out = append(out, &copied)
 		}

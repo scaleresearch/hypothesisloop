@@ -19,7 +19,6 @@ from support import admin
 from support.api import API, HLError
 from support.wait import Deadline, eventually
 
-pytestmark = pytest.mark.parallel
 
 # Priced in controlplane/settings/hypothesisloop.yaml, installed on none of the dev nodes and asked
 # for by no other test, so nothing but this module's jobs can fit the clusters it fakes.
@@ -67,6 +66,7 @@ def _key(api: API, org_id: str, name: str, project_id: str = "") -> dict:
     return api.post_json(f"/orgs/{org_id}/api-keys", body)
 
 
+@pytest.mark.parallel
 def test_an_api_key_runs_its_org_through_hl(orgs):
     a, b = orgs
 
@@ -152,6 +152,7 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     bound.close_platform_experiment(pe_id)
 
 
+@pytest.mark.parallel
 def test_a_revoked_key_stops_at_once_with_every_key_minted_from_it(orgs):
     a, b = orgs
     root_id = a.api.get_json("/me")["key_id"]
@@ -242,16 +243,24 @@ def _capacity_names(api: API) -> set[str]:
 
 
 @pytest.mark.timeout(240)
+@pytest.mark.exclusive
 def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, run_id: str, deadline: Deadline):
+    """Exclusive: while the cluster is shared, every org's capacity and cluster listing show it."""
     a, b = orgs
     name, name_b = f"own-{a.marker}"[:40], f"own-{b.marker}"[:40]
 
-    command = a.api.hl("cluster", "add", name, "--metrics-url", "http://metrics.invalid:8084")
-    match = re.fullmatch(rf"make cluster-agent-up CLUSTER={name} API_URL=(\S+) METRICS_URL=http://metrics.invalid:8084 RUNTIME_TOKEN=(hls_\S+)\n", command)
+    command = a.api.hl("cluster", "add", name)
+    match = re.fullmatch(rf"RUNTIME_TOKEN=(hls_\S+) make cluster-agent-up CLUSTER={name} API_URL=(http://\S+:8081) METRICS_URL=(http://\S+:8084)\n", command)
     assert match, f"hl cluster add printed {command!r}"
-    token = match.group(2)
+    token, api_url, metrics_url = match.groups()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
-    assert a.api.hl("cluster", "add", name, "--metrics-url", "http://metrics.invalid:8084") == command, "adding again prints the same command"
+    for address in (api_url, metrics_url):
+        assert "localhost" not in address and "127.0.0.1" not in address and "REPLACE" not in address, (
+            f"hl cluster add printed {address}, which no runtime inside a cluster reaches"
+        )
+    assert a.api.hl("cluster", "add", name) == command, "adding again prints the same command"
+    registered = a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})
+    assert (registered["runtime_token"], registered["api_url"], registered["metrics_url"]) == (token, api_url, metrics_url)
 
     taken = b.api.post(f"/orgs/{b.org_id}/clusters", {"name": name})
     assert taken.status_code == 409 and "hls_" not in taken.text, f"org B registering org A's cluster name: {taken.status_code} {taken.text}"
@@ -266,8 +275,9 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     assert stolen.status_code == 409, f"org B's runtime stating org A's cluster id: {stolen.status_code} {stolen.text}"
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
-    assert listed[name] == {**listed[name], "org_id": a.org_id, "shared": False, "connected": True, "cluster_id": runtime.cluster_id}
+    assert listed[name] == {**listed[name], "org_id": a.org_id, "shared": False, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
     assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text
+    assert api.get(f"/orgs/org-never-made-{uuid.uuid4().hex[:8]}/clusters").status_code == 404, "staff list the clusters of an org that does not exist"
 
     assert name in _capacity_names(a.api) and name in _capacity_names(api)
     assert name not in _capacity_names(b.api), "org B reads the capacity of org A's cluster"
@@ -325,10 +335,17 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
                        accept=lambda exp: exp.get("cluster_name") == name)
             assert job_b in runtime.handed, "the shared cluster's runtime was not handed the job placed on it"
             assert name in _capacity_names(b.api), "org B does not read the capacity of a cluster shared with it"
+            seen = b.api.get(f"/orgs/{b.org_id}/clusters")
+            shared = {c["name"]: c for c in seen.json()["clusters"]}[name]
+            assert shared == {**shared, "shared": True, "owned": False, "connected": True}, f"org B lists the shared cluster as {shared}"
+            assert "org_id" not in shared and "cluster_id" not in shared and a.org_id not in seen.text and runtime.cluster_id not in seen.text, (
+                f"org B is shown the owner or the settings key of the shared cluster: {seen.text}"
+            )
         finally:
             unshared = _status(api, "PATCH", share, {"shared": False})
         assert unshared.status_code == 200 and unshared.json()["shared"] is False
         assert name not in _capacity_names(b.api)
+        assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text, "a cluster no longer shared is still listed to another org"
         assert b.api.get(settings).status_code == 404, "sharing a cluster gave another org its settings"
     finally:
         admin.share_cluster(name, False)
@@ -337,6 +354,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
             org.api.close_platform_experiment(pe_id)
 
 
+@pytest.mark.parallel
 def test_only_staff_see_every_org(orgs, api: API):
     a, b = orgs
     me = api.get_json("/me")
@@ -351,6 +369,7 @@ def test_only_staff_see_every_org(orgs, api: API):
     assert created.json()["id"] not in a.api.get("/me").text, "an org-wide key reached an org made after it"
 
 
+@pytest.mark.parallel
 def test_tokens_the_platform_derives_reach_no_account(orgs, api: API, run_id: str):
     a, _ = orgs
     agent, pe_id = _running_org(a, run_id)

@@ -193,6 +193,15 @@ func (c *Config) build() error {
 	if apiURL, err := url.Parse(c.Agents.APIURL); err != nil || apiURL.Host == "" || (apiURL.Scheme != "http" && apiURL.Scheme != "https") {
 		return fmt.Errorf("agents api_url %q must be the http(s) address hosted agents reach this API at", c.Agents.APIURL)
 	}
+	for key, address := range map[string]string{"api_url": c.Runtimes.APIURL, "metrics_url": c.Runtimes.MetricsURL} {
+		parsed, err := url.Parse(address)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("runtimes %s %q must be the http(s) address a cluster's runtime reaches the platform at", key, address)
+		}
+		if host := parsed.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
+			return fmt.Errorf("runtimes %s %q is loopback: a runtime inside a cluster cannot reach it", key, address)
+		}
+	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}

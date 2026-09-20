@@ -44,11 +44,25 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 	if _, err := clusters.RegisterCluster(ctx, "cluster-"+uuid.New().String()[:8], "org-missing"); !errors.Is(err, ErrOrgNotFound) {
 		t.Fatalf("register for an org that does not exist: got = %v, want = %v", err, ErrOrgNotFound)
 	}
-	if listed, err := clusters.ListClusters(ctx, []string{orgA}); err != nil || len(listed) != 1 || listed[0].Name != name {
+	if listed, err := clusters.ClustersHosting(ctx, orgA); err != nil || len(listed) != 1 || listed[0].Name != name {
 		t.Fatalf("clusters of the owner: got = %+v, %v, want only %s", listed, err, name)
 	}
-	if listed, err := clusters.ListClusters(ctx, []string{orgB}); err != nil || len(listed) != 0 {
+	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
 		t.Fatalf("clusters of another org: got = %+v, %v, want none", listed, err)
+	}
+	if _, err := clusters.SetClusterShared(ctx, name, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, orgID := range []string{orgA, orgB} {
+		if listed, err := clusters.ClustersHosting(ctx, orgID); err != nil || len(listed) != 1 || listed[0].Name != name || !listed[0].Shared {
+			t.Fatalf("clusters hosting %s once %s is shared: got = %+v, %v, want only it", orgID, name, listed, err)
+		}
+	}
+	if _, err := clusters.SetClusterShared(ctx, name, false); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
+		t.Fatalf("clusters of another org once sharing ended: got = %+v, %v, want none", listed, err)
 	}
 }
 

@@ -25,8 +25,9 @@ type policy struct {
 	roles RoleReader
 }
 
-// RoleReader reads a person's role in an org. *db.AccountsStore satisfies it.
+// RoleReader reads an org and a person's role in it. *db.AccountsStore satisfies it.
 type RoleReader interface {
+	GetOrg(ctx context.Context, id string) (*domain.Org, error)
 	OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error)
 }
 
@@ -53,10 +54,21 @@ func (pol policy) inOrg(ctx context.Context, orgID string) (auth.Principal, erro
 	if !p.Scope().AdmitsOrg(orgID) {
 		return p, huma.Error404NotFound("org not found")
 	}
+	// A person and a key reach an org through a row that names it. Staff reach every id, so
+	// for them the org's existence is checked here.
+	if p.Kind == auth.KindStaff {
+		org, err := pol.roles.GetOrg(ctx, orgID)
+		if err != nil {
+			return p, huma.Error500InternalServerError(err.Error())
+		}
+		if org == nil {
+			return p, huma.Error404NotFound("org not found")
+		}
+	}
 	return p, nil
 }
 
-// readOrg admits the caller to see what belongs to the org as a whole: its clusters.
+// readOrg admits the caller to see what belongs to the org as a whole: the clusters it runs on.
 func (pol policy) readOrg(ctx context.Context, orgID string) (auth.Principal, error) {
 	p, err := pol.inOrg(ctx, orgID)
 	if err != nil {

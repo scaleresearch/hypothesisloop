@@ -233,6 +233,13 @@ type AgentsConfig struct {
 	APIURL string `yaml:"api_url"`
 }
 
+// RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a
+// cluster is registered.
+type RuntimesConfig struct {
+	APIURL     string `yaml:"api_url"`
+	MetricsURL string `yaml:"metrics_url"`
+}
+
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.
 const MinSigningSecretLength = 32
 
@@ -246,6 +253,7 @@ type Config struct {
 	Services         ServicesConfig          `yaml:"services"`
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
+	Runtimes         RuntimesConfig          `yaml:"runtimes"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate

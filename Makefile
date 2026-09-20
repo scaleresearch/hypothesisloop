@@ -175,8 +175,10 @@ full-start:
 
 # Rebuild every image from current source and push it to the registry, then bounce the
 # control-plane containers and cluster-agent/node-agent pods so they run it under the new TAG.
-# Use this after a Go change, before re-running the e2e suites.
-reload: images
+# Use this after a Go change, before re-running the e2e suites. The settings are rendered again
+# first: a control plane built from source that added a required key does not start on the
+# settings rendered before it.
+reload: render-settings images
 	bash localdev/k3s-macos/reload.sh
 
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------

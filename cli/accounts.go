@@ -32,7 +32,7 @@ var apiKeyCommands = []subcommand{
 
 var clusterCommands = []subcommand{
 	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
-	{"list", "an org's clusters and whether each is connected", clusterList},
+	{"list", "the clusters an org's jobs run on and whether each is connected", clusterList},
 }
 
 const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
@@ -207,21 +207,16 @@ func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster add", `usage: hl cluster add NAME --metrics-url URL [--api-url URL] [--org ORG]
+	fs := newFlags("cluster add", `usage: hl cluster add NAME [--org ORG]
 
 Registers the cluster name for the org and prints the command that installs its agent, with the
-cluster's runtime token filled in. Run that command with kubectl pointed at the cluster. Both
-URLs must be reachable from inside the cluster. Adding a name the org already has prints the
-same command again. A cluster takes its own org's jobs only.`, stderr)
+cluster's runtime token and the addresses its agent reaches the platform at filled in. Run that
+command with kubectl pointed at the cluster. The token is derived from the name, so adding a name
+the org already has prints the same command again. A cluster takes its own org's jobs only.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	apiURL := fs.String("api-url", "", "control-service URL as the cluster reaches it (default $API_URL)")
-	metricsURL := fs.String("metrics-url", "", "metrics-service URL as the cluster reaches it (required)")
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
 		return parseExit(err)
-	}
-	if *apiURL = orEnv(*apiURL, "API_URL"); *apiURL == "" || *metricsURL == "" {
-		return parseExit(misuse(fs, "--metrics-url and --api-url (or $API_URL) are required"))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
@@ -230,17 +225,19 @@ same command again. A cluster takes its own org's jobs only.`, stderr)
 	var registered struct {
 		Name         string `json:"name"`
 		RuntimeToken string `json:"runtime_token"`
+		APIURL       string `json:"api_url"`
+		MetricsURL   string `json:"metrics_url"`
 	}
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s RUNTIME_TOKEN=%s\n",
-		registered.Name, *apiURL, *metricsURL, registered.RuntimeToken)
+	fmt.Fprintf(stdout, "RUNTIME_TOKEN=%s make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s\n",
+		registered.RuntimeToken, registered.Name, registered.APIURL, registered.MetricsURL)
 	return 0
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe org's clusters by name: whether an agent is connected now, and whether the platform shares the cluster with every org.", stderr)
+	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, with whether an agent is connected now.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
