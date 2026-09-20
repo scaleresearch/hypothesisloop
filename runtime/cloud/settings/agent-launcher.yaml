@@ -19,6 +19,19 @@ namespace: main
 # has to change. Set this against the provider's rate limit.
 reconcile_interval_seconds: 15
 
+# How long an instance may stay starting, counted from when its provider says it was created,
+# before the launcher destroys it and rents it again: a machine whose command never came up is
+# billed with no agent in it. A first boot pulls the agent image, which took about 11 seconds on
+# the slowest provider measured, so 120 leaves a pull ten times slower alone. Too low and a slow
+# pull is destroyed mid-way on every pass and no agent ever starts.
+boot_limit_seconds: 120
+
+# Waited between two creates of one pass, for a provider that limits how fast instances may be
+# rented: the strictest one shipped documents one create a second. A provider that ends every
+# instance at a fixed age makes all agents of an experiment due at once, and this is what spreads
+# their replacements. 0 is no pause.
+create_pause_milliseconds: 1000
+
 provider:
   # One of the adapters the binary was built with.
   name: example
@@ -26,13 +39,17 @@ provider:
   settings: {}
 
 # What every agent instance runs and how large it is rented. Which image it boots and the
-# environment of each agent are the control plane's to say.
+# environment of each agent are the control plane's to say. The size is bound by the provider:
+# its section (settings/provider.<name>.yaml) states what it can rent, and a size above that
+# fails the create of every agent on every pass, which the log reports as NO AGENT COULD BE
+# STARTED. The storage here is under the smallest disk among the providers shipped, about
+# 11 GiB; check cpu and memory against the section of the one you configure.
 instance:
   # The whole argv, in place of the image's entrypoint.
   command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
   cpu: "2"
   memory: 4Gi
-  storage: 20Gi
+  storage: 10Gi
 
 # The environment variable of this process that holds the Claude credential every agent runs
 # with. The launcher adds it to each instance as CLAUDE_CODE_OAUTH_TOKEN, so it never passes

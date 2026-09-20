@@ -106,6 +106,7 @@ func (h *harness) config() Config {
 		Provider:   h.rented,
 		HTTPClient: h.cp.server.Client(),
 		Interval:   time.Second,
+		BootLimit:  2 * time.Minute,
 		Log: func(format string, args ...any) {
 			h.logMu.Lock()
 			defer h.logMu.Unlock()
@@ -562,6 +563,8 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		"no memory":           func(c *Config) { c.Size.MemoryBytes = 0 },
 		"no disk":             func(c *Config) { c.Size.DiskBytes = 0 },
 		"no interval":         func(c *Config) { c.Interval = 0 },
+		"no boot limit":       func(c *Config) { c.BootLimit = 0 },
+		"negative pause":      func(c *Config) { c.CreatePause = -time.Second },
 		"empty env value":     func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
 		"no provider":         func(c *Config) { c.Provider = nil },
 		"no http client":      func(c *Config) { c.HTTPClient = nil },
@@ -572,5 +575,267 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// since lists what the wrapped provider rents with the start times a test gives by name, as an
+// adapter that reports when an instance was created does.
+type since struct {
+	provider.Provider
+	started map[string]time.Time
+}
+
+func (p *since) List(ctx context.Context, prefix string) ([]provider.Instance, error) {
+	listed, err := p.Provider.List(ctx, prefix)
+	for i := range listed {
+		if at, set := p.started[listed[i].Name]; set {
+			listed[i].StartedAt = at
+		}
+	}
+	return listed, err
+}
+
+func (h *harness) launcherWith(edit func(*Config)) *Launcher {
+	h.t.Helper()
+	cfg := h.config()
+	edit(&cfg)
+	launcher, err := New(cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return launcher
+}
+
+func (h *harness) logged(text string) int {
+	h.logMu.Lock()
+	defer h.logMu.Unlock()
+	count := 0
+	for _, line := range h.log {
+		if strings.Contains(line, text) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestAnInstanceStartingPastTheBootLimitIsDestroyedAndRentedAgain(t *testing.T) {
+	h := newHarness(t)
+	clock := &since{Provider: h.rented, started: map[string]time.Time{}}
+	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stuck := h.rented.IDs(full("a"))
+	slow := h.rented.IDs(full("b"))
+	clock.started[full("a")] = time.Now().Add(-2*time.Minute - time.Second)
+	clock.started[full("b")] = time.Now().Add(-2*time.Minute + 10*time.Second)
+
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.names(full("a"), full("b"))
+	if got := h.rented.IDs(full("a")); len(got) != 1 || got[0] == stuck[0] {
+		t.Fatalf("the stuck instance was not replaced: %v, was %v", got, stuck)
+	}
+	if got := h.rented.IDs(full("b")); !reflect.DeepEqual(got, slow) {
+		t.Fatalf("an instance inside the boot limit was replaced: %v, was %v", got, slow)
+	}
+	if h.logged("still starting after") != 1 || h.logged("the boot limit is 2m0s") != 1 {
+		t.Fatalf("log = %q", h.log)
+	}
+}
+
+func TestOnlyAStartingInstanceWithAKnownAgeIsHeldToTheBootLimit(t *testing.T) {
+	long := time.Now().Add(-24 * time.Hour)
+	for name, tc := range map[string]struct {
+		started time.Time
+		running bool
+	}{
+		"no start time reported":      {started: time.Time{}},
+		"the epoch for no start time": {started: time.Unix(0, 0)},
+		"a start time in the future":  {started: time.Now().Add(time.Hour)},
+		"running for a day":           {started: long, running: true},
+	} {
+		h := newHarness(t)
+		clock := &since{Provider: h.rented, started: map[string]time.Time{}}
+		launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
+		h.cp.want([]entry{agent("a")}, nil)
+		if err := launcher.Pass(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if tc.running {
+			h.rented.Start(full("a"))
+		}
+		clock.started[full("a")] = tc.started
+		for range 3 {
+			if err := launcher.Pass(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 {
+			t.Errorf("%s: creates %d destroys %d, want the instance left alone", name, h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+		}
+	}
+}
+
+func TestAStuckInstanceThatCannotBeDestroyedIsNotRentedBeside(t *testing.T) {
+	h := newHarness(t)
+	clock := &since{Provider: h.rented, started: map[string]time.Time{}}
+	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
+	h.cp.want([]entry{agent("a")}, nil)
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock.started[full("a")] = time.Now().Add(-time.Hour)
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Destroy" {
+			return errors.New("vendor refused")
+		}
+		return nil
+	}
+	if err := launcher.Pass(context.Background()); err == nil || !strings.Contains(err.Error(), "destroy "+full("a")) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := h.rented.IDs(full("a")); len(got) != 1 || h.rented.Calls("Create") != 1 {
+		t.Fatalf("instances %v, creates %d", got, h.rented.Calls("Create"))
+	}
+}
+
+func TestAnEndingInstanceIsNotHeldToTheBootLimit(t *testing.T) {
+	h := newHarness(t)
+	clock := &since{Provider: h.rented, started: map[string]time.Time{full("a"): time.Now().Add(-time.Hour)}}
+	launcher := h.launcherWith(func(c *Config) { c.Provider = clock })
+	rent(t, h.rented, full("a"))
+	h.cp.want(nil, []string{"a"})
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.rented.Calls("Destroy") != 0 || h.rented.Calls("Create") != 1 {
+		t.Fatalf("destroys %d creates %d", h.rented.Calls("Destroy"), h.rented.Calls("Create"))
+	}
+}
+
+// timed records when each create reached the provider.
+type timed struct {
+	provider.Provider
+	mu sync.Mutex
+	at []time.Time
+}
+
+func (p *timed) Create(ctx context.Context, spec provider.Spec) (string, error) {
+	p.mu.Lock()
+	p.at = append(p.at, time.Now())
+	p.mu.Unlock()
+	return p.Provider.Create(ctx, spec)
+}
+
+func TestCreatesOfOnePassAreSpacedByThePauseAndAFailedOneDoesNotEndThem(t *testing.T) {
+	const pause = 60 * time.Millisecond
+	h := newHarness(t)
+	recorded := &timed{Provider: h.rented}
+	launcher := h.launcherWith(func(c *Config) { c.Provider = recorded; c.CreatePause = pause })
+	h.rented.Start(rentNamed(t, h.rented, full("here")))
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c"), agent("d"), agent("here")}, nil)
+	h.rented.Fail = func(method, name string) error {
+		if method == "Create" && (name == full("a") || name == full("b")) {
+			return errors.New("vendor refused")
+		}
+		return nil
+	}
+	started := time.Now()
+	err := launcher.Pass(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "create "+full("a")) || !strings.Contains(err.Error(), "create "+full("b")) {
+		t.Fatalf("err = %v", err)
+	}
+	h.names(full("c"), full("d"), full("here"))
+	if len(recorded.at) != 4 {
+		t.Fatalf("creates = %d, want one for each missing instance", len(recorded.at))
+	}
+	if first := recorded.at[0].Sub(started); first >= pause {
+		t.Errorf("the first create waited %s", first)
+	}
+	for i := 1; i < len(recorded.at); i++ {
+		if gap := recorded.at[i].Sub(recorded.at[i-1]); gap < pause {
+			t.Errorf("creates %d and %d are %s apart, want at least %s", i, i+1, gap, pause)
+		}
+	}
+	if h.logged("NO AGENT COULD BE STARTED") != 0 {
+		t.Errorf("a pass that started some agents says none could be: %q", h.log)
+	}
+}
+
+func rentNamed(t *testing.T, rented *fake.Provider, name string) string {
+	t.Helper()
+	rent(t, rented, name)
+	return name
+}
+
+func TestAPassCancelledInAPauseStopsRenting(t *testing.T) {
+	h := newHarness(t)
+	launcher := h.launcherWith(func(c *Config) { c.CreatePause = time.Hour })
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := launcher.Pass(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
+	}
+	h.names(full("a"))
+}
+
+func TestEveryCreateFailingIsLoudAndLeavesNothingRented(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
+	h.rented.Fail = func(method, _ string) error {
+		if method == "Create" {
+			return errors.New("the size asked for is above the plan: 20 GiB of disk")
+		}
+		return nil
+	}
+	for pass := 1; pass <= 3; pass++ {
+		err := h.pass()
+		for _, name := range []string{"a", "b", "c"} {
+			if err == nil || !strings.Contains(err.Error(), "create "+full(name)) {
+				t.Fatalf("pass %d: err = %v, want every failed create named", pass, err)
+			}
+		}
+		h.names()
+		if got := h.logged("NO AGENT COULD BE STARTED: all 3 creates of this pass failed, the last with: the size asked for is above the plan"); got != pass {
+			t.Fatalf("pass %d: the loud line was logged %d times: %q", pass, got, h.log)
+		}
+	}
+	if h.rented.Calls("Create") != 9 || h.rented.Calls("Destroy") != 0 {
+		t.Fatalf("creates %d destroys %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"))
+	}
+}
+
+// halfRented fails every create after renting the instance, as a vendor does whose start
+// succeeded and whose command then could not be launched: the instance is listed as exited.
+type halfRented struct {
+	*fake.Provider
+}
+
+func (p halfRented) Create(ctx context.Context, spec provider.Spec) (string, error) {
+	if _, err := p.Provider.Create(ctx, spec); err != nil {
+		return "", err
+	}
+	p.Provider.Exit(spec.Name)
+	return "", errors.New("the command could not be launched")
+}
+
+func TestACreateThatFailsAndLeavesAnExitedInstanceNeverLeavesMoreThanOne(t *testing.T) {
+	h := newHarness(t)
+	launcher := h.launcherWith(func(c *Config) { c.Provider = halfRented{h.rented} })
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	for pass := 1; pass <= 4; pass++ {
+		if err := launcher.Pass(context.Background()); err == nil {
+			t.Fatalf("pass %d: no error", pass)
+		}
+		if a, b := h.rented.IDs(full("a")), h.rented.IDs(full("b")); len(a) != 1 || len(b) != 1 {
+			t.Fatalf("pass %d: instances of a %v, of b %v, want one each", pass, a, b)
+		}
+	}
+	if h.rented.Calls("Destroy") != 6 {
+		t.Fatalf("destroys = %d, want each leftover destroyed before its replacement", h.rented.Calls("Destroy"))
 	}
 }

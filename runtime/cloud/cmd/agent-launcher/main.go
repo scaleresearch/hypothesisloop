@@ -44,7 +44,7 @@ func main() {
 
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
-	log("starting: launcher=%s provider=%s namespace=%s control_plane=%s interval=%s",
-		cfg.LauncherName, cfg.Provider.Name, cfg.Namespace, cfg.APIURL, launch.Interval)
+	log("starting: launcher=%s provider=%s namespace=%s control_plane=%s interval=%s boot_limit=%s create_pause=%s",
+		cfg.LauncherName, cfg.Provider.Name, cfg.Namespace, cfg.APIURL, launch.Interval, launch.BootLimit, launch.CreatePause)
 	launcher.Run(ctx)
 }

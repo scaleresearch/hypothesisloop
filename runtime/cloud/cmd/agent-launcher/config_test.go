@@ -38,13 +38,15 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := agentlaunch.Config{
-		Name:      "main",
-		APIURL:    "https://api.example.invalid",
-		Namespace: "main",
-		Command:   []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
-		Size:      agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30},
-		Env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
-		Interval:  15 * time.Second,
+		Name:        "main",
+		APIURL:      "https://api.example.invalid",
+		Namespace:   "main",
+		Command:     []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
+		Size:        agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 10 << 30},
+		Env:         map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
+		Interval:    15 * time.Second,
+		BootLimit:   120 * time.Second,
+		CreatePause: time.Second,
 	}
 	if got := cfg.launch(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("launch config = %+v\nwant          %+v", got, want)
@@ -82,14 +84,18 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"namespace with dash":    {"namespace: main", "namespace: team-a"},
 		"no interval":            {"reconcile_interval_seconds: 15\n", ""},
 		"negative interval":      {"reconcile_interval_seconds: 15", "reconcile_interval_seconds: -1"},
+		"no boot limit":          {"boot_limit_seconds: 120\n", ""},
+		"negative boot limit":    {"boot_limit_seconds: 120", "boot_limit_seconds: -5"},
+		"no create pause":        {"create_pause_milliseconds: 1000\n", ""},
+		"negative create pause":  {"create_pause_milliseconds: 1000", "create_pause_milliseconds: -1"},
 		"no provider name":       {"name: example", `name: ""`},
 		"misspelled in provider": {"settings: {}", "setings: {}"},
 		"no command":             {`command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: []"},
 		"command not a list":     {`command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]`, "command: uv run"},
 		"bad quantity":           {"memory: 4Gi", "memory: lots"},
 		"no cpu":                 {`cpu: "2"`, `cpu: "0"`},
-		"no storage":             {"storage: 20Gi\n", ""},
-		"misspelled in instance": {"storage: 20Gi", "disk: 20Gi"},
+		"no storage":             {"storage: 10Gi\n", ""},
+		"misspelled in instance": {"storage: 10Gi", "disk: 20Gi"},
 		"no credential variable": {"claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN", `claude_code_oauth_token_env: ""`},
 		"the credential itself":  {"claude_code_oauth_token_env: CLAUDE_CODE_OAUTH_TOKEN", "claude_code_oauth_token: sk-something"},
 	} {
@@ -100,5 +106,16 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		if _, err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestACreatePauseOfZeroIsNoPause(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
+	cfg, err := loadText(t, strings.Replace(shipped(t), "create_pause_milliseconds: 1000", "create_pause_milliseconds: 0", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.launch().CreatePause; got != 0 {
+		t.Fatalf("pause = %s", got)
 	}
 }

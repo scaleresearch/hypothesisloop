@@ -39,7 +39,13 @@ type Config struct {
 	Provider   provider.Provider
 	HTTPClient *http.Client
 	Interval   time.Duration
-	Log        func(format string, args ...any)
+	// BootLimit is how long an instance may stay in StateStarting, counted from the StartedAt its
+	// provider reports, before it is destroyed and rented again.
+	BootLimit time.Duration
+	// CreatePause is waited between two creates of one pass, for a provider that limits how fast
+	// instances may be rented. Zero is no pause.
+	CreatePause time.Duration
+	Log         func(format string, args ...any)
 }
 
 type Launcher struct {
@@ -75,6 +81,12 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
+	}
+	if cfg.BootLimit <= 0 {
+		return errors.New("agentlaunch: BootLimit must be positive")
+	}
+	if cfg.CreatePause < 0 {
+		return errors.New("agentlaunch: CreatePause must not be negative")
 	}
 	for name, value := range cfg.Env {
 		if name == "" || value == "" {
@@ -119,6 +131,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		byName[i.Name] = append(byName[i.Name], i)
 	}
 
+	now := time.Now()
 	var failures []error
 	destroy := func(i provider.Instance, why string) bool {
 		if err := l.provider.Destroy(ctx, i.ID); err != nil {
@@ -140,11 +153,14 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 	}
 
+	var creates, failedCreates int
+	var lastCreateError error
 	for _, name := range sortedKeys(want.instances) {
 		// One instance runs the agent: the live one with the lowest id. A provider that lists
-		// with a lag or a create that failed after it succeeded leaves a second, and an exited
-		// one is a harness that crashed. Both go, and a name left with nothing live is rented
-		// again, unless something of it could not be destroyed: then the next pass decides.
+		// with a lag or a create that failed after it succeeded leaves a second, an exited one
+		// is a harness that crashed, and one starting for longer than the boot limit will never
+		// run its command. All three go, and a name left with nothing live is rented again,
+		// unless something of it could not be destroyed: then the next pass decides.
 		kept, cleared := false, true
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
@@ -152,6 +168,8 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			switch {
 			case i.State == provider.StateExited:
 				cleared = destroy(i, "its command exited") && cleared
+			case l.stuckStarting(i, now):
+				cleared = destroy(i, fmt.Sprintf("still starting after %s, the boot limit is %s", now.Sub(i.StartedAt).Round(time.Second), l.cfg.BootLimit)) && cleared
 			case kept:
 				cleared = destroy(i, "duplicate") && cleared
 			default:
@@ -161,14 +179,51 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		if kept || !cleared {
 			continue
 		}
+		if creates > 0 && !l.pause(ctx) {
+			failures = append(failures, fmt.Errorf("create %s: %w", name, ctx.Err()))
+			break
+		}
+		creates++
 		if _, err := l.provider.Create(ctx, l.spec(want.instances[name])); err != nil {
 			l.cfg.Log("create %s: %v", name, err)
 			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
+			failedCreates++
+			lastCreateError = err
 			continue
 		}
 		l.cfg.Log("created %s", name)
 	}
+	// Every create failing is the account, the image or the size in this launcher's config, and
+	// nothing will run until it is changed, so it is said once more in a line of its own.
+	if creates > 0 && failedCreates == creates {
+		l.cfg.Log("NO AGENT COULD BE STARTED: all %d creates of this pass failed, the last with: %v", creates, lastCreateError)
+	}
 	return errors.Join(failures...)
+}
+
+// stuckStarting reports an instance that has been starting for longer than the boot limit. An
+// instance whose provider reports no start time, or one in the future, has no age to judge and
+// is left to start.
+func (l *Launcher) stuckStarting(i provider.Instance, now time.Time) bool {
+	if i.State != provider.StateStarting || i.StartedAt.Unix() <= 0 {
+		return false
+	}
+	return now.Sub(i.StartedAt) > l.cfg.BootLimit
+}
+
+// pause waits CreatePause and reports false when ctx ended first.
+func (l *Launcher) pause(ctx context.Context) bool {
+	if l.cfg.CreatePause == 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(l.cfg.CreatePause)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (l *Launcher) spec(i instance) provider.Spec {

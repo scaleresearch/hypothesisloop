@@ -25,9 +25,15 @@ type config struct {
 	// Namespace is part of every instance name, so launchers sharing an account keep apart.
 	Namespace string `yaml:"namespace"`
 	// Each pass costs the provider one list call and the control plane one request.
-	ReconcileIntervalSeconds int            `yaml:"reconcile_interval_seconds"`
-	Provider                 providerConfig `yaml:"provider"`
-	Instance                 instanceConfig `yaml:"instance"`
+	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
+	// BootLimitSeconds is how long an instance may stay starting before it is destroyed and
+	// rented again.
+	BootLimitSeconds int `yaml:"boot_limit_seconds"`
+	// CreatePauseMilliseconds is waited between two creates of one pass. 0 is no pause, and the
+	// key must be present either way.
+	CreatePauseMilliseconds *int           `yaml:"create_pause_milliseconds"`
+	Provider                providerConfig `yaml:"provider"`
+	Instance                instanceConfig `yaml:"instance"`
 	// ClaudeCodeOAuthTokenEnv names the environment variable of this process that holds the
 	// Claude credential every agent runs with. The launcher adds it to each instance itself, so
 	// it never passes through the control plane or its database.
@@ -60,6 +66,9 @@ func loadConfig(path string) (*config, error) {
 	if cfg.Provider.Name == "" {
 		return nil, fmt.Errorf("config: provider.name is required")
 	}
+	if cfg.CreatePauseMilliseconds == nil {
+		return nil, fmt.Errorf("config: create_pause_milliseconds is required: the pause between two creates of one pass, 0 for none")
+	}
 	size, err := cfg.Instance.size()
 	if err != nil {
 		return nil, fmt.Errorf("config: instance: %w", err)
@@ -81,13 +90,15 @@ func loadConfig(path string) (*config, error) {
 // HTTP client and the log are the process's to add.
 func (cfg *config) launch() agentlaunch.Config {
 	return agentlaunch.Config{
-		Name:      cfg.LauncherName,
-		APIURL:    cfg.APIURL,
-		Namespace: cfg.Namespace,
-		Command:   cfg.Instance.Command,
-		Size:      cfg.size,
-		Env:       map[string]string{claudeTokenVariable: cfg.claudeToken},
-		Interval:  time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		Name:        cfg.LauncherName,
+		APIURL:      cfg.APIURL,
+		Namespace:   cfg.Namespace,
+		Command:     cfg.Instance.Command,
+		Size:        cfg.size,
+		Env:         map[string]string{claudeTokenVariable: cfg.claudeToken},
+		Interval:    time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
+		BootLimit:   time.Duration(cfg.BootLimitSeconds) * time.Second,
+		CreatePause: time.Duration(*cfg.CreatePauseMilliseconds) * time.Millisecond,
 	}
 }
 
