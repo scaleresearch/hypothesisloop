@@ -8,7 +8,6 @@ dependencies = [
     # Official OpenAI Codex SDK — still beta, so pinned exactly; bundles the matching Codex
     # CLI/app-server binary via its openai-codex-cli-bin dependency.
     "openai-codex==0.1.0b3",
-    "python-dotenv>=1.0",
 ]
 
 [project.scripts]

@@ -1,5 +1,3 @@
-"""Agent configuration — every knob is an env var with a default, no config library, mirroring
-how cluster-agent/node-agent are configured (see runtime/k8s/cmd/*/main.go)."""
 from __future__ import annotations
 
 import json
@@ -7,9 +5,11 @@ import os
 from dataclasses import dataclass, field
 
 
-
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
+def _required(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise SystemExit(f"agent: missing required env var: {name}")
+    return value
 
 
 def _env_float(name: str, default: float) -> float:
@@ -33,30 +33,28 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
 
 @dataclass
 class Config:
-    # Required, with no default: the agent's own `hl` reads API_URL from this same environment
-    # and has none either.
-    api_url: str = field(default_factory=lambda: _env("API_URL", ""))
+    # The agent's own `hl` reads API_URL from this same environment.
+    api_url: str = field(default_factory=lambda: _required("API_URL"))
 
-    agent_id: str = field(default_factory=lambda: _env("AGENT_ID", ""))
+    agent_id: str = field(default_factory=lambda: _required("AGENT_ID"))
 
-    # Which platform experiment to compete in. Required: an agent competes in exactly the one it
+    # Which platform experiment to compete in: an agent competes in exactly the one it
     # was launched for. Everything about that experiment — objective, metric, job spec, rules —
     # the agent discovers itself from the experiment's `description` (see core.py's prompt).
-    platform_experiment_id: str = field(default_factory=lambda: _env("PLATFORM_EXPERIMENT_ID", ""))
+    platform_experiment_id: str = field(default_factory=lambda: _required("PLATFORM_EXPERIMENT_ID"))
 
     # THE shared code repo, pre-created by the operator — every agent clones the same one and works
     # on its own branch ({agent_id}-{platform_experiment_id}). Must be a real remote pods can clone: code_ref =
     # "{code_repo_url}@<sha>" is the commit a job pod checks out to run. Auth via GIT_TOKEN (see the
     # Dockerfile's git credential helper); a local git:// remote needs no token.
-    code_repo_url: str = field(default_factory=lambda: _env(
-        "CODE_REPO_URL", "https://github.com/hypothesisloop-agents/experiments"))
+    code_repo_url: str = field(default_factory=lambda: _required("CODE_REPO_URL"))
 
     # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
     # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it
     # only selects which brief is inlined into the prompt (prompts/flavors/<flavor>.md), which
     # holds the specialized approach: what kind of trial to run, what to vary, what "winning"
     # looks like for that specialization.
-    flavor: str = field(default_factory=lambda: _env("AGENT_FLAVOR", "generalist"))
+    flavor: str = field(default_factory=lambda: os.environ.get("AGENT_FLAVOR", "generalist"))
 
     # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) the
     # coordinator hands this one agent at launch, on top of its flavor — a sweep is a coordinator
@@ -70,10 +68,3 @@ class Config:
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
     # experiment closes and submissions start getting rejected (see core.py's stop_reason).
     max_wall_hours: float = field(default_factory=lambda: _env_float("MAX_WALL_HOURS", 0))
-
-    def validate(self) -> None:
-        for name, value in (("API_URL", self.api_url),
-                            ("AGENT_ID", self.agent_id),
-                            ("PLATFORM_EXPERIMENT_ID", self.platform_experiment_id)):
-            if not value:
-                raise SystemExit(f"agent: missing required env var: {name}")

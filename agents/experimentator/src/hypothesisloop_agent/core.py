@@ -9,8 +9,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from hypothesisloop_agent import api_client, config
 
 log = logging.getLogger("llm_agent")
@@ -62,12 +60,10 @@ class RunSetup:
 
 
 def prepare() -> RunSetup:
-    """Shared startup: logging, .env, config, workdir, platform client, prompt."""
+    """Shared startup: logging, config, workdir, platform client, prompt."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    load_dotenv(".env")
 
     cfg = config.Config()
-    cfg.validate()
 
     # Per-agent by default: two agents launched from the same cwd (the natural way to run a
     # multi-agent competition on one box) must not resolve to the same repo checkout. agent_id is
@@ -97,7 +93,7 @@ def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | No
         return f"reached MAX_WALL_HOURS={cfg.max_wall_hours}"
     try:
         pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
-        if pe.get("status") == "closed":
+        if pe["status"] == "closed":
             return "platform experiment closed"
     except api_client.APIError as e:
         log.warning("could not check platform experiment status (%s) — continuing", e)
