@@ -241,7 +241,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}),
-                                cfg=SimpleNamespace(agent_id="agent-a", api_url="http://x", platform_experiment_id="pe-1",
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", platform_experiment_id="pe-1",
                                                     max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \

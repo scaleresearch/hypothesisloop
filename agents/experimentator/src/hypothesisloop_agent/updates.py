@@ -33,10 +33,18 @@ IDLE_PROMPT = (
 
 
 def watch_env(api_url: str, agent_id: str, platform_experiment_id: str, workdir: str) -> dict[str, str]:
-    """The environment hl watch needs: identity, API, and a state dir that outlives the process."""
-    return {**os.environ, "API_URL": api_url, "AGENT_ID": agent_id,
-            "PLATFORM_EXPERIMENT_ID": platform_experiment_id,
-            "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
+    """The environment hl watch needs: identity, API, and a state dir that outlives the process.
+    Without an agent_id the watch is a coordinator's, of the whole platform experiment."""
+    env = {**os.environ, "API_URL": api_url, "PLATFORM_EXPERIMENT_ID": platform_experiment_id,
+           "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
+    env.pop("AGENT_ID", None)
+    if agent_id:
+        env["AGENT_ID"] = agent_id
+    return env
+
+
+def watch_command(env: dict[str, str]) -> list[str]:
+    return HL_WATCH if env.get("AGENT_ID") else [*HL_WATCH, "--all"]
 
 
 async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool],
@@ -72,8 +80,8 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     """events, completed with what an agent told of an ended job would otherwise read: each
     COMPLETED job's declared metrics as its event's detail, and two closing events: the count of
     the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
-    read is left out."""
-    if not any(e["kind"] == "experiment.status" for e in events):
+    read is left out. A coordinator's events are every agent's and are handed over as they are."""
+    if "AGENT_ID" not in env or not any(e["kind"] == "experiment.status" for e in events):
         return events
 
     def completed(e: dict) -> bool:
@@ -104,9 +112,10 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
 _drain_failing = False
 
 
-async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict]:
+async def drain(env: dict[str, str], command: list[str] | None = None) -> list[dict]:
     """The events already waiting on the cursor, without waiting for more."""
     global _drain_failing
+    command = command or watch_command(env)
     code, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
                                  warn=not _drain_failing)
     _drain_failing = code != 0
@@ -114,9 +123,10 @@ async def drain(env: dict[str, str], command: list[str] = HL_WATCH) -> list[dict
 
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
-                     command: list[str] = HL_WATCH, retry_s: float = _RETRY_S) -> list[dict]:
+                     command: list[str] | None = None, retry_s: float = _RETRY_S) -> list[dict]:
     """Runs hl watch until it returns events, and returns them. Returns [] once idle_s passes
     without any, or as soon as stopped() is true. A failed hl watch is retried after retry_s."""
+    command = command or watch_command(env)
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
         code, stdout = await _run_hl(command, env, stopped)

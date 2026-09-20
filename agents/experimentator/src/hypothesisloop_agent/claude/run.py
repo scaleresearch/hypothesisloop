@@ -33,7 +33,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
-from hypothesisloop_agent import core, updates
+from hypothesisloop_agent import config, core, updates
 from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
@@ -169,6 +169,12 @@ _SHUTDOWN_PROMPT = (
 )
 
 
+_COORDINATOR_SHUTDOWN_PROMPT = (
+    "You are being stopped and this is your last turn, about a minute long. Start nothing new. "
+    "Commit and push the findings you have not yet pushed, then end your turn."
+)
+
+
 class TurnStalled(Exception):
     pass
 
@@ -183,12 +189,13 @@ async def _interrupt_on_stop(client, stopped) -> None:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict]) -> None:
+async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict],
+                     prompt: str = _SHUTDOWN_PROMPT) -> None:
     """The shutdown turn, opened with events and whatever else finished since the last delivery."""
     events = [*events, *await updates.drain(watch_env)]
     for line in activity.event_lines(events, agent):
         print(line, flush=True)
-    await client.query(_SHUTDOWN_PROMPT + ("\n\n" + updates.message(events, agent) if events else ""))
+    await client.query(prompt + ("\n\n" + updates.message(events, agent) if events else ""))
     try:
         async with asyncio.timeout(_SHUTDOWN_TURN_S):
             async for message in client.receive_response():
@@ -242,7 +249,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     session starts fresh from it. The session id and the handoff live on disk, see _restart_state.
     """
     cfg = setup.cfg
-    watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
+    watch_env = updates.watch_env(cfg.api_url, config.watched_agent_id(cfg), cfg.platform_experiment_id, setup.workdir)
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt,
         model=model,
@@ -270,6 +277,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     )
 
     rate_limited_resets_at: float | None = None
+    shutdown_prompt = _COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(cfg) else _SHUTDOWN_PROMPT
 
     def stopped() -> bool:
         return core.stop_requested(setup, started_at, stop_flag)
@@ -307,7 +315,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
             if stopped() and got_result and not rate_limited_resets_at:
                 log.info("stopping: turn interrupted, one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, [])
+                await _last_turn(client, cfg.agent_id, watch_env, [], shutdown_prompt)
                 return None, False
 
             if rate_limited_resets_at:
@@ -366,7 +374,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
             if stopped():
                 log.info("stopping: one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, events)
+                await _last_turn(client, cfg.agent_id, watch_env, events, shutdown_prompt)
                 return None, False
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):

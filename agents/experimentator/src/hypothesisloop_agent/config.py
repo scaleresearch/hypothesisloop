@@ -31,6 +31,21 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
     return value
 
 
+# What a platform experiment's coordinator is started as. It is no flavor of an agent: a
+# coordinator is not in the experiment, so it has no AGENT_ID, and HL_TOKEN is the platform
+# experiment's coordinator token.
+COORDINATOR_FLAVOR = "coordinator"
+
+
+def _agent_id() -> str:
+    if os.environ.get("AGENT_FLAVOR") != COORDINATOR_FLAVOR:
+        return _required("AGENT_ID")
+    if os.environ.get("AGENT_ID"):
+        raise SystemExit("agent: AGENT_ID is set and AGENT_FLAVOR is coordinator: a coordinator is no agent of its "
+                         "platform experiment, and hl would act as that agent")
+    return COORDINATOR_FLAVOR
+
+
 @dataclass
 class Config:
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
@@ -39,7 +54,9 @@ class Config:
     # Who this agent is and the token that acts as it. Both are handed out when the agent is added
     # to its platform experiment (POST /platform-experiments/{id}/agents): the harness registers
     # nothing and signs up nowhere.
-    agent_id: str = field(default_factory=lambda: _required("AGENT_ID"))
+    # A coordinator has none: agent_id is then its flavor, which names it in the activity log
+    # and its working directory and is never sent to the platform.
+    agent_id: str = field(default_factory=_agent_id)
     token: str = field(default_factory=lambda: _required("HL_TOKEN"))
 
     # Which platform experiment to compete in: an agent competes in exactly the one it
@@ -68,3 +85,13 @@ class Config:
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
     # experiment closes and submissions start getting rejected (see core.py's stop_reason).
     max_wall_hours: float = field(default_factory=lambda: _env_float("MAX_WALL_HOURS", 0))
+
+
+def coordinates(cfg) -> bool:
+    return cfg.flavor == COORDINATOR_FLAVOR
+
+
+def watched_agent_id(cfg) -> str:
+    """Whose resources the harness watches: the agent's own, or with "" the whole platform
+    experiment's."""
+    return "" if coordinates(cfg) else cfg.agent_id

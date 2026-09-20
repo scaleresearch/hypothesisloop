@@ -824,7 +824,7 @@ func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints events, one JSON object per line. With $AGENT_ID set and no --experiment or --all, the
-agent's own resources, resuming from where its last watch stopped.`, stderr)
+agent's own resources, resuming from where its last watch stopped. --all resumes the same way.`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
@@ -849,14 +849,16 @@ agent's own resources, resuming from where its last watch stopped.`, stderr)
 	}
 
 	// An agent watching its own resources with the default kinds resumes where its last watch
-	// stopped. Any other subscription would skip events of kinds it did not carry.
+	// stopped, and so does a watch of the whole platform experiment. Any other subscription
+	// would skip events of kinds it did not carry.
 	var cursorFile string
-	if *agent != "" && *platformExperiment != "" && *experiment == "" && *kinds == "" {
+	if (*agent != "" || *all) && *platformExperiment != "" && *experiment == "" && *kinds == "" {
 		dir, err := stateDir()
 		if err != nil {
 			fmt.Fprintf(stderr, "hl watch: %s\n", err)
 			return 2
 		}
+		// No agent id is empty, so a whole experiment's cursor is no agent's file.
 		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 

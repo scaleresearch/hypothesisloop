@@ -38,7 +38,7 @@ class HangingClient:
 
 def _setup():
     return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
-                           cfg=SimpleNamespace(agent_id="agent-a", api_url="http://x", platform_experiment_id="pe-1",
+                           cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", platform_experiment_id="pe-1",
                                                max_wall_hours=0))
 
 

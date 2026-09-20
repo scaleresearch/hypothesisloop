@@ -20,16 +20,23 @@ log = logging.getLogger("llm_agent")
 # {flavor_brief}.
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
+# A coordinator changes the roster and the brief, which no agent does.
+_HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
+                        ["platform-experiments", "update"], ["job"], ["hypothesis"])
 
 
-def hl_commands() -> str:
-    """hl's own listing of its commands and of the subcommands of job and hypothesis."""
+def hl_commands(coordinates: bool = False) -> str:
+    """hl's own listing of its commands and of the subcommands the briefing leans on."""
     return "\n\n".join(
         subprocess.run(["hl", *group, "--help"], check=True, capture_output=True, text=True).stdout.strip()
-        for group in _HL_HELP)
+        for group in (_HL_HELP_COORDINATOR if coordinates else _HL_HELP))
 
 
 def system_prompt(cfg: config.Config, rules: str, commands: str, code_repo_url: str) -> str:
+    if config.coordinates(cfg):
+        return (_PROMPTS_DIR / "coordinator.md").read_text().format(
+            rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
+            code_repo_url=code_repo_url)
     return (_PROMPTS_DIR / "system_prompt.md").read_text().format(
         rules=rules.strip(), hl_commands=commands, agent_id=cfg.agent_id, flavor=cfg.flavor,
         flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
@@ -72,16 +79,20 @@ def prepare() -> RunSetup:
     os.makedirs(workdir, exist_ok=True)
 
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
-    client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
+    if config.coordinates(cfg):
+        platform_experiment = client.require_coordinated(cfg.platform_experiment_id)
+    else:
+        client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
+        platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
     # The repository is the project's, attached on the platform: the agent clones it through
     # `hl git-credential`, so no address and no git token is handed to it at launch.
-    code_repo_url = client.get_platform_experiment(cfg.platform_experiment_id).get("code_repo_url")
+    code_repo_url = platform_experiment.get("code_repo_url")
     if not code_repo_url:
         raise SystemExit(f"agent: the project of platform experiment {cfg.platform_experiment_id} has no repository "
                          "attached: attach one to the project, then start the agent again")
 
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(), code_repo_url)
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(config.coordinates(cfg)), code_repo_url)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 

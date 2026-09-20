@@ -31,7 +31,7 @@ import time
 
 from openai_codex import ApprovalMode, AsyncCodex, Sandbox
 
-from hypothesisloop_agent import core, updates
+from hypothesisloop_agent import config, core, updates
 
 log = logging.getLogger("llm_agent")
 
@@ -63,7 +63,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
             config={"model_auto_compact_token_limit": 400_000},
         )
         cfg = setup.cfg
-        watch_env = updates.watch_env(cfg.api_url, cfg.agent_id, cfg.platform_experiment_id, setup.workdir)
+        watch_env = updates.watch_env(cfg.api_url, config.watched_agent_id(cfg), cfg.platform_experiment_id, setup.workdir)
         prompt = "Begin."
         while True:
             turn = await thread.turn(prompt)
