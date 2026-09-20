@@ -323,8 +323,12 @@ on hosts that have it). Tests are grouped with pytest markers: `parallel` (API-o
 concurrently), `exclusive` (needs the whole cluster idle - node death, connectivity loss,
 daemonset redeploy, preemption), `slow`, and `hardware`.
 
+Running pytest directly requires `API_URL`, the control plane's base URL; the make targets set it
+to the local stack.
+
 ```bash
 make e2e-py                                              # portable lane: parallel-safe tests only
+export API_URL=http://localhost:8081                     # required by every pytest command below
 cd tests && uv run pytest e2e -k job_lifecycle           # only tests whose name matches
 cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"  # same as e2e-py
 cd tests && uv run pytest e2e -m exclusive               # cluster-mutating tests, one at a time

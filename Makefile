@@ -121,9 +121,12 @@ k3s-dev-nodes-up:
 k3s-dev-nodes-down:
 	bash localdev/k3s-macos/dev-nodes-down.sh
 
+# The e2e suite requires API_URL; these targets point it at the local stack unless the caller set one.
+E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
+
 # Provisions dev nodes, runs the portable e2e suite, tears them back down — pass/fail either way.
 k3s-e2e:
-	bash localdev/k3s-macos/run-e2e.sh
+	API_URL="$(E2E_API_URL)" bash localdev/k3s-macos/run-e2e.sh
 
 # ---- Convenience: local cluster + control plane in one command -------------
 full-up: k3s-up controlplane-up
@@ -170,7 +173,7 @@ tt-hardware-image: check-tag
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 
 tt-e2e: tt-hardware-image
-	bash localdev/k3s-tenstorrent/run-e2e.sh
+	API_URL="$(E2E_API_URL)" bash localdev/k3s-tenstorrent/run-e2e.sh
 
 # Counterpart to `reload` for the real Tenstorrent host.
 tt-reload: images
@@ -293,7 +296,7 @@ agent-test:
 # Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
 # the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
 e2e-py:
-	cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"
+	cd tests && API_URL="$(E2E_API_URL)" uv run pytest e2e -m "not exclusive and not slow and not hardware"
 
 lint:
 	golangci-lint run ./...

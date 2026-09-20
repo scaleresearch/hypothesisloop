@@ -20,7 +20,12 @@ from support.cluster import wait_scope_idle
 from support.wait import Deadline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-API_URL = os.environ.get("API_URL", "http://localhost:8081")
+API_URL = os.environ.get("API_URL")
+if not API_URL:
+    raise pytest.UsageError(
+        "API_URL is required: set it to the control plane's base URL, "
+        "e.g. API_URL=http://localhost:8081 for the local stack (the make e2e targets pass it)."
+    )
 HL_BIN = REPO_ROOT / "bin" / "hl"
 
 # Which accelerator the generic scenarios schedule onto.
