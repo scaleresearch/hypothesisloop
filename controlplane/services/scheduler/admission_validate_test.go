@@ -297,3 +297,20 @@ func TestASubmittedNodeSelectorMayNotNameAPlatformLabel(t *testing.T) {
 		t.Fatalf("an ordinary node selector was rejected: %v", err)
 	}
 }
+
+func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
+	exp := validSubmission()
+	exp.Job.Env = map[string]string{"HF_TOKEN": "open"}
+	exp.SecretEnv = map[string]string{"HF_TOKEN": "secret"}
+	mustReject(t, exp, `"HF_TOKEN" is in both job.env and job.secret_env`)
+
+	exp = validSubmission()
+	exp.SecretEnv = map[string]string{"HF-TOKEN": "secret"}
+	mustReject(t, exp, "not an environment variable name")
+
+	exp = validSubmission()
+	exp.SecretEnv = map[string]string{"HF_TOKEN": "secret"}
+	if err := validate(t, exp); err != nil {
+		t.Fatalf("a job with a secret_env of its own names: got = %v, want accepted", err)
+	}
+}

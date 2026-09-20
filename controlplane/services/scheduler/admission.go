@@ -127,6 +127,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
 		}
 	}
+	if err := exp.Job.ValidateSecretEnv(exp.SecretEnv); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+	}
 	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries is required and must be non-negative"}
 	}

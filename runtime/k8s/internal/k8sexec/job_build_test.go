@@ -969,3 +969,26 @@ func TestEveryPodOfATwoGroupJobComputesADistinctGlobalRank(t *testing.T) {
 		t.Fatalf("3 replicas compute %d ranks: %v", len(seen), seen)
 	}
 }
+
+func TestBuildJobSetsTheSecretEnvOnTheContainer(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: "http://registry"}
+	exp := &domain.Experiment{Data: testDataAccess(), Token: "test-job-token", ID: "secret-env-test", AgentID: "agent",
+		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed,
+		Job: domain.JobSpec{Image: "image:v1", Env: map[string]string{"Z_LAST": "z"}, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5)}}
+	plain, err := c.BuildJob(exp, AcceleratorPlacement{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp.Job.SecretEnv = map[string]string{"HF_TOKEN": "secret"}
+	withSecret, err := c.BuildJob(exp, AcceleratorPlacement{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := withSecret.Spec.Template.Spec.Containers[0].Env
+	if env[len(env)-2].Name != "HF_TOKEN" || env[len(env)-2].Value != "secret" || env[len(env)-1].Name != "Z_LAST" {
+		t.Fatalf("environment tail = %v, want the secret sorted among the job's own variables", env[len(env)-2:])
+	}
+	if plain.Annotations[DesiredSpecHashAnnotation] == withSecret.Annotations[DesiredSpecHashAnnotation] {
+		t.Fatal("desired spec hash is the same with and without the secret environment")
+	}
+}

@@ -15,6 +15,9 @@ import (
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
+	// secret_env leaves the spec before anything reads, stores or answers with it.
+	exp.SecretEnv, exp.Job.SecretEnv = exp.Job.SecretEnv, nil
+
 	// 1. The platform experiment and its state, before the spec: a job sent before the start is
 	// told so at once, whatever else is wrong with it.
 	if exp.PlatformExperimentID == "" {

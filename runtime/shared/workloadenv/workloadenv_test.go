@@ -98,3 +98,11 @@ func TestCommandIsTheGroupsOwnWhenItNamesOne(t *testing.T) {
 		t.Errorf("group command: %q %q", command, args)
 	}
 }
+
+func TestJobCarriesTheSecretEnvironment(t *testing.T) {
+	spec := domain.JobSpec{Env: map[string]string{"LR": "0.1"}, SecretEnv: map[string]string{"HF_TOKEN": "secret"}}
+	got := Job(spec, domain.JobGroup{Env: map[string]string{"ROLE": "learner"}})
+	if got["HF_TOKEN"] != "secret" || got["LR"] != "0.1" || got["ROLE"] != "learner" {
+		t.Errorf("Job = %v, want the secret beside the job's and the group's own", got)
+	}
+}

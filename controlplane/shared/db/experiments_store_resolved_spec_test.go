@@ -27,7 +27,7 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 		0.0, 0.0, "guaranteed", "SUBMITTED",
 		&now, &now, (*string)(nil), (*string)(nil),
 		(*time.Time)(nil), 0, 0, []byte("[]"),
-		"AK", "SK",
+		"AK", "SK", map[string]string{},
 		now, now,
 		"prj-1", "org-1",
 	}
@@ -58,6 +58,8 @@ func assignScanDest(dest, v any) {
 		*d = v.(float64)
 	case *[]byte:
 		*d = v.([]byte)
+	case *map[string]string:
+		*d = v.(map[string]string)
 	case *time.Time:
 		*d = v.(time.Time)
 	case **time.Time:

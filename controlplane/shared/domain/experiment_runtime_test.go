@@ -100,3 +100,35 @@ func TestNoAnswerOfTheAPICarriesTheClustersAJobWasTriedOn(t *testing.T) {
 		t.Fatalf("a job's JSON carries the ids of the clusters it was tried on: %s", wire)
 	}
 }
+
+// A job's secret_env is on no JSON of the job but the one a runtime is handed, where it sits on
+// the spec the runtime builds the environment from, the resolved one included.
+func TestSecretEnvIsOnTheWireOnlyForARuntime(t *testing.T) {
+	exp := &Experiment{
+		ID: "job-1", Job: JobSpec{Image: "img", Env: map[string]string{"LR": "0.1"}},
+		ResolvedJob: &JobSpec{Image: "img"},
+		SecretEnv:   map[string]string{"HF_TOKEN": "the-secret-value"},
+	}
+	wire, err := json.Marshal(exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "the-secret-value") || strings.Contains(string(wire), "secret_env") {
+		t.Fatalf("a job's JSON carries its secret_env: %s", wire)
+	}
+
+	wire, err = json.Marshal(exp.ForRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Experiment
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Job.SecretEnv["HF_TOKEN"] != "the-secret-value" || decoded.EffectiveJob().SecretEnv["HF_TOKEN"] != "the-secret-value" {
+		t.Fatalf("the runtime's view = %s, want secret_env on job and resolved_job", wire)
+	}
+	if exp.Job.SecretEnv != nil || exp.ResolvedJob.SecretEnv != nil {
+		t.Fatalf("ForRuntime wrote the secret onto the job it was called on: %+v", exp)
+	}
+}

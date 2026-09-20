@@ -94,3 +94,33 @@ func TestAdmitExperimentTxRollsBackWhenTheStoreCannotCreateTheKey(t *testing.T) 
 		t.Fatalf("experiment %s was inserted although its key was never created", exp.ID)
 	}
 }
+
+// secret_env is stored with the row and apart from job_spec, which every read of a job returns.
+func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
+	store, exp := admitDataKeyFixture(t)
+	ctx := context.Background()
+	exp.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
+	if decision, reason, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("admit = %v %q %v, want inserted", decision, reason, err)
+	}
+	got, err := store.GetExperiment(ctx, exp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SecretEnv["HF_TOKEN"] != "the-secret-value" || got.Job.SecretEnv != nil {
+		t.Fatalf("read back secret_env = %v, on the spec = %v, want it on the experiment only", got.SecretEnv, got.Job.SecretEnv)
+	}
+	var inSpec bool
+	if err := store.ExperimentsStore.pool.pool.QueryRow(ctx, `SELECT job_spec::text LIKE '%the-secret-value%' OR job_spec ? 'secret_env' FROM experiments WHERE id = $1`, exp.ID).Scan(&inSpec); err != nil {
+		t.Fatal(err)
+	}
+	if inSpec {
+		t.Fatal("job_spec holds the secret")
+	}
+
+	_, onSpec := admitDataKeyFixture(t)
+	onSpec.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
+	if _, _, err := store.AdmitExperimentTx(ctx, onSpec, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err == nil {
+		t.Fatal("a job whose spec still carries secret_env was stored, want an error")
+	}
+}

@@ -244,6 +244,9 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- per-job keys (experiments_active_has_data_key).
     data_access_key_id       TEXT              NOT NULL DEFAULT '',
     data_secret_access_key   TEXT              NOT NULL DEFAULT '',
+    -- The job's secret_env, name to value, kept out of job_spec because every read of a job
+    -- returns job_spec. Handed to the runtime that runs the job and to nothing else.
+    secret_env               JSONB             NOT NULL DEFAULT '{}'::jsonb,
     created_at               TIMESTAMPTZ       NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ       NOT NULL DEFAULT now()
 );
@@ -256,6 +259,7 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS tried_clusters JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_access_key_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS secret_env JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object

@@ -87,6 +87,9 @@ type Experiment struct {
 	// DataKey is the job's permanent object-store key, created at submission and stored with
 	// the row. Never serialized: only Data carries it, and only to the runtime.
 	DataKey DataKey `json:"-"`
+	// SecretEnv is the secret_env the job was submitted with, stored with the row and apart from
+	// Job. Never serialized: ForRuntime alone puts it back on the spec, for the runtime.
+	SecretEnv map[string]string `json:"-"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
@@ -144,8 +147,18 @@ func (e *Experiment) EffectiveJob() JobSpec {
 // from, and nothing it has no use for. A runtime may be another org's, so the hypothesis, the
 // objective, the theory and where the job sits in its org stay with the platform. The fields
 // kept are the ones the executors and the workload environment read
-// (runtime/shared/workloadenv), under the names they already decode.
+// (runtime/shared/workloadenv), under the names they already decode. This is the one place the
+// job's secret_env leaves the platform: on the spec, where the runtime reads the rest of the
+// job's environment.
 func (e *Experiment) ForRuntime() *Experiment {
+	job := e.Job
+	job.SecretEnv = e.SecretEnv
+	resolved := e.ResolvedJob
+	if resolved != nil {
+		withSecrets := *resolved
+		withSecrets.SecretEnv = e.SecretEnv
+		resolved = &withSecrets
+	}
 	return &Experiment{
 		ID:                     e.ID,
 		AgentID:                e.AgentID,
@@ -153,8 +166,8 @@ func (e *Experiment) ForRuntime() *Experiment {
 		CodeRef:                e.CodeRef,
 		ConfigHash:             e.ConfigHash,
 		DataRef:                e.DataRef,
-		Job:                    e.Job,
-		ResolvedJob:            e.ResolvedJob,
+		Job:                    job,
+		ResolvedJob:            resolved,
 		AcceleratorType:        e.AcceleratorType,
 		AcceleratorCount:       e.AcceleratorCount,
 		EstimatedDurationHours: e.EstimatedDurationHours,

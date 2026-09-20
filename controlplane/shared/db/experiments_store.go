@@ -62,7 +62,7 @@ const experimentStoredColumns = `
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
 	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters,
-	data_access_key_id, data_secret_access_key,
+	data_access_key_id, data_secret_access_key, secret_env,
 	created_at, updated_at`
 
 // pgUniqueViolation is PostgreSQL's SQLSTATE for a unique-constraint violation.
@@ -92,7 +92,7 @@ INSERT INTO experiments (
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
-	data_access_key_id, data_secret_access_key,
+	data_access_key_id, data_secret_access_key, secret_env,
 	created_at, updated_at
 ) VALUES (
 	$1, $2, $3, $4, $5,
@@ -102,12 +102,20 @@ INSERT INTO experiments (
 	$16, $17,
 	$18, $19, $20, $21,
 	$22, NULLIF($23, ''),
-	$24, $25,
-	$26, $27
+	$24, $25, $26,
+	$27, $28
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
 	// duplicate them inside job_spec; scanExperiment reconstructs the per-node API fields.
+	// job_spec is what every read of the job returns, so a secret must never be written into it.
+	if exp.Job.SecretEnv != nil {
+		return fmt.Errorf("experiments_store.CreateExperiment: job spec of %s still carries secret_env; it is stored apart from the spec", exp.ID)
+	}
+	secretEnv := exp.SecretEnv
+	if secretEnv == nil {
+		secretEnv = map[string]string{}
+	}
 	persistedJob := exp.Job
 	persistedJob.AcceleratorCount = 0
 	jobSpec, err := json.Marshal(persistedJob)
@@ -123,7 +131,7 @@ INSERT INTO experiments (
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
-		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey,
+		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey, secretEnv,
 		exp.CreatedAt, exp.UpdatedAt,
 	)
 	if err != nil {

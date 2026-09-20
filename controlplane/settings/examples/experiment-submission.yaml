@@ -19,6 +19,11 @@ job:
   command: ["python", "train.py"]
   env:
     MY_APP_CONFIG: "whatever-your-training-code-needs"
+  # secret_env: environment variables the job needs and nobody may read back, such as a token for
+  # a dataset host. The job gets them exactly like env; every read of the job returns env and
+  # never secret_env. A name may be in one of the two only. It is sent in the request body alone:
+  # `hl job submit` refuses a file that carries it and takes `--secret-env NAME`, which reads
+  # $NAME from the caller's environment, so no value is committed or put on a command line.
 
   # --- Resources ---------------------------------------------------------------------
   # cpu/memory/storage: required plain quantity strings. If the platform experiment sets a

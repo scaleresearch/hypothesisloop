@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -322,5 +323,38 @@ func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing
 	}
 	if want := []string{"mine-1", "mine-2"}; !slices.Equal(novelty.compared, want) {
 		t.Fatalf("compared against: got = %v, want = %v", novelty.compared, want)
+	}
+}
+
+// Everything after Submit's first line reads exp.Job: the store that writes job_spec, the answer
+// of POST /experiments, the events of the job. The secret has to be off it by then.
+func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
+	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	exp := humanIdeaSubmission()
+	exp.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
+
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit: got = %v, want it to reach scoring", err)
+	}
+	if exp.Job.SecretEnv != nil || exp.SecretEnv["HF_TOKEN"] != "the-secret-value" {
+		t.Fatalf("after Submit: job.secret_env = %v, experiment's = %v, want it moved off the spec", exp.Job.SecretEnv, exp.SecretEnv)
+	}
+	wire, err := json.Marshal(exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "the-secret-value") {
+		t.Fatalf("the answer of a submission carries the secret: %s", wire)
+	}
+
+	clash := humanIdeaSubmission()
+	clash.Job.Env = map[string]string{"HF_TOKEN": "open"}
+	clash.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
+	var refused *AdmissionError
+	if err := s.Submit(context.Background(), clash); !errors.As(err, &refused) || refused.Reason != ReasonMalformed || admissionHTTPStatus(refused.Reason) != 400 {
+		t.Fatalf("a name in both env and secret_env: got = %v, want a malformed submission answered 400", err)
+	}
+	if strings.Contains(refused.Message, "the-secret-value") {
+		t.Fatalf("the refusal repeats the secret: %s", refused.Message)
 	}
 }

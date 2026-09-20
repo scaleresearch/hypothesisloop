@@ -59,13 +59,17 @@ func Platform(exp *domain.Experiment, group domain.JobGroup, apiURL string, reac
 }
 
 // Job returns the job's own environment with the group's entries over it: the job-level map says
-// what is true of every node, the group's what is true of its role.
+// what is true of every node, the group's what is true of its role. The job's secret_env is part
+// of it; admission refused a name the job or a group also sets in the open.
 func Job(spec domain.JobSpec, group domain.JobGroup) map[string]string {
-	env := make(map[string]string, len(spec.Env)+len(group.Env))
+	env := make(map[string]string, len(spec.Env)+len(group.Env)+len(spec.SecretEnv))
 	for k, v := range spec.Env {
 		env[k] = v
 	}
 	for k, v := range group.Env {
+		env[k] = v
+	}
+	for k, v := range spec.SecretEnv {
 		env[k] = v
 	}
 	return env

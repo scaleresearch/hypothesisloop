@@ -207,3 +207,32 @@ func TestReconcileBindsTheReportedIdentityBeforeItRecordsAnything(t *testing.T) 
 		}
 	}
 }
+
+// secret_env reaches the runtime on the spec of its own job, the resolved one included.
+func TestReconcileHandsARuntimeTheSecretEnvOfItsJobs(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	withSecret := placedJob("job-secret", "org-a")
+	withSecret.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
+	withSecret.ResolvedJob = &domain.JobSpec{Image: "example.invalid/workload", CPU: "2"}
+	w.store.desired["of-a"] = []*domain.Experiment{withSecret, placedJob("job-plain", "org-a")}
+
+	rec := w.reconcile(t, "of-a", idleReport("id-of-a"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reconcile: got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	var answer struct {
+		Experiments []*domain.Experiment `json:"experiments"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.Experiments) != 2 {
+		t.Fatalf("handed %d jobs, want 2", len(answer.Experiments))
+	}
+	if got := answer.Experiments[0].EffectiveJob().SecretEnv["HF_TOKEN"]; got != "the-secret-value" || answer.Experiments[0].Job.SecretEnv["HF_TOKEN"] != got {
+		t.Fatalf("the job is handed without its secret_env: %s", rec.Body)
+	}
+	if answer.Experiments[1].Job.SecretEnv != nil || strings.Count(rec.Body.String(), "the-secret-value") != 2 {
+		t.Fatalf("the secret is handed with a job it is not of: %s", rec.Body)
+	}
+}

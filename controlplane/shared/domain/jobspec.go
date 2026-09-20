@@ -24,6 +24,10 @@ type JobSpec struct {
 	// Env is injected into every node's container, in addition to the platform's own
 	// HYPOTHESISLOOP_* env vars (experiment id, rank, world size, etc).
 	Env map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	// SecretEnv is injected like Env and never shown again: a submission carries it, the
+	// platform stores it apart from the spec (Experiment.SecretEnv), and only the runtime that
+	// runs the job is handed it. No read of a job returns it. See ValidateSecretEnv.
+	SecretEnv map[string]string `json:"secret_env,omitempty" yaml:"secret_env,omitempty" writeOnly:"true"`
 
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
 	// non-Accelerator resources each node gets. All three are required.
@@ -371,6 +375,46 @@ func (j JobSpec) ValidateGroups() error {
 	}
 	if acceleratorType == "" && j.TotalAccelerators() > 0 {
 		return fmt.Errorf("job.accelerator_type is required when any group requests accelerators")
+	}
+	return nil
+}
+
+const (
+	// MaxSecretEnvEntries and MaxSecretEnvBytes bound a job's secret_env, the names and values
+	// together, so one submission cannot grow the row every read of the job loads.
+	MaxSecretEnvEntries = 64
+	MaxSecretEnvBytes   = 64 << 10
+)
+
+var secretEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ValidateSecretEnv enforces that secret is a bounded set of environment variable names none of
+// which the job also sets in the open: a name in both would leave which value the workload gets
+// to the order two maps are merged in.
+func (j JobSpec) ValidateSecretEnv(secret map[string]string) error {
+	if len(secret) > MaxSecretEnvEntries {
+		return fmt.Errorf("job.secret_env holds %d entries, more than the %d allowed", len(secret), MaxSecretEnvEntries)
+	}
+	size := 0
+	for name, value := range secret {
+		if !secretEnvNamePattern.MatchString(name) {
+			return fmt.Errorf("job.secret_env name %q is not an environment variable name: letters, digits and '_', not starting with a digit", name)
+		}
+		if value == "" {
+			return fmt.Errorf("job.secret_env[%q] is empty", name)
+		}
+		if _, open := j.Env[name]; open {
+			return fmt.Errorf("%q is in both job.env and job.secret_env: state it in one", name)
+		}
+		for _, g := range j.Groups {
+			if _, open := g.Env[name]; open {
+				return fmt.Errorf("%q is in both job.groups[%q].env and job.secret_env: state it in one", name, g.Name)
+			}
+		}
+		size += len(name) + len(value)
+	}
+	if size > MaxSecretEnvBytes {
+		return fmt.Errorf("job.secret_env is %d bytes of names and values, more than the %d allowed", size, MaxSecretEnvBytes)
 	}
 	return nil
 }
