@@ -47,10 +47,18 @@ describe('the sign-in page', () => {
     expect(screen.getByText(text)).toBeTruthy()
   })
 
-  it('shows nothing for a notice it does not know', () => {
-    navigation.search = 'notice=%3Cscript%3E'
+  it.each(['%3Cscript%3E', '__proto__', 'constructor', 'toString'])('shows nothing for a notice it does not know: %s', notice => {
+    navigation.search = `notice=${notice}`
     render(<LoginPage />)
     expect(document.querySelector('.error-banner')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeTruthy()
+  })
+
+  it.each(['/%09/evil.example', '/%0A/evil.example', '/%5Cevil.example'])('goes home afterwards when the way back hides another site: %s', async next => {
+    navigation.search = `next=${next}`
+    render(<LoginPage />)
+    await userEvent.click(screen.getByRole('button', { name: 'Continue with GitHub' }))
+    expect(signIn).toHaveBeenCalledExactlyOnceWith('github', '/')
   })
 
   it('shows why sign-in could not start and lets the visitor try again', async () => {

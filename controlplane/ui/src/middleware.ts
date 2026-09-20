@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { LOGIN_PATH, hasSession, safeNext } from '@/lib/auth'
+import { LOGIN_PATH, hasSession, overHTTPS, safeNext } from '@/lib/auth'
 
 type WrittenCookie = Parameters<NextResponse['cookies']['set']>[2] & { name: string; value: string }
 
@@ -9,13 +9,16 @@ export async function middleware(request: NextRequest) {
   const cookies: WrittenCookie[] = []
   const headers: Record<string, string> = {}
   const signedIn = await hasSession({
-    getAll: () => request.cookies.getAll(),
-    setAll: (written, cacheHeaders) => {
-      for (const { name, value, options } of written) {
-        request.cookies.set(name, value)
-        cookies.push({ ...options, name, value })
-      }
-      Object.assign(headers, cacheHeaders)
+    https: overHTTPS(request.headers, request.nextUrl),
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (written, cacheHeaders) => {
+        for (const { name, value, options } of written) {
+          request.cookies.set(name, value)
+          cookies.push({ ...options, name, value })
+        }
+        Object.assign(headers, cacheHeaders)
+      },
     },
   })
 

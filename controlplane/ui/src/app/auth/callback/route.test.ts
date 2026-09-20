@@ -14,7 +14,7 @@ function arrive(query: string) {
 }
 
 beforeEach(() => {
-  vi.mocked(completeSignIn).mockImplementation(async (cookies, code) => {
+  vi.mocked(completeSignIn).mockImplementation(async ({ cookies }, code) => {
     if (code !== 'good') return false
     await cookies.setAll!([{ name: 'sb-auth-token', value: 'session', options: { path: '/' } }], { 'Cache-Control': 'private, no-store' })
     return true
@@ -32,13 +32,19 @@ describe('the sign-in callback', () => {
 
   it('hands the exchange the request\'s cookies, where the code verifier is', async () => {
     await arrive('?code=good')
-    const [cookies] = vi.mocked(completeSignIn).mock.calls[0]
+    const [{ cookies }] = vi.mocked(completeSignIn).mock.calls[0]
     expect(await cookies.getAll()).toEqual([{ name: 'sb-code-verifier', value: 'v1' }])
   })
 
   it('sends them home when no way back is named, or it leads to another site', async () => {
     expect((await arrive('?code=good')).headers.get('location')).toBe('/')
     expect((await arrive('?code=good&next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('/')
+  })
+
+  it('sends them home when the way back hides another site behind a tab, a newline or a backslash', async () => {
+    for (const hostile of ['/%09/evil.example', '/%0A/evil.example', '/%5Cevil.example']) {
+      expect((await arrive(`?code=good&next=${hostile}`)).headers.get('location')).toBe('/')
+    }
   })
 
   it('returns to sign-in, saying so, when the code is refused', async () => {

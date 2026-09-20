@@ -7,16 +7,16 @@ import { Button } from '@/components/ui/button'
 import { ErrorMessage } from '@/components/ui/status-message'
 
 // Why the visitor is here again, as the redirect that brought them says it.
-const NOTICES: Record<string, string> = {
-  ended: 'Your session ended. Sign in again to continue where you were.',
-  refused: 'The API did not accept your session. Sign in again.',
-  failed: 'Sign-in did not complete. Try again.',
-}
+const NOTICES = new Map([
+  ['ended', 'Your session ended. Sign in again to continue where you were.'],
+  ['refused', 'The API did not accept your session. Sign in again.'],
+  ['failed', 'Sign-in did not complete. Try again.'],
+])
 
 function SignIn() {
   const params = useSearchParams()
   const next = safeNext(params.get('next'))
-  const notice = NOTICES[params.get('notice') ?? '']
+  const notice = NOTICES.get(params.get('notice') ?? '')
   const [pending, setPending] = useState('')
   const [error, setError] = useState('')
 

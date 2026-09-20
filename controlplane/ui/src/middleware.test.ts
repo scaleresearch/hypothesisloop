@@ -56,6 +56,21 @@ describe('a signed-in visitor', () => {
     expect((await visit('/login?next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('http://ui.test/')
     expect((await visit('/login')).headers.get('location')).toBe('http://ui.test/')
   })
+
+  it('is sent home when the way back hides another site behind a tab, a newline or a backslash', async () => {
+    for (const hostile of ['/%09/evil.example', '/%0A/evil.example', '/%0D/evil.example', '%09//evil.example', '/%5Cevil.example', '%5C%5Cevil.example']) {
+      expect((await visit(`/login?next=${hostile}`)).headers.get('location')).toBe('http://ui.test/')
+    }
+  })
+})
+
+describe('the scheme the visitor came over', () => {
+  it('reaches the session check, which marks its cookies Secure over https', async () => {
+    await middleware(new NextRequest('http://ui.internal/jobs', { headers: { 'x-forwarded-proto': 'https' } }))
+    expect(vi.mocked(hasSession).mock.lastCall![0].https).toBe(true)
+    await visit('/jobs')
+    expect(vi.mocked(hasSession).mock.lastCall![0].https).toBe(false)
+  })
 })
 
 describe('cookies the session check writes', () => {
@@ -63,7 +78,7 @@ describe('cookies the session check writes', () => {
   const cacheHeaders = { 'Cache-Control': 'private, no-store' }
 
   it('leave with the page when a token was refreshed', async () => {
-    vi.mocked(hasSession).mockImplementation(async cookies => {
+    vi.mocked(hasSession).mockImplementation(async ({ cookies }) => {
       await cookies.setAll!(refreshed, cacheHeaders)
       return true
     })
@@ -75,7 +90,7 @@ describe('cookies the session check writes', () => {
   })
 
   it('leave with the redirect when a dead session was cleared', async () => {
-    vi.mocked(hasSession).mockImplementation(async cookies => {
+    vi.mocked(hasSession).mockImplementation(async ({ cookies }) => {
       await cookies.setAll!([{ name: 'sb-auth-token', value: '', options: { path: '/', maxAge: 0 } }], cacheHeaders)
       return false
     })
@@ -86,7 +101,7 @@ describe('cookies the session check writes', () => {
 
   it('reads the request\'s cookies', async () => {
     let seen: unknown
-    vi.mocked(hasSession).mockImplementation(async cookies => {
+    vi.mocked(hasSession).mockImplementation(async ({ cookies }) => {
       seen = await cookies.getAll()
       return true
     })
