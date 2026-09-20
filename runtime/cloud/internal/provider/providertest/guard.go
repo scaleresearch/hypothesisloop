@@ -26,8 +26,15 @@ const suitePrefix = "hlconf-"
 // first one's instances.
 func guard(t *testing.T, p provider.Provider) context.Context {
 	t.Helper()
+	testDeadline, bounded := t.Deadline()
+	return guardUntil(t, p, testDeadline, bounded)
+}
+
+// guardUntil is guard for a test binary that is killed at testDeadline, when bounded.
+func guardUntil(t testing.TB, p provider.Provider, testDeadline time.Time, bounded bool) context.Context {
+	t.Helper()
 	ctx := context.Background()
-	if testDeadline, bounded := t.Deadline(); bounded {
+	if bounded {
 		end, err := checksEnd(testDeadline, time.Now())
 		if err != nil {
 			t.Fatal(err)

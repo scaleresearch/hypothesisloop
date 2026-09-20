@@ -3,7 +3,9 @@ package providertest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -135,19 +137,57 @@ func TestChecksEndWhileThereIsStillTimeToDestroy(t *testing.T) {
 	}
 }
 
-// guard is what Run and RunHold start with: an account that still holds an aborted run's
+// guardUntil is what Run and RunHold start with: an account that still holds an aborted run's
 // instances is cleaned before anything new is rented, and the checks' context ends ahead of the
-// test's own deadline.
+// deadline the test binary was given.
 func TestGuardSweepsAtTheStartAndBoundsTheChecks(t *testing.T) {
 	p := rentedOn(t, "hlconf-0a1b2c3d-lifecycle", "hl-job-main-exp1-a1")
+	testDeadline := time.Now().Add(45 * time.Minute)
 
-	ctx := guard(t, p)
+	ctx := guardUntil(t, p, testDeadline, true)
 	if left := names(t, p); len(left) != 1 || left[0] != "hl-job-main-exp1-a1" {
 		t.Errorf("after the start of a run: %q, want the earlier run's instance gone", left)
 	}
-	testDeadline, bounded := t.Deadline()
 	checksDeadline, set := ctx.Deadline()
-	if bounded && (!set || testDeadline.Sub(checksDeadline) != cleanupLimit) {
+	if !set || testDeadline.Sub(checksDeadline) != cleanupLimit {
 		t.Errorf("checks end at %s, test at %s, want %s between them", checksDeadline, testDeadline, cleanupLimit)
+	}
+}
+
+func TestGuardLeavesTheChecksUnboundedWhenTheTestHasNoTimeout(t *testing.T) {
+	ctx := guardUntil(t, fake.New(), time.Time{}, false)
+	if _, set := ctx.Deadline(); set {
+		t.Error("the checks have a deadline although the test has none")
+	}
+}
+
+// refused records the failure guardUntil ends a run with, in place of failing this test.
+type refused struct {
+	testing.TB
+	message string
+}
+
+func (r *refused) Helper() {}
+
+func (r *refused) Fatal(args ...any) {
+	r.message = fmt.Sprint(args...)
+	runtime.Goexit()
+}
+
+func TestGuardRefusesARunWhoseTimeoutLeavesNoTimeToDestroy(t *testing.T) {
+	p := rentedOn(t, "hlconf-0a1b2c3d-lifecycle")
+	run := &refused{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		guardUntil(run, p, time.Now().Add(time.Minute), true)
+	}()
+	<-done
+
+	if !strings.Contains(run.message, "-timeout") {
+		t.Fatalf("a run under a one minute timeout ended with %q, want a refusal that says to raise -timeout", run.message)
+	}
+	if left := names(t, p); len(left) != 1 {
+		t.Errorf("a refused run touched the account: %q", left)
 	}
 }
