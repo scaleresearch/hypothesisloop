@@ -113,6 +113,14 @@ func (g AcceleratorType) MatchesAttributes(driver string, attributes map[string]
 // foldKey normalizes an accelerator type string for case-insensitive map lookups.
 func foldKey(s string) string { return strings.ToLower(s) }
 
+// Is reports whether g and other name the same accelerator type. Types compare without regard
+// to case, everywhere: the rate table, a footprint's key and node placement all fold it (see
+// MatchesLabels for why), so a job that wrote its type in another casing than a runtime reports
+// is admitted as that type and has to be run and recognised as it too.
+func (g AcceleratorType) Is(other AcceleratorType) bool {
+	return foldKey(string(g)) == foldKey(string(other))
+}
+
 // acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from hypothesisloop.yaml.
 // Rates are in accelerator-hours (AccH), H100-equivalent: 1 AccH = 1 H100-hour, so H100 is
 // exactly 1.0 and every other tier is its H100-relative fraction. Keyed by foldKey (see

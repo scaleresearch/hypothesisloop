@@ -109,7 +109,7 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 		if r.ClusterName != cluster || r.AcceleratorCount <= 0 {
 			continue
 		}
-		if !strings.EqualFold(string(r.AcceleratorType), string(flavor)) {
+		if !r.AcceleratorType.Is(flavor) {
 			continue
 		}
 		if r.Job.Nodes() > 1 {

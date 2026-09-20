@@ -302,11 +302,13 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 			w.logger.Warn("job_watcher: observed accelerator type not yet available, will retry", zap.String("id", exp.ID), zap.Error(err))
 			return "", runningTypeUnobservable
 		}
-		if admittedType != exp.AcceleratorType {
+		if !admittedType.Is(exp.AcceleratorType) {
 			w.logger.Error("job_watcher: observed accelerator type disagrees with desired flavor",
 				zap.String("id", exp.ID), zap.String("desired", string(exp.AcceleratorType)), zap.String("observed", string(admittedType)))
 			return "", runningTypeMismatch
 		}
+		// The same type in the runtime's casing is the type the job asked for and is billed as.
+		admittedType = exp.AcceleratorType
 	}
 	started, err := w.store.MarkStarted(ctx, exp.ID)
 	if err != nil {
