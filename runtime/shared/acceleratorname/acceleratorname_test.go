@@ -13,3 +13,16 @@ func TestNVIDIAProductLabelMatchesGPUFeatureDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateHoldsAHandWrittenTypeToTheReportedForm(t *testing.T) {
+	for _, valid := range []string{"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", "tenstorrent.com/chipArch=blackhole"} {
+		if err := Validate(valid); err != nil {
+			t.Errorf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"H100", "=x", "nvidia.com/gpu.product=", "nvidia.com/gpu.product=nvidia-h100", "nvidia.com/gpu.product=NVIDIA H100"} {
+		if err := Validate(invalid); err == nil {
+			t.Errorf("%q was accepted", invalid)
+		}
+	}
+}
