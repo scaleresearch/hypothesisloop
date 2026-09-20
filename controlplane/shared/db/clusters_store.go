@@ -6,14 +6,21 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// ErrClusterNameTaken reports that another org already registered the cluster name.
-var ErrClusterNameTaken = errors.New("cluster name is registered to another org")
+var (
+	// ErrClusterNameTaken reports that another org already registered the cluster name.
+	ErrClusterNameTaken = errors.New("cluster name is registered to another org")
+	ErrClusterNotFound  = errors.New("cluster is not registered")
+	// ErrClusterIDBound reports a runtime stating an identity another registered cluster holds.
+	ErrClusterIDBound = errors.New("cluster id is bound to another registered cluster")
+)
 
-// ClustersStore holds which cluster names exist and the org each belongs to.
+// ClustersStore holds which cluster names exist, the org each belongs to, whether the platform
+// shares it, and the identity its runtime reported.
 type ClustersStore struct {
 	pool *Pool
 }
@@ -22,22 +29,57 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 	return &ClustersStore{pool: pool}
 }
 
+const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), created_at`
+
+func scanCluster(row rowScanner) (*domain.Cluster, error) {
+	c := &domain.Cluster{}
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.CreatedAt); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // RegisterCluster records name as a cluster of orgID. Registering a name the org already owns
 // changes nothing.
 func (s *ClustersStore) RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error) {
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
 		return nil, err
 	}
-	c := &domain.Cluster{Name: name}
-	err := s.pool.pool.QueryRow(ctx, `
+	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `
 INSERT INTO clusters (name, org_id) VALUES ($1, $2)
 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-RETURNING org_id, created_at`, name, orgID).Scan(&c.OrgID, &c.CreatedAt)
+RETURNING `+clusterColumns, name, orgID))
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return nil, ErrOrgNotFound
+		}
 		return nil, fmt.Errorf("clusters_store.RegisterCluster: %w", err)
 	}
 	if c.OrgID != orgID {
 		return nil, ErrClusterNameTaken
+	}
+	return c, nil
+}
+
+// GetCluster returns a registered cluster, or nil when the name is not registered.
+func (s *ClustersStore) GetCluster(ctx context.Context, name string) (*domain.Cluster, error) {
+	return s.clusterWhere(ctx, "GetCluster", `name = $1`, name)
+}
+
+// ClusterByReportedID returns the cluster bound to an identity a runtime reported, or nil when
+// none is.
+func (s *ClustersStore) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+	return s.clusterWhere(ctx, "ClusterByReportedID", `reported_id = $1`, reportedID)
+}
+
+func (s *ClustersStore) clusterWhere(ctx context.Context, op, where, arg string) (*domain.Cluster, error) {
+	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE `+where, arg))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.%s: %w", op, err)
 	}
 	return c, nil
 }
@@ -54,38 +96,75 @@ func (s *ClustersStore) ClusterOrg(ctx context.Context, name string) (orgID stri
 	return orgID, true, nil
 }
 
-// ClusterOrgs maps every registered cluster name to its org.
-func (s *ClustersStore) ClusterOrgs(ctx context.Context) (map[string]string, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT name, org_id FROM clusters`)
+// RegisteredClusters returns every registered cluster by name.
+func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters`)
 	if err != nil {
-		return nil, fmt.Errorf("clusters_store.ClusterOrgs: %w", err)
+		return nil, fmt.Errorf("clusters_store.RegisteredClusters: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	out := map[string]domain.Cluster{}
 	for rows.Next() {
-		var name, orgID string
-		if err := rows.Scan(&name, &orgID); err != nil {
-			return nil, fmt.Errorf("clusters_store.ClusterOrgs: scan: %w", err)
+		c, err := scanCluster(rows)
+		if err != nil {
+			return nil, fmt.Errorf("clusters_store.RegisteredClusters: scan: %w", err)
 		}
-		out[name] = orgID
+		out[c.Name] = *c
 	}
 	return out, rows.Err()
 }
 
 // ListClusters returns the clusters of the given orgs by name.
 func (s *ClustersStore) ListClusters(ctx context.Context, orgIDs []string) ([]*domain.Cluster, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT name, org_id, created_at FROM clusters WHERE org_id = ANY($1) ORDER BY name`, orgIDs)
+	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = ANY($1) ORDER BY name`, orgIDs)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.ListClusters: %w", err)
 	}
 	defer rows.Close()
 	out := []*domain.Cluster{}
 	for rows.Next() {
-		c := &domain.Cluster{}
-		if err := rows.Scan(&c.Name, &c.OrgID, &c.CreatedAt); err != nil {
+		c, err := scanCluster(rows)
+		if err != nil {
 			return nil, fmt.Errorf("clusters_store.ListClusters: scan: %w", err)
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SetClusterShared records whether the platform shares a cluster with every org.
+func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, shared bool) (*domain.Cluster, error) {
+	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `UPDATE clusters SET shared = $2 WHERE name = $1 RETURNING `+clusterColumns, name, shared))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClusterNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
+	}
+	return c, nil
+}
+
+// BindReportedID records the identity a registered cluster's runtime states about itself. A
+// cluster rebuilt under its name reports a new identity and is bound to that one. An identity
+// another registered cluster holds is refused with ErrClusterIDBound.
+func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID string) error {
+	var bound string
+	err := s.pool.pool.QueryRow(ctx, `SELECT COALESCE(reported_id, '') FROM clusters WHERE name = $1`, name).Scan(&bound)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrClusterNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("clusters_store.BindReportedID: %w", err)
+	}
+	if bound == reportedID {
+		return nil
+	}
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET reported_id = $2 WHERE name = $1`, name, reportedID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return ErrClusterIDBound
+		}
+		return fmt.Errorf("clusters_store.BindReportedID: %w", err)
+	}
+	return nil
 }

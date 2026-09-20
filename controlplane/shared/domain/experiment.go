@@ -22,6 +22,9 @@ type Experiment struct {
 	PlatformExperimentID string  `json:"platform_experiment_id"`
 	// ProjectID is the platform experiment's project, read with the job and stored there only.
 	ProjectID string `json:"project_id"`
+	// OrgID is the org of that project, read with the job and stored there only. Admission
+	// places a job on a cluster of this org or on a shared one.
+	OrgID string `json:"org_id"`
 	// ClusterName is the target execution cluster this experiment is (or will be) admitted onto
 	// (a k8s cluster today, but domain has no dependency on that). Empty means "not yet
 	// assigned" or "default" for old rows / single-cluster deployments.

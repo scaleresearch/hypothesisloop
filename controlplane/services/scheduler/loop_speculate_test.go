@@ -117,7 +117,7 @@ func TestSpeculativeCandidatesRequiresAutoscalerAndConnected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clusterIDs := map[string]string{"cluster-a": "cid-a"}
-			got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, tc.autoscaler, tc.connected, clusterIDs, nil, accel, resources, nil, nil, nil)
+			got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, tc.autoscaler, tc.connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("speculativeCandidates: %v", err)
 			}
@@ -137,7 +137,7 @@ func TestSpeculativeCandidatesGangRequiresMultiNodeCapable(t *testing.T) {
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, map[string]bool{}, accel, resources, nil, nil, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, map[string]bool{}, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestSpeculativeCandidatesGangRequiresMultiNodeCapable(t *testing.T) {
 		t.Fatal("a gang must not speculate onto a cluster that hasn't reported multi_node_capable")
 	}
 
-	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, map[string]bool{"cluster-a": true}, accel, resources, nil, nil, nil)
+	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, map[string]bool{"cluster-a": true}, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestSpeculativeCandidatesExcludesTriedCluster(t *testing.T) {
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp,
 		map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true},
-		map[string]string{"cluster-a": "cid-a"}, nil, accel, resources, nil, nil, nil)
+		map[string]string{"cluster-a": "cid-a"}, nil, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestSpeculativeCandidatesStableOrderByClusterID(t *testing.T) {
 	// the id being sorted.
 	clusterIDs := map[string]string{"cluster-z": "cid-b", "cluster-a": "cid-z"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, nil, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestSpeculativeCandidatesExcludesClusterAlreadyWaitingForItsOwnScaleUp(t *t
 	desiredFree := domain.NewFootprint()
 	desiredFree.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}, -2)
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, nil, map[string]domain.Footprint{"cluster-a": desiredFree})
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, map[string]domain.Footprint{"cluster-a": desiredFree})
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestSpeculativeCandidatesRespectsMaxSpeculativeAccelerators(t *testing.T) {
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, map[string]int{"cluster-a": 2}, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, map[string]int{"cluster-a": 2}, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSpeculativeCandidatesRespectsMaxSpeculativeAccelerators(t *testing.T) {
 		t.Fatal("2 already outstanding + 2 requested exceeds the cap of 3, must be excluded")
 	}
 
-	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, map[string]int{"cluster-a": 0}, nil)
+	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, map[string]int{"cluster-a": 0}, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -431,25 +431,25 @@ func TestAllSpeculativeCandidatesTried(t *testing.T) {
 	connected := map[string]bool{"cluster-a": true, "cluster-b": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a", "cluster-b": "cid-b"}
 
-	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, singleOrg, 10*time.Minute) {
 		t.Fatal("neither cluster has been tried yet")
 	}
 
 	exp.TriedClusters = []domain.TriedCluster{{ClusterID: "cid-a", At: time.Now()}}
-	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, singleOrg, 10*time.Minute) {
 		t.Fatal("cluster-b is still untried")
 	}
 
 	exp.TriedClusters = append(exp.TriedClusters, domain.TriedCluster{ClusterID: "cid-b", At: time.Now()})
-	if !allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 10*time.Minute) {
+	if !allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, singleOrg, 10*time.Minute) {
 		t.Fatal("every autoscaler-enabled candidate has been tried within the TTL")
 	}
 
-	if allSpeculativeCandidatesTried(exp, map[string]bool{}, connected, clusterIDs, 10*time.Minute) {
+	if allSpeculativeCandidatesTried(exp, map[string]bool{}, connected, clusterIDs, singleOrg, 10*time.Minute) {
 		t.Fatal("no autoscaler-enabled cluster exists at all — this is not the no_scalable_capacity case")
 	}
 
-	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, 0) {
+	if allSpeculativeCandidatesTried(exp, autoscaler, connected, clusterIDs, singleOrg, 0) {
 		t.Fatal("speculation not opted into (ttl<=0) must never claim candidates were tried")
 	}
 }
@@ -488,7 +488,7 @@ func TestSpeculativeCandidatesUsesInstalledNotFreeAccelerators(t *testing.T) {
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, nil, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestSpeculativeCandidatesAcceptsZeroNodeClusterBlindWithDefaultCap(t *testi
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, nil, nil, nil, map[string]int{"cluster-a": 0}, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, nil, nil, nil, map[string]int{"cluster-a": 0}, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestSpeculativeCandidatesAcceptsZeroNodeClusterBlindWithDefaultCap(t *testi
 
 	// One job's worth (4) already outstanding + this job's 4 exceeds the implicit one-job default
 	// cap, since no operator cap is set for this cluster.
-	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, nil, nil, nil, map[string]int{"cluster-a": 4}, nil)
+	got, _, err = l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, nil, nil, nil, map[string]int{"cluster-a": 4}, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestSpeculativeCandidatesTiebreaksByFewestPendingSpeculativeJobs(t *testing
 	clusterIDs := map[string]string{"cluster-busy": "cid-a", "cluster-idle": "cid-z"}
 	footprint := map[string]int{"cluster-busy": 6, "cluster-idle": 0}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, footprint, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, footprint, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast(t *t
 	connected := map[string]bool{"cluster-amd": true, "cluster-h100": true}
 	clusterIDs := map[string]string{"cluster-amd": "cid-a", "cluster-h100": "cid-b"}
 
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, accel, resources, nil, nil, nil)
+	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestSpeculativeCandidatesDisabledWithoutWithSpeculation(t *testing.T) {
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp,
 		map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true},
-		map[string]string{"cluster-a": "cid-a"}, nil, accel, resources, nil, nil, nil)
+		map[string]string{"cluster-a": "cid-a"}, nil, singleOrg, accel, resources, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestSpeculativeCandidatesReadTriedClustersAndSettingsOncePerTick(t *testing
 	cache := newResolutionCache(l)
 
 	for job := 0; job < 3; job++ {
-		got, _, err := l.speculativeCandidates(context.Background(), cache, distributedExperiment(1, 1), clusters, clusters, map[string]string{"cluster-a": "cid-a"}, nil, accel, resources, nil, nil, nil)
+		got, _, err := l.speculativeCandidates(context.Background(), cache, distributedExperiment(1, 1), clusters, clusters, map[string]string{"cluster-a": "cid-a"}, nil, singleOrg, accel, resources, nil, nil, nil)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("job %d: candidates = %v, %v, want cluster-a", job, got, err)
 		}

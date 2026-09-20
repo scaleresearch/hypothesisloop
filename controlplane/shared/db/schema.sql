@@ -423,6 +423,14 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS data_access_key_id     TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
+-- What an agent is launched with, fixed when it joins. hosted means the platform runs it, and
+-- launcher names the launcher that does: written here and never read from config again, so a
+-- change of the configured launcher moves new agents only.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS hosted          BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS launcher        TEXT    NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS flavor          TEXT    NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS hyperparameters JSONB   NOT NULL DEFAULT '{}';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS model           TEXT    NOT NULL DEFAULT '';
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN
@@ -434,6 +442,7 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_experiment_signups_platform ON experiment_signups(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_experiment_signups_agent    ON experiment_signups(agent_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_signups_launcher ON experiment_signups(launcher) WHERE hosted;
 
 -- ---------------------------------------------------------------------------
 -- agent_quotas — per-agent allocation per platform experiment
@@ -873,6 +882,16 @@ CREATE TABLE IF NOT EXISTS clusters (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_clusters_org ON clusters(org_id);
+-- shared is the platform's decision that every org's jobs may be placed on the cluster; only
+-- staff set it. Without it a cluster takes the jobs of its own org alone.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
+-- reported_id is the identity the cluster's runtime states about itself, bound to the name on
+-- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
+
+-- minted_by is the key an API key was created with, NULL when a person created it. Revoking a
+-- key revokes every key minted from it.
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS minted_by TEXT REFERENCES api_keys(id);
 
 -- Everything that predates tenancy belongs to org 'default' and its project 'default'. Org is
 -- always derived (job -> platform experiment -> project -> org), so these two columns are the
@@ -894,5 +913,33 @@ CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org_id);
 -- A job's project is its platform experiment's. The column was a free-text tag before projects
 -- existed.
 ALTER TABLE experiments DROP COLUMN IF EXISTS project_id;
+
+-- The clusters that ran jobs before clusters were registered belong to org 'default', or their
+-- runtimes would be refused from the first boot on. An empty table is that first boot: later a
+-- cluster comes into being only by an org registering it.
+INSERT INTO clusters (name, org_id)
+SELECT DISTINCT e.cluster_name, 'default' FROM experiments e
+WHERE e.submitted_at IS NOT NULL AND e.cluster_name <> '' AND NOT EXISTS (SELECT 1 FROM clusters)
+ON CONFLICT (name) DO NOTHING;
+
+-- The account behind a person's hypothesis, link or comment. author on the contribution is the
+-- name the identity provider states for them, which they choose themselves. subject is the
+-- hypothesis id, the comment id, or for a link "<from> <type> <to>".
+CREATE TABLE IF NOT EXISTS human_writes (
+    id                     BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id                TEXT        NOT NULL REFERENCES users(id),
+    author                 TEXT        NOT NULL,
+    kind                   TEXT        NOT NULL,
+    subject                TEXT        NOT NULL,
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT human_writes_kind CHECK (kind IN ('hypothesis', 'link', 'comment'))
+);
+CREATE INDEX IF NOT EXISTS idx_human_writes_subject ON human_writes(subject);
+
+-- When the platform experiment closed. An agent's token outlives the close by a fixed grace, and
+-- updated_at moves again when the summary is filed.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 
 COMMIT;

@@ -25,6 +25,7 @@ func (l *Loop) speculativeCandidates(
 	connected map[string]bool,
 	clusterIDs map[string]string,
 	multiNodeCapable map[string]bool,
+	registered map[string]domain.Cluster,
 	nodeAvail map[string]map[string]map[string]int64,
 	nodeResourcesTotal map[string]map[string]map[string]int64,
 	nodeLabels map[string]map[string]map[string]string,
@@ -56,6 +57,9 @@ func (l *Loop) speculativeCandidates(
 	var candidates []candidate
 	for cluster, clusterID := range clusterIDs {
 		if clusterID == "" || !autoscalerEnabled[cluster] || !connected[cluster] {
+			continue
+		}
+		if !hostsJob(registered, cluster, exp) {
 			continue
 		}
 		if gang && !multiNodeCapable[cluster] {
@@ -190,14 +194,14 @@ func negativeInDimension(avail domain.Footprint, flavor domain.AcceleratorType) 
 // speculation has nowhere left to go right now, not because no autoscaler cluster exists at all.
 // Used only to pick the not-admitted reason (no_scalable_capacity vs the ordinary
 // capacity_unavailable/outranked reasons); it does not gate any admission decision.
-func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, connected map[string]bool, clusterIDs map[string]string, ttl time.Duration) bool {
+func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, connected map[string]bool, clusterIDs map[string]string, registered map[string]domain.Cluster, ttl time.Duration) bool {
 	if ttl <= 0 {
 		return false
 	}
 	now := time.Now()
 	sawCandidate := false
 	for cluster, clusterID := range clusterIDs {
-		if clusterID == "" || !autoscalerEnabled[cluster] || !connected[cluster] {
+		if clusterID == "" || !autoscalerEnabled[cluster] || !connected[cluster] || !hostsJob(registered, cluster, exp) {
 			continue
 		}
 		sawCandidate = true

@@ -49,6 +49,9 @@ const (
 	// because waiting will not fix it: this is not a busy platform, it is a platform with no
 	// runtime for this shape of job.
 	NotAdmittedNoMultiNodeCluster = "no_multi_node_cluster"
+	// NotAdmittedNoClusterForOrg means no connected cluster may take this org's jobs: none is
+	// its own and none is shared. Waiting does not fix it; registering a cluster does.
+	NotAdmittedNoClusterForOrg = "no_cluster_for_org"
 	// NotAdmittedWaitingForScaleUp means this cluster's desired-free already went negative for a
 	// speculative submit in this job's accelerator dimension — a scale-up is outstanding there.
 	// Preemption is skipped rather than evicting a burst job to cover a shortage the incoming

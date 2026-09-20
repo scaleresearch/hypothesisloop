@@ -32,7 +32,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters,
 		&exp.DataKey.AccessKeyID, &exp.DataKey.SecretAccessKey,
 		&exp.CreatedAt, &exp.UpdatedAt,
-		&exp.ProjectID,
+		&exp.ProjectID, &exp.OrgID,
 	); err != nil {
 		return nil, err
 	}

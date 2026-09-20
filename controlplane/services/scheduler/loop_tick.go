@@ -80,6 +80,13 @@ func (l *Loop) tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("multi-node capability: %w", err)
 	}
+	// Which clusters exist for the platform, whose each is, and which are shared. Placement by
+	// org is decided against this one read: a job goes to a cluster of its own org or to a
+	// shared one, and a name nobody registered is no cluster at all.
+	registeredClusters, err := l.store.RegisteredClusters(ctx)
+	if err != nil {
+		return fmt.Errorf("registered clusters: %w", err)
+	}
 	// Speculative-submit inputs (autoscaler.md), read only when a deployment has opted in via
 	// WithSpeculation — a LoopWorkloadClient that has not implemented these two methods (every
 	// pre-autoscaler test fake, and any deployment that never calls WithSpeculation) must not be
@@ -274,11 +281,11 @@ func (l *Loop) tick(ctx context.Context) error {
 		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
 		// has a new flavor to persist.
 		persistedFlavor := exp.AcceleratorType
-		candidates, narrowed := eligibleClusters(gAvail, multiNodeCapable, exp)
-		if len(candidates) == 0 && narrowed {
+		candidates, ineligible := eligibleClusters(gAvail, multiNodeCapable, registeredClusters, exp)
+		if ineligible != "" {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ineligible); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark %s: %w", ineligible, err))
 			}
 			continue
 		}
@@ -331,7 +338,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
 			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
 			// speculating anywhere always wins over preempting a burst job (this runs first).
-			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, nodeAvailAtTickStart, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
+			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, registeredClusters, nodeAvailAtTickStart, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
 			if cerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
@@ -477,11 +484,11 @@ func (l *Loop) tick(ctx context.Context) error {
 			switch {
 			case waitingForScaleUp:
 				reason = domain.NotAdmittedWaitingForScaleUp
-			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, l.triedClusterTTL):
+			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, registeredClusters, l.triedClusterTTL):
 				reason = domain.NotAdmittedNoScalableCapacity
 			case misfit != "":
 				reason = misfit
-			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, exp):
+			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
 				reason = exceedsClusterCapacityReason(exp)
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
@@ -530,11 +537,11 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	for _, exp := range burst {
 		persistedFlavor := exp.AcceleratorType
-		candidates, narrowed := eligibleClusters(bAvail, multiNodeCapable, exp)
-		if len(candidates) == 0 && narrowed {
+		candidates, ineligible := eligibleClusters(bAvail, multiNodeCapable, registeredClusters, exp)
+		if ineligible != "" {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedNoMultiNodeCluster); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark no multi-node cluster: %w", err))
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ineligible); err != nil {
+				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark %s: %w", ineligible, err))
 			}
 			continue
 		}
@@ -603,7 +610,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			backlog.record(start, cluster, "burst", exp, shortage)
 			reason := misfit
-			if reason == "" && exceedsInstalled(totalCapacity, autoscalerEnabled, bAvail, multiNodeCapable, exp) {
+			if reason == "" && exceedsInstalled(totalCapacity, autoscalerEnabled, bAvail, multiNodeCapable, registeredClusters, exp) {
 				reason = exceedsClusterCapacityReason(exp)
 			}
 			if reason == "" {
@@ -678,8 +685,8 @@ func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footp
 // installed, on each accelerator type it accepts: a job no wait will admit. A cluster that scales
 // up, or whose installed capacity was not read, may yet hold it. Only the cluster-wide sum is
 // judged, so a job that fits the sum and no layout of the nodes still reads as waiting.
-func exceedsInstalled(installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) bool {
-	clusters, _ := eligibleClusters(avail, multiNodeCapable, exp)
+func exceedsInstalled(installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) bool {
+	clusters, _ := eligibleClusters(avail, multiNodeCapable, registered, exp)
 	if len(clusters) == 0 {
 		return false
 	}
@@ -707,31 +714,53 @@ func exceedsClusterCapacityReason(exp *domain.Experiment) string {
 	return domain.NotAdmittedExceedsClusterCapacity + ": needs " + footprintStr(exp.Footprint()) + ", more than any connected cluster has installed"
 }
 
-// eligibleClusters narrows the clusters a job may be placed on to the ones that can actually run
-// it. Today that is one capability — multi-node execution — and a single-node job sees every
-// cluster, exactly as before.
+// eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
+// it: registered clusters of the job's own org and shared ones, and of those, for a job that
+// spans nodes, the ones that report multi-node execution. This is the one place the platform
+// decides which org's jobs a cluster takes.
 //
 // The returned map shares its Footprint values with avail rather than copying them, so the
 // in-place reservations admission makes against the returned view are the same numbers every
 // later job in this tick reads. A copy here would let a job admitted through the narrowed view
 // be double-booked by one placed through the full one.
 //
-// narrowed says whether this filter is what emptied the result, and it is the only thing that
-// makes an empty result diagnosable. A single-node job is returned avail untouched, so an empty
-// set for one means no cluster reported capacity at all — a heartbeat gap, not a missing
-// capability. Reporting that as "no multi-node cluster" told a plain one-node job it had been
-// refused for spanning hosts it never asked to span.
-func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, exp *domain.Experiment) (clusters map[string]domain.Footprint, narrowed bool) {
-	if exp.Job.Nodes() <= 1 {
-		return avail, false
-	}
-	out := make(map[string]domain.Footprint, len(avail))
+// ineligible is the not_admitted_reason when a filter is what emptied the result, and it is the
+// only thing that makes an empty result diagnosable. With no cluster connected at all a
+// single-node job gets an empty set and no reason: that is a heartbeat gap, and reporting it as
+// a missing cluster or a missing capability would tell the submitter to fix something that is
+// not broken.
+func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) (clusters map[string]domain.Footprint, ineligible string) {
+	hosted := make(map[string]domain.Footprint, len(avail))
 	for cluster, footprint := range avail {
+		if hostsJob(registered, cluster, exp) {
+			hosted[cluster] = footprint
+		}
+	}
+	// A job never reaches the queue holding a cluster, so this refuses only a pin written
+	// around admission.
+	pinnedElsewhere := exp.ClusterName != "" && !hostsJob(registered, exp.ClusterName, exp)
+	if pinnedElsewhere || (len(hosted) == 0 && len(avail) > 0) {
+		return map[string]domain.Footprint{}, domain.NotAdmittedNoClusterForOrg
+	}
+	if exp.Job.Nodes() <= 1 {
+		return hosted, ""
+	}
+	out := make(map[string]domain.Footprint, len(hosted))
+	for cluster, footprint := range hosted {
 		if multiNodeCapable[cluster] {
 			out[cluster] = footprint
 		}
 	}
-	return out, true
+	if len(out) == 0 {
+		return out, domain.NotAdmittedNoMultiNodeCluster
+	}
+	return out, ""
+}
+
+// hostsJob reports whether cluster is registered and takes jobs of exp's org.
+func hostsJob(registered map[string]domain.Cluster, cluster string, exp *domain.Experiment) bool {
+	c, ok := registered[cluster]
+	return ok && c.Hosts(exp.OrgID)
 }
 
 func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {

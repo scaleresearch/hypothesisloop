@@ -41,27 +41,45 @@ const DefaultProjectName = "default"
 // APIKey is a customer's credential. The token is returned once at creation and only its hash is
 // stored. An empty ProjectID reaches every project of the org.
 type APIKey struct {
-	ID        string     `json:"id"`
-	OrgID     string     `json:"org_id"`
-	ProjectID string     `json:"project_id,omitempty"`
-	CreatedBy string     `json:"created_by"`
+	ID        string `json:"id"`
+	OrgID     string `json:"org_id"`
+	ProjectID string `json:"project_id,omitempty"`
+	CreatedBy string `json:"created_by"`
+	// MintedBy is the key this one was created with, empty when a person created it.
+	MintedBy  string     `json:"minted_by,omitempty"`
 	Name      string     `json:"name"`
 	CreatedAt time.Time  `json:"created_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
-// Cluster is a runtime's registered name and the org that added it.
+// Cluster is a runtime's registered name and the org that added it. Shared is the platform's
+// decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
+// states about itself, empty until its first report.
 type Cluster struct {
-	Name      string    `json:"name"`
-	OrgID     string    `json:"org_id"`
-	CreatedAt time.Time `json:"created_at"`
+	Name       string    `json:"name"`
+	OrgID      string    `json:"org_id"`
+	Shared     bool      `json:"shared"`
+	ReportedID string    `json:"cluster_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
-// Tenancy places one platform experiment: org is always derived through its project.
+// Hosts reports whether a job of orgID may be placed on the cluster: one of its own org, or one
+// the platform shares.
+func (c Cluster) Hosts(orgID string) bool {
+	return c.Shared || c.OrgID == orgID
+}
+
+// AgentWindDown is how long an agent outlives its platform experiment closing, or its own cut:
+// its token keeps working and its machine keeps running, so its last turn can file summaries.
+const AgentWindDown = 120 * time.Second
+
+// Tenancy places one platform experiment: org is always derived through its project. AgentID is
+// set when what was placed is a job or a donation request, which belong to one agent.
 type Tenancy struct {
 	PlatformExperimentID string
 	ProjectID            string
 	OrgID                string
+	AgentID              string
 }
 
 // TenantScope is what one caller may see. AllOrgs lifts the org restriction; ProjectID and
@@ -104,4 +122,24 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+type HumanWriteKind string
+
+const (
+	HumanWriteHypothesis HumanWriteKind = "hypothesis"
+	HumanWriteLink       HumanWriteKind = "link"
+	HumanWriteComment    HumanWriteKind = "comment"
+)
+
+// HumanWrite records which signed-in user made a contribution to the hypothesis graph. The
+// contribution itself carries Author, a name the user chooses with the identity provider, so
+// the account is kept beside it. Subject is the hypothesis id, the comment id, or for a link
+// "<from> <type> <to>".
+type HumanWrite struct {
+	UserID               string
+	Author               string
+	Kind                 HumanWriteKind
+	Subject              string
+	PlatformExperimentID string
 }

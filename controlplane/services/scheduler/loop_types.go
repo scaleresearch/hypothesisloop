@@ -53,6 +53,9 @@ type LoopStore interface {
 	// GetClusterSettings returns the operator overrides for clusterID (scale_up_timeout_seconds,
 	// max_speculative_accelerators), or nil if none were ever set — see domain.ClusterSettings.
 	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
+	// RegisteredClusters returns every registered cluster by name, with its org and whether the
+	// platform shares it: what eligibleClusters decides placement by org against.
+	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	// RecentlyTriedClusters returns the cluster_ids ANY experiment failed a speculative scale-up
 	// attempt on within ttl — the cross-job half of the tried-cluster backoff (autoscaler.md line
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.

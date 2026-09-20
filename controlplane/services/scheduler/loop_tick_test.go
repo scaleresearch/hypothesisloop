@@ -99,7 +99,7 @@ func TestAGroupedJobIsNotPlacedOnAClusterReportingNoMultiNodeCapability(t *testi
 	}
 	capable := map[string]bool{"bare-metal": false, "k8s": true}
 
-	candidates, _ := eligibleClusters(avail, capable, groupedTwoNodeExperiment())
+	candidates, _ := eligibleClusters(avail, capable, ownClusters(avail), groupedTwoNodeExperiment())
 	if _, present := candidates["bare-metal"]; present {
 		t.Fatalf("a two-node grouped job was offered a cluster that reports it cannot run multi-node work — it would be admitted there and fail at creation, holding a reservation the whole time")
 	}
@@ -114,7 +114,7 @@ func TestAGroupedJobIsNotPlacedOnAClusterReportingNoMultiNodeCapability(t *testi
 func TestAGroupedJobIsNotPlacedOnAClusterThatHasReportedNoCapabilityAtAll(t *testing.T) {
 	avail := map[string]domain.Footprint{"silent": {cpuKey: 100000}}
 
-	candidates, _ := eligibleClusters(avail, map[string]bool{}, groupedTwoNodeExperiment())
+	candidates, _ := eligibleClusters(avail, map[string]bool{}, ownClusters(avail), groupedTwoNodeExperiment())
 	if len(candidates) != 0 {
 		t.Fatalf("a cluster with no capability report was offered a multi-node job (%v) — missing evidence must fail closed, exactly as missing capacity data does in domain.Fits", candidates)
 	}
@@ -130,7 +130,7 @@ func TestASingleNodeJobStillSeesEveryClusterRegardlessOfMultiNodeCapability(t *t
 	}
 	exp := &domain.Experiment{Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
 
-	candidates, _ := eligibleClusters(avail, map[string]bool{}, exp)
+	candidates, _ := eligibleClusters(avail, map[string]bool{}, ownClusters(avail), exp)
 	if len(candidates) != 2 {
 		t.Fatalf("a single-node job was offered %d of 2 clusters — it fits on one node by definition, so no capability question arises and none may be asked", len(candidates))
 	}
@@ -200,12 +200,12 @@ func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedFlavor(t *testi
 func TestASingleNodeJobIsNeverReportedAsNarrowedByTheMultiNodeFilter(t *testing.T) {
 	exp := &domain.Experiment{Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
 
-	candidates, narrowed := eligibleClusters(map[string]domain.Footprint{}, map[string]bool{}, exp)
+	candidates, ineligible := eligibleClusters(map[string]domain.Footprint{}, map[string]bool{}, singleOrg, exp)
 	if len(candidates) != 0 {
 		t.Fatalf("no cluster reported capacity yet %d candidates were offered", len(candidates))
 	}
-	if narrowed {
-		t.Error("a single-node job was reported as narrowed by the multi-node capability filter, which never looked at it")
+	if ineligible != "" {
+		t.Errorf("a single-node job with no cluster connected was refused as %q: no filter looked at any cluster", ineligible)
 	}
 }
 
