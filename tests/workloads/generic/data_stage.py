@@ -42,8 +42,6 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-EXP_ID = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
-API_URL = os.environ["HYPOTHESISLOOP_API_URL"]
 MODE = os.environ.get("STAGE_MODE", "write")
 CHECKPOINT_VALUE = os.environ.get("CHECKPOINT_VALUE", "0")
 # The experiment id of the stage whose checkpoint this one reads. Read mode only.
@@ -78,7 +76,7 @@ def log(message: str) -> None:
 
 
 def post_metric(name: str, value: float, fraction: float = 1.0) -> None:
-    url = f"{API_URL}/experiments/{EXP_ID}/metrics"
+    url = f"{os.environ['HYPOTHESISLOOP_API_URL']}/experiments/{os.environ['HYPOTHESISLOOP_EXPERIMENT_ID']}/metrics"
     payload = json.dumps(
         {"metric_name": name, "fraction_complete": fraction, "metric_value": value}
     ).encode()
