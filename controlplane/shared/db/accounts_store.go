@@ -18,6 +18,9 @@ var (
 	ErrOrgNotFound     = errors.New("org not found")
 	ErrProjectNotFound = errors.New("project not found")
 	ErrAPIKeyNotFound  = errors.New("api key not found")
+	// ErrAPIKeyCreatorLacksOrg reports a key asked for in the name of a user who neither owns
+	// the key's org nor is staff: such a key would not authenticate.
+	ErrAPIKeyCreatorLacksOrg = errors.New("the key's creator neither owns the org nor is staff")
 	// ErrProjectNameTaken reports that the org already has a project of that name.
 	ErrProjectNameTaken = errors.New("the org already has a project with that name")
 )
@@ -324,18 +327,33 @@ SELECT id, org_id, name, created_at FROM projects WHERE org_id = ANY($1) ORDER B
 	return out, rows.Err()
 }
 
-const apiKeyColumns = `id, org_id, COALESCE(project_id, ''), created_by, COALESCE(minted_by, ''), name, created_at, revoked_at`
+// apiKeySelect reads keys as they stand now. Whether a key works is decided here, at the read,
+// from rows that can change after the key was made: revoked_at is the earliest revocation of the
+// key or of any key it descends from, and orphaned says its creator no longer administers its org.
+// Deciding it at the read leaves no moment in which a key minted beside a revocation, or kept
+// past its creator's demotion, is live.
+const apiKeySelect = `
+SELECT k.id, k.org_id, COALESCE(k.project_id, ''), k.created_by, COALESCE(k.minted_by, ''), k.name, k.created_at,
+       (WITH RECURSIVE ancestry AS (
+            SELECT k.minted_by AS parent, k.revoked_at
+            UNION ALL
+            SELECT p.minted_by, p.revoked_at FROM api_keys p JOIN ancestry a ON p.id = a.parent
+        ) SELECT min(revoked_at) FROM ancestry),
+       NOT EXISTS (SELECT 1 FROM users u WHERE u.id = k.created_by AND u.staff)
+       AND NOT EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = k.org_id AND m.user_id = k.created_by AND m.role = 'owner')
+FROM api_keys k `
 
 func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
-	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt, &k.Orphaned); err != nil {
 		return nil, err
 	}
 	return k, nil
 }
 
 // CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, CreatedBy and Name are
-// required; the project, when set, must belong to the org.
+// required; the project, when set, must belong to the org, and the creator must own the org or
+// be staff, which is what the key is held to for as long as it lives (apiKeySelect).
 func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
 	var projectID, mintedBy *string
 	if key.MintedBy != "" {
@@ -352,8 +370,14 @@ func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, ke
 		projectID = &key.ProjectID
 	}
 	err := s.pool.pool.QueryRow(ctx, `
-INSERT INTO api_keys (id, key_hash, org_id, project_id, created_by, minted_by, name) VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO api_keys (id, key_hash, org_id, project_id, created_by, minted_by, name)
+SELECT $1, $2, $3, $4, $5, $6, $7
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = $5 AND u.staff)
+   OR EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = $3 AND m.user_id = $5 AND m.role = 'owner')
 RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrAPIKeyCreatorLacksOrg
+	}
 	if err != nil {
 		return fmt.Errorf("accounts_store.CreateAPIKey: %w", err)
 	}
@@ -362,7 +386,7 @@ RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, min
 
 // ListAPIKeys returns an org's keys, revoked ones included, newest first.
 func (s *AccountsStore) ListAPIKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT `+apiKeyColumns+` FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC, id`, orgID)
+	rows, err := s.pool.pool.Query(ctx, apiKeySelect+`WHERE k.org_id = $1 ORDER BY k.created_at DESC, k.id`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.ListAPIKeys: %w", err)
 	}
@@ -380,16 +404,16 @@ func (s *AccountsStore) ListAPIKeys(ctx context.Context, orgID string) ([]*domai
 
 // GetAPIKey returns a key by id, or nil when there is none.
 func (s *AccountsStore) GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
-	return s.apiKeyWhere(ctx, "GetAPIKey", `id = $1`, id)
+	return s.apiKeyWhere(ctx, "GetAPIKey", `k.id = $1`, id)
 }
 
-// APIKeyByHash returns the key stored under a token hash, revoked or not, or nil when there is none.
+// APIKeyByHash returns the key stored under a token hash, working or not, or nil when there is none.
 func (s *AccountsStore) APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
-	return s.apiKeyWhere(ctx, "APIKeyByHash", `key_hash = $1`, keyHash)
+	return s.apiKeyWhere(ctx, "APIKeyByHash", `k.key_hash = $1`, keyHash)
 }
 
 func (s *AccountsStore) apiKeyWhere(ctx context.Context, op, where, arg string) (*domain.APIKey, error) {
-	k, err := scanAPIKey(s.pool.pool.QueryRow(ctx, `SELECT `+apiKeyColumns+` FROM api_keys WHERE `+where, arg))
+	k, err := scanAPIKey(s.pool.pool.QueryRow(ctx, apiKeySelect+`WHERE `+where, arg))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -399,16 +423,11 @@ func (s *AccountsStore) apiKeyWhere(ctx context.Context, op, where, arg string) 
 	return k, nil
 }
 
-// RevokeAPIKey ends a key and every key minted from it, directly or through another. One
-// already revoked keeps its first revocation time.
+// RevokeAPIKey ends a key. Every key minted from it, directly or through another, ends with it:
+// a key is read as revoked while any key it descends from is (apiKeySelect). One already revoked
+// keeps its first revocation time.
 func (s *AccountsStore) RevokeAPIKey(ctx context.Context, id string) error {
-	tag, err := s.pool.pool.Exec(ctx, `
-WITH RECURSIVE lineage AS (
-	SELECT id FROM api_keys WHERE id = $1
-	UNION ALL
-	SELECT k.id FROM api_keys k JOIN lineage l ON k.minted_by = l.id
-)
-UPDATE api_keys SET revoked_at = COALESCE(revoked_at, $2) WHERE id IN (SELECT id FROM lineage)`, id, time.Now().UTC())
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE api_keys SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1`, id, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("accounts_store.RevokeAPIKey: %w", err)
 	}

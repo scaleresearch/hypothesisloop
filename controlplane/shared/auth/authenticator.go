@@ -213,7 +213,10 @@ func (a *Authenticator) apiKey(ctx context.Context, token string) (Principal, er
 		return Principal{}, unauthenticated("unknown api key")
 	}
 	if key.RevokedAt != nil {
-		return Principal{}, unauthenticated("api key %s is revoked", key.ID)
+		return Principal{}, unauthenticated("api key %s is revoked, or was minted from a revoked key", key.ID)
+	}
+	if key.Orphaned {
+		return Principal{}, unauthenticated("api key %s outlived its creator's hold on the org", key.ID)
 	}
 	return Principal{Kind: KindKey, KeyID: key.ID, OrgIDs: []string{key.OrgID}, ProjectID: key.ProjectID}, nil
 }

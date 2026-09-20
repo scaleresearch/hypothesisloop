@@ -223,7 +223,9 @@ func TestAnAPIKeyResolvesToItsOrgUntilRevoked(t *testing.T) {
 	_, projectToken, _ := NewAPIKey()
 	_, revokedToken, _ := NewAPIKey()
 	_, unknownToken, _ := NewAPIKey()
+	_, orphanedToken, _ := NewAPIKey()
 	revokedAt := testNow
+	directory.keys[HashAPIKey(orphanedToken)] = &domain.APIKey{ID: "k4", OrgID: "org-a", Orphaned: true}
 	directory.keys[HashAPIKey(orgToken)] = &domain.APIKey{ID: "k1", OrgID: "org-a"}
 	directory.keys[HashAPIKey(projectToken)] = &domain.APIKey{ID: "k2", OrgID: "org-a", ProjectID: "prj-a"}
 	directory.keys[HashAPIKey(revokedToken)] = &domain.APIKey{ID: "k3", OrgID: "org-a", RevokedAt: &revokedAt}
@@ -238,6 +240,8 @@ func TestAnAPIKeyResolvesToItsOrgUntilRevoked(t *testing.T) {
 	}
 	p, err := a.Authenticate(ctx, revokedToken)
 	assertRefused(t, "revoked key", p, err)
+	p, err = a.Authenticate(ctx, orphanedToken)
+	assertRefused(t, "a key whose creator no longer administers its org", p, err)
 	p, err = a.Authenticate(ctx, unknownToken)
 	assertRefused(t, "unknown key", p, err)
 	p, err = a.Authenticate(ctx, orgToken+"x")

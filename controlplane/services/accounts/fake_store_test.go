@@ -15,6 +15,7 @@ type memStore struct {
 	clock    time.Time
 	sequence int
 	users    map[string]bool
+	staff    map[string]bool
 	orgs     map[string]*domain.Org
 	roles    map[string]map[string]domain.OrgRole // org -> user -> role
 	projects map[string]*domain.Project
@@ -26,7 +27,7 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		users: map[string]bool{}, orgs: map[string]*domain.Org{}, roles: map[string]map[string]domain.OrgRole{},
+		users: map[string]bool{}, staff: map[string]bool{"u-staff": true}, orgs: map[string]*domain.Org{}, roles: map[string]map[string]domain.OrgRole{},
 		projects: map[string]*domain.Project{}, keys: map[string]*domain.APIKey{}, hashes: map[string]string{},
 		clusters: map[string]*domain.Cluster{},
 	}
@@ -166,6 +167,9 @@ func (s *memStore) CreateAPIKey(_ context.Context, key *domain.APIKey, keyHash s
 	if !s.users[key.CreatedBy] {
 		return fmt.Errorf("created_by %q is no user", key.CreatedBy)
 	}
+	if !s.staff[key.CreatedBy] && s.roles[key.OrgID][key.CreatedBy] != domain.OrgRoleOwner {
+		return db.ErrAPIKeyCreatorLacksOrg
+	}
 	if key.ProjectID != "" {
 		if p, ok := s.projects[key.ProjectID]; !ok || p.OrgID != key.OrgID {
 			return db.ErrProjectNotFound
@@ -178,12 +182,22 @@ func (s *memStore) CreateAPIKey(_ context.Context, key *domain.APIKey, keyHash s
 	return nil
 }
 
+// asRead returns a key as the store reads it: revoked while any key it descends from is.
+func (s *memStore) asRead(k *domain.APIKey) *domain.APIKey {
+	out := *k
+	for parent := s.keys[k.MintedBy]; parent != nil; parent = s.keys[parent.MintedBy] {
+		if parent.RevokedAt != nil && (out.RevokedAt == nil || parent.RevokedAt.Before(*out.RevokedAt)) {
+			out.RevokedAt = parent.RevokedAt
+		}
+	}
+	return &out
+}
+
 func (s *memStore) ListAPIKeys(_ context.Context, orgID string) ([]*domain.APIKey, error) {
 	out := []*domain.APIKey{}
 	for _, k := range s.keys {
 		if k.OrgID == orgID {
-			copied := *k
-			out = append(out, &copied)
+			out = append(out, s.asRead(k))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -195,29 +209,18 @@ func (s *memStore) GetAPIKey(_ context.Context, id string) (*domain.APIKey, erro
 	if !ok {
 		return nil, nil
 	}
-	out := *k
-	return &out, nil
+	return s.asRead(k), nil
 }
 
 func (s *memStore) RevokeAPIKey(_ context.Context, id string) error {
-	if _, ok := s.keys[id]; !ok {
+	stored, ok := s.keys[id]
+	if !ok {
 		return db.ErrAPIKeyNotFound
 	}
-	now := s.now()
-	for _, k := range lineage(s.allKeys(), id) {
-		if stored := s.keys[k.ID]; stored.RevokedAt == nil {
-			stored.RevokedAt = &now
-		}
+	if now := s.now(); stored.RevokedAt == nil {
+		stored.RevokedAt = &now
 	}
 	return nil
-}
-
-func (s *memStore) allKeys() []*domain.APIKey {
-	out := make([]*domain.APIKey, 0, len(s.keys))
-	for _, k := range s.keys {
-		out = append(out, k)
-	}
-	return out
 }
 
 func (s *memStore) RegisterCluster(_ context.Context, name, orgID string) (*domain.Cluster, error) {

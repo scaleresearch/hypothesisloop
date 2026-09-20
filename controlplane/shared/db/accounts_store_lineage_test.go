@@ -66,6 +66,124 @@ func TestRevokingAKeyRevokesEveryKeyMintedFromIt(t *testing.T) {
 	}
 }
 
+// The order a mint racing a revocation can take: the minter is read while it works, it is revoked,
+// and only then is the child written.
+func works(k *domain.APIKey) bool { return k.RevokedAt == nil && !k.Orphaned }
+
+func TestAKeyMintedWhileItsParentIsRevokedNeverWorks(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	userID, orgID := newTestUserHome(t, accounts)
+	suffix := uuid.New().String()[:8]
+	parent := &domain.APIKey{ID: "parent" + suffix, OrgID: orgID, CreatedBy: userID, Name: "parent"}
+	if err := accounts.CreateAPIKey(ctx, parent, "hash-parent"+suffix); err != nil {
+		t.Fatal(err)
+	}
+
+	minter, err := accounts.GetAPIKey(ctx, parent.ID)
+	if err != nil || minter == nil || !works(minter) {
+		t.Fatalf("the minter as the mint read it: got = %+v, %v, want a working key", minter, err)
+	}
+	if err := accounts.RevokeAPIKey(ctx, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	child := &domain.APIKey{ID: "child" + suffix, OrgID: orgID, CreatedBy: minter.CreatedBy, MintedBy: minter.ID, Name: "child"}
+	if err := accounts.CreateAPIKey(ctx, child, "hash-child"+suffix); err != nil {
+		t.Fatalf("the late mint: got = %v, want it written, as the race writes it", err)
+	}
+	grandchild := &domain.APIKey{ID: "grandchild" + suffix, OrgID: orgID, CreatedBy: userID, MintedBy: child.ID, Name: "grandchild"}
+	if err := accounts.CreateAPIKey(ctx, grandchild, "hash-grandchild"+suffix); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"child", "grandchild"} {
+		got, err := accounts.APIKeyByHash(ctx, "hash-"+name+suffix)
+		if err != nil || got == nil || works(got) || got.RevokedAt == nil {
+			t.Fatalf("authenticating the %s minted after the revocation: got = %+v, %v, want a revoked key", name, got, err)
+		}
+	}
+	listed, err := accounts.ListAPIKeys(ctx, orgID)
+	if err != nil || len(listed) != 3 {
+		t.Fatalf("list: got = %d keys, %v, want 3", len(listed), err)
+	}
+	for _, k := range listed {
+		if works(k) {
+			t.Errorf("key %s is listed as working", k.ID)
+		}
+	}
+}
+
+func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	ownerID, orgID := newTestUserHome(t, accounts)
+	staffID, _ := newTestUserHome(t, accounts)
+	suffix := uuid.New().String()[:8]
+	working := func(name string) bool {
+		t.Helper()
+		got, err := accounts.APIKeyByHash(ctx, "hash-"+name+suffix)
+		if err != nil || got == nil || got.RevokedAt != nil {
+			t.Fatalf("read key %s: got = %+v, %v, want it found and not revoked", name, got, err)
+		}
+		return works(got)
+	}
+	key := func(name, createdBy, mintedBy string) {
+		t.Helper()
+		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, CreatedBy: createdBy, MintedBy: mintedBy, Name: name}
+		if err := accounts.CreateAPIKey(ctx, k, "hash-"+name+suffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	early := &domain.APIKey{ID: "early" + suffix, OrgID: orgID, CreatedBy: staffID, Name: "early"}
+	if err := accounts.CreateAPIKey(ctx, early, "hash-early"+suffix); !errors.Is(err, ErrAPIKeyCreatorLacksOrg) {
+		t.Fatalf("a key in the name of a user who neither owns the org nor is staff: got = %v, want = %v", err, ErrAPIKeyCreatorLacksOrg)
+	}
+	if got, err := accounts.APIKeyByHash(ctx, "hash-early"+suffix); err != nil || got != nil {
+		t.Fatalf("the refused key: got = %+v, %v, want no row", got, err)
+	}
+	if err := accounts.SetUserStaff(ctx, staffID, true); err != nil {
+		t.Fatal(err)
+	}
+	key("by-staff", staffID, "")
+	key("by-owner", ownerID, "")
+	key("minted", ownerID, "by-owner"+suffix)
+	if !working("by-staff") || !working("by-owner") || !working("minted") {
+		t.Fatal("keys of a staff user and of the org's owner: want all three working")
+	}
+
+	if err := accounts.SetUserStaff(ctx, staffID, false); err != nil {
+		t.Fatal(err)
+	}
+	if working("by-staff") || !working("by-owner") {
+		t.Fatal("once its creator is no longer staff and never owned the org, the key must stop; the owner's must not")
+	}
+	if err := accounts.SetUserStaff(ctx, staffID, true); err != nil {
+		t.Fatal(err)
+	}
+	if !working("by-staff") {
+		t.Fatal("a key follows its creator's standing as it is now")
+	}
+
+	if err := accounts.AddOrgMember(ctx, orgID, ownerID, domain.OrgRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if working("by-owner") || working("minted") {
+		t.Fatal("once its creator is demoted to member, the key and the key minted from it must stop")
+	}
+	listed, err := accounts.ListAPIKeys(ctx, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range listed {
+		if want := k.CreatedBy == ownerID; k.Orphaned != want {
+			t.Errorf("key %s listed orphaned = %v, want = %v", k.ID, k.Orphaned, want)
+		}
+	}
+}
+
 func TestStaffIsAFlagOnAUserThatExists(t *testing.T) {
 	pool := eventsTestDB(t)
 	accounts := NewAccountsStore(pool)

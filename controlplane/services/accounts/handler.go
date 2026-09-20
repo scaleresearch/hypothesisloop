@@ -156,6 +156,8 @@ func storeError(err error) error {
 		return huma.Error404NotFound("user not found")
 	case errors.Is(err, db.ErrClusterNotFound):
 		return huma.Error404NotFound("cluster not found")
+	case errors.Is(err, db.ErrAPIKeyCreatorLacksOrg):
+		return auth.Forbidden("forbidden: " + err.Error())
 	case errors.Is(err, db.ErrProjectNameTaken):
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, db.ErrClusterNameTaken):

@@ -47,7 +47,7 @@ func (a tokens) Authenticate(_ context.Context, token string) (auth.Principal, e
 	if !ok {
 		return auth.Principal{}, auth.Unauthenticated("unknown token")
 	}
-	if p.Kind == auth.KindKey && a.w.store.keys[p.KeyID].RevokedAt != nil {
+	if p.Kind == auth.KindKey && a.w.store.asRead(a.w.store.keys[p.KeyID]).RevokedAt != nil {
 		return auth.Principal{}, auth.Unauthenticated("api key " + p.KeyID + " is revoked")
 	}
 	return p, nil
@@ -525,7 +525,8 @@ func TestRevokingAKeyEndsItAndEveryKeyMintedFromIt(t *testing.T) {
 	for _, alive := range []string{"org-key", "sibling"} {
 		w.ok(alive, "GET", "/me", nil, http.StatusOK, nil)
 	}
-	if w.store.keys[grandchild.ID].RevokedAt == nil || w.store.keys[sibling.ID].RevokedAt != nil || w.store.keys["k-org"].RevokedAt != nil {
+	read := func(id string) *domain.APIKey { return w.store.asRead(w.store.keys[id]) }
+	if read(grandchild.ID).RevokedAt == nil || read(sibling.ID).RevokedAt != nil || read("k-org").RevokedAt != nil {
 		t.Fatal("revocation did not follow the lineage exactly: descendants end, the parent and siblings stay")
 	}
 

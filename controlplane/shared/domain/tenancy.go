@@ -39,18 +39,23 @@ type Project struct {
 const DefaultProjectName = "default"
 
 // APIKey is a customer's credential. The token is returned once at creation and only its hash is
-// stored. An empty ProjectID reaches every project of the org.
+// stored. An empty ProjectID reaches every project of the org. A key works while it is neither revoked nor orphaned.
 type APIKey struct {
 	ID        string `json:"id"`
 	OrgID     string `json:"org_id"`
 	ProjectID string `json:"project_id,omitempty"`
 	CreatedBy string `json:"created_by"`
 	// MintedBy is the key this one was created with, empty when a person created it.
-	MintedBy  string     `json:"minted_by,omitempty"`
-	Name      string     `json:"name"`
-	CreatedAt time.Time  `json:"created_at"`
+	MintedBy  string    `json:"minted_by,omitempty"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	// RevokedAt is the earliest revocation of this key or of a key it descends from.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	// Orphaned reports that the person who created the key no longer owns its org and is not
+	// staff. A key carries its creator's authority, so it ends with it.
+	Orphaned bool `json:"orphaned,omitempty"`
 }
+
 
 // Cluster is a runtime's registered name and the org that added it. Shared is the platform's
 // decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
