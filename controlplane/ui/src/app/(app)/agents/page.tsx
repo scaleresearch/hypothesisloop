@@ -2,7 +2,7 @@
 
 import { Fragment, Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import Link from 'next/link'
+import { Link } from '@/components/ui/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import {
   fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas,
@@ -21,6 +21,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { semantic } from '@/lib/colors'
 import { formatAccH } from '@/lib/format'
 import { useQueryParam } from '@/lib/query-state'
+import { useTenant } from '@/lib/tenant'
 
 const PAGE_SIZE = 25
 
@@ -69,35 +70,36 @@ export default function AgentsPage() {
 }
 
 function AgentsPageContent() {
+  const { project } = useTenant()
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
   const [experimentFilter, setExperimentFilter] = useQueryParam('platform_experiment_id')
   const [page, setPage] = useState(0)
   const [donationPage, setDonationPage] = useState(0)
 
   const { data, error, isLoading } = useSWR(
-    ['agents-page', experimentFilter, page],
-    () => fetchAgentsPage({ platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    ['agents-page', project.id, experimentFilter, page],
+    () => fetchAgentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
   const agents = data?.items
   const total = data?.total ?? 0
 
   const { data: stats } = useSWR(
-    ['agent-stats', experimentFilter],
-    () => fetchAgentStats(experimentFilter),
+    ['agent-stats', project.id, experimentFilter],
+    () => fetchAgentStats({ project_id: project.id, platform_experiment_id: experimentFilter }),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
 
   // Quota exists from an experiment's start, so only running ones have a row to show.
   const { data: running } = useSWR<PlatformExperiment[]>(
-    'platform-experiments-running',
-    () => fetchPlatformExperimentsPage({ status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
+    ['platform-experiments-running', project.id],
+    () => fetchPlatformExperimentsPage({ project_id: project.id, status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
     { refreshInterval: 30_000 },
   )
 
   const { data: donations } = useSWR(
-    ['donations-open', donationPage],
-    () => fetchDonationsPage({ status: 'open', limit: PAGE_SIZE, offset: donationPage * PAGE_SIZE }),
+    ['donations-open', project.id, donationPage],
+    () => fetchDonationsPage({ project_id: project.id, status: 'open', limit: PAGE_SIZE, offset: donationPage * PAGE_SIZE }),
     { refreshInterval: 15_000, keepPreviousData: true },
   )
   const donationItems = donations?.items ?? []
@@ -112,7 +114,7 @@ function AgentsPageContent() {
   // completed jobs it left without a summary (tallied from at most the 50 newest of them).
   const { data: jobStats } = useSWR(
     experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
-    () => fetchExperimentStats({ platform_experiment_id: experimentFilter, group_by: 'agent' }),
+    () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
     { refreshInterval: 15_000 },
   )
   const { data: results } = useSWR(
@@ -122,7 +124,7 @@ function AgentsPageContent() {
   )
   const { data: unsummarized } = useSWR(
     experimentFilter ? ['pe-unsummarized-jobs', experimentFilter] : null,
-    () => fetchExperimentsPage({ platform_experiment_id: experimentFilter, needs_summary: true, limit: 50 }).then(p => p.items),
+    () => fetchExperimentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, needs_summary: true, limit: 50 }).then(p => p.items),
     { refreshInterval: 15_000 },
   )
   const ranking = results?.metrics[0]

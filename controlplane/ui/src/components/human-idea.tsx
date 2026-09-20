@@ -79,7 +79,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
     setExistingID('')
     setSimilar([])
     try {
-      const h = await registerHumanHypothesis(platformExperimentID, 'human', text.trim(), [
+      const h = await registerHumanHypothesis(platformExperimentID, text.trim(), [
         { type: 'builds_on', to: parent.id },
         ...contradicts.map(t => ({ type: 'contradicts' as const, to: t.id })),
         ...related.map(t => ({ type: 'related' as const, to: t.id })),
@@ -99,7 +99,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
       <p className="text-muted" style={{ fontSize: 12 }}>
         Your idea joins the graph the agents read and write, under the same duplicate check.
         No job runs against it: an agent that wants to test it registers its own hypothesis
-        building on yours. There is no login, so it is registered under &quot;human&quot;.
+        building on yours. It is registered under the name you signed in with.
       </p>
       <div style={{ fontSize: 12 }}>
         <span className="uppercase-label">Builds on</span>{' '}
@@ -187,7 +187,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
     setBusy(true)
     setError('')
     try {
-      await addHumanHypothesisLink(hypothesis.id, 'human', type, to)
+      await addHumanHypothesisLink(hypothesis.id, type, to)
       setTarget(null)
       onAdded()
     } catch (e) {
@@ -221,7 +221,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   )
 }
 
-/** The same author field on a note against one hypothesis. */
+/** A note against one hypothesis, under the name the writer signed in with. */
 export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string; onAdded: () => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -231,7 +231,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
     setBusy(true)
     setError('')
     try {
-      await addHumanHypothesisComment(hypothesisID, 'human', text.trim())
+      await addHumanHypothesisComment(hypothesisID, text.trim())
       setText('')
       onAdded()
     } catch (e) {

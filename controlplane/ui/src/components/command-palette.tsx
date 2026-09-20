@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useProjectRouter } from '@/lib/query-state'
 import {
   FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
   ArrowUp, ArrowDown, Hash, Zap, type LucideIcon,
@@ -41,7 +41,7 @@ const DEST_HREF: Record<string, string> = {
  * nav: fuzzy destination search plus "paste an ID, land on the record."
  */
 export function CommandPalette() {
-  const router = useRouter()
+  const router = useProjectRouter()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)

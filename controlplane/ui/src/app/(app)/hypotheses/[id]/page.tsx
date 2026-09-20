@@ -1,8 +1,8 @@
 'use client'
 
 import useSWR from 'swr'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { Link } from '@/components/ui/link'
+import { useProjectRouter } from '@/lib/query-state'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -40,7 +40,7 @@ function LinkRow({ link, platformExperimentID, pe }: {
 
 export default function HypothesisDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
-  const router = useRouter()
+  const router = useProjectRouter()
 
   const { data, error, mutate } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
 

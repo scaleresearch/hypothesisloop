@@ -364,6 +364,83 @@ select:focus-visible,
   margin-top: 1px;
 }
 
+.login {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: 380px;
+  margin: 18vh auto auto;
+  padding: 0 20px;
+}
+
+.login h1 {
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.secret-once {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.secret-once-value {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.field-sm {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--surface-2);
+  color: var(--foreground);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wa-nav-tenant {
+  display: grid;
+  gap: 8px;
+  padding: 12px 10px 0;
+}
+
+.wa-nav-tenant label {
+  display: grid;
+  gap: 3px;
+}
+
+.wa-nav-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.wa-nav-account-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .wa-nav-footer {
   border-top: 1px solid var(--border);
   padding-top: 12px;

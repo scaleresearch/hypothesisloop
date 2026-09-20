@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import Link from 'next/link'
+import { Link } from '@/components/ui/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'

@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
@@ -18,7 +18,8 @@ import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
 import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothesis-search'
-import { useQueryParam } from '@/lib/query-state'
+import { useProjectRouter, useQueryParam } from '@/lib/query-state'
+import { useTenant } from '@/lib/tenant'
 import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
 
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
@@ -32,7 +33,8 @@ export default function HypothesesPage() {
 }
 
 function HypothesesPageContent() {
-  const router = useRouter()
+  const { project } = useTenant()
+  const router = useProjectRouter()
   const searchParams = useSearchParams()
   const peID = searchParams.get('pe') ?? ''
   const [focus, setFocus] = useQueryParam('focus')
@@ -43,8 +45,8 @@ function HypothesesPageContent() {
   const [addUnder, setAddUnder] = useState<string | null>(null)
 
   const { data: platformExperiments, error: peError } = useSWR<PlatformExperiment[]>(
-    peID ? null : 'platform-experiment-latest',
-    () => fetchPlatformExperimentsPage({ sort: '-starts_at', limit: 1 }).then(p => p.items),
+    peID ? null : ['platform-experiment-latest', project.id],
+    () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: 1 }).then(p => p.items),
   )
   const { data: pe, error: selectedError } = useSWR(
     peID ? ['pe', peID] : null,

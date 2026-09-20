@@ -2,10 +2,9 @@
 
 import { Suspense, useState } from 'react'
 import useSWR from 'swr'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { fetchExperimentsPage, fetchExperimentStats, fetchUnsummarizedJobIDs, cancelExperiment, fetchClusters } from '@/lib/api'
-import type { Experiment, ClustersResponse } from '@/types'
+import { Link } from '@/components/ui/link'
+import { fetchExperimentsPage, fetchExperimentStats, fetchUnsummarizedJobIDs, cancelExperiment, fetchOrgClusters } from '@/lib/api'
+import type { Experiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
@@ -19,7 +18,8 @@ import { Pagination } from '@/components/ui/pagination'
 import { semantic } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
-import { useQueryParam } from '@/lib/query-state'
+import { useProjectRouter, useQueryParam } from '@/lib/query-state'
+import { useTenant } from '@/lib/tenant'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
@@ -52,7 +52,8 @@ export default function JobsPage() {
 }
 
 function JobsPageContent() {
-  const router = useRouter()
+  const { org, project } = useTenant()
+  const router = useProjectRouter()
   const [agentFilter, setAgentFilter] = useState('')
   const [peFilter, setPEFilter] = useQueryParam('platform_experiment_id')
   const [statusFilter, setStatusFilter] = useQueryParam('status')
@@ -61,8 +62,10 @@ function JobsPageContent() {
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
-  const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
-  const connectedByCluster = new Map((clusters?.clusters ?? []).map(c => [c.cluster_name, c.connected]))
+  // Connectivity is known for the org's own clusters. A job placed on a cluster the platform
+  // shares shows its name alone.
+  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const connectedByCluster = new Map((clusters ?? []).map(c => [c.name, c.connected]))
 
   function toggleSort(key: SortKey) {
     setPage(0)
@@ -77,8 +80,9 @@ function JobsPageContent() {
   const sort = `${sortDir === 'desc' ? '-' : ''}${sortKey}`
 
   const { data, error, isLoading, mutate } = useSWR(
-    ['jobs', agentFilter, peFilter, statusFilter, page, sort],
+    ['jobs', project.id, agentFilter, peFilter, statusFilter, page, sort],
     () => fetchExperimentsPage({
+      project_id: project.id,
       agent: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
@@ -90,8 +94,8 @@ function JobsPageContent() {
   )
 
   const { data: unsummarized } = useSWR(
-    ['jobs-unsummarized', agentFilter, peFilter],
-    () => fetchUnsummarizedJobIDs({ agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
+    ['jobs-unsummarized', project.id, agentFilter, peFilter],
+    () => fetchUnsummarizedJobIDs({ project_id: project.id, agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
 
@@ -117,8 +121,9 @@ function JobsPageContent() {
   // read uses, minus its paging. Tallying the visible rows instead would report the page's
   // shape under a label that reads as the platform's.
   const { data: stats } = useSWR(
-    ['job-stats', agentFilter, peFilter, statusFilter],
+    ['job-stats', project.id, agentFilter, peFilter, statusFilter],
     () => fetchExperimentStats({
+      project_id: project.id,
       agent: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
@@ -255,10 +260,12 @@ function JobsPageContent() {
                           {j.capacity_tier && j.cluster_name && ' · '}
                           {j.cluster_name && (
                             <>
-                              <span style={{
-                                width: 6, height: 6, borderRadius: '50%', display: 'inline-block', marginRight: 4,
-                                background: connectedByCluster.get(j.cluster_name) ? semantic.success : semantic.danger,
-                              }} title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'} />
+                              {connectedByCluster.has(j.cluster_name) && (
+                                <span style={{
+                                  width: 6, height: 6, borderRadius: '50%', display: 'inline-block', marginRight: 4,
+                                  background: connectedByCluster.get(j.cluster_name) ? semantic.success : semantic.danger,
+                                }} title={connectedByCluster.get(j.cluster_name) ? 'Cluster connected' : 'Cluster disconnected'} />
+                              )}
                               {j.cluster_name}
                             </>
                           )}

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const LISTED = 50
@@ -16,10 +17,11 @@ export function PlatformExperimentSelect({ value, onChange, allLabel, placeholde
   hideAllOption?: boolean
   style?: React.CSSProperties
 }) {
+  const { project } = useTenant()
   const [q, setQ] = useState('')
   const { data } = useSWR(
-    ['platform-experiment-search', q],
-    () => fetchPlatformExperimentsPage({ q, sort: '-starts_at', limit: LISTED }),
+    ['platform-experiment-search', project.id, q],
+    () => fetchPlatformExperimentsPage({ project_id: project.id, q, sort: '-starts_at', limit: LISTED }),
     { keepPreviousData: true },
   )
   const { data: selected } = useSWR(value ? ['pe', value] : null, () => fetchPlatformExperiment(value))

@@ -1,9 +1,9 @@
 'use client'
 
 import React, { Suspense, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { useQueryParam } from '@/lib/query-state'
+import { useProjectRouter, useQueryParam } from '@/lib/query-state'
+import { useTenant } from '@/lib/tenant'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react'
 import {
   fetchPlatformExperimentsPage,
@@ -64,7 +64,7 @@ function ExperimentCard({
   pe: PlatformExperiment
   onEdit: (pe: PlatformExperiment) => void
 }) {
-  const router = useRouter()
+  const router = useProjectRouter()
   const [expanded, setExpanded] = useState(false)
 
   // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
@@ -82,7 +82,7 @@ function ExperimentCard({
   )
   const { data: hypothesisStats } = useSWR(
     ['pe-stats-by-hypothesis', pe.id],
-    () => fetchExperimentStats({ platform_experiment_id: pe.id, group_by: 'hypothesis' }),
+    () => fetchExperimentStats({ project_id: pe.project_id, platform_experiment_id: pe.id, group_by: 'hypothesis' }),
     { refreshInterval: 15_000 },
   )
   const hypothesisCount = verdicts?.total ?? 0
@@ -393,7 +393,7 @@ function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s
           <React.Fragment key={i}>
             <span className="mono text-dim" style={{ fontSize: 12 }}>{i + 1}</span>
             <input
-              style={INPUT_STYLE} type="number" min={0.1} max={100} step={1} value={s.length_pct}
+              style={INPUT_STYLE} type="number" min={0.1} max={100} step="any" value={s.length_pct}
               onChange={e => setStage(i, { length_pct: e.target.value })}
             />
             <input
@@ -557,6 +557,7 @@ function ExperimentModal({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { project } = useTenant()
   const isEdit = !!initial
   // Once running, admission/stage decisions have already been made against budget, max_agents,
   // metrics, the schedule and the report interval — the backend rejects changes to those (see
@@ -628,7 +629,7 @@ function ExperimentModal({
       if (isEdit && initial) {
         await updatePlatformExperiment(initial.id, payload)
       } else {
-        await createPlatformExperiment(payload)
+        await createPlatformExperiment(project.id, payload)
       }
       onSaved()
       onClose()
@@ -777,7 +778,7 @@ function ExperimentModal({
                     ? 'Locked once running.'
                     : "How often agents are expected to push metrics. A job that reports nothing for 3× this interval is treated as dead and evicted, so set it to match your real training loop's logging cadence — too low and healthy jobs get killed during a reschedule."}
                 >
-                  <input style={INPUT_STYLE} type="number" min={1} step={5} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
+                  <input style={INPUT_STYLE} type="number" min={1} step={1} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
                 </Field>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -884,6 +885,7 @@ export default function PlatformExperimentsPage() {
 }
 
 function PlatformExperimentsPageContent() {
+  const { org, project } = useTenant()
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [search, setSearch] = useQueryParam('q')
   const [sort, setSort] = useQueryParam('sort', '-starts_at')
@@ -891,8 +893,9 @@ function PlatformExperimentsPageContent() {
   const [modal, setModal] = useState<{ open: boolean; editing?: PlatformExperiment | null }>({ open: false })
 
   const { data, error, isLoading, mutate } = useSWR(
-    ['platform-experiments', statusFilter, search, sort, page],
+    ['platform-experiments', project.id, statusFilter, search, sort, page],
     () => fetchPlatformExperimentsPage({
+      project_id: project.id,
       status: statusFilter || undefined,
       q: search || undefined,
       sort,
@@ -948,16 +951,26 @@ function PlatformExperimentsPageContent() {
       {isLoading && <Loading />}
       {error && <ErrorMessage>Failed to load platform experiments — is the stack running?</ErrorMessage>}
 
-      {!isLoading && experiments.length === 0 && (
+      {data && experiments.length === 0 && (statusFilter || search ? (
         <Pod>
           <PodContent style={{ textAlign: 'center', padding: 24 }}>
-            <span className="text-dim">No platform experiments found{search ? ` matching "${search}"` : ''}.</span>{' '}
-            <Button variant="link" onClick={() => setModal({ open: true })}>
-              Create the first one.
+            <span className="text-dim">No platform experiments in this project match{search ? ` "${search}"` : ' this filter'}.</span>
+          </PodContent>
+        </Pod>
+      ) : (
+        <Pod>
+          <PodContent style={{ textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>{org.name} / {project.name} has no platform experiments yet</div>
+            <p className="text-muted" style={{ fontSize: 13, maxWidth: 520, margin: '0 auto 14px', lineHeight: 1.6 }}>
+              A platform experiment sets the budget, the metrics and the time window agents work
+              within. Create one, then open it to add agents.
+            </p>
+            <Button variant="primary" onClick={() => setModal({ open: true, editing: null })}>
+              Create the first platform experiment
             </Button>
           </PodContent>
         </Pod>
-      )}
+      ))}
 
       {experiments.map(pe => (
         <ExperimentCard

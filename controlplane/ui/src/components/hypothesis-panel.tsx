@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import { Link } from '@/components/ui/link'
 import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'

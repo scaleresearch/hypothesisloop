@@ -1,6 +1,15 @@
 import type {
+  AgentSignup,
+  APIKey,
   ClustersResponse,
   ClusterSettings,
+  CreatedAPIKey,
+  JoinedAgent,
+  Me,
+  Org,
+  OrgCluster,
+  Project,
+  RegisteredCluster,
   Agent,
   Experiment,
   MetricDataPoint,
@@ -20,16 +29,73 @@ import type {
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
+import { accessToken, endSession } from '@/lib/auth'
 
 // One API, one base URL — quota, scheduler and registry operations are all served together.
-const API_URL = process.env.NEXT_PUBLIC_API_URL as string
+export const API_URL = process.env.NEXT_PUBLIC_API_URL as string
+
+/** A refusal or failure the API answered with, carrying its status and its own message. */
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+// The API answers a failure as {"error"} or {"reason","message"}.
+async function failure(res: Response): Promise<ApiError> {
+  const text = await res.text()
+  let message = text
+  try {
+    const body = JSON.parse(text)
+    message = body.message ?? body.error ?? text
+  } catch {
+    // A proxy in front of the API answers in its own format.
+  }
+  return new ApiError(res.status, message || `API error ${res.status}`)
+}
+
+// Every call to the API goes through here: it carries the session's access token, and a session
+// that is gone or that the API refuses has one outcome, the sign-in page.
+async function request(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await accessToken()
+  if (!token) return endSession('ended')
+  const res = await fetch(url, {
+    ...init,
+    cache: 'no-store',
+    headers: { ...init.headers, Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 401) return endSession('refused')
+  return res
+}
+
+function send(method: string, path: string, body?: unknown): Promise<Response> {
+  return request(`${API_URL}${path}`, body === undefined ? { method } : {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await send(method, path, body)
+  if (!res.ok) throw await failure(res)
+  return res.json() as Promise<T>
+}
 
 async function apiFetch<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) {
-    throw new Error(`API error ${res.status} from ${url}`)
-  }
+  const res = await request(url)
+  if (!res.ok) throw await failure(res)
   return res.json() as Promise<T>
+}
+
+// Query params are the fields of `params` sent under their own names, unset ones left out.
+function withQuery(path: string, params: object): string {
+  const url = new URL(`${API_URL}${path}`)
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
+  }
+  return url.toString()
 }
 
 // A paginated list response: the page of items plus the total match count across all pages,
@@ -45,10 +111,8 @@ export interface Page<T> {
 export const MAX_LIST_PAGE_SIZE = 200
 
 async function apiFetchPage<T>(url: string): Promise<Page<T>> {
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) {
-    throw new Error(`API error ${res.status} from ${url}`)
-  }
+  const res = await request(url)
+  if (!res.ok) throw await failure(res)
   const items = (await res.json()) as T[]
   const totalHeader = res.headers.get('X-Total-Count')
   const total = totalHeader != null ? Number(totalHeader) : items.length
@@ -59,10 +123,20 @@ async function apiFetchPage<T>(url: string): Promise<Page<T>> {
 // Cluster / Quota
 // ---------------------------------------------------------------------------
 
-// Registered target clusters and whether each one's cluster-agent is currently connected
-// (has polled desired-state recently). The control plane never dials a cluster itself.
-export function fetchClusters(): Promise<ClustersResponse> {
+// Every org's clusters with their live occupancy. Staff only: anyone else is answered 403.
+export function fetchAllClusters(): Promise<ClustersResponse> {
   return apiFetch<ClustersResponse>(`${API_URL}/internal/clusters`)
+}
+
+// The clusters one org registered and whether each one's cluster-agent is connected right now
+// (has polled desired-state recently). The control plane never dials a cluster itself.
+export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
+  return apiFetch<{ clusters: OrgCluster[] }>(`${API_URL}/orgs/${orgID}/clusters`).then(r => r.clusters)
+}
+
+// Registering a name the org already owns answers with the same token again.
+export function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
+  return apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
 }
 
 // Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler
@@ -71,22 +145,17 @@ export function fetchClusterSettings(clusterID: string): Promise<ClusterSettings
   return apiFetch<ClusterSettings>(`${API_URL}/clusters/${clusterID}/settings`)
 }
 
-export async function putClusterSettings(
+// The body replaces the whole row: a null field falls back to the scheduler default.
+export function putClusterSettings(
   clusterID: string,
-  req: Omit<ClusterSettings, 'cluster_id'>,
+  req: Required<Omit<ClusterSettings, 'cluster_id'>>,
 ): Promise<ClusterSettings> {
-  const res = await fetch(`${API_URL}/clusters/${clusterID}/settings`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(`update cluster settings failed: ${res.status}`)
-  return res.json()
+  return apiSend<ClusterSettings>('PUT', `/clusters/${clusterID}/settings`, req)
 }
 
 
 export interface AgentsParams {
+  project_id: string
   platform_experiment_id?: string
   /** Substring match against id and name. */
   q?: string
@@ -94,14 +163,8 @@ export interface AgentsParams {
   offset?: number
 }
 
-export function fetchAgentsPage(params?: AgentsParams): Promise<Page<Agent>> {
-  const url = new URL(`${API_URL}/agents`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetchPage<Agent>(url.toString())
+export function fetchAgentsPage(params: AgentsParams): Promise<Page<Agent>> {
+  return apiFetchPage<Agent>(withQuery('/agents', params))
 }
 
 // Whole-set figures for the filters fetchAgentsPage accepts, aggregated server-side.
@@ -111,10 +174,8 @@ export interface AgentStats {
   avg_performance_score: number
 }
 
-export function fetchAgentStats(platformExperimentID: string): Promise<AgentStats> {
-  const url = new URL(`${API_URL}/agents/stats`)
-  if (platformExperimentID) url.searchParams.set('platform_experiment_id', platformExperimentID)
-  return apiFetch<AgentStats>(url.toString())
+export function fetchAgentStats(params: Pick<AgentsParams, 'project_id' | 'platform_experiment_id'>): Promise<AgentStats> {
+  return apiFetch<AgentStats>(withQuery('/agents/stats', params))
 }
 
 
@@ -124,6 +185,7 @@ export function fetchAgentStats(platformExperimentID: string): Promise<AgentStat
 
 // Field names are sent verbatim as query params, so they must match the API's own names.
 export interface ExperimentsParams {
+  project_id: string
   status?: string
   agent?: string
   platform_experiment_id?: string
@@ -137,22 +199,16 @@ export interface ExperimentsParams {
   sort?: string
 }
 
-export function fetchExperimentsPage(params?: ExperimentsParams): Promise<Page<Experiment>> {
-  const url = new URL(`${API_URL}/experiments`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetchPage<Experiment>(url.toString())
+export function fetchExperimentsPage(params: ExperimentsParams): Promise<Page<Experiment>> {
+  return apiFetchPage<Experiment>(withQuery('/experiments', params))
 }
 
 // The ids of the completed jobs no summary was filed for, at most the 50 newest.
-export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'agent' | 'platform_experiment_id'>): Promise<Set<string>> {
+export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'project_id' | 'agent' | 'platform_experiment_id'>): Promise<Set<string>> {
   return fetchExperimentsPage({ ...params, needs_summary: true, limit: 50 }).then(p => new Set(p.items.map(j => j.id)))
 }
 
-export function fetchExperiments(params?: ExperimentsParams): Promise<Experiment[]> {
+export function fetchExperiments(params: ExperimentsParams): Promise<Experiment[]> {
   return fetchExperimentsPage(params).then(p => p.items)
 }
 
@@ -177,15 +233,14 @@ export interface ExperimentStats {
 }
 
 export function fetchExperimentStats(
-  params?: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'> & { group_by?: 'agent' | 'hypothesis' },
+  params: Omit<ExperimentsParams, 'limit' | 'offset' | 'sort'> & { group_by?: 'agent' | 'hypothesis' },
 ): Promise<ExperimentStats> {
-  const url = new URL(`${API_URL}/experiments/stats`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetch<ExperimentStats>(url.toString())
+  return apiFetch<ExperimentStats>(withQuery('/experiments/stats', params))
+}
+
+// The same counts over every org's jobs. Staff only: anyone else gets their own orgs' jobs.
+export function fetchAllExperimentStats(): Promise<ExperimentStats> {
+  return apiFetch<ExperimentStats>(`${API_URL}/experiments/stats`)
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
@@ -272,15 +327,8 @@ interface HypothesisQueryResult {
 
 // Read-only Cypher against one platform experiment's hypothesis graph, which the backend binds as
 // $pe. A Cypher error comes back as a 400 whose body is the database's own message.
-async function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
-  const res = await fetch(`${API_URL}/hypotheses/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ platform_experiment_id: platformExperimentID, cypher, params }),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
+  return apiSend<HypothesisQueryResult>('POST', '/hypotheses/query', { platform_experiment_id: platformExperimentID, cypher, params })
 }
 
 // The text index name and call syntax are defined by the backend in the POST /hypotheses/query
@@ -329,53 +377,32 @@ export interface HeldBack {
 }
 
 // Registers a human's idea, placed in the graph by `links` (at least one builds_on; `to` is a
-// hypothesis id, or the platform_experiment_id for the objective root). `author` is sent instead
-// of an agent_id and there is no auth behind it. Text equivalent to an existing claim returns
+// hypothesis id, or the platform_experiment_id for the objective root). The author is the signed-in
+// person, named by the API from their session. Text equivalent to an existing claim returns
 // that row with already_existed set, and the supplied links are not applied. Text close to other
 // hypotheses registers nothing and returns them until their ids are passed in distinctFrom.
 export async function registerHumanHypothesis(
-  platformExperimentID: string, author: string, text: string, links: HypothesisLinkInput[], distinctFrom: string[] = [],
+  platformExperimentID: string, text: string, links: HypothesisLinkInput[], distinctFrom: string[] = [],
 ): Promise<RegisteredHypothesis | HeldBack> {
-  const res = await fetch(`${API_URL}/hypotheses`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ platform_experiment_id: platformExperimentID, author, text, links, distinct_from: distinctFrom }),
-    cache: 'no-store',
-  })
+  const res = await send('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links, distinct_from: distinctFrom })
   if (res.status === 409) return { similar: (await res.json()).similar }
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw await failure(res)
   return res.json()
 }
 
 // Links are append-only. Only a human-authored hypothesis accepts links from a human.
 export async function addHumanHypothesisLink(
-  hypothesisID: string, author: string, type: HypothesisLinkType, to: string,
+  hypothesisID: string, type: HypothesisLinkType, to: string,
 ): Promise<void> {
-  const res = await fetch(`${API_URL}/hypotheses/${hypothesisID}/links`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ author, type, to }),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(await res.text())
+  await apiSend('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
 }
 
-export async function addHumanHypothesisComment(
-  hypothesisID: string, author: string, text: string,
-): Promise<HypothesisComment> {
-  const res = await fetch(`${API_URL}/hypotheses/${hypothesisID}/comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ author, text }),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+export function addHumanHypothesisComment(hypothesisID: string, text: string): Promise<HypothesisComment> {
+  return apiSend<HypothesisComment>('POST', `/hypotheses/${hypothesisID}/comments`, { text })
 }
 
 export async function cancelExperiment(id: string): Promise<void> {
-  const res = await fetch(`${API_URL}/experiments/${id}/cancel`, { method: 'POST', cache: 'no-store' })
-  if (!res.ok) throw new Error(`cancel failed: ${res.status}`)
+  await apiSend('POST', `/experiments/${id}/cancel`)
 }
 
 // ---------------------------------------------------------------------------
@@ -398,18 +425,12 @@ export interface CreatePlatformExperimentRequest {
   ends_at: string
 }
 
-export async function createPlatformExperiment(req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
-  const res = await fetch(`${API_URL}/platform-experiments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(`create failed: ${res.status}`)
-  return res.json()
+export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
+  return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
 }
 
 export interface PlatformExperimentsParams {
+  project_id: string
   status?: string
   /** Search over name/description. */
   q?: string
@@ -419,14 +440,8 @@ export interface PlatformExperimentsParams {
   sort?: string
 }
 
-export function fetchPlatformExperimentsPage(params?: PlatformExperimentsParams): Promise<Page<PlatformExperiment>> {
-  const url = new URL(`${API_URL}/platform-experiments`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetchPage<PlatformExperiment>(url.toString())
+export function fetchPlatformExperimentsPage(params: PlatformExperimentsParams): Promise<Page<PlatformExperiment>> {
+  return apiFetchPage<PlatformExperiment>(withQuery('/platform-experiments', params))
 }
 
 export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment> {
@@ -475,15 +490,8 @@ export function fetchResourceCapacity(): Promise<ResourceCapacity> {
   return apiFetch<ResourceCapacity>(`${API_URL}/resource-catalog/capacity`)
 }
 
-export async function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
-  const res = await fetch(`${API_URL}/platform-experiments/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(`update failed: ${res.status}`)
-  return res.json()
+export function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
+  return apiSend<PlatformExperiment>('PUT', `/platform-experiments/${id}`, req)
 }
 
 export interface DonationRequest {
@@ -497,19 +505,15 @@ export interface DonationRequest {
 }
 
 export interface DonationsParams {
+  project_id: string
+  platform_experiment_id?: string
   status?: string
   limit?: number
   offset?: number
 }
 
-export function fetchDonationsPage(params?: DonationsParams): Promise<Page<DonationRequest>> {
-  const url = new URL(`${API_URL}/donations`)
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== '') url.searchParams.set(k, String(v))
-    }
-  }
-  return apiFetchPage<DonationRequest>(url.toString())
+export function fetchDonationsPage(params: DonationsParams): Promise<Page<DonationRequest>> {
+  return apiFetchPage<DonationRequest>(withQuery('/donations', params))
 }
 
 
@@ -544,4 +548,66 @@ export interface StagesStatus {
 
 export function fetchStages(platformExpID: string): Promise<StagesStatus> {
   return apiFetch<StagesStatus>(`${API_URL}/platform-experiments/${platformExpID}/stages`)
+}
+
+// ---------------------------------------------------------------------------
+// Agents of a platform experiment
+// ---------------------------------------------------------------------------
+
+export function fetchPlatformExperimentAgents(platformExpID: string): Promise<AgentSignup[]> {
+  return apiFetch<{ agents: AgentSignup[] }>(`${API_URL}/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
+}
+
+export interface AddAgentsRequest {
+  count: number
+  /** true: the platform runs the agents. false: each one's token comes back, to run it yourself. */
+  hosted: boolean
+  flavor?: string
+  model?: string
+}
+
+// An agent the platform does not run comes back with its token, which no later read lists.
+export function addPlatformExperimentAgents(platformExpID: string, req: AddAgentsRequest): Promise<JoinedAgent[]> {
+  return apiSend<{ agents: JoinedAgent[] }>('POST', `/platform-experiments/${platformExpID}/agents`, req).then(r => r.agents)
+}
+
+// Answered 409 once the platform experiment has started.
+export async function removePlatformExperimentAgent(platformExpID: string, agentID: string): Promise<void> {
+  await apiSend('DELETE', `/platform-experiments/${platformExpID}/agents/${agentID}`)
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+export function fetchMe(): Promise<Me> {
+  return apiFetch<Me>(`${API_URL}/me`)
+}
+
+export function renameOrg(orgID: string, name: string): Promise<Org> {
+  return apiSend<Org>('PATCH', `/orgs/${orgID}`, { name })
+}
+
+// A name another project of the org carries is answered 409.
+export function createProject(orgID: string, name: string): Promise<Project> {
+  return apiSend<Project>('POST', `/orgs/${orgID}/projects`, { name })
+}
+
+export function renameProject(projectID: string, name: string): Promise<Project> {
+  return apiSend<Project>('PATCH', `/projects/${projectID}`, { name })
+}
+
+// Newest first, revoked ones included. No token is listed.
+export function fetchAPIKeys(orgID: string): Promise<APIKey[]> {
+  return apiFetch<{ api_keys: APIKey[] }>(`${API_URL}/orgs/${orgID}/api-keys`).then(r => r.api_keys)
+}
+
+// The answer is the only place the key's token ever appears. Without a project the key reaches
+// the whole org.
+export function createAPIKey(orgID: string, name: string, projectID?: string): Promise<CreatedAPIKey> {
+  return apiSend<CreatedAPIKey>('POST', `/orgs/${orgID}/api-keys`, { name, project_id: projectID })
+}
+
+export function revokeAPIKey(keyID: string): Promise<APIKey> {
+  return apiSend<APIKey>('DELETE', `/api-keys/${keyID}`)
 }

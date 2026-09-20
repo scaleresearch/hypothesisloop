@@ -1,0 +1,48 @@
+'use client'
+
+import { createContext, useContext } from 'react'
+import type { Me, Org, Project } from '@/types'
+
+/** The signed-in caller and the org and project every page is showing. */
+export interface Tenant {
+  me: Me
+  org: Org
+  project: Project
+  /** Platform operators see every org and the views across all of them. */
+  staff: boolean
+  /** Whether the caller may change the org: rename it, add projects, keys and clusters. */
+  administers: boolean
+}
+
+export type TenantResolution =
+  | { state: 'selected'; tenant: Tenant }
+  // The caller reaches no project at all.
+  | { state: 'none' }
+  // The URL names a project the caller does not reach: removed, or their membership ended.
+  | { state: 'unavailable'; projectID: string }
+
+// Where a caller lands when the URL names no project: the first project of the first org they
+// belong to. Staff are listed every org, their own among them, and one who belongs to none lands
+// in the first org there is.
+function homeProject(me: Me): Project | undefined {
+  const own = me.orgs.filter(o => o.role)
+  return (own.length > 0 ? own : me.orgs).map(o => me.projects.find(p => p.org_id === o.id)).find(p => p !== undefined)
+}
+
+/** Picks the project the URL names, or with none named the caller's home project. */
+export function resolveTenant(me: Me, projectID: string): TenantResolution {
+  const project = projectID ? me.projects.find(p => p.id === projectID) : homeProject(me)
+  if (!project) return projectID ? { state: 'unavailable', projectID } : { state: 'none' }
+  const org = me.orgs.find(o => o.id === project.org_id)
+  if (!org) throw new Error(`project ${project.id} belongs to org ${project.org_id}, which GET /me did not list`)
+  const staff = me.kind === 'staff'
+  return { state: 'selected', tenant: { me, org, project, staff, administers: staff || org.role === 'owner' } }
+}
+
+export const TenantContext = createContext<Tenant | null>(null)
+
+export function useTenant(): Tenant {
+  const tenant = useContext(TenantContext)
+  if (!tenant) throw new Error('useTenant is called outside the signed-in app shell')
+  return tenant
+}

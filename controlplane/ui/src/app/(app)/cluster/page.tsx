@@ -1,83 +1,22 @@
 'use client'
 
-import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchClusters, fetchResourceCapacity, fetchClusterSettings, putClusterSettings } from '@/lib/api'
+import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse, ClusterInfo } from '@/types'
+import { useTenant } from '@/lib/tenant'
+import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
+import { OrgClustersTable } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
-import { Button } from '@/components/ui/button'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { semantic } from '@/lib/colors'
 
-// Inline editor for one cluster's cluster_settings row (scale_up_timeout_seconds,
-// max_speculative_accelerators). Only rendered for autoscaler-enabled clusters — a non-autoscaler
-// cluster never speculates, so its settings would have nothing to affect.
-function ClusterSettingsEditor({ clusterID }: { clusterID: string }) {
-  const { data, isLoading, mutate } = useSWR(
-    clusterID ? ['cluster-settings', clusterID] : null,
-    () => fetchClusterSettings(clusterID),
-  )
-  const [timeout_, setTimeout_] = useState('')
-  const [cap, setCap] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState(false)
-
-  if (!clusterID) return <span className="text-muted" style={{ fontSize: 12 }}>no cluster_id reported</span>
-  if (isLoading) return <Loading />
-
-  if (!editing) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span className="mono text-muted" style={{ fontSize: 12 }}>
-          timeout: {data?.scale_up_timeout_seconds ?? 'default'}s · cap: {data?.max_speculative_accelerators ?? 'none'}
-        </span>
-        <Button size="sm" onClick={() => {
-          setTimeout_(data?.scale_up_timeout_seconds != null ? String(data.scale_up_timeout_seconds) : '')
-          setCap(data?.max_speculative_accelerators != null ? String(data.max_speculative_accelerators) : '')
-          setEditing(true)
-        }}>Edit</Button>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <input
-        style={{ width: 110, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, background: 'var(--surface-2)', color: 'var(--foreground)' }}
-        placeholder="timeout s (< 1800)" value={timeout_}
-        onChange={e => setTimeout_(e.target.value)}
-      />
-      <input
-        style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, background: 'var(--surface-2)', color: 'var(--foreground)' }}
-        placeholder="max accel" value={cap}
-        onChange={e => setCap(e.target.value)}
-      />
-      <Button size="sm" disabled={saving} onClick={async () => {
-        setSaving(true)
-        try {
-          await putClusterSettings(clusterID, {
-            scale_up_timeout_seconds: timeout_ === '' ? null : Number(timeout_),
-            max_speculative_accelerators: cap === '' ? null : Number(cap),
-            // The PUT replaces the whole row, so the field this editor does not show is sent back as read.
-            stuck_pending_timeout_seconds: data?.stuck_pending_timeout_seconds ?? null,
-          })
-          await mutate()
-          setEditing(false)
-        } finally {
-          setSaving(false)
-        }
-      }}>Save</Button>
-      <Button size="sm" onClick={() => setEditing(false)}>Cancel</Button>
-    </div>
-  )
-}
-
-function ConnectedClusters() {
+// Every org's clusters with their live occupancy, which the API answers for staff alone.
+function AllClusters() {
   const { data, error, isLoading } = useSWR<ClustersResponse>(
-    'clusters',
-    fetchClusters,
+    'all-clusters',
+    fetchAllClusters,
     { refreshInterval: 5_000 },
   )
 
@@ -87,7 +26,7 @@ function ConnectedClusters() {
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
-        <StatTile label="Registered Clusters" value={clusterList.length} />
+        <StatTile label="Clusters, every org" value={clusterList.length} />
         <StatTile
           label="Connected"
           value={connectedCount}
@@ -101,10 +40,10 @@ function ConnectedClusters() {
       </div>
 
       <Pod>
-        <PodHeader>Connected Clusters</PodHeader>
+        <PodHeader>All Clusters · every org · staff only</PodHeader>
         <PodContent>
           {isLoading && <Loading />}
-          {error && <ErrorMessage>Cannot reach scheduler service — is the stack running?</ErrorMessage>}
+          {error && <ErrorMessage>Could not load the clusters of every org: {error.message}</ErrorMessage>}
           {data && data.clusters.length === 0 && (
             <EmptyState>
               No cluster has ever connected. Install a cluster-agent (<code>make cluster-agent-up CLUSTER=&lt;name&gt; API_URL=&lt;control-service-url&gt; METRICS_URL=&lt;metrics-service-url&gt;</code>)
@@ -119,7 +58,7 @@ function ConnectedClusters() {
                   <th>Status</th>
                   <th>Last Seen</th>
                   <th>Autoscaler</th>
-                  <th>Speculation Settings</th>
+                  <th>Scheduler settings</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,9 +88,9 @@ function ConnectedClusters() {
                       </span>
                     </td>
                     <td>
-                      {c.autoscaler_enabled
+                      {c.cluster_id
                         ? <ClusterSettingsEditor clusterID={c.cluster_id} />
-                        : <span className="text-muted" style={{ fontSize: 12 }}>n/a</span>}
+                        : <span className="text-muted" style={{ fontSize: 12 }}>no cluster_id reported</span>}
                     </td>
                   </tr>
                 ))}
@@ -183,12 +122,13 @@ function LiveCapacity() {
       <PodHeader>Capacity</PodHeader>
       <PodContent>
         {isLoading && <Loading />}
-        {error && <ErrorMessage>Cannot reach quota service — is the stack running?</ErrorMessage>}
+        {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && rows.length === 0 && (
           <EmptyState>
-            No cluster has reported live accelerator capacity yet — a cluster-agent reports
-            allocatable-minus-requested accelerators per type on every desired-state poll; this
-            table is empty until at least one poll has landed.
+            No cluster your jobs can be placed on reports live accelerator capacity right now.
+            A cluster-agent reports allocatable-minus-requested accelerators per type on every
+            desired-state poll, so this table fills once one of your clusters, or one the
+            platform shares, has polled.
           </EmptyState>
         )}
         {data && rows.length > 0 && (
@@ -223,17 +163,24 @@ function LiveCapacity() {
 }
 
 export default function ClusterPage() {
+  const { org, staff } = useTenant()
   return (
     <div>
       <PageHeader
         title="Compute Resources"
-        description="Target Kubernetes clusters registered with this control plane. The control plane
-          never connects to a cluster directly — each cluster runs its own cluster-agent,
-          which polls here for work and reports its own presence via heartbeat."
+        description="The clusters your jobs can run on. The control plane never connects to a
+          cluster directly: each cluster runs its own cluster-agent, which polls here for work
+          and reports its own presence via heartbeat."
       />
 
-      <ConnectedClusters />
+      <Pod>
+        <PodHeader>Clusters of {org.name}</PodHeader>
+        <PodContent scrollX>
+          <OrgClustersTable />
+        </PodContent>
+      </Pod>
       <LiveCapacity />
+      {staff && <AllClusters />}
     </div>
   )
 }

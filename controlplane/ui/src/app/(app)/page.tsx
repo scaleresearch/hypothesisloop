@@ -1,9 +1,9 @@
 'use client'
 
-import Link from 'next/link'
+import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
-import { fetchClusters, fetchExperimentStats, fetchAgentsPage } from '@/lib/api'
-import type { ClustersResponse } from '@/types'
+import { fetchOrgClusters, fetchExperimentStats, fetchAgentsPage, fetchPlatformExperimentsPage } from '@/lib/api'
+import { useTenant } from '@/lib/tenant'
 import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 
@@ -12,23 +12,25 @@ const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/hypotheses', title: 'Hypotheses', description: 'The graph of claims each experiment grows, with findings and comments.' },
   { href: '/jobs', title: 'Jobs', description: 'Live and historical job runs with metrics and lineage.' },
   { href: '/agents', title: 'Agents', description: 'Registered agents, quota allocation, and performance history.' },
-  { href: '/cluster', title: 'Cluster', description: 'Registered clusters and node-agent connectivity.' },
-  { href: '/dashboard', title: 'Scheduler Quality', description: 'Eviction audit log, capacity utilisation, and completion rate.' },
+  { href: '/cluster', title: 'Compute Resources', description: 'Your clusters, their connectivity and the capacity your jobs can use.' },
+  { href: '/dashboard', title: 'Dashboard', description: 'Job outcomes, the eviction audit log and completion rate.' },
+  { href: '/settings', title: 'Settings', description: 'Organization, projects, API keys and clusters.' },
 ]
 
 function LiveStrip() {
-  const { data: clusters } = useSWR<ClustersResponse>('clusters', fetchClusters, { refreshInterval: 10_000 })
+  const { org, project } = useTenant()
+  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
   // Both counts are server-side totals, not the length of a fetched page — see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
-  const { data: stats } = useSWR('experiment-stats', () => fetchExperimentStats(), { refreshInterval: 15_000 })
-  const { data: agents } = useSWR('agent-count', () => fetchAgentsPage({ limit: 1 }), { refreshInterval: 30_000 })
+  const { data: stats } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
+  const { data: agents } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
 
-  const clusterList = clusters?.clusters ?? []
+  const clusterList = clusters ?? []
   const connected = clusterList.filter(c => c.connected).length
   const running = stats?.by_status?.RUNNING ?? 0
 
   const items = [
-    { label: 'Clusters online', value: clusters ? `${connected}/${clusterList.length}` : '—', color: clusterList.length > 0 && connected === clusterList.length ? semantic.success : semantic.warning },
+    { label: 'Own clusters online', value: clusters ? `${connected}/${clusterList.length}` : '—', color: connected === clusterList.length ? semantic.success : semantic.warning },
     { label: 'Jobs running', value: stats ? String(running) : '—', color: semantic.success },
     { label: 'Registered agents', value: agents ? String(agents.total) : '—', color: semantic.accent },
   ]
@@ -42,6 +44,34 @@ function LiveStrip() {
           <span className="text-dim" style={{ fontSize: 12 }}>{item.label}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// What a project with nothing in it needs next, shown until its first platform experiment exists.
+function FirstSteps() {
+  const { org, project } = useTenant()
+  const { data } = useSWR(
+    ['platform-experiment-count', project.id],
+    () => fetchPlatformExperimentsPage({ project_id: project.id, limit: 1 }),
+  )
+  if (!data || data.total > 0) return null
+  return (
+    <div className="wa-pod" style={{ padding: '18px 20px', marginBottom: 28, maxWidth: 720 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+        {org.name} / {project.name} is empty. Start here.
+      </div>
+      <ol style={{ fontSize: 13, color: 'var(--muted-fg)', lineHeight: 1.7, paddingLeft: 18, listStyle: 'decimal' }}>
+        <li>
+          <Link href="/platform-experiments" className="text-link">Create a platform experiment</Link>: the
+          budget, the metrics and the time window agents work within.
+        </li>
+        <li>Open it and add agents, run by the platform or by you.</li>
+        <li>
+          Optional: in <Link href="/settings" className="text-link">Settings</Link>, attach a cluster of
+          your own or create an API key for the <span className="mono">hl</span> command line.
+        </li>
+      </ol>
     </div>
   )
 }
@@ -69,6 +99,8 @@ export default function Home() {
         </p>
         <LiveStrip />
       </div>
+
+      <FirstSteps />
 
       <div style={{ maxWidth: 420, marginBottom: 32 }}>
         <CommandPaletteTrigger />

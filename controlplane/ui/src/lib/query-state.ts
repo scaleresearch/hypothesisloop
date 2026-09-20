@@ -1,5 +1,6 @@
 'use client'
 
+import { useCallback, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 // A filter/sort control backed by a URL query param instead of local state, so the current
@@ -20,4 +21,49 @@ export function useQueryParam(name: string, defaultValue = '') {
   }
 
   return [value, setValue] as const
+}
+
+// The selected project is a query param like any other filter, and the one every page shares:
+// in-app links and pushes carry it along, so moving between pages stays inside the project.
+const PROJECT_PARAM = 'project'
+
+function withProject(href: string, project: string): string {
+  const [path, query = ''] = href.split('?')
+  const params = new URLSearchParams(query)
+  params.set(PROJECT_PARAM, project)
+  return `${path}?${params.toString()}`
+}
+
+/** Maps an in-app href to the same place inside the selected project. */
+export function useProjectHref(): (href: string) => string {
+  const project = useSearchParams().get(PROJECT_PARAM)
+  return useCallback((href: string) => (project ? withProject(href, project) : href), [project])
+}
+
+/** router.push and router.replace that stay inside the selected project. */
+export function useProjectRouter() {
+  const router = useRouter()
+  const href = useProjectHref()
+  return useMemo(() => ({
+    push: (to: string) => router.push(href(to)),
+    replace: (to: string) => router.replace(href(to)),
+  }), [router, href])
+}
+
+/**
+ * The project id the URL names, empty when it names none, and a way to switch. Switching lands on
+ * the list page of the current section with its filters cleared: a record open in one project and
+ * a filter on its experiments mean nothing in another.
+ */
+export function useProjectParam() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const value = useSearchParams().get(PROJECT_PARAM) ?? ''
+
+  function select(projectID: string) {
+    const section = `/${pathname.split('/')[1]}`
+    router.push(withProject(section, projectID))
+  }
+
+  return [value, select] as const
 }

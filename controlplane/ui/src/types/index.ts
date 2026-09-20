@@ -189,6 +189,7 @@ export type SubmitterPolicy = 'mixed' | 'human_only' | 'agent_only'
 
 export interface PlatformExperiment {
   id: string
+  project_id: string
   name: string
   description?: string
   budget_accelerator_hours: number
@@ -443,4 +444,84 @@ export interface HypothesisWithJobs extends Hypothesis {
   comments: HypothesisComment[]
   comment_count: number
   links: { out: HypothesisLink[]; in: HypothesisLink[] }
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+export interface Org {
+  id: string
+  name: string
+  // The caller's own role. Absent for staff looking at an org they do not belong to.
+  role?: 'owner' | 'member'
+  created_at: string
+}
+
+export interface Project {
+  id: string
+  org_id: string
+  name: string
+  created_at: string
+}
+
+// Who the session is and what it reaches: see GET /me. Staff reach every org.
+export interface Me {
+  kind: 'user' | 'staff' | 'key'
+  user_id?: string
+  name?: string
+  orgs: Org[]
+  projects: Project[]
+}
+
+export interface APIKey {
+  id: string
+  org_id: string
+  // Absent on a key that reaches the whole org.
+  project_id?: string
+  created_by: string
+  // The key this one was created with, absent when a person created it.
+  minted_by?: string
+  name: string
+  created_at: string
+  revoked_at?: string
+}
+
+// An API key in the answer to creating it, the one place its token appears.
+export interface CreatedAPIKey extends APIKey {
+  token: string
+}
+
+// A cluster an org registered. cluster_id is the identity its runtime reported, the key of its
+// settings, absent until its agent first connects.
+export interface OrgCluster {
+  name: string
+  org_id: string
+  // The platform places every org's jobs on a shared cluster. Staff decide it.
+  shared: boolean
+  cluster_id?: string
+  created_at: string
+  connected: boolean
+}
+
+export interface RegisteredCluster extends Omit<OrgCluster, 'connected'> {
+  runtime_token: string
+}
+
+// One agent's place in a platform experiment and what it was launched with.
+export interface AgentSignup {
+  platform_experiment_id: string
+  agent_id: string
+  name: string
+  role: 'competitor' | 'baseline' | 'reviewer'
+  // true: the platform runs the agent on a machine of its own.
+  hosted: boolean
+  flavor?: string
+  model?: string
+  signed_up_at: string
+}
+
+// An agent in the answer to adding it. token is set for one the platform does not run.
+export interface JoinedAgent extends AgentSignup {
+  token?: string
 }

@@ -1,9 +1,10 @@
 'use client'
 
 import useSWR from 'swr'
-import { useRouter } from 'next/navigation'
-import { fetchExperiments, fetchExperimentStats, fetchClusters } from '@/lib/api'
-import type { Experiment, ClustersResponse } from '@/types'
+import { useProjectRouter } from '@/lib/query-state'
+import { fetchExperiments, fetchExperimentStats, fetchAllExperimentStats, fetchAllClusters } from '@/lib/api'
+import { useTenant } from '@/lib/tenant'
+import type { Experiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
@@ -37,30 +38,113 @@ function ChartTooltip({ active, payload, label }: any) {
   )
 }
 
+// Completion rate: of jobs that reached a terminal state, the share that completed successfully
+// rather than failing or being evicted.
+function completionRate(completed: number, failed: number, evicted: number): number | null {
+  const terminal = completed + failed + evicted
+  return terminal > 0 ? Math.round((completed / terminal) * 100) : null
+}
+
+// How well the platform as a whole places and finishes work, over every org's jobs and clusters.
+// The API answers these reads for staff alone.
+function SchedulerQuality() {
+  const { data: stats } = useSWR('all-experiment-stats', fetchAllExperimentStats, { refreshInterval: 15_000 })
+  const { data: clusters } = useSWR('all-clusters', fetchAllClusters, { refreshInterval: 5_000 })
+
+  const byStatus = stats?.by_status ?? {}
+  const total = stats?.total ?? 0
+  const completed = byStatus.COMPLETED ?? 0
+  const failed = byStatus.FAILED ?? 0
+  const evicted = byStatus.EVICTED ?? 0
+  const burstTotal = stats?.by_capacity_tier?.burst ?? 0
+  const burstEvicted = stats?.evicted_by_capacity_tier?.burst ?? 0
+  const rate = completionRate(completed, failed, evicted)
+
+  const clusterList = clusters?.clusters ?? []
+  const connectedCount = clusterList.filter(c => c.connected).length
+
+  // Real hardware occupancy — busy vs. total accelerators from each connected cluster's most
+  // recent reconcile snapshot — as opposed to a platform experiment's budget-consumption ratio
+  // (used/allocated AccH), which measures spend, not whether chips are actually idle or running
+  // a job.
+  const acceleratorBusy = clusterList.reduce((s, c) => s + c.accelerator_busy, 0)
+  const acceleratorTotal = clusterList.reduce((s, c) => s + c.accelerator_total, 0)
+  const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
+
+  return (
+    <Pod>
+      <PodHeader>Scheduler Quality · every org · staff only</PodHeader>
+      <PodContent>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+          <StatTile label="Total Jobs" value={total} />
+          <StatTile
+            label="Clusters"
+            value={`${connectedCount}/${clusterList.length}`}
+            color={connectedCount === clusterList.length && clusterList.length > 0 ? semantic.success : semantic.danger}
+            sub="connected / registered"
+          />
+          <StatTile
+            label="Accelerator Occupancy"
+            value={occupancyPct != null ? `${occupancyPct}%` : '—'}
+            color={semantic.accent}
+            sub={acceleratorTotal > 0 ? `${acceleratorBusy}/${acceleratorTotal} chips busy, live across connected clusters` : 'no live capacity reported'}
+          />
+        </div>
+        <table className="wa-table" style={{ maxWidth: 640 }}>
+          <thead>
+            <tr><th>Metric</th><th>Definition</th><th>Value</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Completion rate</td>
+              <td className="text-muted" style={{ fontSize: 12 }}>Completed ÷ (completed + failed + evicted)</td>
+              <td className="mono">{rate != null ? `${rate}%` : 'n/a'}</td>
+            </tr>
+            <tr>
+              <td>Early-stop rate</td>
+              <td className="text-muted" style={{ fontSize: 12 }}>Evicted ÷ (completed + evicted)</td>
+              <td className="mono">{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : 'n/a'}</td>
+            </tr>
+            <tr>
+              <td>Clusters connected</td>
+              <td className="text-muted" style={{ fontSize: 12 }}>Registered clusters with a live cluster-agent heartbeat</td>
+              <td className="mono">{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : 'n/a'}</td>
+            </tr>
+            <tr>
+              <td>Crash rate</td>
+              <td className="text-muted" style={{ fontSize: 12 }}>Failed jobs ÷ total</td>
+              <td className="mono">{total > 0 ? `${Math.round(failed / total * 100)}%` : 'n/a'}</td>
+            </tr>
+            <tr>
+              <td>Burst eviction rate</td>
+              <td className="text-muted" style={{ fontSize: 12 }}>Burst evictions ÷ total burst jobs</td>
+              <td className="mono">{burstTotal > 0 ? `${Math.round(burstEvicted / burstTotal * 100)}%` : 'n/a'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </PodContent>
+    </Pod>
+  )
+}
+
 export default function DashboardPage() {
-  const router = useRouter()
+  const router = useProjectRouter()
+  const { project, staff } = useTenant()
 
   // Counts come from the server's own aggregate, never from tallying fetched rows: list reads
   // are capped at one page, so a client-side tally would silently report the page's shape as
   // the platform's.
   const { data: stats, error, isLoading } = useSWR(
-    'experiment-stats',
-    () => fetchExperimentStats(),
+    ['experiment-stats', project.id],
+    () => fetchExperimentStats({ project_id: project.id }),
     { refreshInterval: 15_000 },
   )
 
   // The audit log below is the one place that needs actual rows — the newest handful of them.
   const { data: evictedJobs } = useSWR<Experiment[]>(
-    'recent-evictions',
-    () => fetchExperiments({ status: 'EVICTED', sort: '-updated_at', limit: RECENT_EVICTIONS }),
+    ['recent-evictions', project.id],
+    () => fetchExperiments({ project_id: project.id, status: 'EVICTED', sort: '-updated_at', limit: RECENT_EVICTIONS }),
     { refreshInterval: 15_000 },
-  )
-
-
-  const { data: clusters } = useSWR<ClustersResponse>(
-    'clusters',
-    fetchClusters,
-    { refreshInterval: 5_000 },
   )
 
   const byStatus = stats?.by_status ?? {}
@@ -83,24 +167,7 @@ export default function DashboardPage() {
   const tierRunning = stats?.running_by_capacity_tier ?? {}
   const tierEvicted = stats?.evicted_by_capacity_tier ?? {}
 
-  // Completion rate: of jobs that reached a terminal state, the share that completed
-  // successfully rather than failing or being evicted.
-  const terminalCount = completed + failed + evicted
-  const completionRate = terminalCount > 0
-    ? Math.round((completed / terminalCount) * 100)
-    : null
-
-  // Connected clusters
-  const clusterList = clusters?.clusters ?? []
-  const connectedCount = clusterList.filter(c => c.connected).length
-
-  // Real hardware occupancy — busy vs. total accelerators from each connected cluster's most
-  // recent reconcile snapshot — as opposed to a platform experiment's budget-consumption ratio
-  // (used/allocated AccH), which measures spend, not whether chips are actually idle or running
-  // a job.
-  const acceleratorBusy = clusterList.reduce((s, c) => s + c.accelerator_busy, 0)
-  const acceleratorTotal = clusterList.reduce((s, c) => s + c.accelerator_total, 0)
-  const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
+  const rate = completionRate(completed, failed, evicted)
 
   const recentEvictions: Job[] = (evictedJobs ?? []) as Job[]
 
@@ -112,7 +179,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Scheduler Quality" description="Platform health, eviction audit log, capacity utilisation, and completion rate" />
+      <PageHeader title="Dashboard" description="Job outcomes in this project: status, capacity tiers, the eviction audit log and completion rate" />
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
@@ -122,22 +189,10 @@ export default function DashboardPage() {
         <StatTile label="Total Jobs" value={total} />
         <StatTile label="Running" value={running} color={semantic.success} />
         <StatTile label="Pending" value={pending} color={semantic.warning} sub="submitted + queued + admitted" />
-        <StatTile label="Completion Rate" value={completionRate != null ? `${completionRate}%` : '—'} sub="completed of all terminal jobs" />
+        <StatTile label="Completion Rate" value={rate != null ? `${rate}%` : '—'} sub="completed of all terminal jobs" />
         <StatTile label="Completed" value={completed} color={semantic.accent} />
         <StatTile label="Evicted" value={evicted} color={semantic.pink} />
         <StatTile label="Failed" value={failed} color={semantic.danger} />
-        <StatTile
-          label="Clusters"
-          value={`${connectedCount}/${clusterList.length}`}
-          color={connectedCount === clusterList.length && clusterList.length > 0 ? semantic.success : semantic.danger}
-          sub="connected / registered"
-        />
-        <StatTile
-          label="Accelerator Occupancy"
-          value={occupancyPct != null ? `${occupancyPct}%` : '—'}
-          color={semantic.accent}
-          sub={acceleratorTotal > 0 ? `${acceleratorBusy}/${acceleratorTotal} chips busy, live across connected clusters` : 'no live capacity reported'}
-        />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
@@ -297,48 +352,7 @@ export default function DashboardPage() {
         </Pod>
       )}
 
-      {/* Scheduler quality metrics (spec §8) */}
-      <Pod>
-        <PodHeader>Key Metrics</PodHeader>
-        <PodContent>
-          <table className="wa-table" style={{ maxWidth: 640 }}>
-            <thead>
-              <tr><th>Metric</th><th>Definition</th><th>Value</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Completion rate</td>
-                <td className="text-muted" style={{ fontSize: 12 }}>Completed ÷ (completed + failed + evicted)</td>
-                <td className="mono">{completionRate != null ? `${completionRate}%` : 'n/a'}</td>
-              </tr>
-              <tr>
-                <td>Early-stop rate</td>
-                <td className="text-muted" style={{ fontSize: 12 }}>Evicted ÷ (completed + evicted)</td>
-                <td className="mono">{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : 'n/a'}</td>
-              </tr>
-              <tr>
-                <td>Clusters connected</td>
-                <td className="text-muted" style={{ fontSize: 12 }}>Registered clusters with a live cluster-agent heartbeat</td>
-                <td className="mono">{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : 'n/a'}</td>
-              </tr>
-              <tr>
-                <td>Crash rate</td>
-                <td className="text-muted" style={{ fontSize: 12 }}>Failed jobs ÷ total</td>
-                <td className="mono">{total > 0 ? `${Math.round(failed / total * 100)}%` : 'n/a'}</td>
-              </tr>
-              <tr>
-                <td>Burst eviction rate</td>
-                <td className="text-muted" style={{ fontSize: 12 }}>Burst evictions ÷ total burst jobs</td>
-                <td className="mono">
-                  {(tierTotal.burst ?? 0) > 0
-                    ? `${Math.round((tierEvicted.burst ?? 0) / (tierTotal.burst ?? 1) * 100)}%`
-                    : 'n/a'}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </PodContent>
-      </Pod>
+      {staff && <SchedulerQuality />}
     </div>
   )
 }

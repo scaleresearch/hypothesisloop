@@ -1,8 +1,8 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useProjectRouter } from '@/lib/query-state'
+import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import {
@@ -27,6 +27,7 @@ import {
 import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
+import { ExperimentAgents } from '@/components/experiment-agents'
 import { Pod, PodHeader, PodContent } from '@/components/ui/pod'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
@@ -254,10 +255,11 @@ const AGENT_COLORS = agentPalette
 // Colors are assigned once per full (unfiltered) agent roster, keyed by a sorted id list, so a
 // given agent keeps the same color even as the user toggles which agents/metrics are visible.
 function useAgentColorMap(agentIds: string[]): Map<string, string> {
-  return useMemo(() => {
-    const sorted = [...agentIds].sort()
-    return new Map(sorted.map((id, i) => [id, AGENT_COLORS[i % AGENT_COLORS.length]]))
-  }, [agentIds.join(',')])
+  const roster = [...agentIds].sort().join(',')
+  return useMemo(
+    () => new Map(roster.split(',').map((id, i) => [id, AGENT_COLORS[i % AGENT_COLORS.length]])),
+    [roster],
+  )
 }
 
 function AgentSelector({
@@ -490,10 +492,10 @@ function CompetingAgentsChart({
   )
 }
 
-function AgentJobsPanel({ platformExperimentId, agentId, trackedMetrics }: { platformExperimentId: string; agentId: string; trackedMetrics: string[] }) {
+function AgentJobsPanel({ projectId, platformExperimentId, agentId, trackedMetrics }: { projectId: string; platformExperimentId: string; agentId: string; trackedMetrics: string[] }) {
   const { data, error } = useSWR(
     ['pe-agent-jobs', platformExperimentId, agentId],
-    () => fetchExperimentsPage({ platform_experiment_id: platformExperimentId, agent: agentId, sort: '-created_at' }),
+    () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent: agentId, sort: '-created_at' }),
     { refreshInterval: 15_000 },
   )
   if (error) return <ErrorMessage>Could not load jobs from {agentId}.</ErrorMessage>
@@ -546,7 +548,7 @@ function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
 
 export default function PlatformExperimentDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
-  const router = useRouter()
+  const router = useProjectRouter()
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string> | null>(null)
   const [selectedMetricKeys, setSelectedMetricKeys] = useState<Set<string> | null>(null)
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null)
@@ -563,38 +565,39 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     { refreshInterval: 15_000 },
   )
 
-  // The newest jobs only, for the recent list and the live metrics picker.
+  // Each list below is asked for inside the platform experiment's own project, so it waits for
+  // the experiment itself. The newest jobs only, for the recent list and the live metrics picker.
   const { data: experimentsPage, error: experimentsError } = useSWR(
-    ['pe-experiments', id],
-    () => fetchExperimentsPage({ platform_experiment_id: id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
+    pe ? ['pe-experiments', id] : null,
+    () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
   const experiments = experimentsPage?.items
 
   // Asked for by status: a job that outlived the newest page of jobs is still running.
   const { data: runningPage, error: runningError } = useSWR(
-    ['pe-running', id],
-    () => fetchExperimentsPage({ platform_experiment_id: id, status: 'RUNNING', sort: '-created_at' }),
+    pe ? ['pe-running', id] : null,
+    () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, status: 'RUNNING', sort: '-created_at' }),
     { refreshInterval: 15_000 },
   )
 
   // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
   // so tallying it would report the page's shape under a label that reads as the experiment's.
   const { data: stats, error: statsError } = useSWR(
-    ['pe-stats-by-agent', id],
-    () => fetchExperimentStats({ platform_experiment_id: id, group_by: 'agent' }),
+    pe ? ['pe-stats-by-agent', id] : null,
+    () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'agent' }),
     { refreshInterval: 15_000 },
   )
   const jobsByAgent = stats?.groups ?? {}
   const { data: hypothesisStats, error: hypothesisStatsError } = useSWR(
-    ['pe-stats-by-hypothesis', id],
-    () => fetchExperimentStats({ platform_experiment_id: id, group_by: 'hypothesis' }),
+    pe ? ['pe-stats-by-hypothesis', id] : null,
+    () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'hypothesis' }),
     { refreshInterval: 15_000 },
   )
 
   const { data: donations } = useSWR(
-    'donations-open',
-    () => fetchDonationsPage({ status: 'open', limit: MAX_LIST_PAGE_SIZE }),
+    pe ? ['pe-donations-open', id] : null,
+    () => fetchDonationsPage({ project_id: pe!.project_id, platform_experiment_id: id, status: 'open', limit: MAX_LIST_PAGE_SIZE }),
     { refreshInterval: 15_000 },
   )
 
@@ -617,8 +620,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   )
 
   const { data: unsummarized } = useSWR(
-    ['pe-unsummarized', id],
-    () => fetchUnsummarizedJobIDs({ platform_experiment_id: id }),
+    pe ? ['pe-unsummarized', id] : null,
+    () => fetchUnsummarizedJobIDs({ project_id: pe!.project_id, platform_experiment_id: id }),
     { refreshInterval: 15_000 },
   )
 
@@ -995,6 +998,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         </PodContent>
       </Pod>
 
+      <ExperimentAgents pe={pe} />
+
       {/* Scoreboard */}
       <Pod>
         <PodHeader>
@@ -1117,6 +1122,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <tr>
                           <td colSpan={colCount} style={{ background: 'var(--surface-2)' }}>
                             <AgentJobsPanel
+                              projectId={pe.project_id}
                               platformExperimentId={pe.id}
                               agentId={agentId}
                               trackedMetrics={trackedMetricKeys}
