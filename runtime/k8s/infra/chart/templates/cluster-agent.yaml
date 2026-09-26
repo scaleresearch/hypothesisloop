@@ -87,6 +87,32 @@ roleRef:
   name: hypothesisloop-cluster-agent-reader
   apiGroup: rbac.authorization.k8s.io
 ---
+{{- if .Values.cpuClass }}
+# Only with cpuClass set: the agent labels each node with the class and writes its cores into the
+# node's status as cpu.hypothesisloop.dev/core. Nothing else outside the jobs namespace is changed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hypothesisloop-cluster-agent-cpu-class
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/status"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hypothesisloop-cluster-agent-cpu-class
+subjects:
+  - kind: ServiceAccount
+    name: hypothesisloop-cluster-agent
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: hypothesisloop-cluster-agent-cpu-class
+  apiGroup: rbac.authorization.k8s.io
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -119,6 +145,8 @@ spec:
               value: {{ required "apiURL is required" .Values.apiURL | quote }}
             - name: JOB_IMAGE
               value: {{ .Values.jobImage | quote }}
+            - name: CPU_CLASS
+              value: {{ .Values.cpuClass | quote }}
             - name: RUNTIME_TOKEN
               valueFrom:
                 secretKeyRef:

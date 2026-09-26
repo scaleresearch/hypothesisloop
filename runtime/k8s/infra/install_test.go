@@ -190,6 +190,65 @@ func TestTheRuntimeChangesNothingOutsideTheJobsNamespace(t *testing.T) {
 	}
 }
 
+// A CPU class is the one thing the runtime writes outside the jobs namespace, and only a cluster
+// whose owner named one grants the right: to patch nodes and their status, and nothing more.
+func TestOnlyAClusterWithACPUClassLetsTheAgentPatchNodes(t *testing.T) {
+	env := func(objects []map[string]any) string {
+		for _, object := range ofKind(objects, "Deployment") {
+			if metadata(object, "name") != "hypothesisloop-cluster-agent" {
+				continue
+			}
+			containers := object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)
+			for _, e := range containers[0].(map[string]any)["env"].([]any) {
+				if e.(map[string]any)["name"] == "CPU_CLASS" {
+					value, _ := e.(map[string]any)["value"].(string)
+					return value
+				}
+			}
+		}
+		t.Fatal("the cluster agent has no CPU_CLASS")
+		return ""
+	}
+	writes := func(objects []map[string]any) []string {
+		var out []string
+		for _, role := range ofKind(objects, "ClusterRole") {
+			for _, rule := range role["rules"].([]any) {
+				for _, verb := range rule.(map[string]any)["verbs"].([]any) {
+					if verb != "get" && verb != "list" && verb != "watch" {
+						for _, resource := range rule.(map[string]any)["resources"].([]any) {
+							out = append(out, verb.(string)+" "+resource.(string))
+						}
+					}
+				}
+			}
+		}
+		return out
+	}
+
+	plain := render(t)
+	if got := writes(plain); len(got) != 0 || env(plain) != "" {
+		t.Errorf("with no CPU class: cluster-wide writes = %v, CPU_CLASS = %q, want none", got, env(plain))
+	}
+
+	classed := render(t, "cpuClass=epyc-9354")
+	if got := writes(classed); strings.Join(got, ", ") != "patch nodes, patch nodes/status" {
+		t.Errorf("with a CPU class: cluster-wide writes = %v, want patch on nodes and nodes/status only", got)
+	}
+	if got := env(classed); got != "epyc-9354" {
+		t.Errorf("CPU_CLASS = %q, want the class", got)
+	}
+	bound := false
+	for _, binding := range ofKind(classed, "ClusterRoleBinding") {
+		if metadata(binding, "name") == "hypothesisloop-cluster-agent-cpu-class" {
+			subject := binding["subjects"].([]any)[0].(map[string]any)
+			bound = subject["name"] == "hypothesisloop-cluster-agent" && binding["roleRef"].(map[string]any)["name"] == "hypothesisloop-cluster-agent-cpu-class"
+		}
+	}
+	if !bound {
+		t.Error("the right to patch nodes is bound to nobody, or not to the cluster agent")
+	}
+}
+
 // The agent holds no right to create them, so a job would never start on a cluster whose chart
 // names them differently from what the agent puts on a pod.
 func TestTheChartInstallsTheNamespaceAndPriorityClassesJobsName(t *testing.T) {

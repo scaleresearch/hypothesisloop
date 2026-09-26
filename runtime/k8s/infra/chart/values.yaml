@@ -18,6 +18,18 @@ autoscalerEnabled: "false"
 # The image a job that names none runs in, which every node must be able to pull. Set, the
 # cluster also takes the jobs that name no image. Either way it takes every job that names its own.
 jobImage: ""
+# The name of a CPU class, for a cluster that takes jobs with no accelerator. Set, the agent
+# offers every schedulable node's cores as units of the type cpu.hypothesisloop.dev/class=<name>,
+# one unit per whole allocatable core: it labels the node and writes the extended resource
+# cpu.hypothesisloop.dev/core into its status, and jobs ask for cores of that type. The control
+# plane must price the type (accelerator_types, kind: cpu). This is the one thing the agent
+# changes outside the jobs namespace, and the right to patch nodes is granted only when it is
+# set. Emptied again, the agent stops publishing and holds no such right; the label and the
+# resource stay on the nodes until removed by hand:
+#   kubectl label node NODE cpu.hypothesisloop.dev/class-
+#   kubectl patch node NODE --subresource=status --type=json \
+#     -p '[{"op":"remove","path":"/status/capacity/cpu.hypothesisloop.dev~1core"}]'
+cpuClass: ""
 # helm uninstall removes the cluster from the control plane and stops its jobs before the
 # release goes. false leaves the cluster registered, for a release that is coming back.
 detachOnUninstall: true

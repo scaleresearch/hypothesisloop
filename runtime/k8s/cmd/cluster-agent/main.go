@@ -12,6 +12,9 @@
 //	API_URL             — base URL of the control-plane API
 //	JOB_IMAGE           — the image a job that names none runs in; set, the cluster also takes
 //	                      those jobs
+//	CPU_CLASS           — optional: the name of the CPU class the cluster's nodes offer their
+//	                      cores as, one unit a core; jobs then ask for cores of the type
+//	                      cpu.hypothesisloop.dev/class=<name>. Needs the right to patch nodes.
 package main
 
 import (
@@ -30,7 +33,24 @@ const (
 	binaryName        = "cluster-agent"
 	reconcileInterval = 2 * time.Second
 	statusInterval    = 3 * time.Second
+	// How often the CPU class is published again, for nodes that joined or changed size.
+	cpuClassInterval = 30 * time.Second
 )
+
+func republishCPUClass(ctx context.Context, jwc *k8sexec.JobWorkloadClient, log func(string, ...any)) {
+	ticker := time.NewTicker(cpuClassInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := jwc.PublishCPUClass(ctx); err != nil {
+				log("%v", err)
+			}
+		}
+	}
+}
 
 func main() {
 	detach := false
@@ -57,7 +77,7 @@ func main() {
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
 
-	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL, JobImage: os.Getenv("JOB_IMAGE")})
+	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL, JobImage: os.Getenv("JOB_IMAGE"), CPUClass: os.Getenv("CPU_CLASS")})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
 		os.Exit(1)
@@ -79,7 +99,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
 			os.Exit(1)
 		}
+		// The class is published before the first capacity report, so the report holds it. A
+		// cluster that cannot publish the class it was configured with does not start.
+		if err := jwc.PublishCPUClass(setupCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "cluster-agent: %v\n", err)
+			os.Exit(1)
+		}
 		setupCancel()
+		go republishCPUClass(ctx, jwc, log)
 	}
 
 	a := &agentloop.Agent{

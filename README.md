@@ -182,7 +182,7 @@ hl platform-experiments get pe-123                         # status, description
 hl platform-experiments list                               # yours and the ones the platform shares with every account
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics
-hl capacity                                                # live accelerators per cluster
+hl capacity                                                # live accelerators and CPU class cores per cluster
 hl hypothesis submit --builds-on root --text "..."
 hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
 hl hypothesis get h-1                                      # links, jobs, findings and comments
@@ -274,6 +274,31 @@ metadata:
   capacity_tier: guaranteed
   estimated_duration_hours: 6.0
 ```
+
+Every job asks for units of a type the catalog prices (`GET /resource-catalog`, `hl capacity`).
+A type is an accelerator or a CPU class, a type of `kind: cpu` whose unit is one core. A job
+that needs no accelerator asks for cores of a CPU class:
+
+```yaml
+job:
+  accelerator_type: cpu.hypothesisloop.dev/class=epyc-9354
+  accelerator_count: 8        # 8 cores
+```
+
+The count is then the job's cpu: `cpu` is left out or equals it, and `memory` and `storage`
+left out are the job's share of the node, one part per core. Its alternatives
+(`acceptable_accelerator_types`) are CPU classes too. Budget, quota, fairness, the concurrency
+cap and settlement count those cores at the class's rate, `acch_rate` per core-hour, as they
+count accelerators. A job with `accelerator_count: 0` is refused with 400: it would run outside
+all of them. Sums show cores apart from accelerators (`in_flight_cores`, `core_busy` and
+`core_total` of a cluster, `cores_available` in `hl capacity`), while
+`max_concurrent_accelerators` caps the two together.
+
+A Kubernetes cluster offers a CPU class when its chart is installed with `--set-string
+cpuClass=epyc-9354`: the agent then labels each schedulable node and publishes one unit per
+whole allocatable core, and the control plane prices the type in `accelerator_types` with
+`kind: cpu`. The local dev nodes publish `cpu.hypothesisloop.dev/class=dev-node`. A bare-metal
+node and a rented cluster publish no CPU class yet, so they take jobs on their accelerators only.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
