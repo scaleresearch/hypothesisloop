@@ -145,7 +145,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 		return 0
 	}
-	q := url.Values{"needs_summary": {"true"}, "agent": {*agent}}
+	q := url.Values{"needs_summary": {"true"}, "agent_id": {*agent}}
 	q.Set("platform_experiment_id", fmt.Sprint(metadata["platform_experiment_id"]))
 	var owed []struct {
 		ID string `json:"id"`
@@ -343,7 +343,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	}
 	q := url.Values{}
 	if *agent != "" {
-		q.Set("agent", *agent)
+		q.Set("agent_id", *agent)
 	}
 	if p := experimentOf(c, *pe); p != "" {
 		q.Set("platform_experiment_id", p)
@@ -587,7 +587,7 @@ Counts over every matching job: by status, capacity tier, eviction reason and ev
 		q.Set("platform_experiment_id", p)
 	}
 	if *agent != "" {
-		q.Set("agent", *agent)
+		q.Set("agent_id", *agent)
 	}
 	if *hypothesis != "" {
 		q.Set("hypothesis_id", *hypothesis)

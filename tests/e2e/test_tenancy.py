@@ -117,7 +117,7 @@ def _list_reads(t: Tenant) -> list[str]:
         f"/agents/stats?platform_experiment_id={t.pe_id}",
         "/experiments?limit=200",
         f"/experiments?platform_experiment_id={t.pe_id}",
-        f"/experiments?agent={t.agent}",
+        f"/experiments?agent_id={t.agent}",
         f"/experiments?project_id={t.project_id}",
         f"/experiments?hypothesis_id={t.hypothesis_id}",
         f"/experiments/stats?platform_experiment_id={t.pe_id}",

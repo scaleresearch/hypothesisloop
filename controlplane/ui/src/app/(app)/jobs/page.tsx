@@ -80,7 +80,7 @@ function JobsPageContent() {
     access.known ? ['jobs', scopeKey, agentFilter, peFilter, statusFilter, page, sort] : null,
     () => fetchExperimentsPage({
       ...scope,
-      agent: agentFilter || undefined,
+      agent_id: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
       limit: PAGE_SIZE,
@@ -92,7 +92,7 @@ function JobsPageContent() {
 
   const { data: unsummarized } = useSWR(
     access.known ? ['jobs-unsummarized', scopeKey, agentFilter, peFilter] : null,
-    () => fetchUnsummarizedJobIDs({ ...scope, agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
+    () => fetchUnsummarizedJobIDs({ ...scope, agent_id: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
 
@@ -121,7 +121,7 @@ function JobsPageContent() {
     access.known ? ['job-stats', scopeKey, agentFilter, peFilter, statusFilter] : null,
     () => fetchExperimentStats({
       ...scope,
-      agent: agentFilter || undefined,
+      agent_id: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
     }),

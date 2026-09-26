@@ -460,7 +460,7 @@ function CompetingAgentsChart({
 function AgentJobsPanel({ projectId, platformExperimentId, agentId, trackedMetrics }: { projectId: string; platformExperimentId: string; agentId: string; trackedMetrics: string[] }) {
   const { data, error } = useSWR(
     ['pe-agent-jobs', platformExperimentId, agentId],
-    () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent: agentId, sort: '-created_at' }),
+    () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent_id: agentId, sort: '-created_at' }),
     { refreshInterval: 15_000 },
   )
   if (error) return <ErrorMessage>Could not load jobs from <AgentLabel id={agentId} />.</ErrorMessage>

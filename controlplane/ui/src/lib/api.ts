@@ -224,10 +224,10 @@ export function fetchAgentStats(params: Pick<AgentsParams, 'project_id' | 'platf
 export interface ExperimentsParams {
   project_id?: string
   status?: string
-  agent?: string
+  agent_id?: string
   platform_experiment_id?: string
   /** Substring match against hypothesis and theory. */
-  search?: string
+  q?: string
   /** Only COMPLETED jobs whose agent filed no summary. */
   needs_summary?: boolean
   limit?: number
@@ -241,7 +241,7 @@ export function fetchExperimentsPage(params: ExperimentsParams): Promise<Page<Ex
 }
 
 // The ids of the completed jobs no summary was filed for, at most the 50 newest.
-export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'project_id' | 'agent' | 'platform_experiment_id'>): Promise<Set<string>> {
+export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'project_id' | 'agent_id' | 'platform_experiment_id'>): Promise<Set<string>> {
   return fetchExperimentsPage({ ...params, needs_summary: true, limit: 50 }).then(p => new Set(p.items.map(j => j.id)))
 }
 

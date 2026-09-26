@@ -155,7 +155,7 @@ func TestJobStatsAndListDefaultToThePlatformExperiment(t *testing.T) {
 	if code := run([]string{"job", "stats", "--agent", "a"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	if (*got)[0].Path != "/experiments/stats" || (*got)[0].Query != "agent=a&platform_experiment_id=pe-1" || stdout.String() != `{"by_status":{"COMPLETED":3},"total":3}`+"\n" {
+	if (*got)[0].Path != "/experiments/stats" || (*got)[0].Query != "agent_id=a&platform_experiment_id=pe-1" || stdout.String() != `{"by_status":{"COMPLETED":3},"total":3}`+"\n" {
 		t.Fatalf("request %+v, stdout %q", (*got)[0], stdout.String())
 	}
 	if code := run([]string{"job", "list", "--status", "RUNNING", "--limit", "50"}, &stdout, &stderr); code != 0 {

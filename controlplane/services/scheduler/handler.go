@@ -136,9 +136,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
-		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
+		Description: "Filter with ?agent_id, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
-			"changed since a previous session), ?search (substring match " +
+			"changed since a previous session), ?q (substring match " +
 			"against hypothesis and theory), ?needs_summary (finished experiments still missing " +
 			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
@@ -146,13 +146,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Each carries metrics: its best and last value on each declared metric it reported, and metric, the one on the first ranking metric. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent" doc:"Only this agent's experiments."`
+		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
 		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
 		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
-		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis and theory."`
+		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
@@ -245,13 +245,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
 			"agent or hypothesis that has a matching experiment, keyed by its id.",
 	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent" doc:"Only this agent's experiments."`
+		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
 		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
 		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
-		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis and theory."`
+		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
 		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
 		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {

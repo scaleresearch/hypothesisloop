@@ -76,9 +76,9 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 	spy := &filterSpyStore{total: 45}
 	r := schedulerRouter(t, spy)
 
-	code, _ := get(t, r, "/experiments?agent=a1&platform_experiment_id=pe-1&status=RUNNING"+
+	code, _ := get(t, r, "/experiments?agent_id=a1&platform_experiment_id=pe-1&status=RUNNING"+
 		"&hypothesis_id=h-1&project_id=proj-1&since=2026-01-02T03:04:05Z"+
-		"&search=min_lr&limit=10&offset=20&sort=-created_at")
+		"&q=min_lr&limit=10&offset=20&sort=-created_at")
 	if code != 200 {
 		t.Fatalf("status = %d, want 200", code)
 	}
@@ -189,8 +189,8 @@ func TestKnownQueryParametersStillAccepted(t *testing.T) {
 
 	for _, q := range []string{
 		"/experiments",
-		"/experiments?agent=a1",
-		"/experiments?platform_experiment_id=pe-1&status=RUNNING&search=x&limit=1&offset=0&sort=-created_at",
+		"/experiments?agent_id=a1",
+		"/experiments?platform_experiment_id=pe-1&status=RUNNING&q=x&limit=1&offset=0&sort=-created_at",
 	} {
 		if code, body := get(t, r, q); code != 200 {
 			t.Errorf("GET %s = %d, want 200; body=%s", q, code, body)

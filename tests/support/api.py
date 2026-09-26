@@ -539,7 +539,7 @@ class API:
 
     def needs_summary(self, agent_id: str, pe_id: str, limit: int = 50) -> list[str]:
         docs = self.get_json(
-            f"/experiments?needs_summary=true&agent={agent_id}&platform_experiment_id={pe_id}&limit={limit}"
+            f"/experiments?needs_summary=true&agent_id={agent_id}&platform_experiment_id={pe_id}&limit={limit}"
         )
         return [e["id"] for e in docs]
 

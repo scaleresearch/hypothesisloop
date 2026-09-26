@@ -292,7 +292,7 @@ var routes = []route{
 	{method: "PUT", path: "/platform-experiments/{id}/proposal", request: "/platform-experiments/<pe>/proposal", body: `{"experiment":{},"budget_accelerator_hours":1,"duration_hours":1,"agents":[{}],"baseline_job_id":"job-1","metric_reason":"r","measurement":"m"}`, rule: plannerOnly(agentAudience)},
 	{method: "POST", path: "/platform-experiments/{id}/summary", request: "/platform-experiments/<pe>/summary", body: `{"summary":"s"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/quotas", request: "/platform-experiments/<pe>/quotas", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "GET", path: "/platform-experiments/{id}/quotas/{agentID}", request: "/platform-experiments/<pe>/quotas/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},
+	{method: "GET", path: "/platform-experiments/{id}/quotas/{agent_id}", request: "/platform-experiments/<pe>/quotas/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/stages", request: "/platform-experiments/<pe>/stages", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/metrics-timeseries", request: "/platform-experiments/<pe>/metrics-timeseries?metric_name=loss", rule: scoped(agentAudience, metricsUnreachable), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/data-usage", request: "/platform-experiments/<pe>/data-usage", rule: scoped(agentAudience, reached), sharedRead: true},
