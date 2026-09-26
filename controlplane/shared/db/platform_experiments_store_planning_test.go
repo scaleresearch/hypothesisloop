@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -281,6 +282,15 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
 		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)
+	}
+
+	// The planner leaves with its allowance: it holds no quota and is no participant, though its
+	// signup stays for its jobs and code to keep their owner.
+	if quota, err := pes.GetAgentQuota(ctx, planner, id); err != nil || quota != nil {
+		t.Fatalf("the planner's quota after accept = %+v, %v, want none", quota, err)
+	}
+	if taking, err := pes.ListParticipants(ctx, id); err != nil || len(taking) != 4 || slices.Contains(taking, planner) {
+		t.Fatalf("participants after accept = %v, %v, want the 4 researchers", taking, err)
 	}
 
 	// The launcher runs the coordinator and the researchers, and no longer the planner.

@@ -643,7 +643,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if advances == nil {
 			advances = []domain.StageAdvance{}
 		}
-		allSignups, err := peh.svc.store.ListSignups(ctx, in.ID)
+		allSignups, err := peh.svc.store.ListParticipants(ctx, in.ID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
