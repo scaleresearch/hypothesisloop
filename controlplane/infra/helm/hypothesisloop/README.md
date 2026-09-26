@@ -79,11 +79,13 @@ control-service has made the tables the init container fails and the pod waits.
   it is built (`NEXT_PUBLIC_*` build arguments of `controlplane/build/Dockerfile.ui`), so an
   image serves one deployment. `ui.supabaseURL` and `ui.supabasePublishableKey` repeat the two
   Supabase values as the pod's environment.
-- **Hosted agents.** `agents.launcher`, `agents.image` and `agents.apiURL` are the `agents`
-  section of the config and are required, since the control plane does not start without them.
-- **Runtimes.** `runtimes.apiURL` and `runtimes.metricsURL` are where a cluster's runtime
-  reaches the API and metrics-service. Registering a cluster hands both out, so they must be
-  reachable from inside every cluster that runs jobs.
+- **The API's address.** `publicAPIURL` is the one address hosted agents and every cluster's
+  runtime reach the API at. It is required and must be reachable from wherever a launcher rents
+  and from inside every cluster that runs jobs.
+- **Hosted agents.** `agents.launcher` and `agents.image` are the `agents` section of the config
+  and are required, since the control plane does not start without them.
+- **Runtimes.** `runtimes.metricsURL` is where a cluster's runtime reaches metrics-service.
+  Registering a cluster hands it out beside `publicAPIURL`.
 - **cloud-agent and agent-launcher.** Off by default. Each is one image and one config file,
   passed whole through `config` and mounted from a ConfigMap. The file names environment
   variables and never holds a secret; list those variables in `secretEnv` and keep their values

@@ -164,6 +164,10 @@ type ServicesConfig struct {
 	// operations on one router, so there is a single base URL, a single /openapi.json and a
 	// single /explore to discover all of it.
 	APIPort int `yaml:"api_port"`
+	// PublicAPIURL is the one address everything outside the control plane reaches this API at:
+	// a hosted agent from wherever its launcher rents, and a cluster's runtime from inside its
+	// cluster. It is handed to both, so it is never loopback.
+	PublicAPIURL string `yaml:"public_api_url"`
 	// MetricControllerPort serves the internal controller only; nothing agent-facing.
 	MetricControllerPort int    `yaml:"metric_controller_port"`
 	MetricsDBURL         string `yaml:"metrics_db_url"`
@@ -237,8 +241,6 @@ type AgentsConfig struct {
 	Launcher string `yaml:"launcher"`
 	// Image is what every hosted agent's machine boots.
 	Image string `yaml:"image"`
-	// APIURL is the address a hosted agent reaches this API at, from wherever its launcher rents.
-	APIURL string `yaml:"api_url"`
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
 	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
@@ -278,10 +280,10 @@ type AccountsConfig struct {
 	MaxProjectsPerOrg int `yaml:"max_projects_per_org"`
 }
 
-// RuntimesConfig is what a cluster's runtime is installed with: where it reaches the platform
-// and which images it runs. All of it is handed out when a cluster is registered.
+// RuntimesConfig is what a cluster's runtime is installed with beside services.public_api_url:
+// where it sends metrics and which images it runs. All of it is handed out when a cluster is
+// registered.
 type RuntimesConfig struct {
-	APIURL     string `yaml:"api_url"`
 	MetricsURL string `yaml:"metrics_url"`
 	Registry   string `yaml:"registry"`
 	ImageTag   string `yaml:"image_tag"`

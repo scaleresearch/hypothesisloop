@@ -115,7 +115,7 @@ render_settings() {
             -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
-    values+=("  api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
+    values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}")
   fi
   sed -e 's|http://greptimedb:4000|http://localhost:4010|' \

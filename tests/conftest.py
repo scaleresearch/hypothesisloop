@@ -45,8 +45,8 @@ TEST_ACCH_RATE = 0.25
 # The type every cluster offers its cores as. A job that states cpu and no accelerator holds that
 # many units of it. A job that holds no priced unit is refused.
 TEST_CPU_TYPE = "hypothesisloop.dev/cpu=core"
-# Must match TEST_CPU_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml: a budget
-# spent on cores reads as CPU core-hours.
+# The rate the control plane builds TEST_CPU_TYPE in at: a budget spent on cores reads as CPU
+# core-hours.
 TEST_CPU_ACCH_RATE = 1.0
 
 

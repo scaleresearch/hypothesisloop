@@ -138,10 +138,20 @@ func MustLoad(path string) *Config {
 	return cfg
 }
 
+// cpuCoreAccHRate is what one core of domain.CPUType costs an hour. At 1 the budget of an
+// experiment on cores reads as CPU core-hours.
+const cpuCoreAccHRate = 1.0
+
 func (c *Config) build() error {
 	if len(c.AcceleratorTypes) == 0 {
 		return fmt.Errorf("accelerator_types must not be empty")
 	}
+	for _, g := range c.AcceleratorTypes {
+		if domain.CPUType.Is(domain.AcceleratorType(g.Name)) {
+			return fmt.Errorf("accelerator_types lists %s, which is built in at %g and priced nowhere else", domain.CPUType, cpuCoreAccHRate)
+		}
+	}
+	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)
 	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
 
 	seenNames := map[string]bool{}
@@ -227,9 +237,6 @@ func (c *Config) build() error {
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
 	}
-	if apiURL, err := url.Parse(c.Agents.APIURL); err != nil || apiURL.Host == "" || (apiURL.Scheme != "http" && apiURL.Scheme != "https") {
-		return fmt.Errorf("agents api_url %q must be the http(s) address hosted agents reach this API at", c.Agents.APIURL)
-	}
 	if _, _, err := domain.ResolveAgentLaunch("", "", c.Agents.DefaultModel, nil); err != nil {
 		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
 	}
@@ -264,13 +271,13 @@ func (c *Config) build() error {
 	if c.Accounts.MaxProjectsPerOrg <= 0 {
 		return fmt.Errorf("accounts max_projects_per_org is required and positive: how many projects an org may hold")
 	}
-	for key, address := range map[string]string{"api_url": c.Runtimes.APIURL, "metrics_url": c.Runtimes.MetricsURL} {
+	for key, address := range map[string]string{"services public_api_url": c.Services.PublicAPIURL, "runtimes metrics_url": c.Runtimes.MetricsURL} {
 		parsed, err := url.Parse(address)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return fmt.Errorf("runtimes %s %q must be the http(s) address a cluster's runtime reaches the platform at", key, address)
+			return fmt.Errorf("%s %q must be the http(s) address the platform is reached at from outside it", key, address)
 		}
 		if unreachableFromElsewhere(parsed.Hostname()) {
-			return fmt.Errorf("runtimes %s %q is loopback or unspecified: a runtime inside a cluster cannot reach it", key, address)
+			return fmt.Errorf("%s %q is loopback or unspecified: a hosted agent or a runtime inside a cluster cannot reach it", key, address)
 		}
 	}
 	registry, err := url.Parse("//" + c.Runtimes.Registry)

@@ -4,6 +4,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,8 +191,7 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 	}
 	rendered := productionConfig(t)
 	for _, line := range []string{
-		"  api_url: http://host.example.invalid:8081\n  default_model",
-		"  api_url: http://host.example.invalid:8081\n  metrics_url",
+		"  public_api_url: http://host.example.invalid:8081",
 		"  metrics_url: http://host.example.invalid:8084",
 		"  endpoint: http://host.example.invalid:9000",
 		"  registry: host.example.invalid:5000",
@@ -211,26 +211,30 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 }
 
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
-	const api, metrics = "  api_url: http://host.example.invalid:8081\n  metrics_url: http://host.example.invalid:8084", "  metrics_url: http://host.example.invalid:8084"
+	const api, metrics = "  public_api_url: http://host.example.invalid:8081", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{
-		"no section":            {"runtimes:\n" + api + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
-		"no api url":            {api, "  metrics_url: http://metrics.example.invalid"},
-		"no metrics url":        {metrics, `  metrics_url: ""`},
-		"metrics url no host":   {metrics, "  metrics_url: /metrics"},
-		"metrics url not http":  {metrics, "  metrics_url: grpc://metrics.example.invalid"},
-		"metrics url localhost": {metrics, "  metrics_url: http://localhost:8084"},
-		"metrics url loopback":  {metrics, "  metrics_url: http://127.0.0.1:8084"},
-		"metrics url any":       {metrics, "  metrics_url: http://0.0.0.0:8084"},
-		"metrics url any v6":    {metrics, "  metrics_url: http://[::]:8084"},
-		"api url loopback":      {api, "  api_url: http://[::1]:8081\n  metrics_url: http://metrics.example.invalid"},
-		"misspelled key":        {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
+		"no section":             {"runtimes:\n" + metrics + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
+		"no api url":             {api + "\n", ""},
+		"api url with no host":   {api, "  public_api_url: /api"},
+		"api url not http":       {api, "  public_api_url: ftp://example.invalid"},
+		"api url under agents":   {"  launcher: main", "  launcher: main\n  api_url: http://host.example.invalid:8081"},
+		"api url under runtimes": {metrics, metrics + "\n  api_url: http://host.example.invalid:8081"},
+		"no metrics url":         {metrics, `  metrics_url: ""`},
+		"metrics url no host":    {metrics, "  metrics_url: /metrics"},
+		"metrics url not http":   {metrics, "  metrics_url: grpc://metrics.example.invalid"},
+		"metrics url localhost":  {metrics, "  metrics_url: http://localhost:8084"},
+		"metrics url loopback":   {metrics, "  metrics_url: http://127.0.0.1:8084"},
+		"metrics url any":        {metrics, "  metrics_url: http://0.0.0.0:8084"},
+		"metrics url any v6":     {metrics, "  metrics_url: http://[::]:8084"},
+		"api url loopback":       {api, "  public_api_url: http://[::1]:8081"},
+		"misspelled key":         {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {
 			t.Fatalf("%s: the production config has no %q", name, edit[0])
 		}
-		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "metric_url") {
-			t.Errorf("%s: Load = %v, want it refused naming the runtimes section", name, err)
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "metric_url") && !strings.Contains(err.Error(), "api_url") {
+			t.Errorf("%s: Load = %v, want it refused naming the address", name, err)
 		}
 	}
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
@@ -241,9 +245,8 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (RuntimesConfig{APIURL: "http://host.example.invalid:8081", MetricsURL: "http://host.example.invalid:8084",
-		Registry: "host.example.invalid:5000", ImageTag: "abc1234"}); cfg.Runtimes != want {
-		t.Errorf("runtimes = %+v, want %+v", cfg.Runtimes, want)
+	if want := (RuntimesConfig{MetricsURL: "http://host.example.invalid:8084", Registry: "host.example.invalid:5000", ImageTag: "abc1234"}); cfg.Runtimes != want || cfg.Services.PublicAPIURL != "http://host.example.invalid:8081" {
+		t.Errorf("runtimes = %+v at %q, want %+v", cfg.Runtimes, cfg.Services.PublicAPIURL, want)
 	}
 }
 
@@ -278,9 +281,6 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"no launcher":              {"  launcher: main", `  launcher: ""`},
 		"launcher not an id":       {"  launcher: main", "  launcher: Main_1"},
 		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
-		"no api url":               {"  api_url: http://host.example.invalid:8081", `  api_url: ""`},
-		"api url with no host":     {"  api_url: http://host.example.invalid:8081", "  api_url: /api"},
-		"api url not http":         {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
 		"misspelled agents key":    {"  launcher: main", "  launcher: main\n  launchers: [main]"},
 		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
 		"no boot limit":            {"  boot_limit_seconds: 300\n", ""},
@@ -401,8 +401,9 @@ func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
 	}
 }
 
-// A CPU experiment's budget reads as core-hours, which holds only while a core-hour costs 1.
-func TestTheShippedCatalogPricesACoreHourAtOne(t *testing.T) {
+// A CPU experiment's budget reads as core-hours, which holds only while a core-hour costs 1: the
+// type is built in at that rate, and a file that prices it is refused.
+func TestACoreHourIsBuiltInAtOneAndPricedNowhereElse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
@@ -411,7 +412,11 @@ func TestTheShippedCatalogPricesACoreHourAtOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rate := cfg.RateByName[string(domain.CPUType)]; rate != 1.0 {
-		t.Errorf("rate of %s = %v, want 1", domain.CPUType, rate)
+	if rate := cfg.RateByName[string(domain.CPUType)]; rate != 1.0 || !slices.Contains(cfg.AcceleratorTypeNames(), string(domain.CPUType)) {
+		t.Errorf("rate of %s = %v in %v, want 1 and the type in the catalog", domain.CPUType, rate, cfg.AcceleratorTypeNames())
+	}
+	listed := strings.Replace(productionConfig(t), "accelerator_types:\n", "accelerator_types:\n  - name: "+string(domain.CPUType)+"\n    acch_rate: 0.5\n", 1)
+	if err := loadText(t, listed); err == nil || !strings.Contains(err.Error(), "built in") {
+		t.Errorf("a file that lists %s: Load = %v, want it refused as built in", domain.CPUType, err)
 	}
 }

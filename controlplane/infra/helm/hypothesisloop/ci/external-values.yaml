@@ -24,11 +24,10 @@ auth:
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:test
-  apiURL: https://api.example.invalid
+publicAPIURL: https://api.example.invalid
 postgres:
   enabled: false
 runtimes:
-  apiURL: https://api.example.invalid
   metricsURL: https://metrics.example.invalid
 objectStore:
   endpoint: https://object-store.example.invalid

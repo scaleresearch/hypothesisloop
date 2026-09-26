@@ -1,8 +1,13 @@
 # HypothesisLoop platform configuration.
 # Platform-wide rates and scheduling policy live here.
 
+#   public_api_url  the one address this API is reached at from outside the control plane: by a
+#                   hosted agent from wherever its launcher rents, and by a cluster's runtime
+#                   from inside its cluster. Registering a cluster hands it out. A loopback
+#                   address is rejected at load.
 services:
   api_port: 8081
+  public_api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   metric_controller_port: 8084
   metrics_db_url: http://greptimedb:4000
   graph_db_url: bolt://memgraph:7687
@@ -35,7 +40,7 @@ auth:
 # asked for with hosted: true is started by a launcher, a separate process that holds a provider
 # account and asks this API which instances should exist. Nothing here names a provider.
 # A platform experiment created with coordinator_hosted gets its coordinator the same way: one
-# more instance of the same launcher and image, at the same address, on default_model unless the
+# more instance of the same launcher and image, on default_model unless the
 # request names another.
 #
 #   launcher   the launcher a newly hosted agent is given to: 1 to 16 lowercase letters and
@@ -47,7 +52,6 @@ auth:
 #              that is not registered.
 #   image      what every hosted agent's machine boots. The launcher's provider must be able to
 #              pull it. A change replaces every running agent's machine.
-#   api_url    the address a hosted agent reaches this API at, from wherever its launcher rents.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
 #   boot_limit_seconds  how long a hosted machine may go unreported by its launcher after it was
@@ -75,7 +79,6 @@ auth:
 agents:
   launcher: main
   image: registry.example.invalid/hypothesisloop-experimentator-base:latest
-  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   default_model: claude-sonnet-5
   boot_limit_seconds: 300
   progress_limit_seconds: 300
@@ -114,18 +117,16 @@ accounts:
   max_orgs_per_user: 3
   max_projects_per_org: 10
 
-# What a cluster's runtime is installed with. Registering a cluster returns all four beside its
-# runtime token, so the command that starts the cluster's agents has one source. The addresses
-# must be reachable outbound from inside every cluster and the registry from every node, so a
-# loopback address is rejected at load.
+# What a cluster's runtime is installed with, beside services.public_api_url. Registering a
+# cluster returns all of it beside its runtime token, so the command that starts the cluster's
+# agents has one source. The address must be reachable outbound from inside every cluster and the
+# registry from every node, so a loopback address is rejected at load.
 #
-#   api_url       this API.
 #   metrics_url   the metrics service.
 #   registry      the registry the runtime's images are pulled from (host[:port][/path], no
 #                 scheme): where `make images REGISTRY=...` pushed.
 #   image_tag     the tag of those images. One deployment runs one tag: the control plane's own.
 runtimes:
-  api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   metrics_url: http://REPLACE-WITH-HOST-ADDRESS:8084
   registry: REPLACE-WITH-HOST-ADDRESS:5000
   image_tag: REPLACE-WITH-IMAGE-TAG
@@ -215,17 +216,15 @@ data_store:
 #
 # hypothesisloop.dev/cpu=core is the one type that is no device: one unit is one CPU core. Every
 # runtime offers its nodes' cores as it, and a job that asks for cores and no accelerator (cpu: 4)
-# holds that many units. Its rate is 1.0, so the budget of an experiment on cores reads as CPU
-# core-hours: 4 cores for an hour cost 4.
+# holds that many units. It is built in at 1.0, so the budget of an experiment on cores reads as
+# CPU core-hours: 4 cores for an hour cost 4. It is not listed below, and a file that lists it is
+# refused at load.
 #
 # Accelerators are the resource dimension admitted/preempted on. RAM/storage are hard
 # physical-fit-checked at admission instead of hours-quota-tracked. Agents declare accelerator
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
 
 accelerator_types:
-  - name:      hypothesisloop.dev/cpu=core
-    acch_rate: 1.0
-
   - name:      nvidia.com/gpu.product=Tesla-T4
     acch_rate: 0.125
 

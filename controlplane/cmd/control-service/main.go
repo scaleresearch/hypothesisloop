@@ -249,7 +249,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	launcherRouter := chi.NewRouter()
 	launcherDoc := apidocs.New(launcherRouter, "hypothesisloop agent-launcher API", "1.0.0", "", gate.authenticator, gate.access, logger)
 	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.Settings{
-		Image: pcfg.Agents.Image, APIURL: pcfg.Agents.APIURL, SigningSecret: pcfg.Auth.SigningSecret,
+		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
@@ -273,7 +273,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	autoscaledClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterAutoscalerCapability(ctx, metricsDBURL, connectedWithin)
 	}
-	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
+	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag},
 		accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger).WithAutoscalers(autoscaledClusters))
 	accounts.RegisterRepositoriesHuma(doc, repos)
 	scheduler.RegisterHuma(doc, schedulerHandler)

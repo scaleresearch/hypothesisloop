@@ -123,19 +123,16 @@
         },
         "image": {
           "type": "string"
-        },
-        "apiURL": {
-          "type": "string"
         }
       }
+    },
+    "publicAPIURL": {
+      "type": "string"
     },
     "runtimes": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "apiURL": {
-          "type": "string"
-        },
         "metricsURL": {
           "type": "string"
         }

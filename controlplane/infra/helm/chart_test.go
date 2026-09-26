@@ -61,7 +61,6 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	if got, want := inCluster.Agents, (config.AgentsConfig{
 		Launcher: "main",
 		Image:    "registry.example.invalid/hypothesisloop-experimentator-base:test",
-		APIURL:   "http://api.example.invalid:30081",
 		// Not a value of the chart: the staged settings file decides it.
 		DefaultModel:                   "claude-sonnet-5",
 		BootLimitSeconds:               300,
@@ -72,7 +71,6 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 		t.Errorf("in-cluster agents = %+v, want %+v", got, want)
 	}
 	if got, want := inCluster.Runtimes, (config.RuntimesConfig{
-		APIURL:     "http://api.example.invalid:30081",
 		MetricsURL: "http://metrics.example.invalid:30084",
 		Registry:   "registry.example.invalid",
 		ImageTag:   "test",
@@ -82,8 +80,8 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	if got := inCluster.DataStore.Endpoint; got != "http://object-store.hypothesisloop.svc:9000" {
 		t.Errorf("in-cluster data_store.endpoint = %q", got)
 	}
-	if got := inCluster.Services; got.MetricsDBURL != "http://greptimedb:4000" || got.GraphDBURL != "bolt://memgraph:7687" {
-		t.Errorf("in-cluster services = %+v, want the in-cluster stores", got)
+	if got := inCluster.Services; got.MetricsDBURL != "http://greptimedb:4000" || got.GraphDBURL != "bolt://memgraph:7687" || got.PublicAPIURL != "http://api.example.invalid:30081" {
+		t.Errorf("in-cluster services = %+v, want the in-cluster stores and the API's public address", got)
 	}
 
 	external := loadRendered(t, charttest.Render(t, charttest.External), charttest.External, configLoaders[0])
@@ -251,8 +249,8 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no UI origin":                {charttest.InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
 		"no launcher":                 {charttest.InCluster, `agents.launcher=""`, "agents.launcher is required"},
 		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
-		"no agent API address":        {charttest.InCluster, `agents.apiURL=""`, "agents.apiURL is required"},
-		"no runtime API address":      {charttest.InCluster, `runtimes.apiURL=""`, "runtimes.apiURL is required"},
+		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
+		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
 		"no Supabase address":         {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},

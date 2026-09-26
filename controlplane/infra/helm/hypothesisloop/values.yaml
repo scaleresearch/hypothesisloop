@@ -64,22 +64,22 @@ github:
   appSlug: ""
   clientId: ""
 
+# Required: the one address this API is reached at from outside the control plane, by hosted
+# agents and by every cluster's runtime. services.public_api_url of hypothesisloop.yaml.
+publicAPIURL: ""
+
 # Hosted agents: the agents section of hypothesisloop.yaml.
 agents:
   # The launcher_name of the agent-launcher that starts them.
   launcher: main
   # Required: the image a hosted agent's machine boots, pullable from wherever the launcher rents.
   image: ""
-  # Required: the address a hosted agent reaches the API at.
-  apiURL: ""
 
-# Where a cluster's runtime reaches the platform: the runtimes section of hypothesisloop.yaml.
-# Both are handed out when a cluster is registered and must be reachable from inside every
-# cluster that runs jobs. The section's registry and image_tag are images.registry and
-# images.tag above: a cluster's runtime installs the images this release runs.
+# Where a cluster's runtime sends metrics: the runtimes section of hypothesisloop.yaml. It is
+# handed out when a cluster is registered and must be reachable from inside every cluster that
+# runs jobs. The section's registry and image_tag are images.registry and images.tag above: a
+# cluster's runtime installs the images this release runs.
 runtimes:
-  # Required: this API.
-  apiURL: ""
   # Required: metrics-service.
   metricsURL: ""
 

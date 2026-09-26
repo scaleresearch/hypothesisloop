@@ -17,7 +17,7 @@
 launcher_name: main
 
 # Where this process reaches the control plane. The address the agents reach it at is the control
-# plane's own agents.api_url and arrives in each instance's environment.
+# plane's own services.public_api_url and arrives in each instance's environment.
 api_url: https://api.example.invalid
 
 # One pass costs the provider one list call, and a create or destroy call for each instance that
