@@ -9,7 +9,7 @@ import {
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { Button, Chip } from '@/components/ui/button'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
@@ -27,7 +27,7 @@ const FLAVORS = ['generalist', 'hyperparameter-search', 'architecture-search', '
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
 // started with: its token says which agent of which platform experiment it is, and it reads its
-// flavor and model from its signup.
+// specialization and model from its signup.
 function envFile(agent: JoinedAgent): string {
   return [`API_URL=${apiURL()}`, `HL_TOKEN=${agent.token}`].join('\n')
 }
@@ -57,7 +57,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   return (
     <div className="grid gap-2.5">
       <form className="flex flex-wrap items-end gap-2" onSubmit={submit}>
-        <FormField label="Flavor">
+        <FormField label="Specialization">
           <Input
             fieldSize="sm"
             mono
@@ -86,15 +86,13 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             <Chip type="button" active={!hosted} onClick={() => setHosted(false)}>Me</Chip>
           </div>
         </div>
-        <Button size="sm" variant="primary" type="submit" disabled={busy}>
-          {busy ? 'Adding…' : 'Add agent'}
-        </Button>
+        <Button size="sm" variant="primary" type="submit" loading={busy}>Add agent</Button>
       </form>
-      <span className="text-xs text-subtle">
+      <p className="text-xs text-subtle">
         {hosted
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent is cut.'
           : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
-      </span>
+      </p>
       {error && <ErrorMessage>{error}</ErrorMessage>}
     </div>
   )
@@ -170,18 +168,18 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
 
   return (
     <Card>
-      <CardHeader>Agents{agents ? ` (${agents.length})` : ''}</CardHeader>
+      <CardHeader><CardTitle note={agents && `(${agents.length})`}>Agents</CardTitle></CardHeader>
       <CardContent scrollX>
         <div className="grid gap-3.5">
           {stopped && (
             <ErrorMessage>
-              This platform experiment was created, but it is not running as asked: {stopped.step} failed. {stopped.message}{' '}
+              This experiment was created, but it is not running as asked: {stopped.step} failed. {stopped.message}{' '}
               Nothing was undone. Finish with the controls below.{' '}
               <Button variant="link" size="sm" onClick={forgetStopped}>Dismiss</Button>
             </ErrorMessage>
           )}
           {readOnly ? null : started
-            ? <span className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
+            ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</p>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {!readOnly && pe.status === PlatformExperimentStatus.OPEN && (
             <div className="flex flex-wrap items-center gap-2.5">
@@ -196,9 +194,8 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               value={envFile(agent)}
               note={<>
                 Save it as an env file readable by you alone and start the agent with it. The token
-                acts as this agent in this platform experiment and nowhere else. It is derived from
-                the agent&apos;s place here, so <span className="font-mono">Show token</span> in the
-                agent&apos;s row brings the same one back, as does{' '}
+                works for this agent in this experiment and nowhere else. It never changes:{' '}
+                <span className="font-semibold">Show token</span> in the agent&apos;s row shows the same one again, as does{' '}
                 <span className="font-mono">hl platform-experiments agents add {pe.id} --agent {agent.agent_id}</span>.
                 Removing the agent is what stops it working.
               </>}
@@ -224,7 +221,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {agents && agents.length > 0 && (
             <Table>
               <thead>
-                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine</th><th>Flavor</th><th>Model</th><th>Joined</th><th /></tr>
+                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine</th><th>Specialization</th><th>Model</th><th>Joined</th><th /></tr>
               </thead>
               <tbody>
                 {agents.map(agent => (
@@ -242,7 +239,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                     </td>
                     <td className="whitespace-nowrap font-mono text-xs">{agent.flavor ?? 'default'}</td>
                     <td className="whitespace-nowrap font-mono text-xs">{agent.model ?? 'default'}</td>
-                    <td className="font-mono text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
+                    <td className="whitespace-nowrap text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
                     <td>
                       {!readOnly && (
                         <div className="flex justify-end gap-1.5">
@@ -259,18 +256,18 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
         </div>
         <ConfirmDialog
           open={starting === 'asked'}
-          title="Start this platform experiment now?"
+          title="Start this experiment now?"
           confirmLabel="Start"
           variant="primary"
           onConfirm={start}
           onCancel={() => setStarting(null)}
         >
-          Signup closes and the budget is divided among the agents that have joined. No agent can join or be removed afterwards.
+          The budget is divided among the agents that have joined. After that no agent can join or be removed.
         </ConfirmDialog>
         {removing && (
           <ConfirmDialog
             open
-            title={`Remove ${removing.name} from this platform experiment?`}
+            title={`Remove ${removing.name} from this experiment?`}
             confirmLabel="Remove"
             onConfirm={() => remove(removing)}
             onCancel={() => setRemoving(null)}
