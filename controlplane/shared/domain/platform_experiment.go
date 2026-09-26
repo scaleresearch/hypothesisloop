@@ -178,6 +178,9 @@ type PlatformExperiment struct {
 	// MaxHosted is how many machines the platform may run for this platform experiment, its
 	// coordinator included. Fixed at creation.
 	MaxHosted int `json:"max_hosted"`
+	// Shared is the platform's decision that every account may read this platform experiment and
+	// everything in it. Staff set it; nobody outside its org writes to it.
+	Shared bool `json:"shared"`
 
 	// CoordinatorHosted means the platform runs this platform experiment's coordinator. Fixed at
 	// creation. Coordinator says on which launcher and model and what became of its machine; it

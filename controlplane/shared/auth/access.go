@@ -30,6 +30,10 @@ type Placement interface {
 // A resource outside the principal's scope and one that does not exist are answered alike, as
 // not found, so the answer says nothing about another org. Only staff, who see every org, pass
 // on an id with no row and get the handler's own answer for it.
+//
+// One thing reaches past a caller's scope: a platform experiment staff shared is read by every
+// account, and only read (reaches). Every write to it, and every credential of it, is answered
+// to another org's caller as for any platform experiment of another org.
 type Access struct {
 	placement Placement
 }
@@ -49,6 +53,37 @@ func forbidden(message string) *Error {
 
 func badRequest(message string) *Error {
 	return &Error{status: http.StatusBadRequest, Message: message}
+}
+
+type readKey struct{}
+
+// read is what the gate in front of every handler knows of a request that only reads.
+type read struct {
+	// platformExperimentID is the one platform experiment a listing is narrowed to, empty when
+	// the request names none.
+	platformExperimentID string
+}
+
+// WithRead marks ctx as a request that reads and writes nothing, naming the platform experiment
+// its platform_experiment_id narrows a listing to. The gates that authenticate a request set it
+// (apidocs for every documented operation, the watch handler for its stream) and nothing else
+// does, so no handler decides for itself that it is a read.
+func WithRead(ctx context.Context, platformExperimentID string) context.Context {
+	return context.WithValue(ctx, readKey{}, read{platformExperimentID: platformExperimentID})
+}
+
+// readsShared reports whether the request may read platform experiments staff shared: it is a
+// read, and its caller holds an account. A token the platform derived for an agent, a coordinator
+// or a job stays within its own platform experiment.
+func readsShared(ctx context.Context, p Principal) bool {
+	_, reading := ctx.Value(readKey{}).(read)
+	return reading && (p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff)
+}
+
+// reaches is the one statement of what a caller reaches: what its scope admits, and for a read
+// by an account a platform experiment staff shared, with everything placed in it.
+func reaches(ctx context.Context, p Principal, t domain.Tenancy) bool {
+	return p.Scope().Admits(t) || (t.Shared && readsShared(ctx, p))
 }
 
 func principal(ctx context.Context) (Principal, error) {
@@ -95,7 +130,7 @@ func (a *Access) within(ctx context.Context, what, platformExperimentID string) 
 	if err != nil {
 		return err
 	}
-	if tenancy == nil || !p.Scope().Admits(*tenancy) {
+	if tenancy == nil || !reaches(ctx, p, *tenancy) {
 		return NotFound(what)
 	}
 	return nil
@@ -132,7 +167,7 @@ func (a *Access) experiment(ctx context.Context, experimentID string) (*domain.T
 	if err != nil {
 		return nil, err
 	}
-	return admitted(p, tenancy, "experiment")
+	return admitted(ctx, p, tenancy, "experiment")
 }
 
 // Donation admits the principal to one donation request.
@@ -162,15 +197,15 @@ func (a *Access) donation(ctx context.Context, donationID string) (*domain.Tenan
 	if err != nil {
 		return nil, err
 	}
-	return admitted(p, tenancy, "donation request")
+	return admitted(ctx, p, tenancy, "donation request")
 }
 
 // admitted answers for a placed row. Staff pass on an absent one with a nil tenancy.
-func admitted(p Principal, tenancy *domain.Tenancy, what string) (*domain.Tenancy, error) {
+func admitted(ctx context.Context, p Principal, tenancy *domain.Tenancy, what string) (*domain.Tenancy, error) {
 	if p.Scope().Unrestricted() {
 		return tenancy, nil
 	}
-	if tenancy == nil || !p.Scope().Admits(*tenancy) {
+	if tenancy == nil || !reaches(ctx, p, *tenancy) {
 		return nil, NotFound(what)
 	}
 	return tenancy, nil
@@ -284,13 +319,25 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 	return requested, nil
 }
 
-// ListScope is the principal's scope for a listing, narrowed to one project when asked.
+// ListScope is the principal's scope for a listing, narrowed to one project when asked. A
+// listing is the caller's own, with one exception: narrowed by platform_experiment_id to a
+// platform experiment staff shared, it is that platform experiment's for an account that reads.
 func (a *Access) ListScope(ctx context.Context, projectID string) (domain.TenantScope, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return domain.TenantScope{}, err
 	}
 	scope := p.Scope()
+	if named, _ := ctx.Value(readKey{}).(read); named.platformExperimentID != "" && !scope.Unrestricted() && readsShared(ctx, p) &&
+		domain.IdentifierShaped(named.platformExperimentID) {
+		tenancy, _, err := a.placement.PlatformExperimentTenancy(ctx, named.platformExperimentID)
+		if err != nil {
+			return domain.TenantScope{}, err
+		}
+		if tenancy != nil && tenancy.Shared && !scope.Admits(*tenancy) {
+			return domain.TenantScope{AllOrgs: true, ProjectID: projectID, PlatformExperimentID: tenancy.PlatformExperimentID}, nil
+		}
+	}
 	if projectID == "" {
 		return scope, nil
 	}
@@ -299,6 +346,20 @@ func (a *Access) ListScope(ctx context.Context, projectID string) (domain.Tenant
 	}
 	scope.ProjectID = projectID
 	return scope, nil
+}
+
+// PlatformExperimentListScope is ListScope for the listing of platform experiments themselves.
+// Asked for the shared ones, an account lists them across every org; the listing's own filter
+// keeps it to the shared ones, so a token bound to one platform experiment still sees no other.
+func (a *Access) PlatformExperimentListScope(ctx context.Context, projectID string, shared bool) (domain.TenantScope, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return domain.TenantScope{}, err
+	}
+	if shared && readsShared(ctx, p) {
+		return domain.TenantScope{AllOrgs: true, ProjectID: projectID}, nil
+	}
+	return a.ListScope(ctx, projectID)
 }
 
 // PlatformExperimentIDs lists the platform experiments a listing may draw from, for a store that

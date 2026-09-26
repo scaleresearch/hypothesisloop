@@ -143,6 +143,8 @@ type Tenancy struct {
 	ProjectID            string
 	OrgID                string
 	AgentID              string
+	// Shared is the platform's decision that every account may read the platform experiment.
+	Shared bool
 }
 
 // TenantScope is what one caller may see. AllOrgs lifts the org restriction; ProjectID and

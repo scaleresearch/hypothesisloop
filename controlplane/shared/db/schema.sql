@@ -1016,6 +1016,9 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_l
 -- How many machines the platform may run for this platform experiment, its coordinator included.
 -- Fixed at creation from config agents.max_hosted_per_platform_experiment.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_hosted INTEGER NOT NULL DEFAULT 0;
+-- shared is the platform's decision that every account may read the platform experiment and
+-- everything in it; only staff set it. Nobody outside its org writes to it.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
 
 -- An agent-launcher the platform knows. Its token works while its row exists, as a runtime's
 -- does while its cluster is registered.

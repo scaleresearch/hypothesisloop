@@ -173,6 +173,23 @@ func AfterClose(op huma.Operation) huma.Operation {
 	return op
 }
 
+// readKey marks an operation that reads through a method other than GET.
+const readKey = "hypothesisloop.read"
+
+// Read marks a POST that reads and writes nothing, as a query whose text does not fit a URL.
+// Every GET is a read without the mark.
+func Read(op huma.Operation) huma.Operation {
+	if op.Metadata == nil {
+		op.Metadata = map[string]any{}
+	}
+	op.Metadata[readKey] = true
+	return op
+}
+
+func reads(op *huma.Operation) bool {
+	return op.Method == http.MethodGet || op.Metadata[readKey] == true
+}
+
 func allowedAfterClose(op *huma.Operation) bool {
 	return op.Method == http.MethodGet || op.Metadata[afterCloseKey] == true
 }
@@ -203,7 +220,11 @@ func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)
 				fmt.Sprintf("forbidden: platform experiment %s is closed, and its coordinator token now only reads and files the summary", principal.PlatformExperimentID))
 			return
 		}
-		next(huma.WithContext(ctx, auth.WithPrincipal(ctx.Context(), principal)))
+		admitted := auth.WithPrincipal(ctx.Context(), principal)
+		if reads(op) {
+			admitted = auth.WithRead(admitted, ctx.Query("platform_experiment_id"))
+		}
+		next(huma.WithContext(ctx, admitted))
 	}
 }
 

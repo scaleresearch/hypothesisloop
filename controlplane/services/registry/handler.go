@@ -485,11 +485,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: http.StatusCreated, Body: links}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.Read(apidocs.AfterClose(huma.Operation{
 		OperationID: "query-hypotheses", Method: "POST", Path: "/hypotheses/query",
 		Summary: "Query the hypothesis graph with read-only Cypher", Tags: []string{"hypotheses"},
 		Description: queryDescription,
-	}), func(ctx context.Context, in *struct {
+	})), func(ctx context.Context, in *struct {
 		Body struct {
 			PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
 			Cypher               string         `json:"cypher"`

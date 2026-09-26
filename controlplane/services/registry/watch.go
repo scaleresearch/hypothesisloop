@@ -259,7 +259,9 @@ func (h *WatchHandler) authenticate(ctx context.Context, token string) (context.
 	if !apidocs.AudienceAgent.Admits(principal, "") {
 		return nil, auth.Principal{}, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
 	}
-	return auth.WithPrincipal(ctx, principal), principal, nil
+	// A stream only reads. The platform experiment it is narrowed to is admitted by the access
+	// check on its own, so none is named for a listing here.
+	return auth.WithRead(auth.WithPrincipal(ctx, principal), ""), principal, nil
 }
 
 // stillAdmitted asks again what the upgrade asked: a stream outlives the request that opened

@@ -484,9 +484,9 @@ func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformE
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
 	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.closed_at
+SELECT pe.project_id, p.org_id, pe.shared, pe.closed_at
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &closedAt)
+WHERE pe.id = $1`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}
@@ -502,11 +502,11 @@ func (s *AccountsStore) ExperimentTenancy(ctx context.Context, experimentID stri
 	t := &domain.Tenancy{}
 	var terminal bool
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id, e.agent_id, e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')
+SELECT pe.id, pe.project_id, p.org_id, pe.shared, e.agent_id, e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')
 FROM experiments e
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
-WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.AgentID, &terminal)
+WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.Shared, &t.AgentID, &terminal)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -521,11 +521,11 @@ WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.O
 func (s *AccountsStore) DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error) {
 	t := &domain.Tenancy{}
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id, d.agent_id
+SELECT pe.id, pe.project_id, p.org_id, pe.shared, d.agent_id
 FROM donation_requests d
 JOIN platform_experiments pe ON pe.id = d.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
-WHERE d.id = $1`, donationID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.AgentID)
+WHERE d.id = $1`, donationID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.Shared, &t.AgentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

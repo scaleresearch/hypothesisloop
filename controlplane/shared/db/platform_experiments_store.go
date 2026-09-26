@@ -88,7 +88,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
-SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier,
+SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted
 FROM platform_experiments pe
 WHERE id = $1`
@@ -103,7 +103,7 @@ WHERE id = $1`
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&hypothesisPolicy, &jobPolicy,
-		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier,
+		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &pe.MaxHosted,
@@ -169,7 +169,9 @@ type PlatformExperimentsFilter struct {
 	// Search matches against name/description, case-insensitively, substring match.
 	Search string
 	// Scope keeps the platform experiments the caller may see.
-	Scope  domain.TenantScope
+	Scope domain.TenantScope
+	// Shared keeps the ones staff shared with every account.
+	Shared bool
 	Limit  int
 	Offset int
 	// Sort selects the ORDER BY column and direction, as "field" (ascending) or "-field"
@@ -220,6 +222,9 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 	if filter.Search != "" {
 		clauses = append(clauses, fmt.Sprintf("(pe.name ILIKE $%d OR pe.description ILIKE $%d)", n, n))
 		args = append(args, "%"+filter.Search+"%")
+	}
+	if filter.Shared {
+		clauses = append(clauses, "pe.shared")
 	}
 	if clause, scoped := tenantClause(filter.Scope, "pe.id", args); clause != "" {
 		clauses, args = append(clauses, clause), scoped
@@ -287,7 +292,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
        pe.hypothesis_submit_policy, pe.job_submit_policy,
-       pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier,
+       pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        pe.coordinator_hosted, pe.max_hosted,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -315,7 +320,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&hypothesisPolicy, &jobPolicy,
-			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier,
+			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 			&pe.CoordinatorHosted, &pe.MaxHosted,
 			&pe.SignupCount,
 		); err != nil {
