@@ -117,7 +117,12 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 	}
 
 	// A database from before the kind was kept: loading the schema reads it off what
-	// connected_by names, and refuses to load while one row names neither a user nor a key.
+	// connected_by names, calls a row that names nobody unverified, and refuses to load while
+	// one names somebody who is neither a user nor a key.
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by) VALUES ($1, 4, 'acme-nobody', '')`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	connectors = append(connectors, domain.Actor{Kind: domain.ActorUnverified})
 	if _, err := pool.pool.Exec(ctx, `
 UPDATE org_github_installations SET connected_by_kind = '', connected_by = CASE installation_id WHEN 3 THEN 'hl-admin' ELSE connected_by END WHERE org_id = $1`, orgID); err != nil {
 		t.Fatal(err)

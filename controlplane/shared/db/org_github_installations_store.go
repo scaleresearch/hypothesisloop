@@ -15,13 +15,15 @@ import (
 var ErrGitHubInstallationNotFound = errors.New("the org has not connected that GitHub installation")
 
 // installationColumns reads an installation with who connected it: a user or the API key it was
-// connected with, under the name each carries now or its id while it carries none, or staff.
+// connected with, under the name each carries now or its id while it carries none, or staff, or
+// unverified with no id and no name on one whose connector was not kept.
 const installationColumns = `org_id, installation_id, account_login, connected_by_kind,
-       CASE connected_by_kind WHEN 'staff' THEN '' ELSE connected_by END,
+       CASE WHEN connected_by_kind IN ('user', 'key') THEN connected_by ELSE '' END,
        CASE connected_by_kind
          WHEN 'user' THEN COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''), connected_by)
          WHEN 'key' THEN COALESCE((SELECT named.name FROM api_keys named WHERE named.id = connected_by AND named.name <> ''), connected_by)
-         ELSE connected_by_kind END,
+         WHEN 'staff' THEN 'staff'
+         ELSE '' END,
        connected_at`
 
 func scanInstallation(row rowScanner, in *domain.OrgGitHubInstallation) error {
