@@ -340,7 +340,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     max_agents: initial?.max_agents ?? 20,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : localDatetime(1),
-    ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(8),
+    ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(2),
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ?? 30,
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
@@ -357,6 +357,10 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
   const [fromFile, setFromFile] = useState<{ repository: string; state: 'reading' | 'filled' | 'none' | 'failed'; message?: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // With hosted agents the experiment has the researchers asked for and nobody else joins, so
+  // the cap follows their number until the person states one.
+  const [maxAgentsStated, setMaxAgentsStated] = useState(false)
 
   function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy | RunBy) {
     setForm(f => ({ ...f, [field]: value }))
@@ -390,6 +394,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
 
   const ladderError = stagesError(form.stages)
   const hosted = !isEdit && form.run_by === 'platform'
+  const maxAgents = hosted && !maxAgentsStated ? form.researchers : form.max_agents
   const hostedError = hosted && !form.repository ? HOSTED_NEEDS_REPOSITORY : null
 
   function step1Error(): string | null {
@@ -420,7 +425,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
         name: form.name.trim(),
         description: form.description.trim(),
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
-        max_agents: Number(form.max_agents),
+        max_agents: Number(maxAgents),
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
         report_interval_seconds: Number(form.report_interval_seconds),
@@ -574,7 +579,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                     <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
                   </FormField>
                   <FormField label="Max participants" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
-                    <Input type="number" min={1} max={500} step={1} value={form.max_agents} disabled={lockedWhileRunning} onChange={e => set('max_agents', e.target.value)} />
+                    <Input type="number" min={1} max={500} step={1} value={maxAgents} disabled={lockedWhileRunning} onChange={e => { setMaxAgentsStated(true); set('max_agents', e.target.value) }} />
                   </FormField>
                 </div>
 

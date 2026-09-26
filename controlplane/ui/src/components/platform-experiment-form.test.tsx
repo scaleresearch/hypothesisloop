@@ -119,6 +119,9 @@ describe('a new platform experiment with hosted agents', () => {
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1]).toMatchObject({
       name: 'Run', repository: 'acme/widgets', coordinator_hosted: true, starts_at: '0001-01-01T00:00:00Z',
     })
+    // Nobody else joins a run the platform staffs, so the cap is the researchers asked for.
+    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].max_agents).toBe(3)
+    expect(new Date(vi.mocked(createPlatformExperiment).mock.calls[0][1].ends_at).getTime()).toBeLessThan(Date.now() + 3 * 86_400_000)
     expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(3)
     expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new')
   })
