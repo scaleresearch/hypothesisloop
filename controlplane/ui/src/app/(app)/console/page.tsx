@@ -4,11 +4,12 @@ import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
 import { fetchOrgClusters, fetchExperimentStats, fetchAgentsPage, fetchPlatformExperimentsPage } from '@/lib/api'
 import { useTenant } from '@/lib/tenant'
+import { platformExperimentHref } from '@/lib/example'
 import { semantic } from '@/lib/colors'
 import { CommandPaletteTrigger } from '@/components/command-palette'
-import { Dot } from '@/components/ui/badge'
-import { Card, CardLink } from '@/components/ui/card'
-import { ErrorMessage } from '@/components/ui/status-message'
+import { Badge, Dot } from '@/components/ui/badge'
+import { Card, CardLink, RowLink } from '@/components/ui/card'
+import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { Eyebrow } from '@/components/ui/text'
 
 const LINKS: Array<{ href: string; title: string; description: string }> = [
@@ -58,6 +59,39 @@ function LiveStrip() {
   )
 }
 
+const EXAMPLES_SHOWN = 3
+
+// For a project with nothing in it: the newest experiments the platform shows every account.
+function StartFromExample() {
+  const { me } = useTenant()
+  const { data, error } = useSWR(
+    ['examples-newest'],
+    () => fetchPlatformExperimentsPage({ shared: true, sort: '-starts_at', limit: EXAMPLES_SHOWN }),
+  )
+  if (error) return <p className="mb-7"><InlineError>Could not load the examples: {error.message}</InlineError></p>
+  if (!data || data.items.length === 0) return null
+  return (
+    <section aria-label="Start from an example" className="mb-7 max-w-[720px]">
+      <Eyebrow className="mb-1.5 block">Start from an example</Eyebrow>
+      <p className="mb-2 text-sm text-muted">
+        See what a platform experiment looks like with agents, jobs and findings in it. An example is read only.
+      </p>
+      <div className="grid gap-0.5">
+        {data.items.map(pe => (
+          <RowLink key={pe.id} href={platformExperimentHref(me, pe)}>
+            <Badge status={pe.status}>{pe.status}</Badge>
+            <span className="min-w-0 flex-1 truncate text-sm">{pe.name}</span>
+            <span className="text-accent">→</span>
+          </RowLink>
+        ))}
+      </div>
+      {data.total > data.items.length && (
+        <Link href="/examples" className="mt-1.5 inline-block text-xs text-accent hover:underline">All {data.total} examples</Link>
+      )}
+    </section>
+  )
+}
+
 // What a project with nothing in it needs next, shown until its first platform experiment exists.
 function FirstSteps() {
   const { org, project } = useTenant()
@@ -74,6 +108,7 @@ function FirstSteps() {
   }
   if (!data || data.total > 0) return null
   return (
+    <>
     <Card className="mb-7 max-w-[720px] px-5 py-4">
       <div className="mb-2 text-lg font-bold">
         {org.name} / {project.name} is empty. Start here.
@@ -90,6 +125,8 @@ function FirstSteps() {
         </li>
       </ol>
     </Card>
+    <StartFromExample />
+    </>
   )
 }
 
