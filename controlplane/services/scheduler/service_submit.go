@@ -237,8 +237,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 		}
 		reason := ReasonInsufficientCredits
-		if strings.HasPrefix(err.Error(), db.RejectionRateLimited) {
+		switch {
+		case strings.HasPrefix(err.Error(), db.RejectionRateLimited):
 			reason = ReasonRateLimited
+		case strings.HasPrefix(err.Error(), db.RejectionAgentFinished):
+			reason = "agent_finished"
 		}
 		return &AdmissionError{
 			Reason:  reason,

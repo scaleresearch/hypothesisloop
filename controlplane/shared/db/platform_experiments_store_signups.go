@@ -219,6 +219,11 @@ func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpI
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// A submission of this agent in flight commits or rolls back first, so the jobs read below
+	// include it, and one that starts later reads the finish.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
+		return fmt.Errorf("platform_experiments_store.FinishAgent: lock: %w", err)
+	}
 	var running, unfinished bool
 	var finishedAt *time.Time
 	err = tx.QueryRow(ctx, `

@@ -90,6 +90,16 @@ const (
 // quota rejection without matching on prose.
 const RejectionRateLimited = "rate_limited:"
 
+// RejectionAgentFinished prefixes the rejection reason AdmitExperimentTx returns for an agent
+// that finished.
+const RejectionAgentFinished = "agent_finished:"
+
+// admissionLockKey names the advisory lock one agent's admissions in one platform experiment
+// are decided under. FinishAgent takes it too, so a submission and a finish never interleave.
+func admissionLockKey(agentID, platformExpID string) string {
+	return agentID + "/" + platformExpID
+}
+
 // SubmissionRateLimit bounds how many experiments one agent may submit into one platform
 // experiment within Window. MaxPerHour <= 0 means unlimited.
 type SubmissionRateLimit struct {
@@ -106,8 +116,7 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		return AdmitRejected, "", fmt.Errorf("admit experiment: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	key := exp.AgentID + "/" + exp.PlatformExperimentID
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(exp.AgentID, exp.PlatformExperimentID)); err != nil {
 		return AdmitRejected, "", fmt.Errorf("admit experiment: lock: %w", err)
 	}
 	// The one place that decides whether this id is new, a legal re-submission, or taken. It is
@@ -164,6 +173,15 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	}
 	if cut {
 		return AdmitRejected, "agent was cut at a stage boundary", nil
+	}
+	var finished bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2 AND finished_at IS NOT NULL
+	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&finished); err != nil {
+		return AdmitRejected, "", fmt.Errorf("admit experiment: finished: %w", err)
+	}
+	if finished {
+		return AdmitRejected, RejectionAgentFinished + " the agent finished in this platform experiment, which is final: it submits no further job", nil
 	}
 
 	allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`

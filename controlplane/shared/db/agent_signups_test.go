@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,41 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 		}
 	}
 	expect(runningAgents[3], true)
+	// A submission and a finish are decided under one lock. The finished agent's submission is
+	// refused inside the admission itself, and a finish that meets a submission in flight waits
+	// for it and then counts its job.
+	admission := NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 1))
+	late := &domain.Experiment{ID: "job-" + uuid.New().String()[:8], AgentID: runningAgents[3], PlatformExperimentID: running,
+		Actor: domain.Actor{Kind: domain.ActorAgent, ID: runningAgents[3]}, Status: domain.StatusQueued}
+	if decision, reason, err := admission.AdmitExperimentTx(ctx, late, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitRejected || !strings.HasPrefix(reason, RejectionAgentFinished) {
+		t.Errorf("admitting a finished agent's job: got = (%v, %q, %v), want = rejected as finished", decision, reason, err)
+	}
+	submitting, err := pool.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer submitting.Rollback(ctx) //nolint:errcheck
+	inFlight := "job-" + uuid.New().String()[:8]
+	if _, err := submitting.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(runningAgents[1], running)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := submitting.Exec(ctx, `INSERT INTO experiments SELECT (jsonb_populate_record(e, jsonb_build_object('id', $1::text, 'agent_id', $2::text))).* FROM experiments e WHERE e.agent_id = $3 AND e.platform_experiment_id = $4`,
+		inFlight, runningAgents[1], runningAgents[0], running); err != nil {
+		t.Fatalf("insert a job in flight: %v", err)
+	}
+	meanwhile := make(chan error, 1)
+	go func() { meanwhile <- pes.FinishAgent(ctx, running, runningAgents[1], "raced") }()
+	select {
+	case err := <-meanwhile:
+		t.Fatalf("finish beside a submission in flight: got = %v at once, want it to wait", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := submitting.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-meanwhile; !errors.Is(err, ErrWorkUnfinished) {
+		t.Errorf("finish after the submission committed: got = %v, want = ErrWorkUnfinished", err)
+	}
 	for agent, want := range map[string]bool{runningAgents[0]: false, runningAgents[3]: true} {
 		if finished, err := pes.IsAgentFinished(ctx, running, agent); err != nil || finished != want {
 			t.Errorf("finished %s: got = (%v, %v), want = %v", agent, finished, err, want)
