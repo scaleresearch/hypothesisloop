@@ -136,6 +136,8 @@ type WatchSubscription struct {
 	ExperimentID         string   `json:"experiment_id"`
 	AgentID              string   `json:"agent_id"`
 	Kinds                []string `json:"kinds"`
+	// Decisions is set on a stream narrowed to what may need a decision (db.EventFilter).
+	Decisions bool `json:"decisions,omitempty"`
 	// Since is the cursor this connection opened at, and the floor a widened filter replays from.
 	Since int64 `json:"since"`
 }
@@ -151,6 +153,7 @@ func describe(filter db.EventFilter, since int64) WatchSubscription {
 		ExperimentID:         filter.ExperimentID,
 		AgentID:              filter.AgentID,
 		Kinds:                kinds,
+		Decisions:            filter.Decisions,
 		Since:                since,
 	}
 }
@@ -654,6 +657,13 @@ func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
 		PlatformExperimentID: q.Get("platform_experiment_id"),
 		ExperimentID:         q.Get("experiment_id"),
 		AgentID:              q.Get("agent"),
+	}
+	if raw := q.Get("decisions"); raw != "" {
+		decisions, err := strconv.ParseBool(raw)
+		if err != nil {
+			return filter, 0, errWatch("decisions must be true or false")
+		}
+		filter.Decisions = decisions
 	}
 	if filter.PlatformExperimentID == "" && filter.ExperimentID == "" {
 		return filter, 0, errWatch("one of platform_experiment_id or experiment_id is required")

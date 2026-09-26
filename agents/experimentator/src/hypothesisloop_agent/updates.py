@@ -43,8 +43,19 @@ def watch_env(api_url: str, agent_id: str, platform_experiment_id: str, workdir:
     return env
 
 
+# How long a coordinator's watch keeps collecting after its first event. A coordinator rereads
+# its whole context on every wake, and what happens across an experiment comes in bursts: a job
+# ends, its summary and a verdict follow within a minute or two. The batch waits in hl and on the
+# platform, which replays from the cursor hl saves only once it has printed.
+COORDINATOR_SETTLE_S = 120
+
+
 def watch_command(env: dict[str, str]) -> list[str]:
-    return HL_WATCH if env.get("AGENT_ID") else [*HL_WATCH, "--all"]
+    """An agent watches its own resources. A coordinator watches the whole platform experiment,
+    narrowed to what may need a decision and gathered into one batch per burst."""
+    if env.get("AGENT_ID"):
+        return HL_WATCH
+    return [*HL_WATCH, "--all", "--decisions", "--settle", str(COORDINATOR_SETTLE_S)]
 
 
 async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool],

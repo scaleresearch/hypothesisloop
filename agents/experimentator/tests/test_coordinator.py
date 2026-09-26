@@ -129,7 +129,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.dict(os.environ, {"AGENT_ID": "left-over"}):
             env = updates.watch_env("http://api", "", "pe-1", "/tmp/w")
         self.assertNotIn("AGENT_ID", env)
-        self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all"])
+        self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all", "--decisions", "--settle", "120"])
         own = updates.watch_env("http://api", "ag-1", "pe-1", "/tmp/w")
         self.assertEqual((own["AGENT_ID"], updates.watch_command(own)), ("ag-1", ["hl", "watch"]))
 

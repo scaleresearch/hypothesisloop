@@ -65,8 +65,14 @@ type Options struct {
 	PlatformExperiment string
 	Agent              string
 	Kinds              string
-	ShowSubscription   bool
-	Until              string
+	// Decisions asks for a whole platform experiment's stream without the job transitions that
+	// need no decision.
+	Decisions bool
+	// Settle is how long a watch without --until keeps collecting after its first event before
+	// it returns the batch. Zero is settleWindow.
+	Settle           time.Duration
+	ShowSubscription bool
+	Until            string
 	// Follow streams until the timeout instead of returning with the first batch.
 	Follow bool
 	// NoWait returns once the events already waiting have been printed.
@@ -156,6 +162,9 @@ func (w *watch) run() int {
 	}
 	if w.opts.Agent != "" {
 		query.Set("agent", w.opts.Agent)
+	}
+	if w.opts.Decisions {
+		query.Set("decisions", "true")
 	}
 	if w.opts.Kinds != "" {
 		query.Set("kinds", w.opts.Kinds)
@@ -269,7 +278,11 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 			}
 			w.printed = true
 			if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
-				w.settleBy = time.Now().Add(settleWindow)
+				settle := settleWindow
+				if w.opts.Settle > 0 {
+					settle = w.opts.Settle
+				}
+				w.settleBy = time.Now().Add(settle)
 			}
 		}
 		if w.satisfied != nil && w.satisfied(event) {

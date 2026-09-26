@@ -174,6 +174,10 @@ type EventFilter struct {
 	AgentID              string
 	// Kinds, when non-empty, admits only these kinds.
 	Kinds map[string]bool
+	// Decisions narrows a stream of a whole platform experiment to what whoever steers it may
+	// have to act on: of a job's statuses the terminal ones, and of its queue reasons those
+	// waiting will not clear. An agent filter is that narrow already.
+	Decisions bool
 }
 
 // isExperimentSubject reports the kinds whose Subject is an experiment id, and therefore the only
@@ -238,7 +242,8 @@ func agentScope(kind string) string {
 // activity on hypotheses it registered. A job waiting its turn for capacity is no news.
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
 // by EventsStore.Concerns; Matches only drops the agent's own echo. Without an agent the stream is
-// the whole platform experiment.
+// the whole platform experiment, or with Decisions what of it may need a decision: a job that
+// was queued, admitted or started is on its way and asks nothing of anyone.
 func (f EventFilter) Matches(e Event) bool {
 	if len(f.Kinds) > 0 && !f.Kinds[e.Kind] {
 		return false
@@ -250,7 +255,16 @@ func (f EventFilter) Matches(e Event) bool {
 		return false
 	}
 	if f.AgentID == "" {
-		return true
+		switch {
+		case !f.Decisions:
+			return true
+		case e.Kind == EventExperimentStatus:
+			return domain.ExperimentStatus(e.Value).IsTerminal()
+		case e.Kind == EventExperimentBlocked:
+			return !domain.QueueReasonClearsByWaiting(e.Value)
+		default:
+			return true
+		}
 	}
 	switch {
 	case e.Kind == EventExperimentStatus:

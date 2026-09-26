@@ -913,3 +913,47 @@ func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInPositionO
 		t.Errorf("replayed kinds: got = %v, want = %v", got, want)
 	}
 }
+
+// A hosted coordinator was woken for every job being queued, admitted and started, each wake a
+// reread of its whole context that ended in "nothing to act on". Whoever steers an experiment
+// decides on outcomes and on jobs that are stuck, across every agent.
+func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testing.T) {
+	filter := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds(), Decisions: true}
+	whole := EventFilter{PlatformExperimentID: "pe-1", Kinds: DefaultKinds()}
+	admitted := []Event{
+		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"},
+		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"},
+		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
+		{Kind: EventHypothesisNew, Value: "agent", AgentID: "agent-a"},
+		{Kind: EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"},
+		{Kind: EventFindingNew, Value: "job-1", AgentID: "agent-b"},
+		{Kind: EventCommentNew, Value: "human"},
+		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
+		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
+		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
+		{Kind: EventPlatformExperimentStatus, Value: "closed"},
+	}
+	onTheirWay := []Event{
+		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
+		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable: short {accelerator:nvidia.com/gpu.product=nvidia-l40=1}", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"},
+	}
+	for _, e := range admitted {
+		e.PlatformExperimentID = "pe-1"
+		if !filter.Matches(e) {
+			t.Errorf("Matches(%+v): got = false, want = true", e)
+		}
+	}
+	for _, e := range onTheirWay {
+		e.PlatformExperimentID = "pe-1"
+		if filter.Matches(e) {
+			t.Errorf("Matches(%+v): got = true, want = false", e)
+		}
+		if !whole.Matches(e) {
+			t.Errorf("the whole stream lost %+v, which only the decisions stream leaves out", e)
+		}
+	}
+}
