@@ -213,7 +213,8 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        s.instance_state, s.instance_progress_at, s.instance_end_reason,
        ` + domain.InstanceReleasedSQL(`LEAST(
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
-           (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id))`)
+           (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
+           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.flavor = '`+domain.PlannerFlavor+`'))`)
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -288,19 +289,29 @@ type LauncherAgent struct {
 // or who were cut less than $2 seconds ago. A stopped agent is among them: it is asked for again
 // once what it is started with changes. Both moments and the comparison are on the database's
 // clock.
+//
+// A draft's planner is the other way round. It has something to do while the draft is a draft
+// and nothing is proposed, which a revision makes true again, and it is let wind down for $2
+// seconds after it proposed or the draft closed. Once the draft is accepted it has nothing left
+// to do, in an experiment that is then open or running.
 const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 LEFT JOIN agents a ON a.id = s.agent_id
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
 WHERE s.hosted AND s.launcher = $1
-  AND (pe.status IN ('open', 'running') OR (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)))
+  AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
+       OR s.flavor <> '` + domain.PlannerFlavor + `' AND pe.status IN ('open', 'running')
+       OR s.flavor = '` + domain.PlannerFlavor + `' AND pe.status = 'draft' AND (pe.proposed_at IS NULL OR pe.proposed_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))`
+
+// launcherAgentEnding says that the agent's run is over and its machine is only winding down.
+const launcherAgentEnding = `(pe.status = 'closed' OR c.agent_id IS NOT NULL OR (s.flavor = '` + domain.PlannerFlavor + `' AND pe.proposed_at IS NOT NULL))`
 
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image, (pe.status = 'closed' OR c.agent_id IS NOT NULL)`+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherAgentEnding+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)

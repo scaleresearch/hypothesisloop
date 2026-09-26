@@ -55,16 +55,27 @@ func draftName(goal string) string {
 	return string(runes) + "…"
 }
 
-// CreateDraft creates a platform experiment in status draft from one sentence. It has the
-// planning allowance for a budget and the planning limit for an end, and nothing else of a run:
-// the planner proposes the rest and a person accepts it.
-func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, maxHosted int) (*domain.PlatformExperiment, error) {
+// CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
+// an agent the platform runs, of role baseline, so that it is never ranked or cut, and of flavor
+// planner. The draft has the planning allowance for a budget and the planning limit for an end,
+// and nothing else of a run: the planner proposes the rest and a person accepts it.
+func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return nil, invalidPlatformExperiment(errors.New("goal is required: one sentence saying what you want to find out"))
 	}
 	if len(goal) > domain.MaxGoalBytes {
 		return nil, invalidPlatformExperiment(fmt.Errorf("goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes))
+	}
+	if launch.Launcher == "" || launch.DefaultModel == "" || launch.MaxHosted <= 0 {
+		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
+	}
+	if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
+		return nil, err
+	}
+	plannerID, err := domain.NewAgentID()
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
@@ -84,14 +95,20 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed,
 		JobSubmitPolicy:        domain.SubmitterPolicyMixed,
 		DefaultQuotaTier:       domain.QuotaTierGuaranteed,
-		MaxHosted:              maxHosted,
+		MaxHosted:              launch.MaxHosted,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
-	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
+	planner := &domain.Agent{ID: plannerID, Name: "Planner", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
+	signup := domain.AgentSignup{
+		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
+		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
+	}
+	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
-	s.logger.Info("draft created", zap.String("id", pe.ID))
+	pe.SignupCount = 1
+	s.logger.Info("draft created", zap.String("id", pe.ID), zap.String("planner", plannerID))
 	return pe, nil
 }
 
@@ -111,10 +128,12 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Start planning a platform experiment from one sentence", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
-			"A draft has the planning allowance for a budget, no metrics, and nobody joins it: the platform plans it and proposes the metrics, " +
+			"A draft has the planning allowance for a budget, no metrics, and one agent, its planner, which the platform runs (flavor planner, role baseline, in the roster like any agent) " +
+			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
 			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then nothing but the " +
 			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
-			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it.",
+			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
+			"503 launcher_not_registered when the deployment has no launcher to run the planner.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID string `json:"project_id"`
@@ -128,7 +147,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			return nil, err
 		}
 		caller, _ := auth.FromContext(ctx)
-		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch.MaxHosted)
+		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, huma.Error422UnprocessableEntity(err.Error())
 		}

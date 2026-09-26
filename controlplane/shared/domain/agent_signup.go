@@ -124,6 +124,11 @@ func ValidateLauncherName(name string) error {
 // can join with.
 const CoordinatorFlavor = "coordinator"
 
+// PlannerFlavor is what the agent of a draft runs as: it works out how to measure the draft's
+// goal, runs the baseline and proposes the experiment. The platform signs it up when the draft
+// is created, and no request can ask for one: it is no member of AgentFlavors.
+const PlannerFlavor = "planner"
+
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
 // run that ended at endedAt (a column or expression, NULL while the run goes on) is released:
 // AgentWindDown later, when the launcher's desired state stops naming it.

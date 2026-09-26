@@ -29,7 +29,8 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop())
+	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
+		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
 	return svc, func(method, path string, body any) (int, map[string]any) {
@@ -55,7 +56,7 @@ var planner = auth.Principal{Kind: auth.KindUser, UserID: "u-1", Name: "Ada", Or
 // A person with an idea had to state metrics, a budget, a ladder and dates before anything
 // existed. A draft is the experiment made from the idea alone.
 func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t *testing.T) {
-	store := &createdStore{}
+	store := &draftStore{}
 	_, call := planningAPI(t, store, planner)
 	goal := "Find out whether a cosine schedule beats a constant learning rate for a small transformer on character-level text, measured by validation loss"
 	before := time.Now()
@@ -79,6 +80,12 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if pe.CreatedBy == nil || *pe.CreatedBy != (domain.Actor{Kind: domain.ActorUser, ID: "u-1", Name: "Ada"}) {
 		t.Errorf("created_by = %+v, want the person who asked", pe.CreatedBy)
 	}
+	// Its one agent is the planner, which the platform runs and never ranks or cuts.
+	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
+	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted || signup.Launcher != "main" ||
+		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
+		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
+	}
 
 	for name, body := range map[string]map[string]any{
 		"no goal":                {"project_id": "prj-a", "goal": "   "},
@@ -94,6 +101,24 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if len(store.created) != 1 {
 		t.Fatalf("a refused draft was created: %d", len(store.created))
 	}
+
+	// Nobody asks for a planner: it is no flavor a request can name.
+	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxHosted: rosterMaxHosted, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
+	if code, body := call2(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"flavor":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
+		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
+	}
+
+	// With no launcher registered a planner would never start, so no draft is made.
+	store.unregistered = true
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
+		t.Errorf("no launcher: got = %d %v with %d created, want 503 launcher_not_registered", code, out, len(store.created))
+	}
+}
+
+// call2 is the agents tests' call under a name that does not shadow this file's.
+func call2(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
+	t.Helper()
+	return call(t, r, method, path, body)
 }
 
 func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
@@ -101,9 +126,9 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	draft := func(id string, ends time.Time) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", EndsAt: ends, Stages: []domain.Stage{{LengthPct: 100}}}
 	}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
+	store := &draftStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
 		draft("pe-planning", now.Add(time.Hour)), draft("pe-late", now.Add(-time.Minute)), draft("pe-dropped", now.Add(time.Hour)),
-	}}}
+	}}}}
 	svc, _ := planningAPI(t, store, planner)
 	// Closing a draft derives no standings: it never ran and has no metric to rank on.
 	if err := svc.Close(context.Background(), "pe-dropped", nil); err != nil {
@@ -140,5 +165,27 @@ func (s *statusStore) UpdatePlatformExperimentStatus(_ context.Context, id strin
 			pe.Status = status
 		}
 	}
+	return nil
+}
+
+// draftStore is statusStore with a draft's own write: the experiment and its planner together.
+type draftStore struct {
+	statusStore
+	planners map[string]*domain.Agent
+	signups  map[string]domain.AgentSignup
+	// unregistered is a launcher config names and no operator registered.
+	unregistered bool
+}
+
+func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
+	return !s.unregistered, nil
+}
+
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
+	if s.planners == nil {
+		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
+	}
+	s.created = append(s.created, pe)
+	s.planners[pe.ID], s.signups[pe.ID] = planner, signup
 	return nil
 }
