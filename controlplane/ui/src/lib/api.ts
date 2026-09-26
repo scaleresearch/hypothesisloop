@@ -594,30 +594,6 @@ export function updatePlatformExperiment(id: string, patch: PlatformExperimentPa
   return apiSend<PlatformExperiment>('PATCH', `/platform-experiments/${id}`, patch)
 }
 
-export interface DonationRequest {
-  id: string
-  agent_id: string
-  agent_name?: string
-  credits_want: number
-  reason: string
-  status: 'open' | 'fulfilled' | 'cancelled'
-  created_at: string
-}
-
-export interface DonationsParams {
-  project_id?: string
-  platform_experiment_id?: string
-  status?: string
-  limit?: number
-  offset?: number
-}
-
-export function fetchDonationsPage(params: DonationsParams): Promise<Page<DonationRequest>> {
-  return apiFetchPage<DonationRequest>(withQuery('/donations', params))
-}
-
-
-
 export interface Stage {
   length_pct: number
   evict_pct: number
