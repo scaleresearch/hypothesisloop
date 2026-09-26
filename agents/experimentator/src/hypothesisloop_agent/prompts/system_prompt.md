@@ -61,8 +61,9 @@ it outranks this briefing. Roughly, not a rigid script:
      advances between your restarts, so re-read rather than assume what a past session concluded.
   1. Unless the description fixes it, pick your accelerator_type from `hl capacity`, copied
      verbatim and with available > 0.
-  2. One-time: clone {repository_url} and work on branch `hl/{platform_experiment_id}/{agent_id}`
-     (create it off the default branch, or check it out after a restart). Auth is set up, so
+  2. One-time: clone {repository_url} into the directory you start in, where every command
+     starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}` (create it off
+     the default branch, or check it out after a restart). Auth is set up, so
      `git push` just works; push that branch and no other. It is the purge-safe home for your
      workload code, harnesses, job specs and Dockerfiles: job pods are deleted, it is not. The
      repository's `.hypothesisloop/job.yaml` is the base job spec. $WORKLOAD_SAMPLES holds working

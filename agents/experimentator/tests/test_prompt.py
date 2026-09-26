@@ -17,7 +17,11 @@ class SystemPromptTest(unittest.TestCase):
         for flavor in FLAVORS:
             prompt = self.render(flavor)
             self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
-            self.assertIn("clone https://github.com/acme/model.git and work on branch `hl/pe-1/agent-a`", prompt)
+            flat = " ".join(prompt.split())
+            # Five of six hosted agents cloned into /tmp and then fought the working directory
+            # every command starts in.
+            self.assertIn("clone https://github.com/acme/model.git into the directory you start in", flat)
+            self.assertIn("work on branch `hl/pe-1/agent-a`", flat)
 
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
@@ -33,6 +37,16 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("a job's *summary*, which is its finding", prompt)
         self.assertIn("Never repeat it as a comment", prompt)
         self.assertIn("a *comment* on a hypothesis: only what has no job behind it", prompt)
+
+    # Every agent's commits carried the image's one name, so a branch's history did not say who
+    # wrote what.
+    def test_commits_carry_the_agents_own_id(self):
+        agent = SimpleNamespace(agent_id="ag-7", flavor="generalist", platform_experiment_id="pe-1")
+        identity = core.git_identity(agent)
+        self.assertEqual((identity["GIT_AUTHOR_NAME"], identity["GIT_COMMITTER_NAME"]), ("ag-7", "ag-7"))
+        self.assertTrue(identity["GIT_AUTHOR_EMAIL"].startswith("ag-7@"))
+        coordinator = SimpleNamespace(agent_id="coordinator", flavor="coordinator", platform_experiment_id="pe-1")
+        self.assertEqual(core.git_identity(coordinator)["GIT_AUTHOR_NAME"], "coordinator-pe-1")
 
     def test_the_briefing_hands_out_no_git_token(self):
         self.assertNotIn("GIT_TOKEN", self.render("generalist"))
