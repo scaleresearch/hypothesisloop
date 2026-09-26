@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -109,6 +110,24 @@ ORDER BY created_at ASC`
 	}
 	defer rows.Close()
 	return collectExperiments(rows)
+}
+
+// CompletedJobIDs returns the jobs of a platform experiment that ran to a successful end. Only
+// their metrics count for an agent's best: a job that failed or was stopped proved nothing.
+func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED'`, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.CompletedJobIDs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.CompletedJobIDs: %w", err)
+	}
+	completed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		completed[id] = true
+	}
+	return completed, nil
 }
 
 // ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for

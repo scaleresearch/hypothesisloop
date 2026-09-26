@@ -263,7 +263,7 @@ func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher s
 type Evidence struct {
 	// Finding is the newest finding filed against it, nil when none was.
 	Finding *domain.HypothesisFinding `json:"finding,omitempty"`
-	// BestJob is the job testing it that holds the best raw value on the platform experiment's
+	// BestJob is the completed job testing it that holds the best raw value on the platform experiment's
 	// first ranking metric, nil when none reported it.
 	BestJob *BestJob `json:"best_job,omitempty"`
 }
@@ -346,7 +346,7 @@ func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinitio
 	primary, _ := domain.PrimaryRankingMetric(metrics)
 	best := map[string]*domain.Experiment{}
 	for _, job := range jobs {
-		if job.Metric == nil || job.Metric.Basis != "raw" {
+		if job.Status != domain.StatusCompleted || job.Metric == nil || job.Metric.Basis != "raw" {
 			continue
 		}
 		if cur := best[job.HypothesisID]; cur != nil {

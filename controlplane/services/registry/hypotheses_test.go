@@ -639,8 +639,11 @@ func (findingsStore) ListExperimentsTesting(_ context.Context, ids []string) ([]
 		return nil, errors.New("asked for the jobs of other hypotheses")
 	}
 	created := time.Now().Add(-time.Hour)
-	jobs := []*domain.Experiment{{ID: "job-a"}, {ID: "job-b"}, {ID: "job-rescaled"}}
+	jobs := []*domain.Experiment{{ID: "job-a"}, {ID: "job-b"}, {ID: "job-rescaled"}, {ID: "job-failed", Status: domain.StatusFailed}}
 	for _, job := range jobs {
+		if job.Status == "" {
+			job.Status = domain.StatusCompleted
+		}
 		job.PlatformExperimentID, job.HypothesisID, job.CreatedAt = "pe-1", "hyp-tested", created
 	}
 	return jobs, nil
@@ -671,13 +674,15 @@ func (findingsGraph) ListHypotheses(_ context.Context, f graphdb.ListFilter) ([]
 
 // The experiment page answers "what was found" from one read: each hypothesis with a verdict or
 // evidence, whatever its status, with its newest finding and the job that did best on the ranking
-// metric, a rescaled value never winning. A hypothesis with neither is left out.
+// metric, a rescaled value and a job that failed never winning. A hypothesis with neither is
+// left out.
 func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) {
 	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[
 			{"metric":{"job_id":"job-a","metric_name":"loss","metric_basis":"raw"},"value":[1,"0.30"]},
 			{"metric":{"job_id":"job-b","metric_name":"loss","metric_basis":"raw"},"value":[1,"0.10"]},
+			{"metric":{"job_id":"job-failed","metric_name":"loss","metric_basis":"raw"},"value":[1,"0.02"]},
 			{"metric":{"job_id":"job-rescaled","metric_name":"loss","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
 	}))
 	defer metrics.Close()

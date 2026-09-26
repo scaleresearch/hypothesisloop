@@ -36,7 +36,7 @@ type ObservedState interface {
 	HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error)
 	SettledAccHByJob(ctx context.Context, platformExpStart time.Time, platformExpID string) (map[string]float64, error)
 	PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error
-	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error)
+	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error)
 }
 
 // metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
@@ -82,8 +82,8 @@ func (o metricsDBObserver) PopulateUsage(ctx context.Context, platformExpStart t
 	return metricsdb.PopulateUsage(ctx, o.url, platformExpStart, platformExpID, quotas)
 }
 
-func (o metricsDBObserver) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
-	return metricsdb.BestPerAgentOnMetric(ctx, o.url, pe, metric)
+func (o metricsDBObserver) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error) {
+	return metricsdb.BestPerAgentOnMetric(ctx, o.url, pe, metric, completed)
 }
 
 // observedGapCap is the longest gap between two real observations that still counts as

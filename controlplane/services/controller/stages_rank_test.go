@@ -148,6 +148,10 @@ func (f *rolesStagesStore) ListCutAgents(ctx context.Context, platformExpID stri
 	return cuts, nil
 }
 
+func (f *rolesStagesStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
+	return nil, nil
+}
+
 func (f *rolesStagesStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	if role != domain.SignupRoleCompetitor {
 		return nil, fmt.Errorf("unexpected role read: %s", role)

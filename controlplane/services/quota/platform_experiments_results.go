@@ -93,7 +93,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		Bests:                make([]MetricBests, 0, len(pe.Metrics)),
 	}
 	for _, metric := range pe.Metrics {
-		best, nonRawAgents, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
+		best, nonRawAgents, err := s.bestPerAgent(ctx, pe, metric)
 		if err != nil {
 			return nil, fmt.Errorf("results: %w", err)
 		}
@@ -199,7 +199,7 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if err != nil {
 		return nil, err
 	}
-	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, primary)
+	best, _, err := s.bestPerAgent(ctx, pe, primary)
 	if err != nil {
 		return nil, fmt.Errorf("results: %w", err)
 	}
@@ -212,6 +212,16 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 		out = append(out, AgentResult{AgentID: st.AgentID, FinalMetric: st.Best})
 	}
 	return out, nil
+}
+
+// bestPerAgent is every agent's best on one metric over its COMPLETED jobs: the one figure
+// results, standings and the top-3 at close read.
+func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
+	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric, completed)
 }
 
 // eligibleStandings is the ranking a run is judged by: competitors that pass every constraint,
@@ -236,7 +246,7 @@ func (s *PlatformExperimentsService) eligibleStandings(ctx context.Context, pe *
 // The ranking itself is metricsdb.BestPerAgentOnMetric — the same call the stage ladder cuts with,
 // so a run's final standings and its mid-run cuts can never disagree about who is ahead.
 func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, error) {
-	best, _, err := metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric)
+	best, _, err := s.bestPerAgent(ctx, pe, metric)
 	if err != nil {
 		return nil, fmt.Errorf("results: %w", err)
 	}

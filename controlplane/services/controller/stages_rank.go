@@ -131,7 +131,11 @@ func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperim
 	// never rank the same field differently. Agents that only ever reported this metric on a
 	// non-"raw" basis come back flagged rather than ranked, and are treated here as no data on it
 	// — same as an agent that never reported it at all.
-	best, _, err := c.observed.BestPerAgentOnMetric(ctx, pe, metric)
+	completed, err := c.stagesStore.CompletedJobIDs(ctx, pe.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	best, _, err := c.observed.BestPerAgentOnMetric(ctx, pe, metric, completed)
 	if err != nil {
 		return nil, false, err
 	}

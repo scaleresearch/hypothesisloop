@@ -36,6 +36,10 @@ func (f *everyPEStagesStore) ListCutAgents(ctx context.Context, platformExpID st
 	return nil, nil
 }
 
+func (f *everyPEStagesStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
+	return nil, nil
+}
+
 func (f *everyPEStagesStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	return nil, nil
 }

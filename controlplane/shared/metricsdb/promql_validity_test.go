@@ -130,12 +130,12 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 		}},
 		{"BestPerAgentOnMetric (normal start)", func(dbURL string) error {
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "maximize"})
+			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "maximize"}, nil)
 			return err
 		}},
 		{"BestPerAgentOnMetric (zero start)", func(dbURL string) error {
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: zero}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"})
+			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"}, nil)
 			return err
 		}},
 		{"acceleratorTypeChanges", func(dbURL string) error {

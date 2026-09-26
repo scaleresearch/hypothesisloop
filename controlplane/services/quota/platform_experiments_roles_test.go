@@ -115,6 +115,11 @@ type standingsStore struct {
 	competitors []string
 }
 
+// Every job these tests name completed.
+func (f *standingsStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
+	return map[string]bool{"job-baseline": true, "job-c1": true, "job-c2": true, "job-c3": true}, nil
+}
+
 func (f *standingsStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	return f.competitors, nil
 }

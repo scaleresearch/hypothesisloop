@@ -29,6 +29,8 @@ type StagesStore interface {
 	// reviewer holds quota and runs jobs like anyone else; it is simply not one of the things
 	// the ladder is comparing.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
+	// CompletedJobIDs is the jobs whose metrics rank: the ones that ran to a successful end.
+	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
 
 	// Quota. Accelerator-hours drives progress itself (GetTotalConsumedAccH); CPU/RAM/storage
 	// are released alongside it (see applyCut).

@@ -15,7 +15,10 @@ type AgentBest struct {
 }
 
 // BestPerAgentOnMetric returns, for every agent in platformExpID, its best "raw"-basis value on
-// one metric, plus the agents that only ever reported it on some other basis.
+// one metric over the jobs in completed, plus the agents that only ever reported it on some other
+// basis. completed is the platform experiment's COMPLETED jobs as the relational store has them:
+// a job that failed or was stopped reported numbers and proved nothing, so none of its values
+// rank.
 //
 // This is the single definition of "who is ahead". The stage ladder cuts with it and the final
 // standings rank with it, and the two ran as separately-built copies of the same PromQL — a
@@ -37,7 +40,7 @@ type AgentBest struct {
 // job_id is in the grouping so the winning value carries the job that produced it (and with it the
 // code ref). It does not change who wins: the per-agent best is still the same direction-aware
 // aggregation, just taken over each agent's per-job bests.
-func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]AgentBest, []string, error) {
+func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
 	agg := "max"
 	if metric.Direction == "minimize" {
 		agg = "min"
@@ -52,6 +55,9 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 	best := make(map[string]AgentBest, len(samples))
 	nonRaw := make(map[string]bool)
 	for _, sm := range samples {
+		if !completed[sm.Labels["job_id"]] {
+			continue
+		}
 		agentID := sm.Labels["agent_id"]
 		if agentID == "" {
 			return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: result missing agent_id", metric.Key)

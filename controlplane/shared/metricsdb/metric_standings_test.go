@@ -27,6 +27,9 @@ func vectorServer(t *testing.T, body string) (*httptest.Server, *string) {
 	return server, &gotQuery
 }
 
+// allCompleted is every job these tests name as one that ran to a successful end.
+var allCompleted = map[string]bool{"job-low": true, "job-high": true, "job-mid": true, "job-only": true, "job-1": true, "job-2": true, "job-a": true, "job-z": true}
+
 func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing.T) {
 	// One agent, three distinct job_id series (see BestPerAgentOnMetric's grouping-by-job_id
 	// doc comment) — the exact shape confirmed against live GreptimeDB data, where a single
@@ -35,6 +38,8 @@ func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing
 		`{"metric":{"agent_id":"a1","job_id":"job-low"},"value":[1,"0.10"]},` +
 		`{"metric":{"agent_id":"a1","job_id":"job-high"},"value":[1,"0.90"]},` +
 		`{"metric":{"agent_id":"a1","job_id":"job-mid"},"value":[1,"0.50"]},` +
+		`{"metric":{"agent_id":"a1","job_id":"job-failed"},"value":[1,"0.99"]},` +
+		`{"metric":{"agent_id":"a3","job_id":"job-still-running"},"value":[1,"0.95"]},` +
 		`{"metric":{"agent_id":"a2","job_id":"job-only"},"value":[1,"0.30"]}` +
 		`]}}`
 	server, gotQuery := vectorServer(t, body)
@@ -43,7 +48,7 @@ func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric)
+	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
@@ -51,7 +56,10 @@ func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing
 		t.Fatalf("nonRaw = %v, want none", nonRaw)
 	}
 	if got := best["a1"]; got.Value != 0.90 || got.ExperimentID != "job-high" {
-		t.Fatalf("a1 best = %+v, want value=0.90 job=job-high (its winner across 3 jobs)", got)
+		t.Fatalf("a1 best = %+v, want value=0.90 job=job-high (its winner across its 3 completed jobs, the failed one left out)", got)
+	}
+	if _, ranked := best["a3"]; ranked {
+		t.Fatal("a3 is ranked on a job that has not completed")
 	}
 	if got := best["a2"]; got.Value != 0.30 || got.ExperimentID != "job-only" {
 		t.Fatalf("a2 best = %+v, want value=0.30 job=job-only", got)
@@ -72,7 +80,7 @@ func TestBestPerAgentOnMetricPicksTheLowerJobIDOnAnExactTie(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric)
+	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
@@ -93,7 +101,7 @@ func TestBestPerAgentOnMetricExcludesNonRawBasisFromRanking(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric)
+	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
