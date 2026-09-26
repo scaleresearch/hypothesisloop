@@ -22,13 +22,13 @@ import (
 // Accounts is the persistence the handler needs for orgs, members, invites, projects and API keys.
 // *db.AccountsStore satisfies it.
 type Accounts interface {
-	CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error)
+	CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error)
 	RenameOrg(ctx context.Context, id, name string) error
 	GetOrg(ctx context.Context, id string) (*domain.Org, error)
 	ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error)
 	ListAllOrgs(ctx context.Context) ([]*domain.Org, error)
 	ListUserOrgs(ctx context.Context, userID string) ([]*domain.Org, error)
-	CreateProject(ctx context.Context, orgID, name string) (*domain.Project, error)
+	CreateProject(ctx context.Context, orgID, name string, maxProjects int) (*domain.Project, error)
 	RenameProject(ctx context.Context, id, name string) error
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	ListProjects(ctx context.Context, orgIDs []string) ([]*domain.Project, error)
@@ -70,17 +70,37 @@ type Handler struct {
 	connected     Connectivity
 	signingSecret string
 	runtimes      RuntimeAddresses
+	limits        Limits
 	logger        *zap.Logger
 	// access and policy are the document's own access check, set when the routes are registered.
 	access *auth.Access
 	policy policy
 }
 
-func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses, logger *zap.Logger) *Handler {
+// Limits is what one account may create: the orgs a person owns and the projects an org holds.
+// Staff are held to neither (auth.Access.HeldToLimits).
+type Limits struct {
+	MaxOrgsPerUser    int `json:"max_orgs_per_user" doc:"How many orgs a person may own when they create one. The orgs of this answer with role owner are the ones that count."`
+	MaxProjectsPerOrg int `json:"max_projects_per_org" doc:"How many projects one org may hold. The projects of this answer with that org_id are the ones that count."`
+}
+
+func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
 	if logger == nil {
 		panic("accounts.NewHandler: a logger is required")
 	}
-	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, logger: logger}
+	if limits.MaxOrgsPerUser <= 0 || limits.MaxProjectsPerOrg <= 0 {
+		panic("accounts.NewHandler: both account limits are required and positive")
+	}
+	return &Handler{accounts: accounts, clusters: clusters, connected: connected, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger}
+}
+
+// limit is bound for a caller held to the account limits, and none, zero, for staff.
+func (h *Handler) limit(ctx context.Context, bound int) (int, error) {
+	held, err := h.access.HeldToLimits(ctx)
+	if err != nil || !held {
+		return 0, err
+	}
+	return bound, nil
 }
 
 // Me is the caller and what it reaches.
@@ -93,6 +113,7 @@ type Me struct {
 	ProjectID string            `json:"project_id,omitempty" doc:"The one project an API key is bound to, absent when it reaches its whole org."`
 	Orgs      []*domain.Org     `json:"orgs"`
 	Projects  []*domain.Project `json:"projects"`
+	Limits    *Limits           `json:"limits,omitempty" doc:"What this caller may create, absent for staff, who are held to no limit. How much of each is used is read from orgs and projects beside it."`
 }
 
 // CreatedAPIKey is an API key at the one moment its token exists outside the caller's hands.
@@ -194,6 +215,10 @@ func (h *Handler) answer(op string, err error) error {
 		return conflict(ReasonInviteExpired, "the invite has expired: ask an owner of the org for a new one")
 	case errors.Is(err, db.ErrAPIKeyCreatorLacksOrg):
 		return auth.Forbidden("forbidden: " + err.Error())
+	case errors.Is(err, db.ErrMaxOrgsReached):
+		return conflict(ReasonMaxOrgsReached, fmt.Sprintf("a person owns at most %d orgs, and the owner of this one already does", h.limits.MaxOrgsPerUser))
+	case errors.Is(err, db.ErrMaxProjectsReached):
+		return conflict(ReasonMaxProjectsReached, fmt.Sprintf("an org holds at most %d projects, and this one already does", h.limits.MaxProjectsPerOrg))
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
 		return huma.Error409Conflict(err.Error())
 	default:
@@ -221,7 +246,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-me", Method: "GET", Path: "/me",
 		Summary: "Who this token is and what it reaches", Tags: []string{"accounts"},
 		Description: "The caller with the orgs and projects it reaches. A person sees the orgs they belong to with their role, " +
-			"an API key its org and the projects it is bound to, staff every org.",
+			"an API key its org and the projects it is bound to, staff every org. limits is what the caller may create.",
 	}, func(ctx context.Context, _ *struct{}) (*struct{ Body Me }, error) {
 		me, err := h.me(ctx)
 		if err != nil {
@@ -234,7 +259,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "create-org", Method: "POST", Path: "/orgs", DefaultStatus: http.StatusCreated,
 		Summary: "Create an org", Tags: []string{"accounts"},
 		Description: "The org starts with its creator as owner and a project named default. A person creates an org for " +
-			"themselves. Staff name the owner in owner_user_id. An API key cannot create an org.",
+			"themselves. Staff name the owner in owner_user_id. An API key cannot create an org. " +
+			"A person owns a bounded number of orgs, their first one included: past it the create answers 409 with reason max_orgs_reached. " +
+			"GET /me states the bound in limits. Staff are held to none, whoever they create for.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			Name        string `json:"name"`
@@ -249,7 +276,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		org, err := h.accounts.CreateOrg(ctx, name, owner)
+		maxOwned, err := h.limit(ctx, h.limits.MaxOrgsPerUser)
+		if err != nil {
+			return nil, err
+		}
+		org, err := h.accounts.CreateOrg(ctx, name, owner, maxOwned)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +347,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "create-project", Method: "POST", Path: "/orgs/{id}/projects", DefaultStatus: http.StatusCreated,
 		Summary: "Create a project in an org", Tags: []string{"accounts"},
-		Description: "A project groups platform experiments. Its name is unique within the org: a taken name answers 409.",
+		Description: "A project groups platform experiments. Its name is unique within the org: a taken name answers 409. " +
+			"An org holds a bounded number of projects, its default one included: past it the create answers 409 with reason max_projects_reached. " +
+			"GET /me states the bound in limits. Staff are held to none.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body nameBody
@@ -328,7 +361,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		project, err := h.accounts.CreateProject(ctx, in.ID, name)
+		maxProjects, err := h.limit(ctx, h.limits.MaxProjectsPerOrg)
+		if err != nil {
+			return nil, err
+		}
+		project, err := h.accounts.CreateProject(ctx, in.ID, name, maxProjects)
 		if err != nil {
 			return nil, err
 		}
@@ -566,6 +603,10 @@ func (h *Handler) me(ctx context.Context) (*Me, error) {
 		return nil, err
 	}
 	me := &Me{Kind: p.Kind, UserID: p.UserID, Name: p.Name, KeyID: p.KeyID}
+	if p.Kind != auth.KindStaff {
+		limits := h.limits
+		me.Limits = &limits
+	}
 	switch p.Kind {
 	case auth.KindStaff:
 		if me.Orgs, err = h.accounts.ListAllOrgs(ctx); err != nil {

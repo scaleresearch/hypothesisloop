@@ -212,10 +212,10 @@ func TestOrgsAreReadByIDAndAnOrgNeedsAnOwnerThatExists(t *testing.T) {
 	userID, homeOrg := newTestUserHome(t, accounts)
 	_, otherOrg := newTestUserHome(t, accounts)
 
-	if _, err := accounts.CreateOrg(ctx, "ownerless", "user-missing-"+uuid.New().String()); !errors.Is(err, ErrUserNotFound) {
+	if _, err := accounts.CreateOrg(ctx, "ownerless", "user-missing-"+uuid.New().String(), 0); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("create an org for a missing user: got = %v, want = %v", err, ErrUserNotFound)
 	}
-	second, err := accounts.CreateOrg(ctx, "home of "+userID, userID)
+	second, err := accounts.CreateOrg(ctx, "home of "+userID, userID, 0)
 	if err != nil || second.Role != domain.OrgRoleOwner {
 		t.Fatalf("a second org under the name of the first: got = %+v, %v, want it created and owned", second, err)
 	}

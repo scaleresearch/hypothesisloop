@@ -55,9 +55,18 @@ func (s *memStore) OrgRole(_ context.Context, orgID, userID string) (domain.OrgR
 	return role, ok, nil
 }
 
-func (s *memStore) CreateOrg(_ context.Context, name, ownerUserID string) (*domain.Org, error) {
+func (s *memStore) CreateOrg(_ context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
 	if !s.users[ownerUserID] {
 		return nil, db.ErrUserNotFound
+	}
+	owns := 0
+	for _, roles := range s.roles {
+		if roles[ownerUserID] == domain.OrgRoleOwner {
+			owns++
+		}
+	}
+	if maxOwned > 0 && owns >= maxOwned {
+		return nil, db.ErrMaxOrgsReached
 	}
 	org := &domain.Org{ID: s.id("org"), Name: name, CreatedAt: s.now()}
 	s.orgs[org.ID] = org
@@ -125,12 +134,21 @@ func (s *memStore) projectNameTaken(orgID, name, exceptID string) bool {
 	return false
 }
 
-func (s *memStore) CreateProject(_ context.Context, orgID, name string) (*domain.Project, error) {
+func (s *memStore) CreateProject(_ context.Context, orgID, name string, maxProjects int) (*domain.Project, error) {
 	if _, ok := s.orgs[orgID]; !ok {
 		return nil, db.ErrOrgNotFound
 	}
 	if s.projectNameTaken(orgID, name, "") {
 		return nil, db.ErrProjectNameTaken
+	}
+	held := 0
+	for _, p := range s.projects {
+		if p.OrgID == orgID {
+			held++
+		}
+	}
+	if maxProjects > 0 && held >= maxProjects {
+		return nil, db.ErrMaxProjectsReached
 	}
 	p := &domain.Project{ID: s.id("prj"), OrgID: orgID, Name: name, CreatedAt: s.now()}
 	s.projects[p.ID] = p

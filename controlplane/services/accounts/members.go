@@ -23,6 +23,9 @@ const (
 	ReasonInviteUsed    = "invite_used"
 	ReasonInviteRevoked = "invite_revoked"
 	ReasonInviteExpired = "invite_expired"
+
+	ReasonMaxOrgsReached     = "max_orgs_reached"
+	ReasonMaxProjectsReached = "max_projects_reached"
 )
 
 func conflict(reason, message string) *refused {

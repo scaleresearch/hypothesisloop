@@ -253,7 +253,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
 	}
-	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL}, logger))
+	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL},
+		accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger))
 	accounts.RegisterReposHuma(doc, repos)
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)

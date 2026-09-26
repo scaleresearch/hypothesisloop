@@ -105,7 +105,7 @@ func TestOrgsAndProjectsCanBeCreatedAndRenamed(t *testing.T) {
 	ctx := context.Background()
 	userID, homeOrg := newTestUserHome(t, accounts)
 
-	second, err := accounts.CreateOrg(ctx, "second", userID)
+	second, err := accounts.CreateOrg(ctx, "second", userID, 0)
 	if err != nil {
 		t.Fatalf("create org: got = %v, want = nil", err)
 	}
@@ -121,17 +121,17 @@ func TestOrgsAndProjectsCanBeCreatedAndRenamed(t *testing.T) {
 		t.Fatalf("user orgs: got = %+v, %v, want the home org then the renamed one", orgs, err)
 	}
 
-	project, err := accounts.CreateProject(ctx, second.ID, "vision")
+	project, err := accounts.CreateProject(ctx, second.ID, "vision", 0)
 	if err != nil {
 		t.Fatalf("create project: got = %v, want = nil", err)
 	}
-	if _, err := accounts.CreateProject(ctx, second.ID, "vision"); !errors.Is(err, ErrProjectNameTaken) {
+	if _, err := accounts.CreateProject(ctx, second.ID, "vision", 0); !errors.Is(err, ErrProjectNameTaken) {
 		t.Fatalf("create a project under a taken name: got = %v, want = %v", err, ErrProjectNameTaken)
 	}
-	if _, err := accounts.CreateProject(ctx, homeOrg, "vision"); err != nil {
+	if _, err := accounts.CreateProject(ctx, homeOrg, "vision", 0); err != nil {
 		t.Fatalf("the same project name in another org: got = %v, want = nil", err)
 	}
-	if _, err := accounts.CreateProject(ctx, "org_missing", "vision"); !errors.Is(err, ErrOrgNotFound) {
+	if _, err := accounts.CreateProject(ctx, "org_missing", "vision", 0); !errors.Is(err, ErrOrgNotFound) {
 		t.Fatalf("create a project in a missing org: got = %v, want = %v", err, ErrOrgNotFound)
 	}
 	if err := accounts.RenameProject(ctx, project.ID, domain.DefaultProjectName); !errors.Is(err, ErrProjectNameTaken) {
@@ -338,7 +338,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)
 	projectA, projectB := defaultProjectOf(t, accounts, orgA), defaultProjectOf(t, accounts, orgB)
-	secondA, err := accounts.CreateProject(ctx, orgA, "second")
+	secondA, err := accounts.CreateProject(ctx, orgA, "second", 0)
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

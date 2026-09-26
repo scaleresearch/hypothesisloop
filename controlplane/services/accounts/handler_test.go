@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,10 +17,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 const testSigningSecret = "accounts-test-signing-secret"
+
+var testLimits = Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}
 
 var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid"}
 
@@ -90,14 +94,14 @@ func newWorld(t *testing.T) *world {
 	for _, user := range []string{"u-owner", "u-member", "u-other", "u-staff"} {
 		w.store.users[user] = true
 	}
-	orgA, _ := w.store.CreateOrg(ctx, "org a", "u-owner")
-	orgB, _ := w.store.CreateOrg(ctx, "org b", "u-other")
+	orgA, _ := w.store.CreateOrg(ctx, "org a", "u-owner", 0)
+	orgB, _ := w.store.CreateOrg(ctx, "org b", "u-other", 0)
 	w.orgA, w.orgB = orgA.ID, orgB.ID
 	w.store.join(w.orgA, "u-member", domain.OrgRoleMember)
 	projectsA, _ := w.store.ListProjects(ctx, []string{w.orgA})
 	projectsB, _ := w.store.ListProjects(ctx, []string{w.orgB})
 	w.projectA, w.projectB = projectsA[0].ID, projectsB[0].ID
-	second, _ := w.store.CreateProject(ctx, w.orgA, "second")
+	second, _ := w.store.CreateProject(ctx, w.orgA, "second", 0)
 	w.projectA2 = second.ID
 	w.personKey, w.parentKey, w.memberKey = "k-person", "k-org", "k-member"
 	w.inviteA, w.inviteToken = "inv-a", "hli_token-of-inv-a"
@@ -148,9 +152,35 @@ func newWorld(t *testing.T) *world {
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", tokens{w}, auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(w.store, w.store, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.router = router
 	return w
+}
+
+// fillOrgs gives every person as many orgs as one may own.
+func (w *world) fillOrgs() {
+	w.t.Helper()
+	for user := range w.store.users {
+		for {
+			if _, err := w.store.CreateOrg(context.Background(), "filler", user, testLimits.MaxOrgsPerUser); errors.Is(err, db.ErrMaxOrgsReached) {
+				break
+			} else if err != nil {
+				w.t.Fatalf("fill orgs of %s: %v", user, err)
+			}
+		}
+	}
+}
+
+// fillProjects gives the org as many projects as one may hold.
+func (w *world) fillProjects(orgID string) {
+	w.t.Helper()
+	for i := 0; ; i++ {
+		if _, err := w.store.CreateProject(context.Background(), orgID, fmt.Sprintf("filler %d", i), testLimits.MaxProjectsPerOrg); errors.Is(err, db.ErrMaxProjectsReached) {
+			return
+		} else if err != nil {
+			w.t.Fatalf("fill projects of %s: %v", orgID, err)
+		}
+	}
 }
 
 // call makes one request as caller; an empty caller sends no token.
@@ -225,6 +255,16 @@ func TestWhoMayCallWhat(t *testing.T) {
 			map[string]int{"owner": ok, "member": ok, "outsider": notFound, "org-key": ok, "project-key": ok, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"create a project", func(w *world) request { return request{"POST", "/orgs/" + w.orgA + "/projects", name{"name": "third"}} },
 			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
+		{"create an org when every person owns the most they may", func(w *world) request {
+			w.fillOrgs()
+			return request{"POST", "/orgs", name{"name": "one more"}}
+		},
+			map[string]int{"owner": conflict, "member": conflict, "outsider": conflict, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": bad, "staff-user": created}},
+		{"create a project in an org that holds the most it may", func(w *world) request {
+			w.fillProjects(w.orgA)
+			return request{"POST", "/orgs/" + w.orgA + "/projects", name{"name": "one more"}}
+		},
+			map[string]int{"owner": conflict, "member": forbidden, "outsider": notFound, "org-key": conflict, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
 		{"rename the project a key is bound to", func(w *world) request { return request{"PATCH", "/projects/" + w.projectA, name{"name": "renamed"}} },
 			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"rename another project of the org", func(w *world) request { return request{"PATCH", "/projects/" + w.projectA2, name{"name": "renamed"}} },
@@ -301,8 +341,8 @@ func TestWhoMayCallWhat(t *testing.T) {
 				if _, known := w.callers[caller]; !known && caller != "" {
 					t.Fatalf("no caller named %q", caller)
 				}
-				before := snapshot(t, w.store)
 				r := op.request(w)
+				before := snapshot(t, w.store)
 				rec := w.call(caller, r.method, r.path, r.body)
 				if rec.Code != want {
 					t.Fatalf("%s %s: got = %d %s, want = %d", r.method, r.path, rec.Code, rec.Body, want)
@@ -843,7 +883,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}
-	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, testSigningSecret, testRuntimeAddresses, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)

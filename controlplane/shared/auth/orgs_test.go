@@ -208,6 +208,18 @@ func TestAProjectAndAKeyAreFoundUnderTheIdsTheStoreIssues(t *testing.T) {
 	}
 }
 
+func TestOnlyStaffAreHeldToNoLimit(t *testing.T) {
+	access := orgsWithAMember()
+	for caller, want := range map[string]bool{"owner": true, "member": true, "org key": true, "project key": true, "staff": false} {
+		if got, err := access.HeldToLimits(auth.WithPrincipal(context.Background(), accountCallers[caller])); err != nil || got != want {
+			t.Errorf("%s held to the account limits: got = %v, %v, want = %v", caller, got, err, want)
+		}
+	}
+	if _, err := access.HeldToLimits(auth.WithPrincipal(context.Background(), accountCallers["agent"])); status(err) != 403 {
+		t.Errorf("an agent token asking: got = %v, want a 403", err)
+	}
+}
+
 // An invite is answered for by a person: the owner who makes it, or the one who made the key
 // that makes it.
 func TestAnInviteIsAnsweredForByAPerson(t *testing.T) {

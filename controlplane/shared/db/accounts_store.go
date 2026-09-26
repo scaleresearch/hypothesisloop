@@ -21,6 +21,9 @@ var (
 	// ErrAPIKeyCreatorLacksOrg reports a key asked for in the name of a user who may not hold
 	// it (apiKeyHeldBy): such a key would not authenticate.
 	ErrAPIKeyCreatorLacksOrg = errors.New("the key's creator may not hold such a key in the org")
+	// ErrMaxOrgsReached and ErrMaxProjectsReached report a create past what one account may hold.
+	ErrMaxOrgsReached     = errors.New("the owner already owns as many orgs as one person may")
+	ErrMaxProjectsReached = errors.New("the org already holds as many projects as one org may")
 	// ErrProjectNameTaken reports that the org already has a project of that name.
 	ErrProjectNameTaken = errors.New("the org already has a project with that name")
 )
@@ -124,20 +127,36 @@ func createOrg(ctx context.Context, tx pgx.Tx, name, ownerUserID string) (*domai
 }
 
 // CreateOrg creates an org owned by ownerUserID, with its default project. ErrUserNotFound when
-// there is no such user.
-func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string) (*domain.Org, error) {
+// there is no such user. With maxOwned set the owner may own that many orgs and no more, this one
+// included, and ErrMaxOrgsReached refuses the next; zero holds them to no limit. The owner's row
+// is locked first and the orgs they own are counted after the insert, inside its transaction, so
+// two creates at once cannot both take the last place.
+func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateOrg: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	var locked bool
+	err = tx.QueryRow(ctx, `SELECT true FROM users WHERE id = $1 FOR NO KEY UPDATE`, ownerUserID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("accounts_store.CreateOrg: lock owner: %w", err)
+	}
 	org, err := createOrg(ctx, tx, name, ownerUserID)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-			return nil, ErrUserNotFound
-		}
 		return nil, fmt.Errorf("accounts_store.CreateOrg: %w", err)
+	}
+	if maxOwned > 0 {
+		var owned int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE user_id = $1 AND role = 'owner'`, ownerUserID).Scan(&owned); err != nil {
+			return nil, fmt.Errorf("accounts_store.CreateOrg: count owned: %w", err)
+		}
+		if owned > maxOwned {
+			return nil, ErrMaxOrgsReached
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateOrg: commit: %w", err)
@@ -242,16 +261,45 @@ func (s *AccountsStore) OrgRole(ctx context.Context, orgID, userID string) (role
 	return role, true, nil
 }
 
-func (s *AccountsStore) CreateProject(ctx context.Context, orgID, name string) (*domain.Project, error) {
+// CreateProject creates a project in an org. With maxProjects set the org may hold that many
+// and no more, this one included, and ErrMaxProjectsReached refuses the next; zero holds it to no
+// limit. The org's row is locked first and its projects are counted after the insert, as
+// CreateOrg counts an owner's orgs.
+func (s *AccountsStore) CreateProject(ctx context.Context, orgID, name string, maxProjects int) (*domain.Project, error) {
 	id, err := newAccountID("prj")
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateProject: %w", err)
 	}
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("accounts_store.CreateProject: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var locked bool
+	err = tx.QueryRow(ctx, `SELECT true FROM orgs WHERE id = $1 FOR NO KEY UPDATE`, orgID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOrgNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("accounts_store.CreateProject: lock org: %w", err)
+	}
 	p := &domain.Project{ID: id, OrgID: orgID, Name: name}
-	err = s.pool.pool.QueryRow(ctx, `INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) RETURNING created_at`,
+	err = tx.QueryRow(ctx, `INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) RETURNING created_at`,
 		id, orgID, name).Scan(&p.CreatedAt)
 	if err != nil {
 		return nil, projectWriteError("CreateProject", err)
+	}
+	if maxProjects > 0 {
+		var held int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM projects WHERE org_id = $1`, orgID).Scan(&held); err != nil {
+			return nil, fmt.Errorf("accounts_store.CreateProject: count projects: %w", err)
+		}
+		if held > maxProjects {
+			return nil, ErrMaxProjectsReached
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("accounts_store.CreateProject: commit: %w", err)
 	}
 	return p, nil
 }

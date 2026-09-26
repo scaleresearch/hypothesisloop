@@ -14,7 +14,7 @@ func TestAProjectHoldsOneRepositoryAndSharesAnInstallationWithOthers(t *testing.
 	ctx := context.Background()
 	_, orgID := newTestUserHome(t, accounts)
 	first := defaultProjectOf(t, accounts, orgID)
-	second, err := accounts.CreateProject(ctx, orgID, "second")
+	second, err := accounts.CreateProject(ctx, orgID, "second", 0)
 	if err != nil {
 		t.Fatalf("create project: got = %v, want = nil", err)
 	}

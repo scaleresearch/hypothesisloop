@@ -18,6 +18,8 @@ import (
 //     its members and invites, its API keys and its clusters.
 //   - A member reads the org and works in its projects. Of what the org owns a member makes one
 //     thing, API keys bound to one project, and ends only the keys they made.
+//   - What one account may create is bounded (config accounts.*). Staff, the platform's own
+//     operators, are held to no bound, whoever they create for.
 //   - A person leaves an org by themselves, whatever their role. An invite is accepted by a
 //     signed-in person, for themselves. The store keeps an org from losing its last owner.
 //   - A cluster is administered by the administrators of the org that registered it, whatever is
@@ -94,6 +96,13 @@ func (a *Access) administers(ctx context.Context, p Principal, orgID string) err
 	default:
 		return forbidden("forbidden: a " + string(p.Kind) + " token does not administer an org")
 	}
+}
+
+// HeldToLimits reports whether what the caller creates counts against the bounds on what one
+// account may create.
+func (a *Access) HeldToLimits(ctx context.Context) (bool, error) {
+	p, err := a.Account(ctx)
+	return p.Kind != KindStaff, err
 }
 
 // Person returns the principal when a signed-in person is behind it: a user, or staff signed in
