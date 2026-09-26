@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  addPlatformExperimentAgents, createPlatformExperiment, fetchGitHubInstallations, fetchGitHubRepositories, startPlatformExperiment, updatePlatformExperiment,
+  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubInstallations, fetchGitHubRepositories, startPlatformExperiment,
+  updatePlatformExperiment,
 } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
@@ -12,7 +13,7 @@ import type { Me, PlatformExperiment } from '@/types'
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
   startPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
 }))
 
@@ -46,6 +47,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 
 beforeEach(() => {
   onSaved.mockReset()
+  vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u9', connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockResolvedValue(created)
@@ -66,6 +68,40 @@ describe('a new platform experiment whose agents the operator runs', () => {
     expect(new Date(sent.starts_at).getTime()).toBeGreaterThan(Date.now())
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
     expect(startPlatformExperiment).not.toHaveBeenCalled()
+  })
+})
+
+describe('a repository that brings its own experiment', () => {
+  // A person who picked such a repository in the form started agents with an empty brief: the
+  // form knew nothing of the file the API reads for a create with from_repo.
+  it('fills the form from its experiment file, and what is created carries it', async () => {
+    vi.mocked(fetchExperimentFile).mockResolvedValue({
+      repository: 'acme/widgets', name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10,
+      metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
+    })
+    show()
+    await userEvent.click(await screen.findByLabelText('Repository'))
+    await userEvent.click(await screen.findByRole('option', { name: 'acme/widgets' }))
+    await screen.findByText(/Filled in from \.hypothesisloop\/experiment\.yaml of acme\/widgets/)
+    expect(fetchExperimentFile).toHaveBeenCalledExactlyOnceWith('prj_1', 'acme/widgets')
+    expect(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')).toHaveProperty('value', 'Widget compression')
+    await userEvent.click(screen.getByRole('button', { name: 'Next: competition settings' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create and run' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1]).toMatchObject({
+      name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets',
+      metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
+    })
+  })
+
+  it('keeps a name already typed, and says so when the repository has no experiment file', async () => {
+    show()
+    await userEvent.type(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'Mine')
+    await userEvent.click(await screen.findByLabelText('Repository'))
+    await userEvent.click(await screen.findByRole('option', { name: 'acme/widgets' }))
+    await screen.findByText(/acme\/widgets has no \.hypothesisloop\/experiment\.yaml/)
+    expect(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')).toHaveProperty('value', 'Mine')
   })
 })
 

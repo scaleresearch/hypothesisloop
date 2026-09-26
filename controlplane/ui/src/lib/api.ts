@@ -33,6 +33,7 @@ import type {
   GitHubApp,
   GitHubInstallation,
   GitHubRepository,
+  SubmitterPolicy,
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
@@ -456,6 +457,25 @@ export interface CreatePlatformExperimentRequest {
   agent_image?: string
   /** true has the platform run the coordinator. It needs `repository`. Read at creation only. */
   coordinator_hosted?: boolean
+}
+
+/** What a repository's .hypothesisloop/experiment.yaml states of a platform experiment. */
+export interface ExperimentFile {
+  repository: string
+  name?: string
+  description?: string
+  metrics?: MetricDefinition[]
+  report_interval_seconds?: number
+  stages?: Stage[]
+  hypothesis_submit_policy?: SubmitterPolicy
+  job_submit_policy?: SubmitterPolicy
+}
+
+/** The reason the API gives for a repository that brings no experiment file. */
+export const NO_EXPERIMENT_FILE = 'no_experiment_file'
+
+export function fetchExperimentFile(projectID: string, repository: string): Promise<ExperimentFile> {
+  return apiFetch<ExperimentFile>(withQuery(`/projects/${projectID}/experiment-file`, { repository }))
 }
 
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {

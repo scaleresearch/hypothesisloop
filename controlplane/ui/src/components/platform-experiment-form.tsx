@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { clsx } from 'clsx'
-import { createPlatformExperiment, updatePlatformExperiment } from '@/lib/api'
+import { ApiError, NO_EXPERIMENT_FILE, createPlatformExperiment, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api'
 import type { Stage } from '@/lib/api'
 import { isZeroDate } from '@/lib/format'
 import { createAndRun } from '@/lib/run-experiment'
@@ -336,7 +336,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
   const [form, setForm] = useState<FormState>({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
-    budget_accelerator_hours: initial?.budget_accelerator_hours ?? 1000,
+    budget_accelerator_hours: initial?.budget_accelerator_hours ?? 10,
     max_agents: initial?.max_agents ?? 20,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : localDatetime(1),
@@ -352,11 +352,40 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     researchers: 2,
   })
   const [step, setStep] = useState<1 | 2>(1)
+  // What the chosen repository's experiment file did to the form: filled it, is not there, or
+  // could not be read.
+  const [fromFile, setFromFile] = useState<{ repository: string; state: 'reading' | 'filled' | 'none' | 'failed'; message?: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy | RunBy) {
     setForm(f => ({ ...f, [field]: value }))
+  }
+
+  // A repository may bring its own experiment: the brief, the metrics and the ladder its code
+  // is written for. Choosing it fills them in, for the person to read and change before anything
+  // is created. A name or a description already typed stays.
+  async function chooseRepository(repository: string) {
+    set('repository', repository)
+    if (!repository) return setFromFile(null)
+    setFromFile({ repository, state: 'reading' })
+    try {
+      const file = await fetchExperimentFile(project.id, repository)
+      setForm(f => f.repository !== repository ? f : {
+        ...f,
+        name: f.name.trim() || file.name || '',
+        description: f.description.trim() || file.description || '',
+        metrics: file.metrics?.length ? file.metrics : f.metrics,
+        report_interval_seconds: file.report_interval_seconds || f.report_interval_seconds,
+        stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
+        hypothesis_submit_policy: file.hypothesis_submit_policy || f.hypothesis_submit_policy,
+        job_submit_policy: file.job_submit_policy || f.job_submit_policy,
+      })
+      setFromFile({ repository, state: 'filled' })
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, state: 'none' })
+      setFromFile({ repository, state: 'failed', message: err instanceof Error ? err.message : String(err) })
+    }
   }
 
   const ladderError = stagesError(form.stages)
@@ -436,6 +465,42 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
           <div className="flex flex-col gap-4">
             {step === 1 ? (
               <>
+                {isEdit ? (
+                  <FieldGroup label="Repository and agent image" hint="Fixed when the experiment was created.">
+                    <p className="font-mono text-xs">
+                      {form.repository || 'no repository'} · {form.agent_image || 'the platform\'s agent image'}
+                    </p>
+                  </FieldGroup>
+                ) : (
+                  <>
+                    <FormField
+                      label="Repository"
+                      hint="The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Fixed once created."
+                    >
+                      <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} />
+                    </FormField>
+                    {fromFile?.repository === form.repository && fromFile.state === 'reading' && (
+                      <p className="text-xs text-subtle">Reading .hypothesisloop/experiment.yaml of {fromFile.repository}…</p>
+                    )}
+                    {fromFile?.repository === form.repository && fromFile.state === 'filled' && (
+                      <p className="text-xs text-muted">Filled in from .hypothesisloop/experiment.yaml of {fromFile.repository}: the name, the description, the metrics and the settings it states. Change anything before you create it.</p>
+                    )}
+                    {fromFile?.repository === form.repository && fromFile.state === 'none' && (
+                      <p className="text-xs text-muted">{fromFile.repository} has no .hypothesisloop/experiment.yaml, so nothing is filled in: describe the task and name its metrics below.</p>
+                    )}
+                    {fromFile?.repository === form.repository && fromFile.state === 'failed' && (
+                      <InlineError>Could not read .hypothesisloop/experiment.yaml of {fromFile.repository}: {fromFile.message}</InlineError>
+                    )}
+                    <Disclosure label="Advanced">
+                      <FormField
+                        label="Agent image"
+                        hint="The container image hosted agents and the coordinator run. Leave it empty for the platform's own agent image. A custom image must be built FROM that one, so the harness is in it. Fixed once created."
+                      >
+                        <Input mono value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
+                      </FormField>
+                    </Disclosure>
+                  </>
+                )}
                 <FormField label="Name *" hint="Shown to every agent in the listing. Make it specific enough to tell two runs apart.">
                   <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
                 </FormField>
@@ -483,30 +548,6 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                   )}
                 </FieldGroup>
 
-                {isEdit ? (
-                  <FieldGroup label="Repository and agent image" hint="Fixed when the experiment was created.">
-                    <p className="font-mono text-xs">
-                      {form.repository || 'no repository'} · {form.agent_image || 'the platform\'s agent image'}
-                    </p>
-                  </FieldGroup>
-                ) : (
-                  <>
-                    <FormField
-                      label="Repository"
-                      hint="The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. Fixed once created."
-                    >
-                      <RepositorySelect value={form.repository} onChange={r => set('repository', r)} />
-                    </FormField>
-                    <Disclosure label="Advanced">
-                      <FormField
-                        label="Agent image"
-                        hint="The container image hosted agents and the coordinator run. Leave it empty for the platform's own agent image. A custom image must be built FROM that one, so the harness is in it. Fixed once created."
-                      >
-                        <Input mono value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
-                      </FormField>
-                    </Disclosure>
-                  </>
-                )}
               </>
             ) : (
               <>

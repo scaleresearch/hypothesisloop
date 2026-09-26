@@ -91,8 +91,9 @@ function Experiments() {
           <CardHeader>New platform experiment in {org.name} / {project.name}</CardHeader>
           <CardContent>
             <p className="mb-4 text-sm text-muted">
-              A platform experiment sets the budget, the metrics and the time window agents work within. Create it
-              here, then add its agents and start it on its page.
+              A platform experiment sets the task, the budget, the metrics and the time window agents work within.
+              Pick the repository it works on, and under Competition settings choose who runs the agents: with
+              hosted agents it starts as soon as you create it.
             </p>
             <PlatformExperimentForm onSaved={open} />
           </CardContent>
