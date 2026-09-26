@@ -83,6 +83,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	finished, err := s.store.IsAgentFinished(ctx, exp.PlatformExperimentID, exp.AgentID)
+	if err != nil {
+		return fmt.Errorf("scheduler: check finished: %w", err)
+	}
+	if finished {
+		return &AdmissionError{
+			Reason:  "agent_finished",
+			Message: "agent finished in this platform experiment (POST /platform-experiments/{id}/agents/{agent_id}/finish), which is final: it submits no further job. Its token still reads",
+		}
+	}
+
 	// 3ab. Durable-data ceiling.
 	if err := s.enforceDataCeiling(ctx, exp); err != nil {
 		return err

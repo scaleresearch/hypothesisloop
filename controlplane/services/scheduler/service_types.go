@@ -34,6 +34,8 @@ type Store interface {
 	// IsAgentCut reports whether the agent was cut at a stage boundary (see
 	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// IsAgentFinished reports whether the agent said it has nothing left to do, which is final.
+	IsAgentFinished(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
 	// without a summary in the given platform experiment.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)

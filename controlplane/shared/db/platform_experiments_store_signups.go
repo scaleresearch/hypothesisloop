@@ -252,6 +252,16 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, re
 	return nil
 }
 
+// IsAgentFinished says the agent finished in the platform experiment.
+func (s *PlatformExperimentsStore) IsAgentFinished(ctx context.Context, platformExpID, agentID string) (bool, error) {
+	var finished bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM experiment_signups
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)`, platformExpID, agentID).Scan(&finished); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.IsAgentFinished: %w", err)
+	}
+	return finished, nil
+}
+
 // The last column is whether the agent's run ended long enough ago for its machine to be
 // released: its platform experiment closed, it was cut, or it finished.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,

@@ -232,6 +232,11 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 		}
 	}
 	expect(runningAgents[3], true)
+	for agent, want := range map[string]bool{runningAgents[0]: false, runningAgents[3]: true} {
+		if finished, err := pes.IsAgentFinished(ctx, running, agent); err != nil || finished != want {
+			t.Errorf("finished %s: got = (%v, %v), want = %v", agent, finished, err, want)
+		}
+	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET finished_at = now() - make_interval(secs => $3) WHERE platform_experiment_id = $1 AND agent_id = $2`,
 		running, runningAgents[4], (windDown + time.Second).Seconds()); err != nil {
 		t.Fatal(err)

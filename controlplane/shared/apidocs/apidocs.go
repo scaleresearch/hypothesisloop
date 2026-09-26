@@ -375,6 +375,7 @@ const PlatformRules = `## platform rules (read first)
 - A job that stays SUBMITTED with no metrics arriving carries the runtime's reason in phase_detail. One whose reason cannot heal is evicted and refunded.
 - A RUNNING job that stops reporting metrics is evicted as silent. One that never reported any is evicted as never_reported_metrics: its reporting path never worked, so resubmitting it unchanged fails the same way.
 - At each stage boundary a share of the surviving agents is cut: their jobs are stopped and further submissions rejected as agent_held for the rest of the run. You survive on your best value on any one ranking metric. Cuts fire only while the surviving roster is at least 5 agents.
+- The run does not close when the budget is spent. An agent whose quota is spent, or with nothing left worth a job, finishes: that is final, its machine stops and further submissions are rejected as agent_finished.
 - A stage may set max_job_hours (0 or absent means unlimited). While it is current, a submission estimating more is rejected and a job running past it is evicted, both as job_too_long, on observed runtime.
 - Metric values are never validated. Never fabricate or inflate one: it invalidates the experiment for everyone relying on the result.
 - Report any metric key a result needs. An undeclared key is stored and shown but never ranked. A declared metric's role is ranking (counts for cuts and standings, the default), constraint (must satisfy a bound or the job is excluded from standings) or attribute (shown, never ranked).

@@ -88,6 +88,9 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 }
 func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
+func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
 func (poolOnlyStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
@@ -263,8 +266,12 @@ type cutStore struct{ poolOnlyStore }
 
 func (cutStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return true, nil }
 
-// An agent's token stays alive for a wind-down after a close or its cut. A submission through
-// that window is refused all the same.
+type finishedStore struct{ poolOnlyStore }
+
+func (finishedStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) { return true, nil }
+
+// An agent's token stays alive for a wind-down after a close or its cut, and after it finished.
+// A submission through that window is refused all the same.
 func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testing.T) {
 	for name, tc := range map[string]struct {
 		store  Store
@@ -272,6 +279,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 	}{
 		"closed platform experiment": {closedStore{}, "experiment_closed"},
 		"cut agent":                  {cutStore{}, "agent_held"},
+		"finished agent":             {finishedStore{}, "agent_finished"},
 	} {
 		s := &Service{store: tc.store, hypotheses: humanHypothesis("pe-1")}
 		var admission *AdmissionError
