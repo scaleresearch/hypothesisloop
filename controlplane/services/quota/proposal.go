@@ -266,6 +266,9 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}
+		if errors.Is(err, db.ErrPlanningOver) {
+			return nil, planningOver(pe)
+		}
 		if err != nil {
 			return nil, h.refusal("store proposal", err)
 		}
@@ -449,6 +452,9 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}
+		if errors.Is(err, db.ErrPlanningOver) {
+			return nil, planningOver(pe)
+		}
 		if err != nil {
 			return nil, h.refusal("store decline", err)
 		}
@@ -459,6 +465,10 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
+}
+
+func planningOver(pe *domain.PlatformExperiment) error {
+	return &reasonError{status: http.StatusConflict, Reason: "planning_over", Message: "the planning limit of draft " + pe.ID + " passed at " + pe.EndsAt.UTC().Format(time.RFC3339) + ": it takes no proposal and no decline, and is closed"}
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {

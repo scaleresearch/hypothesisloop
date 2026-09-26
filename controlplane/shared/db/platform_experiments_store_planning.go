@@ -114,35 +114,50 @@ func (e *PlanningLimitError) Error() string {
 // ErrNotDraft is returned for a write that only a draft takes.
 var ErrNotDraft = errors.New("platform experiment is not a draft")
 
+// ErrPlanningOver is returned for a planner's answer to a draft whose planning limit has passed.
+var ErrPlanningOver = errors.New("the draft's planning limit has passed")
+
+// answerDraft runs a planner's answer, which a draft takes until its ends_at. The sweep closes a
+// draft past it within a minute; an answer in that minute is refused here.
+func (s *PlatformExperimentsStore) answerDraft(ctx context.Context, id, update string, args ...any) error {
+	tag, err := s.pool.pool.Exec(ctx, update+` WHERE id = $1 AND status = 'draft' AND ends_at > now()`, append([]any{id}, args...)...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	var draft bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT COALESCE((SELECT status = 'draft' FROM platform_experiments WHERE id = $1), false)`, id).Scan(&draft); err != nil {
+		return err
+	}
+	if draft {
+		return ErrPlanningOver
+	}
+	return ErrNotDraft
+}
+
 // SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
 // draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
 func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
-	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()
-WHERE id = $1 AND status = 'draft'`, id, proposal, waitUntil)
-	if err != nil {
+	err := s.answerDraft(ctx, id, `
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()`, proposal, waitUntil)
+	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotDraft
-	}
-	return nil
+	return err
 }
 
 // Decline stores why a draft's planner proposes nothing. It answers the goal as a proposal
 // does: the draft waits for a person until waitUntil and the planner's machine is released. A
 // proposal made before no longer stands, so it is cleared and there is nothing to accept.
 func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time) error {
-	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), ends_at = $3, updated_at = now()
-WHERE id = $1 AND status = 'draft'`, id, reason, waitUntil)
-	if err != nil {
+	err := s.answerDraft(ctx, id, `
+UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), ends_at = $3, updated_at = now()`, reason, waitUntil)
+	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.Decline: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotDraft
-	}
-	return nil
+	return err
 }
 
 // ErrNothingProposed is returned for accepting a draft whose planner has proposed nothing or

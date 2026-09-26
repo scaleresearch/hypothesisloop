@@ -382,16 +382,22 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 // ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
 // asked, nil when the platform closes it at its end time. One already closed keeps what it has.
 func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error {
-	reason, actor := domain.CloseEndTimeReached, domain.Actor{}
+	reason, actor := "", domain.Actor{}
 	if by != nil {
-		reason, actor = domain.CloseByRequest, *by
+		reason, actor = string(domain.CloseByRequest), *by
 	}
+	// What the platform closes at ends_at is a run at its end, or a draft: one nobody proposed
+	// for inside the planning limit, or one whose answer no person took up.
 	const q = `
 UPDATE platform_experiments
 SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
-    close_reason = $2, closed_by_kind = $3, closed_by_id = $4
+    close_reason = CASE WHEN $2 <> '' THEN $2
+                        WHEN status = 'draft' AND proposed_at IS NULL THEN '` + string(domain.ClosePlanningLimitReached) + `'
+                        WHEN status = 'draft' THEN '` + string(domain.CloseProposalExpired) + `'
+                        ELSE '` + string(domain.CloseEndTimeReached) + `' END,
+    closed_by_kind = $3, closed_by_id = $4
 WHERE id = $1 AND status <> 'closed'`
-	if _, err := s.pool.pool.Exec(ctx, q, id, string(reason), string(actor.Kind), actor.ID); err != nil {
+	if _, err := s.pool.pool.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID); err != nil {
 		return fmt.Errorf("platform_experiments_store.Close: %w", err)
 	}
 	return nil

@@ -216,6 +216,27 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		return pe, agents, signups
 	}
 
+	{
+		id, _ := createTestDraft(t, pool, launcher+"-late")
+		// Past its limit a draft takes no answer, also in the minute before the sweep closes it, and
+		// closed by the platform it says which limit ended it.
+		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != ErrPlanningOver {
+			t.Fatalf("proposing past the limit: got = %v, want ErrPlanningOver", err)
+		}
+		if err := pes.Decline(ctx, id, "late", time.Now().Add(time.Hour)); err != ErrPlanningOver {
+			t.Fatalf("declining past the limit: got = %v, want ErrPlanningOver", err)
+		}
+		if err := pes.ClosePlatformExperiment(ctx, id, nil); err != nil {
+			t.Fatal(err)
+		}
+		if late, _ := pes.GetPlatformExperiment(ctx, id); late.CloseReason != domain.ClosePlanningLimitReached || late.ProposedAt != nil {
+			t.Fatalf("a draft closed at its limit: got = %q proposed at %v, want planning_limit_reached and no proposal", late.CloseReason, late.ProposedAt)
+		}
+	}
+
 	pe, agents, signups := accepted(2)
 	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
 		t.Fatalf("accepting before a proposal: got = %v, want ErrNothingProposed", err)

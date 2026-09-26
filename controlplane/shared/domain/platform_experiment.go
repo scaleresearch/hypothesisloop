@@ -242,7 +242,7 @@ type PlatformExperiment struct {
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at EndsAt. Carried by a read of one platform experiment.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
-	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
+	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -256,6 +256,10 @@ type CloseReason string
 const (
 	CloseEndTimeReached CloseReason = "end_time_reached"
 	CloseByRequest      CloseReason = "closed_by_request"
+	// ClosePlanningLimitReached is a draft whose planner answered nothing inside the planning
+	// limit, and CloseProposalExpired one whose proposal or decline no person took up in time.
+	ClosePlanningLimitReached CloseReason = "planning_limit_reached"
+	CloseProposalExpired      CloseReason = "proposal_expired"
 )
 
 // PlanningRequest is one request to a draft's planner to change its proposal.
