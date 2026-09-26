@@ -408,8 +408,15 @@ class API:
     def post_hypothesis_comment(self, hyp_id: str, text: str, agent_id: str = "", author: str = "") -> requests.Response:
         return self.post(f"/hypotheses/{hyp_id}/comments", {"agent_id": agent_id, "author": author, "text": text})
 
-    def set_hypothesis_status(self, hyp_id: str, agent_id: str, status: str) -> requests.Response:
-        return self.post(f"/hypotheses/{hyp_id}/status", {"agent_id": agent_id, "status": status})
+    # What a test says for a confirmed or refuted verdict it gives without the jobs that carry one.
+    NO_EVIDENCE = "the test settles this hypothesis without running jobs for it"
+
+    def set_hypothesis_status(self, hyp_id: str, agent_id: str, status: str, **evidence: str) -> requests.Response:
+        """Sets a verdict. confirmed and refuted need `against` (the control job) or `despite`
+        (a reason); with neither given the test's own reason is sent."""
+        if status in ("confirmed", "refuted") and not evidence:
+            evidence = {"despite": self.NO_EVIDENCE}
+        return self.post(f"/hypotheses/{hyp_id}/status", {"agent_id": agent_id, "status": status, **evidence})
 
     # ---- jobs / experiments ---------------------------------------------------------------------
 

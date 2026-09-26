@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,28 @@ type poolStore struct {
 	Store
 	humanWrites []domain.HumanWrite
 	failRecord  error
+	// jobs is every job on record, and comments every note written, in order.
+	jobs     []*domain.Experiment
+	comments []string
+}
+
+func (s *poolStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
+	var testing []*domain.Experiment
+	for _, job := range s.jobs {
+		if slices.Contains(ids, job.HypothesisID) {
+			testing = append(testing, job)
+		}
+	}
+	return testing, nil
+}
+
+func (s *poolStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
+	for _, job := range s.jobs {
+		if job.ID == id {
+			return job, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *poolStore) RecordHumanWrite(_ context.Context, w domain.HumanWrite) error {
@@ -51,6 +74,7 @@ func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
 // beyond its id — a note is attached to a row, not authorised against its owner.
 func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
+	s.comments = append(s.comments, text)
 	return &domain.HypothesisComment{
 		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID, Source: source,
 		AgentID: agentID, Author: author, Text: text,
@@ -279,7 +303,7 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", domain.HypothesisRefuted)
+	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 	if err != nil {
 		t.Fatalf("SetHypothesisStatus on a human row: got = %v, want nil", err)
 	}
@@ -300,10 +324,10 @@ func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testi
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-2", domain.HypothesisRefuted); !errors.Is(err, ErrHypothesisNotOwner) {
+	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-2", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); !errors.Is(err, ErrHypothesisNotOwner) {
 		t.Fatalf("SetHypothesisStatus by a non-owner: got = %v, want %v", err, ErrHypothesisNotOwner)
 	}
-	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-1", domain.HypothesisRefuted); err != nil {
+	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
 		t.Fatalf("SetHypothesisStatus by the owner: got = %v, want nil", err)
 	}
 }
@@ -392,7 +416,7 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	}
 
 	for range 2 {
-		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", domain.HypothesisRefuted); err != nil {
+		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
 			t.Fatalf("SetHypothesisStatus: got = %v, want nil", err)
 		}
 	}
@@ -457,7 +481,7 @@ func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 			return err
 		}},
 		{db.EventHypothesisStatus, func() error {
-			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", domain.HypothesisRefuted)
+			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 			return err
 		}},
 		{db.EventHypothesisLink, func() error {
@@ -684,3 +708,6 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 		t.Errorf("Findings of an unknown platform experiment: got = %v, want %v", err, ErrUnknownPlatformExperiment)
 	}
 }
+
+// enoughSaid is a reason long enough to carry a verdict the record does not.
+const enoughSaid = "the job diverged to NaN in its first step, twice"

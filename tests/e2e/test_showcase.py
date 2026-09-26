@@ -78,7 +78,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
                                      "links": [{"type": "builds_on", "to": pe_id}]}),
             ("POST", f"/hypotheses/{hyp_id}/comments", {"author": "Mallory", "text": "an intruding comment"}),
             ("POST", f"/hypotheses/{hyp_id}/links", {"author": "Mallory", "type": "related", "to": pe_id}),
-            ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed"}),
+            ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed", "despite": "an intruder settles it with a reason of its own"}),
             # A whole body: one that is not is refused for its shape before anyone's reach is looked at.
                 ("PUT", f"/platform-experiments/{pe_id}", {
                     "name": "taken over", "description": "taken over", "budget_accelerator_hours": 1, "max_agents": 2,

@@ -118,7 +118,7 @@ func TestAnAgentTokenWritesToTheGraphAsItsOwnAgentOnly(t *testing.T) {
 func TestAnAgentTokenSettlesAsItselfOnly(t *testing.T) {
 	f := newRegistryAs(t, agentOne)
 	status := func(id, agent string) int {
-		return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(id)+"/status", map[string]any{"agent_id": agent, "status": "confirmed"}).Code
+		return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(id)+"/status", map[string]any{"agent_id": agent, "status": "confirmed", "despite": enoughSaid}).Code
 	}
 	if got := status(f.rivals.ID, "agent-2"); got != http.StatusForbidden {
 		t.Errorf("settling a rival's hypothesis as the rival: got = %d, want = 403", got)

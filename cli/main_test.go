@@ -257,7 +257,7 @@ func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
 	var reply map[string]any
 	recordingServer(t, func(int, recorded) any { return reply })
 	for verdict, want := range map[string]string{
-		"open":      "hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 confirmed|refuted|inconclusive\n",
+		"open":      "hl: job summary: the verdict of hyp-1 is open and yours to set: hl hypothesis status hyp-1 inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees\n",
 		"confirmed": "hl: job summary: the verdict of hyp-1 is confirmed and yours to change if this finding does not fit it\n",
 		"":          "",
 	} {

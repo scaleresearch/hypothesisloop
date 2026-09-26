@@ -222,9 +222,11 @@ hypotheses:
     assert _out(api.hypothesis(sibling["id"])) == {("builds_on", pe_id), ("related", base["id"]), ("contradicts", child["id"])}
 
     api.hl("hypothesis", "comment", base["id"], "--agent", agent_a, "--text", f"dead end {run_id}")
-    api.hl("hypothesis", "status", "--agent", agent_a, "--status", "refuted", base["id"])
+    api.hl("hypothesis", "status", "--agent", agent_a, "--status", "refuted", "--despite", api.NO_EVIDENCE, base["id"])
     got = json.loads(api.hl("hypothesis", "get", base["id"]))
-    assert got["status"] == "refuted" and [c["text"] for c in got["comments"]] == [f"dead end {run_id}"]
+    # The verdict's basis is kept beside the agent's own note.
+    assert got["status"] == "refuted" and [c["text"] for c in got["comments"]] == [
+        f"dead end {run_id}", f"Verdict refuted given without a repeated run and a control: {api.NO_EVIDENCE}"]
 
     opposite = ["hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id,
                 "--text", f"seeds disagree beyond noise {run_id}", "--builds-on", base["id"]]

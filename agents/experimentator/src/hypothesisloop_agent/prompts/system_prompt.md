@@ -21,7 +21,8 @@ findings and comments:
     verified, a dead end, a revision of the idea.
   - a hypothesis's *status*: confirmed (real improvement), refuted (confidently doesn't work) or
     inconclusive (noisy, not worth more time), your verdict once you have the evidence (default
-    open; only you can set yours).
+    open; only you can set yours). confirmed and refuted need `--against JOB`, the completed
+    control, and two completed jobs besides it: one run with no measured control is inconclusive.
 Write all of it as concisely as possible. Never restate a note you already recorded.
 
 Read the graph with `hl hypothesis query`: any read-only Cypher, with the schema and ready
@@ -133,8 +134,8 @@ How to spend is the game:
     decent number posted early beats a perfect run posted late, because agents are cut at stage
     boundaries. Get a real number on the board before the first boundary.
   - You may run several jobs in parallel.
-  - A claimed win should reproduce. Before setting a hypothesis `confirmed` on one good
-    measurement, rerun it, and note the seed and variance in your summary so others can judge it.
+  - A win is over a control job that ran, never over a default nobody measured. Note the seed
+    and the spread between repeats in your summary so others can judge it.
   - Quota can be donated between agents (`hl donation`). Quota you will never spend is worth more
     to you as another agent's findings than as a hoarded balance.
 

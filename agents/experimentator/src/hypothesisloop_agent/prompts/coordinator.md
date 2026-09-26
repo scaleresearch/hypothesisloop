@@ -127,7 +127,9 @@ You do not start the experiment. Left alone it ends at its `ends_at` or when its
 The summary is where your findings live: `hl platform-experiments summary --file FILE`. Each
 write replaces the one before, so keep the whole text in a file, edit it and send all of it. An
 entry says what happened as observed, what you changed and why, and whether it is resolved or
-open. Prefer what speeds up the next run over what the experiment's own metrics already show:
+open. Repeat a number or a claim of an agent's only after reading it in the registry yourself
+(`hl results`, `hl job status`, `hl hypothesis get`, which shows what each verdict rests on): a
+comparison is worth stating when both sides of it were measured by jobs you can name. Prefer what speeds up the next run over what the experiment's own metrics already show:
 what blocked agents, which directions were confirmed or refuted and by which jobs, the flavor
 mix the next run should start with, what the brief should have said from the start. Keep it to
 what is open or actionable plus the conclusions, a few pages at most. Write it whenever you

@@ -446,11 +446,19 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 }
 
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|confirmed|refuted|inconclusive
+	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|inconclusive | confirmed|refuted --against CONTROL_JOB | confirmed|refuted --despite REASON
 
-Sets the verdict on your own hypothesis, or on a human-submitted one. --status VERDICT works too.`, stderr)
+Sets the verdict on your own hypothesis, or on a human-submitted one. --status VERDICT works too.
+confirmed and refuted say the hypothesis's jobs differ from a control, so they need the record
+to show it: --against names the control, a completed job of this experiment (a baseline run, or
+the same job without your change), and the hypothesis has two completed jobs of its own besides
+it. One run with no measured control is inconclusive. When the record cannot show what you know
+(a failure that needs no repeat, a control measured outside this experiment), --despite takes a
+sentence of why the verdict holds anyway. What a verdict rests on is kept as a comment.`, stderr)
 	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
 	status := fs.String("status", "", "")
+	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
+	despite := fs.String("despite", "", "why a confirmed or refuted verdict holds without a repeated run and a control")
 	operands, err := parseOperands(fs, args, "id")
 	if err != nil {
 		return parseExit(err)
@@ -466,7 +474,14 @@ Sets the verdict on your own hypothesis, or on a human-submitted one. --status V
 	}
 	id := operands[0]
 	var out json.RawMessage
-	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/status", map[string]string{"agent_id": *agent, "status": *status}, &out); err != nil {
+	body := map[string]string{"agent_id": *agent, "status": *status}
+	if *against != "" {
+		body["against"] = *against
+	}
+	if *despite != "" {
+		body["despite"] = *despite
+	}
+	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/status", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	if err := printLine(stdout, out); err != nil {

@@ -91,6 +91,10 @@ func hypothesisWriteError(err error) error {
 		return &similarHypothesesError{Status: http.StatusConflict, Title: http.StatusText(http.StatusConflict),
 			Detail: similarDetail, Similar: similar.Similar}
 	}
+	var unsupported *UnsupportedVerdictError
+	if errors.As(err, &unsupported) {
+		return huma.Error409Conflict(unsupported.Detail)
+	}
 	switch {
 	case errors.Is(err, domain.ErrHypothesisOrigin), errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
@@ -737,7 +741,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
 		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +
 			"(confidently established as not working) / inconclusive (noisy or not worth drilling " +
-			"into). Only the registering agent_id may set it; anyone else gets 403. A " +
+			"into). confirmed and refuted are given with the evidence: against names the control, a " +
+			"completed job of the same platform experiment, and the hypothesis has two completed " +
+			"jobs of its own besides it. Without that the answer is 409 with what is missing, " +
+			"unless despite carries a sentence of why the verdict holds anyway. What a verdict " +
+			"rests on is kept as a comment on the hypothesis. " +
+			"Only the registering agent_id may set it; anyone else gets 403. A " +
 			"human-submitted row has no registering agent, so any agent may settle it — an idea " +
 			"nobody owns would otherwise sit open forever however much evidence it collected.",
 	}, func(ctx context.Context, in *struct {
@@ -745,6 +754,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Body struct {
 			AgentID string                  `json:"agent_id"`
 			Status  domain.HypothesisStatus `json:"status"`
+			Against string                  `json:"against,omitempty" doc:"The control job a confirmed or refuted verdict compares with."`
+			Despite string                  `json:"despite,omitempty" doc:"Why a confirmed or refuted verdict holds without a repeated run and a control."`
 		}
 	}) (*struct{ Body *domain.Hypothesis }, error) {
 		if in.Body.AgentID == "" {
@@ -759,7 +770,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
 			return nil, err
 		}
-		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, in.Body.Status)
+		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, Verdict{Status: in.Body.Status, Against: in.Body.Against, Despite: in.Body.Despite})
 		if err != nil {
 			h.logger.Info("set hypothesis status", zap.Error(err))
 			return nil, hypothesisWriteError(err)

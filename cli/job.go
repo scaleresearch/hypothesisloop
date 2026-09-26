@@ -501,7 +501,7 @@ COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	switch out.Verdict {
 	case "":
 	case "open":
-		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s confirmed|refuted|inconclusive\n", out.Hypothesis, out.Hypothesis)
+		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees\n", out.Hypothesis, out.Hypothesis)
 	default:
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is %s and yours to change if this finding does not fit it\n", out.Hypothesis, out.Verdict)
 	}

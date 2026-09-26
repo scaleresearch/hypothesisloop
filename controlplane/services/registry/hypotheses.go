@@ -310,13 +310,29 @@ func (s *Service) addActivity(ctx context.Context, items []*domain.HypothesisLis
 // SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID: the owning agent's
 // own verdict on its own claim, or any agent's verdict on an unowned human row (see
 // domain.HypothesisStatus). Ownership is checked in the same graph transaction as the write.
-func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus) (*domain.Hypothesis, error) {
+//
+// A confirmed or refuted verdict is given only with the evidence for it (see supported), and
+// what it rests on is kept as a comment of the agent's on the hypothesis.
+func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, verdict Verdict) (*domain.Hypothesis, error) {
+	status := verdict.Status
 	if !domain.ValidHypothesisStatus(status) {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
 	}
+	current, err := s.graph.GetHypothesis(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+	}
+	// Whose verdict it is comes first and is the graph's to refuse, in the write below: the
+	// evidence is asked only of an agent that may give the verdict at all.
+	mayJudge := current != nil && (current.AgentID == "" || current.AgentID == callerAgentID)
+	if mayJudge && current.Status != status {
+		if err := s.supported(ctx, current, verdict); err != nil {
+			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+		}
+	}
 	var h *domain.Hypothesis
 	var announced bool
-	err := s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var err error
 		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, status, stamp)
 		if err != nil || !announced {
@@ -330,6 +346,11 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	}
 	s.logger.Info("hypothesis status updated",
 		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
+	if announced && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted) {
+		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, "", basis(verdict)); err != nil {
+			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
+		}
+	}
 	return h, nil
 }
 
