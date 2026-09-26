@@ -88,6 +88,8 @@ function AllClusters() {
   )
 }
 
+const gib = (bytes: number) => Math.round((bytes / 2 ** 30) * 10) / 10
+
 function LiveCapacity() {
   const { org } = useTenant()
   const { data, error, isLoading } = useSWR(
@@ -115,13 +117,21 @@ function LiveCapacity() {
         {clusters.map(cluster => (
           <section key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0">
             <h3 className="mb-1.5 font-mono text-sm font-semibold">{cluster.cluster_name}</h3>
+            {!cluster.on_demand && cluster.resources && (
+              <p className="mb-1.5 text-xs text-muted">
+                {cluster.resources.cpu_cores_available} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free
+                {' · '}{gib(cluster.resources.memory_bytes_available)} of {gib(cluster.resources.memory_bytes_total)} GiB memory free
+              </p>
+            )}
             {cluster.accelerators.length === 0 && <p className="text-xs text-muted">Reports nothing a job can ask for right now.</p>}
             {cluster.accelerators.length > 0 && (
               <Table>
                 <thead>
                   <tr>
                     <th title="An accelerator type, or CPU cores">Type</th>
-                    <th title="How many are free and how many there are. A cluster that rents machines when a job needs them reports how many it may still rent and the most it rents at once.">Free / total</th>
+                    {cluster.on_demand
+                      ? <th title="No machine stands by. The cluster rents one when a job needs it, up to this many at once.">Rented on demand</th>
+                      : <th>Free / total</th>}
                     <th title={`What one accelerator of the type, or one CPU core, takes from a budget for an hour of run, in ${budgetUnit('accelerator', 'long')}`}>Budget per hour</th>
                   </tr>
                 </thead>
@@ -129,10 +139,14 @@ function LiveCapacity() {
                   {cluster.accelerators.map(a => (
                     <tr key={a.accelerator_type}>
                       <td className="font-mono text-xs font-semibold">{a.accelerator_type}</td>
-                      <td className="font-mono text-xs">
-                        <span className={a.available > 0 ? 'text-success' : 'text-danger'}>{a.available}</span>
-                        <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
-                      </td>
+                      {cluster.on_demand ? (
+                        <td className="text-xs">up to {unitCount(a.kind, a.total)}, {a.total - a.available} rented now</td>
+                      ) : (
+                        <td className="font-mono text-xs">
+                          <span className={a.available > 0 ? 'text-success' : 'text-danger'}>{a.available}</span>
+                          <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
+                        </td>
+                      )}
                       <td className="font-mono text-xs">{unitRate(a.kind, a.acch_per_hour)}</td>
                     </tr>
                   ))}

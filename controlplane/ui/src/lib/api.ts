@@ -579,6 +579,12 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
 export interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
+    // The cluster rents a machine when a job needs one. Nothing stands by: a type's total is the
+    // most it rents at once and its available is what it may still rent.
+    on_demand?: boolean
+    // The cluster's cores and memory, summed over its nodes: in total and not asked for by
+    // running jobs. Absent for a cluster that reported none.
+    resources?: { cpu_cores_available: number; cpu_cores_total: number; memory_bytes_available: number; memory_bytes_total: number }
     // kind says what available and total count: devices, or for cpu cores.
     accelerators: Array<{ accelerator_type: string; kind: TypeKind; available: number; total: number; acch_per_hour: number }>
   }>
