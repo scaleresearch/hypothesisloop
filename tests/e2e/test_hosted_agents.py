@@ -304,8 +304,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     api.start_platform_experiment(pe_id)
 
     run_env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}
-    for agent in agents:
-        api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides={"env": run_env})
+    jobs = {agent: api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides={"env": run_env}) for agent in agents}
 
     stages = eventually(
         "the first stage boundary",
@@ -325,6 +324,36 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
         assert before[agent]["name"] in ending, f"cut agent {agent} is not left to end"
     for agent in survivors:
         assert instances[agent] == before[agent], f"the survivor {agent} would be replaced by the cut"
+
+    # A survivor with nothing left to do says so. It cannot while a job of its own is in flight
+    # or owes its summary; after that its machine is left to end and whoever steers the run is told.
+    done = sorted(survivors)[0]
+    as_done = api.as_caller(admin.token(f"agent:{pe_id}/{done}"))
+    finish = ("platform-experiments", "agents", "finish", "--reason", "quota spent")
+    if api.experiment(jobs[done])["status"] in ("QUEUED", "SUBMITTED", "RUNNING", "COMPLETED"):
+        early = as_done.hl_expect(*finish)
+        assert early.returncode == 1 and "work_unfinished" in early.stderr, f"finishing with work open: {early.stderr}"
+        if api.experiment(jobs[done])["status"] == "COMPLETED":
+            api.file_finding(jobs[done])
+        else:
+            api.cancel_job(jobs[done])
+    eventually("the agent finishing once its job has ended", lambda: as_done.hl_expect(*finish),
+               accept=lambda said: said.returncode == 0, deadline=deadline)
+    again = as_done.hl_expect(*finish)
+    assert again.returncode == 0, f"finishing a second time: {again.stderr}"
+    signup = roster(api, pe_id)[done]
+    assert signup["finished_at"] and signup["finished_reason"] == "quota spent", signup
+    instances, ending = desired_for(api, pe_id, up)
+    assert done not in instances and before[done]["name"] in ending, f"the finished agent is not left to end: {sorted(instances)}"
+    assert set(instances) == survivors - {done}
+    code, _ = as_done.submit_job_expect(pe_id, done, hours=JOB_HOURS)
+    assert code == 422, f"a finished agent's submission: {code}"
+    seen = api.as_caller(admin.token(f"coordinator:{pe_id}")).hl_expect(
+        "watch", "--platform-experiment", pe_id, "--kinds", "agent.finished", "--since", "1", "--timeout", "5", timeout=20)
+    assert seen.returncode == 0, f"the coordinator's watch: {seen.stderr}"
+    finished = [json.loads(line) for line in seen.stdout.splitlines() if line.startswith("{")]
+    assert [(e["kind"], e["subject"], e["detail"]) for e in finished] == [("agent.finished", done, "quota spent")], finished
+    survivors -= {done}
 
     api.close_platform_experiment(pe_id)
     instances, ending = desired_for(api, pe_id, up)
