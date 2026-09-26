@@ -193,7 +193,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"The budget caps everything the platform experiment spends, planning included: what the planner spent is taken from it, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator and each researcher, and starts_at is now, so POST /platform-experiments/{id}/start starts it and the platform does if nobody calls. " +
-			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
+			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
+			"and 422 budget_spent when planning already spent the budget stated; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it. " +
 			"What the planner's baseline job cost is real spend of this platform experiment and counts in the run's consumed budget from the start.",
 	}, func(ctx context.Context, in *struct {
@@ -317,6 +318,15 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	experiment, err := h.checkProposal(proposal, pe.MaxHosted)
 	if err != nil {
 		return nil, err
+	}
+	// Start refuses the same budget: refused here, a draft is never accepted and unstartable.
+	planning, err := h.svc.PlanningSpend(ctx, pe)
+	if err != nil {
+		return nil, h.refusal("accept", err)
+	}
+	if planning >= req.BudgetAcceleratorHours {
+		return nil, refusedProposal("budget_spent", "planning already spent %.3g accelerator hours and they count toward the budget, so a budget of %g leaves nothing for the researchers to share: state a larger one",
+			planning, req.BudgetAcceleratorHours)
 	}
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))

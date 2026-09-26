@@ -227,7 +227,11 @@ type draftStore struct {
 
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
+	// spending is the planner whose spend the metrics store is asked for.
+	spending string
 }
+
+func (s *draftStore) PlannerID(context.Context, string) (string, error) { return s.spending, nil }
 
 func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
@@ -472,6 +476,26 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		if code, out := call("POST", "/platform-experiments/pe-draft/accept", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].Status != domain.PlatformExpDraft {
 			t.Errorf("%s: got = %d %v, want 422 %s and still a draft", name, code, out, c.reason)
 		}
+	}
+
+	// Planning spend counts toward the budget: one it already spent is refused here, so the
+	// draft is never accepted and unstartable.
+	spent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"resource_type":"accelerator_hours","tier":"guaranteed"},"value":[1,"3"]}]}}`))
+	}))
+	defer spent.Close()
+	store = draftWithPlanner()
+	store.spending = "ag-planner"
+	_, propose = planningAPI(t, store, thePlanner)
+	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	svc, call := planningAPI(t, store, planner)
+	svc.metricsDBURL = spent.URL
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusUnprocessableEntity || out["reason"] != "budget_spent" || store.created[0].Status != domain.PlatformExpDraft {
+		t.Errorf("a budget planning already spent: got = %d %v, want 422 budget_spent and still a draft", code, out)
+	}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 4, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusOK {
+		t.Errorf("a budget over what planning spent: got = %d %v, want 200", code, out)
 	}
 
 	// The planner proposes and a person accepts: its own token is of no kind that may.

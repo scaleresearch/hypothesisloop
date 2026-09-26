@@ -54,18 +54,27 @@ func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID,
 // the proposal was accepted. The budget a person accepts caps everything the platform
 // experiment spends, planning included, so shares are carved from what planning left.
 func (s *PlatformExperimentsService) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+	planning, err := s.PlanningSpend(ctx, pe)
+	if err != nil {
+		return 0, err
+	}
+	return max(0, pe.BudgetAcceleratorHours-planning), nil
+}
+
+// PlanningSpend is what the planner of pe has spent, zero for one nobody planned.
+func (s *PlatformExperimentsService) PlanningSpend(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	planner, err := s.store.PlannerID(ctx, pe.ID)
 	if err != nil {
-		return 0, fmt.Errorf("platform_experiments.RunBudget: %w", err)
+		return 0, fmt.Errorf("platform_experiments.PlanningSpend: %w", err)
 	}
 	if planner == "" {
-		return pe.BudgetAcceleratorHours, nil
+		return 0, nil
 	}
 	planning := &domain.AgentQuota{AgentID: planner, PlatformExperimentID: pe.ID}
 	if err := metricsdb.PopulateUsageOne(ctx, s.metricsDBURL, pe.CreatedAt, planning); err != nil {
-		return 0, fmt.Errorf("platform_experiments.RunBudget: %w", err)
+		return 0, fmt.Errorf("platform_experiments.PlanningSpend: %w", err)
 	}
-	return max(0, pe.BudgetAcceleratorHours-planning.Used()), nil
+	return planning.Used(), nil
 }
 
 func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
