@@ -353,28 +353,64 @@ On macOS:
 - `make full-start` rebuilds the dev node containers: a stopped k3s agent cannot resume once its
   address changes.
 
-### Option B - Existing cluster (GKE, EKS, remote k3s, ...)
+### Option B - Existing cluster or bare-metal node
+
+Register the cluster for your org first. `hl cluster add` prints the Kubernetes install command
+with the two addresses the cluster's agents reach the platform at, which are `runtimes.api_url`
+and `runtimes.metrics_url` of the control plane's settings:
 
 ```bash
-make controlplane-up
-# Register the cluster for your org. This prints the command that installs its agent, with
-# the addresses its agent reaches the platform at filled in:
 hl cluster add my-cluster
-# Point kubectl at the cluster and run what it printed:
-RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agent-up CLUSTER='my-cluster' \
-  API_URL='https://your-control-plane:8081' METRICS_URL='https://your-control-plane:8084'
 ```
 
-`RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
-a make argument or a flag is readable in the process list. The printed command reads the token
-with `hl cluster token` when it runs, so the token is in no scrollback and no shell history.
+Both addresses must answer from inside the cluster, and so must `data_store.endpoint`, which
+every job is handed for its data. The control plane never connects to a cluster, so it needs no
+kubeconfig and no credential of one. A control plane started with `make dev` or
+`make controlplane-up` names this host as local containers reach it
+(`host.containers.internal` on macOS), which no other machine resolves. For a cluster elsewhere
+the settings must name addresses that cluster reaches. `API_URL` and `METRICS_URL` can also be
+given to the install command directly, and `data_store.endpoint` cannot.
 
-`make cluster-agent-up` installs the `runtime/k8s/infra/chart` helm release, so it needs `helm`,
-and `REGISTRY` must name a registry every node can pull from (`make images` pushes there).
-`API_URL` (control-service) and `METRICS_URL` (metrics-service) are both required and just need
-to be reachable *outbound* from inside the target cluster - the control
-plane never needs to reach the cluster at all, so there's no kubeconfig or credential to hand
-it. Repeat both for every additional target cluster. Capacity is read from the agent's heartbeats.
+**A Kubernetes cluster.** Needs a checkout of this repository, `helm`, `kubectl` pointed at the
+cluster, and the images in a registry every node pulls from.
+
+```bash
+RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agent-up CLUSTER='my-cluster' \
+  API_URL='https://your-control-plane:8081' METRICS_URL='https://your-control-plane:8084' \
+  REGISTRY='registry.example.com/hypothesisloop' TAG='the-tag-that-was-pushed' \
+  KUBECONFIG_PATH="$HOME/.kube/config" KUBE_CONTEXT='my-cluster'
+```
+
+`REGISTRY` and `TAG` name what `make images REGISTRY=...` pushed. Left out, they are the local
+development registry and the tag of this checkout, which only the local cluster pulls.
+`KUBECONFIG_PATH` and `KUBE_CONTEXT` default to `~/.kube/config` and its current context.
+The command installs the `runtime/k8s/infra/chart` helm release into the namespace
+`hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it again
+upgrades the release. A cluster that holds these objects from before the chart existed (applied
+as plain manifests, no helm release) refuses the install: delete the old
+`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
+The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
+role and no other taint, so it needs one node free of other taints.
+
+**A bare-metal node.** Needs podman or docker on the node, and Go and gcc to build the agent
+there (it links the NVIDIA management library through cgo, so it is not cross-compiled).
+
+```bash
+go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent
+CLUSTER_NAME='my-node' API_URL='https://your-control-plane:8081' \
+  RUNTIME_TOKEN="$(hl cluster token 'my-node' --org 'org-1')" ./bare-agent
+```
+
+The node is its own cluster, registered with `hl cluster add my-node` like any other. It
+runs no node-agent, so there is no `METRICS_URL`. `SCRATCH_DIR` is where job
+storage lives (default `/var/lib/hypothesisloop/scratch`, which needs root to create).
+
+`RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
+a make argument or a flag is readable in the process list. Both commands read the token with
+`hl cluster token` when they run, so the token is in no scrollback and no shell history.
+
+`hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
+accelerators under the names its drivers publish. Repeat for every additional cluster.
 
 #### Clusters belong to an org
 
