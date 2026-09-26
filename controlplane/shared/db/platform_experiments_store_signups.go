@@ -204,11 +204,16 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 	return nil
 }
 
-const agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
+// The last column is whether the agent's run ended long enough ago for its machine to be
+// released: its platform experiment closed, or it was cut.
+var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
        s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_launch,
-       s.instance_state, s.instance_progress_at, s.instance_end_reason`
+       s.instance_state, s.instance_progress_at, s.instance_end_reason,
+       ` + domain.InstanceReleasedSQL(`LEAST(
+           (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
+           (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id))`)
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -218,7 +223,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
-		&instance.SeenAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason}, more...)...); err != nil {
+		&instance.SeenAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &instance.Released}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	if signup.Hosted {

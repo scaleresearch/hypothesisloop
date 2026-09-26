@@ -41,10 +41,11 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
 // for it, read from platform_experiments as pe.
-const coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model, pe.coordinator_instance_name,
+var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model, pe.coordinator_instance_name,
        pe.coordinator_instance_restarts, pe.coordinator_instance_stopped, pe.coordinator_instance_exited_at, pe.coordinator_instance_exit_log,
        pe.coordinator_instance_seen_at, pe.coordinator_instance_launch,
-       pe.coordinator_instance_state, pe.coordinator_instance_progress_at, pe.coordinator_instance_end_reason`
+       pe.coordinator_instance_state, pe.coordinator_instance_progress_at, pe.coordinator_instance_end_reason,
+       ` + domain.InstanceReleasedSQL("pe.closed_at")
 
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
@@ -89,7 +90,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
-	const q = `
+	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image
 FROM platform_experiments pe
@@ -108,7 +109,7 @@ WHERE id = $1`
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
-		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
+		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
 	)
 	pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 	if err != nil {

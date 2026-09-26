@@ -57,7 +57,8 @@ type AgentInstance struct {
 	Launch string `json:"-"`
 	// State is what the machine is now: "requested" while its launcher has not listed the one
 	// asked for, "starting" and "running" as the launcher last reported it, "stopped" once no
-	// further machine is asked for. It is worked out from the fields around it when written.
+	// further machine is asked for: its restarts ran out (Stopped), or its run is over. It is
+	// worked out from the fields around it when written.
 	State string `json:"state" enum:"requested,starting,running,stopped"`
 	// Reported is the state the launcher last reported of the machine asked for under Name.
 	Reported string `json:"-"`
@@ -67,6 +68,10 @@ type AgentInstance struct {
 	// ended), "gone" (its provider no longer lists it), "never_seen" (no machine came to be),
 	// "still_starting" (it did not come up in time) or "silent" (it ran and made no progress).
 	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent"`
+	// Released means the run the machine was for is over and its wind-down has passed: the
+	// platform experiment closed, or the agent was cut. The launcher is no longer asked for the
+	// machine and has destroyed it, so what it last reported of it says nothing any more.
+	Released bool `json:"-"`
 }
 
 const (
@@ -79,7 +84,7 @@ const (
 // Shown is the instance's State.
 func (i AgentInstance) Shown() string {
 	switch {
-	case i.Stopped:
+	case i.Stopped || i.Released:
 		return InstanceStopped
 	case i.Name == "" || i.Reported == "":
 		return InstanceRequested
@@ -118,6 +123,13 @@ func ValidateLauncherName(name string) error {
 // CoordinatorFlavor is what the harness is started as to coordinate. It is no flavor an agent
 // can join with.
 const CoordinatorFlavor = "coordinator"
+
+// InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
+// run that ended at endedAt (a column or expression, NULL while the run goes on) is released:
+// AgentWindDown later, when the launcher's desired state stops naming it.
+func InstanceReleasedSQL(endedAt string) string {
+	return fmt.Sprintf("COALESCE(%s <= now() - make_interval(secs => %d), false)", endedAt, int(AgentWindDown.Seconds()))
+}
 
 // MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
 // again. The next exit stops the agent.

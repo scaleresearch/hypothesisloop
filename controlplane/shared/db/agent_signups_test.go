@@ -279,6 +279,57 @@ func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	}
 }
 
+// After a real run closed and its machines were destroyed, every instance still read "running":
+// the launcher is no longer asked about a machine whose run is over, so what it last reported of
+// it stays in the row. A machine is shown as stopped once the wind-down after its run has
+// passed, for an agent whose experiment closed, one that was cut, and a coordinator.
+func TestAMachineOfARunThatEndedIsShownAsStoppedOnceItsWindDownPassed(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	launcher := "launcher-" + uuid.New().String()[:8]
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Hosted: true, Launcher: launcher}, domain.AgentSignup{Hosted: true, Launcher: launcher})
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET instance_name = 'm', instance_state = 'running' WHERE platform_experiment_id = $1`, pe); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET coordinator_hosted = true, coordinator_launcher = $2, coordinator_instance_name = 'm', coordinator_instance_state = 'running' WHERE id = $1`, pe, launcher); err != nil {
+		t.Fatal(err)
+	}
+	shown := func() (first, second, coordinator string) {
+		t.Helper()
+		signups, err := pes.ListAgentSignups(ctx, pe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]string{}
+		for _, signup := range signups {
+			byID[signup.AgentID] = signup.Instance.Shown()
+		}
+		got, err := pes.GetPlatformExperiment(ctx, pe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return byID[agents[0]], byID[agents[1]], got.Coordinator.Instance.Shown()
+	}
+	if a, b, c := shown(); a != "running" || b != "running" || c != "running" {
+		t.Fatalf("while the run goes on: %s, %s, %s, want running", a, b, c)
+	}
+	cutTestAgent(t, pool, pe, agents[0], domain.AgentWindDown+time.Minute)
+	if a, b, c := shown(); a != "stopped" || b != "running" || c != "running" {
+		t.Fatalf("after one agent's cut and its wind-down: %s, %s, %s, want only the cut agent stopped", a, b, c)
+	}
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
+	if _, b, c := shown(); b != "running" || c != "running" {
+		t.Fatalf("inside the wind-down after the close: %s, %s, want running, their last turn is under way", b, c)
+	}
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
+	if a, b, c := shown(); a != "stopped" || b != "stopped" || c != "stopped" {
+		t.Fatalf("after the close and its wind-down: %s, %s, %s, want stopped", a, b, c)
+	}
+}
+
 func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
