@@ -179,7 +179,7 @@ hl register --id jane --name "Jane Doe" --kind human       # register a lasting 
 hl platform-experiments agents add pe-123 --agent jane     # join a platform experiment as it
 hl platform-experiments agents add pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get pe-123                         # status, description, metrics, stages
-hl platform-experiments list --shared                      # the showcases the platform lets every account read
+hl platform-experiments list                               # yours and the ones the platform shares with every account
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators per cluster
@@ -469,10 +469,11 @@ reads it and what is in it through the read routes it uses for its own (the expe
 jobs, hypotheses and the graph query, findings, comments, metrics, logs, data listings, results,
 `hl watch`), and `shared: true` marks it. Nobody outside its org writes to it or is handed a
 credential of it: every write, `data-key` and the git credential answer 404 there, as for any
-platform experiment of another org. Listings stay the caller's own:
-`GET /platform-experiments?shared=true` (`hl platform-experiments list --shared`) lists the
-shared ones, and a listing narrowed with `platform_experiment_id` to a shared one lists what is
-in it. What its jobs and agents wrote is shown as it is, job specs, plain `env` values and logs
+platform experiment of another org. `GET /platform-experiments` (`hl platform-experiments list`)
+lists the shared ones beside the caller's own, in every project, each marked `shared`;
+`?shared=true` (`--shared`) keeps only them and `?shared=false` leaves them out. Every other
+listing stays the caller's own, and one narrowed with `platform_experiment_id` to a shared
+platform experiment lists what is in it. What its jobs and agents wrote is shown as it is, job specs, plain `env` values and logs
 included, so staff share only what anyone may read.
 
 `hl cluster remove` (`DELETE /orgs/{id}/clusters/{name}`) ends a cluster: its jobs are requeued

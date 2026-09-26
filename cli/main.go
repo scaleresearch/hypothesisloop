@@ -554,10 +554,10 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
-	shared := fs.Bool("shared", false, "the platform experiments the platform shows every account, in place of your own: read them like your own, write nothing to them")
+	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
 	if len(args) > 0 && args[0] == "list" {
 		args = args[1:]
 	}
@@ -568,15 +568,14 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 		return parseExit(misuse(fs, "unknown subcommand %q", fs.Arg(0)))
 	}
 	q := url.Values{"limit": {strconv.Itoa(*limit)}}
-	if *shared {
-		// A shared platform experiment is in another org's project, so $HL_PROJECT does not narrow these.
-		q.Set("shared", "true")
-		if *project != "" {
-			q.Set("project_id", *project)
-		}
-	} else if p := orEnv(*project, projectEnv); p != "" {
+	if p := orEnv(*project, projectEnv); p != "" {
 		q.Set("project_id", p)
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "shared" {
+			q.Set("shared", strconv.FormatBool(*shared))
+		}
+	})
 	var out any
 	if err := c.Do("GET", "/platform-experiments?"+q.Encode(), nil, &out); err != nil {
 		return fail(stderr, err)

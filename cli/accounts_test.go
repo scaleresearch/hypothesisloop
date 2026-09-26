@@ -305,14 +305,21 @@ func TestAccountGroupsListTheirCommands(t *testing.T) {
 	}
 }
 
-func TestPlatformExperimentsListSharedAsksForTheSharedOnesOfEveryProject(t *testing.T) {
-	calls := accountsServer(t, nil, `[]`)
+func TestPlatformExperimentsListPassesSharedOnAsTheFilterItIs(t *testing.T) {
+	calls := accountsServer(t, nil, `[{"id":"pe-own","shared":false},{"id":"pe-show","shared":true}]`)
 	t.Setenv("HL_PROJECT", "prj-env")
-	if code, _, stderr := hl(t, "platform-experiments", "list", "--shared"); code != 0 || (*calls)[0].path != "/platform-experiments?limit=20&shared=true" {
-		t.Fatalf("--shared: exit code = %d, calls = %+v, stderr = %s, want the shared ones with no project of the environment", code, *calls, stderr)
+	code, stdout, stderr := hl(t, "platform-experiments", "list")
+	if code != 0 || (*calls)[0].path != "/platform-experiments?limit=20&project_id=prj-env" {
+		t.Fatalf("no flag: exit code = %d, calls = %+v, stderr = %s, want no shared filter", code, *calls, stderr)
 	}
-	if code, _, _ := hl(t, "platform-experiments", "--shared", "--project", "prj-flag", "--limit", "5"); code != 0 || (*calls)[1].path != "/platform-experiments?limit=5&project_id=prj-flag&shared=true" {
-		t.Fatalf("--shared with --project: exit code = %d, call = %+v", code, (*calls)[1])
+	if !strings.Contains(stdout, `"shared": true`) || !strings.Contains(stdout, `"shared": false`) {
+		t.Fatalf("no flag: stdout = %s, want each platform experiment with its shared mark", stdout)
+	}
+	if code, _, _ := hl(t, "platform-experiments", "list", "--shared"); code != 0 || (*calls)[1].path != "/platform-experiments?limit=20&project_id=prj-env&shared=true" {
+		t.Fatalf("--shared: exit code = %d, call = %+v", code, (*calls)[1])
+	}
+	if code, _, _ := hl(t, "platform-experiments", "--shared=false", "--project", "prj-flag", "--limit", "5"); code != 0 || (*calls)[2].path != "/platform-experiments?limit=5&project_id=prj-flag&shared=false" {
+		t.Fatalf("--shared=false with --project: exit code = %d, call = %+v", code, (*calls)[2])
 	}
 }
 

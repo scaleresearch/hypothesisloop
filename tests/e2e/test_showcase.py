@@ -102,6 +102,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
 
         refused_everything("before the platform experiment is shared")
         assert pe_id not in _listed(b.api) and pe_id not in _listed(b.api, "&shared=true")
+        assert pe_id in _listed(a.api, "&shared=false"), "an unshared platform experiment is among its own org's unshared ones"
         assert _call(b.api, "GET", listings[0]).json() == [], "a listing narrowed to another org's platform experiment showed something"
         for verb in ("share", "unshare"):
             for caller in (a.api, b.api):
@@ -126,10 +127,15 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         git = _call(b.api, "POST", "/git-credentials", {"protocol": "https", "host": "github.com", "path": "x/y"})
         assert git.status_code >= 400, f"another org's key was handed a git credential: {git.status_code}"
 
-        # Listings stay the caller's own: the shared one is listed only when asked for.
-        assert pe_id not in _listed(b.api) and pe_id in _listed(b.api, "&shared=true")
+        # The shared one is in every account's listing of platform experiments, in whatever
+        # project, and ?shared filters on it. Every other listing stays the caller's own.
+        assert pe_id in _listed(b.api) and pe_id in _listed(b.api, "&shared=true")
+        assert pe_id in _listed(b.api, f"&project_id={b.api.project_id}"), "a shared one is in every project's listing"
+        assert pe_id not in _listed(b.api, "&shared=false")
+        assert pe_id in _listed(a.api, "&shared=true") and pe_id not in _listed(a.api, "&shared=false")
+        assert pe_id in b.api.hl("platform-experiments", "list")
         assert pe_id in b.api.hl("platform-experiments", "list", "--shared")
-        assert pe_id not in b.api.hl("platform-experiments", "list")
+        assert pe_id not in b.api.hl("platform-experiments", "list", "--shared=false")
         assert pe_id not in b.api.get("/hypotheses?limit=200").text and hyp_id not in b.api.get("/hypotheses?limit=200").text
         assert json.loads(b.api.hl("platform-experiments", "get", pe_id))["shared"] is True
 
@@ -153,7 +159,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
 
         admin.share_platform_experiment(pe_id, False)
         refused_everything("after staff took the sharing back")
-        assert pe_id not in _listed(b.api, "&shared=true")
+        assert pe_id not in _listed(b.api) and pe_id not in _listed(b.api, "&shared=true")
         admin.share_platform_experiment(pe_id, True)
         assert _call(b.api, "GET", f"/platform-experiments/{pe_id}").status_code == 200, "hl-admin shares as the staff route does"
         unshared = api.post(f"/platform-experiments/{pe_id}/unshare")
