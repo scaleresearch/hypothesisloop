@@ -80,6 +80,13 @@ func checkBaseline(p Proposal, experiment CreatePlatformExperimentRequest, plann
 	if !baseline.Finding {
 		return refusedProposal("baseline_without_finding", "baseline job %s has no finding: file what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
 	}
+	// The brief is all a researcher reads, and a proposal that passes is stored and ends the
+	// planner's work, so a brief that does not hand over the baseline is refused here.
+	for _, named := range [][2]string{{"job", baseline.Job.ID}, {"code_ref", baseline.Job.CodeRef}} {
+		if named[1] == "" || !strings.Contains(experiment.Description, named[1]) {
+			return refusedProposal("brief_without_baseline", "experiment.description does not name the baseline's %s %s: its BASELINE block states config, code_ref, metric and measured, so that a researcher starts from what you ran", named[0], named[1])
+		}
+	}
 	var missing []string
 	for _, metric := range experiment.Metrics {
 		value, reported := baseline.Reported[metric.Key]

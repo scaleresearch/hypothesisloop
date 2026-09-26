@@ -35,10 +35,11 @@ def _planner_instance(api: API, pe_id: str) -> tuple[dict | None, set[str]]:
     return (own[0] if own else None), set(desired["ending"])
 
 
-def _proposal(job_id: str, **more) -> dict:
+def _proposal(job_id: str, code_ref: str = "", **more) -> dict:
     return {
         "experiment": {
-            "name": "Hidden layer width", "description": "Vary the hidden layer of the sample classifier and report val_accuracy.",
+            "name": "Hidden layer width",
+            "description": f"Vary the hidden layer of the sample classifier and report val_accuracy. BASELINE code_ref: {code_ref} measured: {job_id}",
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
         "budget_accelerator_hours": 2, "duration_hours": 3, "agents": [{"flavor": "hyperparameter-search"}, {}],
@@ -76,7 +77,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         job = planner.submit_job(pe_id, planner_id, hours=0.02, hyp_text="the baseline: the sample classifier as it is")
         # The type the proposal sizes its jobs for is the one the baseline runs on, which the
         # platform reads from the job: a body that states one is refused.
-        on = api.experiment(job)["accelerator_type"]
+        on, code_ref = api.experiment(job)["accelerator_type"], api.experiment(job)["code_ref"]
         typed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, accelerator_type=on))
         assert typed.status_code == 422, typed.text
         none = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal("job-none"))
@@ -88,11 +89,13 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         unfiled = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
         assert (unfiled.status_code, unfiled.json()["reason"]) == (422, "baseline_without_finding"), unfiled.text
         planner.file_finding(job, "baseline: the sample classifier as it is")
-        unmeasured = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, experiment=_proposal(job)["experiment"] | {
+        unbriefed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
+        assert (unbriefed.status_code, unbriefed.json()["reason"]) == (422, "brief_without_baseline"), unbriefed.text
+        unmeasured = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref, experiment=_proposal(job, code_ref)["experiment"] | {
             "metrics": [{"key": "latency_never_reported", "direction": "minimize"}]}))
         assert (unmeasured.status_code, unmeasured.json()["reason"]) == (422, "baseline_missing_metric"), unmeasured.text
 
-        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
+        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref))
         assert proposed.status_code == 200, proposed.text
         assert proposed.json()["proposed_at"] and proposed.json()["status"] == "draft"
         assert proposed.json()["proposal"]["accelerator_type"] == on, proposed.json()["proposal"]
@@ -106,7 +109,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert [r["message"] for r in revised.json()["revisions"]] == ["Use three researchers at most."]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None, "a revised draft has no planner"
-        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, agents=[{}, {}, {}])).status_code == 200
+        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref, agents=[{}, {}, {}])).status_code == 200
 
         # Accepted at the cost the person states, whatever was proposed.
         accepted = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "agents": [{"flavor": "data-search"}, {}]})

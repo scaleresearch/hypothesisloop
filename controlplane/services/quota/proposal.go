@@ -215,7 +215,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours and agents are proposed, and the person who accepts states them. " +
 			"The proposal is checked before it is stored and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
-			"no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
+			"no_baseline, baseline_not_completed, baseline_without_finding, brief_without_baseline, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
 			"The stored proposal also answers accelerator_type, the type the baseline job ran on: the platform reads it from that job and a body that states it is refused.",
 	}, func(ctx context.Context, in *struct {

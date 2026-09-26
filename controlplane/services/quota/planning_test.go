@@ -247,7 +247,7 @@ func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, 
 func aProposal(more map[string]any) map[string]any {
 	body := map[string]any{
 		"experiment": map[string]any{
-			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss.",
+			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE code_ref: git://seed@abc measured: job-1",
 			"metrics":                 []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 			"report_interval_seconds": 30,
 		},
@@ -270,7 +270,7 @@ func draftWithPlanner() *draftStore {
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		baseline: &Baseline{
-			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090"},
+			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc"},
 			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
 		},
 	}
@@ -458,7 +458,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 // accepts reads "baseline 1.8" as measured.
 func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *testing.T) {
 	gated := map[string]any{"experiment": map[string]any{
-		"name": "n", "description": "d", "report_interval_seconds": 30,
+		"name": "n", "description": "d of job-1 at git://seed@abc", "report_interval_seconds": 30,
 		"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}, {"key": "exact_match", "direction": "maximize", "role": "constraint", "bound": 1}},
 	}}
 	store := draftWithPlanner()
@@ -472,15 +472,18 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 		change func(*Baseline)
 		reason string
 	}{
-		"no job named":                  {map[string]any{"baseline_job_id": ""}, func(*Baseline) {}, "no_baseline"},
-		"a job of someone else":         {nil, func(b *Baseline) { b.Job.AgentID = "ag-other" }, "no_baseline"},
-		"a job of another experiment":   {nil, func(b *Baseline) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
-		"a job that failed":             {nil, func(b *Baseline) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
-		"nothing filed":                 {nil, func(b *Baseline) { b.Finding = false }, "baseline_without_finding"},
-		"a metric nothing reports":      {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
-		"a gate the baseline fails":     {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
-		"a type nobody has now":         {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
-		"a budget below one run apiece": {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
+		"no job named":                {map[string]any{"baseline_job_id": ""}, func(*Baseline) {}, "no_baseline"},
+		"a job of someone else":       {nil, func(b *Baseline) { b.Job.AgentID = "ag-other" }, "no_baseline"},
+		"a job of another experiment": {nil, func(b *Baseline) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
+		"a job that failed":           {nil, func(b *Baseline) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
+		"nothing filed":               {nil, func(b *Baseline) { b.Finding = false }, "baseline_without_finding"},
+		// A planner that did not know the file's shape probed it with a brief of "x", and that
+		// probe was stored as the proposal a person was asked to accept.
+		"a brief that omits the baseline": {nil, func(b *Baseline) { b.Job.CodeRef = "git://seed@other" }, "brief_without_baseline"},
+		"a metric nothing reports":        {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
+		"a gate the baseline fails":       {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
+		"a type nobody has now":           {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
+		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
 	} {
 		store := draftWithPlanner()
 		c.change(store.baseline)
