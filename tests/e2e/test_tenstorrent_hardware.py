@@ -9,17 +9,9 @@ k3s context via localdev/lib/node.sh's lib_attach_node/lib_detach_node for the d
 test only, same care as the k8s-mutating scenarios (test_node_and_daemonset_faults.py): detach
 happens in a `finally` so it runs on pass, fail, or timeout.
 
-KNOWN HOST ISSUE (2026-08-26, not a porting defect -- see the port's report): the DRA
-submission/admission/allocation path this test asserts on (submit -> admitted onto
-cluster_name=box-a -> real ResourceClaim device allocation) is confirmed working end to
-end on this host. train.py's own container then segfaults inside vendor tt-metal/ttnn during
-device init/teardown (`dmesg`: repeated general-protection-fault in libc abort(), inside
-libtt_metal.so's MetalContext::destroy_instance) -- this device currently reports firmware
-bundle 19.13.1, newer than the 19.11.0 this workload's Dockerfile/train.py comments record as
-last confirmed-working. The bash scenario this was ported from would hit the identical crash
-if run today against the same firmware -- nothing in the pytest port changes the job spec,
-image, or device-access pattern. Re-run once the tt-metal image / device firmware are back in a
-matched combination.
+The k3s leg's job runs the image `make tt-hardware-image` pushed, as the cluster's nodes pull it:
+TT_WORKLOAD_IMAGE names it when the registry is not the local one (a control plane on another
+machine). The bare-node leg builds the same image on this host and runs that.
 """
 from __future__ import annotations
 
@@ -46,8 +38,20 @@ ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 # its own image/cpu/memory/hugepages, and must drop the generic spec's nvidia
 # accelerator_tolerations/acceptable_accelerator_types -- see that job.yaml's own comments for why
 # (256Mi OOMKilled every run; 4Gi clears it).
+BARE_IMAGE = "localhost/hypothesisloop-tenstorrent-workload:latest"
+
+
+def _k3s_image() -> str:
+    named = os.environ.get("TT_WORKLOAD_IMAGE")
+    if named:
+        return named
+    host = (REPO_ROOT / "localdev" / ".host-address").read_text().strip()
+    tag = (REPO_ROOT / "localdev" / ".image-tag").read_text().strip()
+    return f"{host}:5000/hypothesisloop-tenstorrent-workload:{tag}"
+
+
 TT_JOB_OVERRIDES = {
-    "image": "localhost/hypothesisloop-tenstorrent-workload:latest",
+    "image": BARE_IMAGE,
     "cpu": "2",
     "memory": "4Gi",
     "storage": "1Gi",
@@ -177,7 +181,7 @@ def test_tenstorrent_real_dra_allocation_and_bare_node(api, run_id: str, deadlin
 def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> None:
     job = api.submit_job(
         pe_id, agent, hours=0.02,
-        job_overrides=dict(TT_JOB_OVERRIDES),
+        job_overrides={**TT_JOB_OVERRIDES, "image": _k3s_image()},
     )
 
     exp = eventually(
