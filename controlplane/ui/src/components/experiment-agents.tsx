@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import {
-  addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
+  addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
   startPlatformExperiment,
 } from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
@@ -25,15 +25,11 @@ import { useReadOnly } from '@/lib/read-only'
 // accepted when the harness image carries a prompt for it.
 const FLAVORS = ['generalist', 'hyperparameter-search', 'architecture-search', 'data-search']
 
-// What the operator's own `podman run --env-file` takes for one agent.
+// What the operator's own `podman run --env-file` takes for one agent, and all an agent is
+// started with: its token says which agent of which platform experiment it is, and it reads its
+// flavor and model from its signup.
 function envFile(agent: JoinedAgent): string {
-  return [
-    `AGENT_ID=${agent.agent_id}`,
-    `HL_TOKEN=${agent.token}`,
-    `PLATFORM_EXPERIMENT_ID=${agent.platform_experiment_id}`,
-    ...(agent.flavor ? [`AGENT_FLAVOR=${agent.flavor}`] : []),
-    ...(agent.model ? [`ANTHROPIC_MODEL=${agent.model}`] : []),
-  ].join('\n')
+  return [`API_URL=${apiURL()}`, `HL_TOKEN=${agent.token}`].join('\n')
 }
 
 function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {

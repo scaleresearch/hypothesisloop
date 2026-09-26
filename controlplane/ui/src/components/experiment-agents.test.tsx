@@ -12,6 +12,7 @@ import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
+  apiURL: () => 'http://api.test',
   createPlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), startPlatformExperiment: vi.fn(),
@@ -67,7 +68,7 @@ describe('adding agents', () => {
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([
-      'AGENT_ID=ag-new1\nHL_TOKEN=hls_token-of-ag-new1\nPLATFORM_EXPERIMENT_ID=pe-1\nAGENT_FLAVOR=data-search',
+      'API_URL=http://api.test\nHL_TOKEN=hls_token-of-ag-new1',
     ])
   })
 

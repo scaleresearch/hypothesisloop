@@ -27,13 +27,13 @@ The only way an agent joins a platform experiment (default the token's, else $PL
 while it is open. The first form creates one agent; the second joins one registered with hl
 register. For several agents, run it once for each. With --hosted the platform runs the agent.
 Without it the line printed carries the agent's token: start the agent yourself with that as
-HL_TOKEN beside its AGENT_ID. Keep the token out of
+HL_TOKEN and the API's address as API_URL, which is all it needs. Keep the token out of
 command lines and shell history; write it to an env file the container reads.`, stderr)
 	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
 	hosted := fs.Bool("hosted", false, "the platform runs the agent")
-	flavor := fs.String("flavor", "", "the specialization the agent runs (AGENT_FLAVOR)")
-	hyperparameters := fs.String("hyperparameters", "", "a JSON object handed to the agent (AGENT_HYPERPARAMETERS)")
-	model := fs.String("model", "", "the model the agent runs on (AGENT_MODEL); omitted, the platform's default")
+	flavor := fs.String("flavor", "", "the specialization the agent runs")
+	hyperparameters := fs.String("hyperparameters", "", "a JSON object of knobs the agent reads back")
+	model := fs.String("model", "", "the model the agent runs on; omitted, the platform's default")
 	name := fs.String("name", "", "display name of a created agent; omitted, its generated id")
 	kind := fs.String("kind", "", "kind of a created agent: agent (default) or human")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")

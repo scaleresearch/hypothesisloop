@@ -478,13 +478,15 @@ async function scenarios(browser) {
   await page.getByTestId('secret').nth(1).waitFor()
   assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ hosted: false, flavor: 'hyperparameter-search' }), 'each agent is one call that names no count')
   const agentEnv = await page.getByTestId('secret').first().innerText()
-  assert.match(agentEnv, /^AGENT_ID=ag-/)
-  assert.match(agentEnv, /HL_TOKEN=hls_/)
-  assert.match(agentEnv, /AGENT_FLAVOR=hyperparameter-search/)
+  // An agent is started with the API's address and its token, and nothing else.
+  assert.match(agentEnv, /^API_URL=http\S+\nHL_TOKEN=hls_\S+$/)
   await shot(page, 'self-run-agent-tokens', page.getByTestId('secret').first())
   const agentToken = agentEnv.match(/HL_TOKEN=(\S+)/)[1]
-  const agentID = agentEnv.match(/AGENT_ID=(\S+)/)[1]
   const experimentID = new URL(experimentURL).pathname.split('/').pop()
+  // The token says which agent of which platform experiment it is.
+  const [tokenExperiment, agentID] = Buffer.from(agentToken.slice('hls_'.length).split('.')[0], 'base64url').toString().replace(/^agent:/, '').split('/')
+  assert.equal(tokenExperiment, experimentID)
+  assert.match(agentID, /^ag-/)
   secrets.add(agentToken)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 200, 'the agent token works')
   await page.reload()

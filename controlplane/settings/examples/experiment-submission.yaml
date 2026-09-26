@@ -145,6 +145,7 @@ metadata:
   # Which agent and platform experiment this run belongs to. Required for quota
   # tracking, leaderboard placement, and the summary gate (an agent can't submit a new
   # run in the same platform experiment until its last COMPLETED run has a summary).
+  # An agent's token says both, so an agent leaves them out. A person or an API key states them.
   agent_id: agent-007
   platform_experiment_id: pe-llm-finetune-2026-07
 

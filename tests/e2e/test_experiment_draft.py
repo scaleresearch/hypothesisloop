@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from support.api import API
+from support.api import API, token_scope
 from support.wait import Deadline, eventually
 
 pytestmark = pytest.mark.exclusive
@@ -28,7 +28,9 @@ GOAL = "Find out whether a larger hidden layer improves validation accuracy of t
 
 def _planner_instance(api: API, pe_id: str) -> tuple[dict | None, set[str]]:
     desired = api.launcher_desired(LAUNCHER)
-    own = [i for i in desired["instances"] if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id and i["env"].get("AGENT_FLAVOR") == "planner"]
+    planners = {a["agent_id"] for a in api.agents(pe_id) if a["flavor"] == "planner"}
+    own = [i for i in desired["instances"]
+           if (scope := token_scope(i["env"]["HL_TOKEN"]))[:2] == ("agent", pe_id) and scope[2] in planners]
     assert len(own) <= 1, own
     return (own[0] if own else None), set(desired["ending"])
 
@@ -60,7 +62,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert [(a["name"], a["flavor"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "baseline", True)], roster
         planner_id = roster[0]["agent_id"]
         instance, _ = _planner_instance(api, pe_id)
-        assert instance is not None and instance["env"]["AGENT_ID"] == planner_id, instance
+        assert instance is not None and token_scope(instance["env"]["HL_TOKEN"])[2] == planner_id, instance
         planner = api.as_caller(instance["env"]["HL_TOKEN"], api.org_id, api.project_id)
 
         # Nobody joins a draft, nobody but the planner proposes, and nothing is accepted yet.

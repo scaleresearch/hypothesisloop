@@ -100,18 +100,27 @@ def prepare() -> RunSetup:
 
     cfg = config.Config()
 
-    # Per-agent by default: two agents launched from the same cwd (the natural way to run a
-    # multi-agent competition on one box) must not resolve to the same repo checkout. agent_id is
-    # required and validated, so the default is always unique with no extra config.
-    workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
-    os.makedirs(workdir, exist_ok=True)
-
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
     if config.coordinates(cfg):
         platform_experiment = client.require_coordinated(cfg.platform_experiment_id)
+        cfg.run_as(config.COORDINATOR_FLAVOR, (platform_experiment.get("coordinator") or {}).get("model"))
     else:
-        client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
+        signup = client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
+        cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"))
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
+
+    # hl reads who it is from HL_TOKEN. These two are what its commands that have not moved to
+    # the token yet still read, so they say what the token says and nothing left over from
+    # whoever started this process.
+    os.environ["PLATFORM_EXPERIMENT_ID"] = cfg.platform_experiment_id
+    os.environ.pop("AGENT_ID", None)
+    if not config.coordinates(cfg):
+        os.environ["AGENT_ID"] = cfg.agent_id
+
+    # Per-agent by default: two agents launched from the same cwd (the natural way to run a
+    # multi-agent competition on one box) must not resolve to the same repo checkout.
+    workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
+    os.makedirs(workdir, exist_ok=True)
 
     # The repository is the one the platform experiment names: the agent clones it through
     # `hl git-credential`, so no address and no git token is handed to it at launch. With none

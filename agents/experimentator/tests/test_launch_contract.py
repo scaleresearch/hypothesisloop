@@ -12,32 +12,23 @@ from claude_agent_sdk import ResultMessage
 
 from hypothesisloop_agent import config, core
 from hypothesisloop_agent.claude import run
+from test_require_joined import AGENT_TOKEN
 
-LAUNCH_ENV = {
-    "API_URL": "http://api.example.invalid", "AGENT_ID": "ag-1", "HL_TOKEN": "hls_token",
-    "PLATFORM_EXPERIMENT_ID": "pe-1", "AGENT_FLAVOR": "data-search", "AGENT_MODEL": "model-1",
-    "AGENT_HYPERPARAMETERS": '{"batch_size": 64}',
-}
+# What a launcher hands a machine, and all of it: where the platform is and the agent's token.
+LAUNCH_ENV = {"API_URL": "http://api.example.invalid", "HL_TOKEN": AGENT_TOKEN}
 
 
 class LaunchEnvironmentTest(unittest.TestCase):
-    def test_the_values_a_launcher_hands_over_are_the_whole_config(self):
-        with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
+    def test_the_token_says_who_this_is_and_nothing_in_the_environment_says_what_it_runs_as(self):
+        stale = {"AGENT_FLAVOR": "data-search", "AGENT_MODEL": "model-1", "ANTHROPIC_MODEL": "model-2", "AGENT_ID": "left-over"}
+        with mock.patch.dict(os.environ, {**LAUNCH_ENV, **stale}, clear=True):
             cfg = config.Config()
+        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.flavor, cfg.model), ("agent-a", "pe-1", "", ""))
+        for flavor, model in (("", "model-1"), ("data-search", "")):
+            with self.assertRaises(SystemExit):
+                cfg.run_as(flavor, model)
+        cfg.run_as("data-search", "model-1", {"batch_size": 64})
         self.assertEqual((cfg.flavor, cfg.model, cfg.hyperparameters), ("data-search", "model-1", {"batch_size": 64}))
-
-    def test_flavor_and_model_have_no_default(self):
-        for name in ("AGENT_FLAVOR", "AGENT_MODEL"):
-            env = {k: v for k, v in LAUNCH_ENV.items() if k != name}
-            with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit) as refused:
-                config.Config()
-            self.assertIn(name, str(refused.exception))
-
-    def test_the_model_once_read_from_another_variable_is_not_read(self):
-        env = {k: v for k, v in LAUNCH_ENV.items() if k != "AGENT_MODEL"}
-        env["ANTHROPIC_MODEL"] = "model-from-the-old-variable"
-        with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
-            config.Config()
 
 
 class StopSignalTest(unittest.TestCase):

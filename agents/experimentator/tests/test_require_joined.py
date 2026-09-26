@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import shutil
@@ -10,11 +11,20 @@ from unittest import mock
 from hypothesisloop_agent import api_client, config, core
 
 
+def derived(scope: str) -> str:
+    """A token shaped like the ones the platform derives for scope."""
+    return "hls_" + base64.urlsafe_b64encode(scope.encode()).decode().rstrip("=") + ".mac"
+
+
+AGENT_TOKEN = derived("agent:pe-1/agent-a")
+
+
 class FakePlatform(BaseHTTPRequestHandler):
     """Answers like the platform: an agent that was added reads its own signup, and the token of
     one that was not is refused before any handler runs."""
 
     joined: set = set()
+    signup: dict = {}
     calls: list = []
     tokens: set = set()
     status_for_strangers = 401
@@ -35,13 +45,13 @@ class FakePlatform(BaseHTTPRequestHandler):
             self.wfile.write(b"## platform rules\n")
             return
         if self.path == "/platform-experiments/pe-1":
-            body = {"id": "pe-1", "status": "running"}
+            body = {"id": "pe-1", "status": "running", "coordinator": {"model": "model-1"}}
             if FakePlatform.repository_url:
                 body["repository_url"] = FakePlatform.repository_url
             return self._reply(200, body)
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
-            return self._reply(200, {"agent_id": agent_id, "role": "competitor"})
+            return self._reply(200, {"agent_id": agent_id, "role": "competitor", **FakePlatform.signup})
         self._reply(FakePlatform.status_for_strangers, {"error": "unauthenticated: agent is not in platform experiment"})
 
     def do_POST(self):
@@ -55,6 +65,7 @@ class FakePlatform(BaseHTTPRequestHandler):
 class PlatformCase(unittest.TestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
+        FakePlatform.signup = {"flavor": "generalist", "model": "model-1", "hyperparameters": {"batch_size": 64}}
         FakePlatform.status_for_strangers = 401
         FakePlatform.repository_url = "https://github.com/acme/model.git"
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
@@ -112,8 +123,7 @@ class StartupTest(PlatformCase):
     """core.prepare is what both backends start with."""
 
     def environment(self, **overrides):
-        env = {"API_URL": self.url, "HL_TOKEN": "agent-token", "AGENT_ID": "agent-a", "PLATFORM_EXPERIMENT_ID": "pe-1",
-               "AGENT_FLAVOR": "generalist", "AGENT_MODEL": "model-1", "AGENT_WORKDIR": self.workdir}
+        env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir}
         env.update(overrides)
         return {k: v for k, v in env.items() if v is not None}
 
@@ -127,9 +137,12 @@ class StartupTest(PlatformCase):
                 mock.patch.object(core, "hl_commands", return_value="usage: hl"):
             return core.prepare()
 
-    def test_prepare_checks_membership_before_anything_else_and_never_writes(self):
-        setup = self.prepare()
-        self.assertEqual(setup.cfg.agent_id, "agent-a")
+    def test_prepare_reads_who_it_is_from_the_token_and_what_it_runs_as_from_its_signup(self):
+        # What a stale environment says of who this is counts for nothing.
+        setup = self.prepare(AGENT_ID="left-over", PLATFORM_EXPERIMENT_ID="pe-stale", AGENT_FLAVOR="coordinator", AGENT_MODEL="other")
+        cfg = setup.cfg
+        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id), ("agent-a", "pe-1"))
+        self.assertEqual((cfg.flavor, cfg.model, cfg.hyperparameters), ("generalist", "model-1", {"batch_size": 64}))
         self.assertEqual(FakePlatform.calls, [
             ("GET", "/platform-experiments/pe-1/signups/agent-a"),
             ("GET", "/platform-experiments/pe-1"),
@@ -155,11 +168,11 @@ class StartupTest(PlatformCase):
 
     def test_prepare_stops_an_agent_nobody_added_before_it_reads_the_rules(self):
         with self.assertRaises(SystemExit):
-            self.prepare(AGENT_ID="agent-b")
+            self.prepare(HL_TOKEN=derived("agent:pe-1/agent-b"))
         self.assertEqual(FakePlatform.calls, [("GET", "/platform-experiments/pe-1/signups/agent-b")])
 
-    def test_prepare_requires_the_identity_and_the_token_it_was_handed(self):
-        for missing in ("AGENT_ID", "HL_TOKEN", "PLATFORM_EXPERIMENT_ID", "API_URL", "AGENT_FLAVOR", "AGENT_MODEL"):
+    def test_prepare_requires_the_address_and_a_token_that_says_who_it_is(self):
+        for missing in ("HL_TOKEN", "API_URL"):
             FakePlatform.calls = []
             with self.assertRaises(SystemExit) as ctx:
                 self.prepare(**{missing: None})
@@ -167,6 +180,19 @@ class StartupTest(PlatformCase):
             self.assertEqual(FakePlatform.calls, [], f"the platform was called without {missing}")
             with self.assertRaises(SystemExit):
                 self.prepare(**{missing: ""})
+        for token in ("hlk_an-api-key", "hls_not-base64.mac", derived("launcher:main"), derived("agent:pe-1")):
+            with self.assertRaises(SystemExit) as ctx:
+                self.prepare(HL_TOKEN=token)
+            self.assertIn("neither an agent's token nor a coordinator's", str(ctx.exception))
+            self.assertNotIn(token, str(ctx.exception))
+        self.assertEqual(FakePlatform.calls, [])
+
+    def test_a_signup_that_names_no_flavor_or_no_model_fails_startup(self):
+        for gone in ("flavor", "model"):
+            FakePlatform.signup = {"flavor": "generalist", "model": "model-1", gone: ""}
+            with self.assertRaises(SystemExit) as ctx:
+                self.prepare()
+            self.assertIn("names no flavor or no model", str(ctx.exception))
 
 
 if __name__ == "__main__":

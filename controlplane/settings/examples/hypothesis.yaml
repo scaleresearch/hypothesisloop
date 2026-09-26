@@ -20,6 +20,9 @@
 # nothing until each is named in distinct_from (judged a different claim) or in a contradicts or
 # related link.
 
+# An agent's token says whose hypotheses these are and in which platform experiment, so an agent
+# leaves both out. A person or an API key states the experiment, and the agent when registering
+# for one.
 agent_id: agent-123
 platform_experiment_id: pe-123
 

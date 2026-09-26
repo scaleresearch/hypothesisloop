@@ -8,35 +8,23 @@ from unittest import mock
 
 from hypothesisloop_agent import config, core, updates
 from hypothesisloop_agent.claude import run
-from test_require_joined import FakePlatform, PlatformCase
+from test_require_joined import AGENT_TOKEN, FakePlatform, PlatformCase, derived
 from test_updates import COMPLETED, fake_hl
 
-LAUNCH_ENV = {
-    "API_URL": "http://api.example.invalid", "HL_TOKEN": "hls_coordinator", "PLATFORM_EXPERIMENT_ID": "pe-1",
-    "AGENT_FLAVOR": "coordinator", "AGENT_MODEL": "model-1",
-}
+COORDINATOR_TOKEN = derived("coordinator:pe-1")
+LAUNCH_ENV = {"API_URL": "http://api.example.invalid", "HL_TOKEN": COORDINATOR_TOKEN}
 
 
 class LaunchEnvironmentTest(unittest.TestCase):
-    def test_what_the_launcher_hands_a_coordinator_is_the_whole_config_and_holds_no_agent_id(self):
-        with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
+    def test_a_coordinators_token_makes_a_coordinator_whatever_agent_id_is_left_in_the_environment(self):
+        with mock.patch.dict(os.environ, {**LAUNCH_ENV, "AGENT_ID": "ag-1"}, clear=True):
             cfg = config.Config()
         self.assertTrue(config.coordinates(cfg))
-        self.assertEqual((cfg.agent_id, config.watched_agent_id(cfg), cfg.model), ("coordinator", "", "model-1"))
-
-    def test_an_agent_id_beside_the_coordinator_flavor_is_refused(self):
-        with mock.patch.dict(os.environ, {**LAUNCH_ENV, "AGENT_ID": "ag-1"}, clear=True), self.assertRaises(SystemExit) as refused:
-            config.Config()
-        self.assertIn("AGENT_ID", str(refused.exception))
-
-    def test_an_agent_still_needs_its_id_and_does_not_coordinate(self):
-        env = {**LAUNCH_ENV, "AGENT_FLAVOR": "generalist"}
-        with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
-            config.Config()
-        with mock.patch.dict(os.environ, {**env, "AGENT_ID": "ag-1"}, clear=True):
+        self.assertEqual((cfg.agent_id, config.watched_agent_id(cfg), cfg.platform_experiment_id), ("coordinator", "", "pe-1"))
+        with mock.patch.dict(os.environ, {**LAUNCH_ENV, "HL_TOKEN": AGENT_TOKEN}, clear=True):
             cfg = config.Config()
         self.assertFalse(config.coordinates(cfg))
-        self.assertEqual(config.watched_agent_id(cfg), "ag-1")
+        self.assertEqual(config.watched_agent_id(cfg), "agent-a")
 
 
 class StartupTest(PlatformCase):
@@ -60,7 +48,8 @@ class StartupTest(PlatformCase):
         self.assertEqual(FakePlatform.calls[0], ("GET", "/platform-experiments/pe-1/agents"))
         self.assertFalse([path for _, path in FakePlatform.calls if "/signups/" in path])
         self.assertNotIn("POST", [method for method, _ in FakePlatform.calls])
-        self.assertEqual(FakePlatform.tokens, {"Bearer hls_coordinator"})
+        self.assertEqual(FakePlatform.tokens, {"Bearer " + COORDINATOR_TOKEN})
+        self.assertEqual((setup.cfg.flavor, setup.cfg.model), ("coordinator", "model-1"))
         self.assertIn("coordinator of one platform experiment", setup.system_prompt)
 
     def test_a_token_that_does_not_coordinate_fails_startup_without_showing_itself(self):
@@ -70,7 +59,7 @@ class StartupTest(PlatformCase):
             with self.assertRaises(SystemExit) as refused:
                 self.prepare()
             self.assertIn("does not coordinate platform experiment pe-1", str(refused.exception))
-            self.assertNotIn("hls_coordinator", str(refused.exception))
+            self.assertNotIn(COORDINATOR_TOKEN, str(refused.exception))
 
     def test_with_no_repository_the_coordinator_starts_and_is_told_there_is_none(self):
         FakePlatform.joined, FakePlatform.repository_url = {"agents"}, ""
@@ -85,6 +74,7 @@ class BriefingTest(unittest.TestCase):
     def render(self) -> str:
         with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
             cfg = config.Config()
+        cfg.run_as(config.COORDINATOR_FLAVOR, "model-1")
         return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git")
 
     def test_it_renders_with_the_rules_the_commands_and_its_assignment(self):

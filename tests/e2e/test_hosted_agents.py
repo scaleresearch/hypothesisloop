@@ -28,7 +28,7 @@ import pytest
 import requests
 
 from support import admin
-from support.api import API
+from support.api import API, token_scope
 from support.wait import eventually
 
 pytestmark = pytest.mark.exclusive
@@ -74,8 +74,8 @@ def desired_for(api: API, pe_id: str, observed: list[dict] | None = None) -> tup
     agent id, and the names of the ending ones."""
     desired = api.launcher_desired(LAUNCHER, observed)
     assert isinstance(desired["instances"], list) and isinstance(desired["ending"], list), desired.keys()
-    own = {i["env"]["AGENT_ID"]: i for i in desired["instances"]
-           if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id and "AGENT_ID" in i["env"]}
+    scopes = [(token_scope(i["env"]["HL_TOKEN"]), i) for i in desired["instances"]]
+    own = {agent: i for (kind, pe, agent), i in scopes if kind == "agent" and pe == pe_id}
     return own, set(desired["ending"])
 
 
@@ -83,7 +83,7 @@ def coordinator_for(api: API, pe_id: str, observed: list[dict] | None = None) ->
     """The instance the launcher is asked to keep for this platform experiment's coordinator, and
     the names of the ending ones."""
     desired = api.launcher_desired(LAUNCHER, observed)
-    own = [i for i in desired["instances"] if i["env"]["PLATFORM_EXPERIMENT_ID"] == pe_id and "AGENT_ID" not in i["env"]]
+    own = [i for i in desired["instances"] if token_scope(i["env"]["HL_TOKEN"]) == ("coordinator", pe_id, "")]
     assert len(own) <= 1, f"more than one coordinator instance for {pe_id}: {[i['name'] for i in own]}"
     return (own[0] if own else None), set(desired["ending"])
 
@@ -167,10 +167,11 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert len(names) == 2 and not names & ending
     for agent_id, instance in instances.items():
         env = instance["env"]
-        assert set(env) == {"API_URL", "AGENT_ID", "PLATFORM_EXPERIMENT_ID", "AGENT_FLAVOR",
-                            "AGENT_HYPERPARAMETERS", "AGENT_MODEL", "HL_TOKEN"}, sorted(env)
-        assert env["AGENT_FLAVOR"] == "data-search" and env["AGENT_MODEL"] == "claude-sonnet-5"
-        assert json.loads(env["AGENT_HYPERPARAMETERS"]) == {"batch_size": 64}
+        # A machine is handed where the platform is and its agent's token. What it runs as it
+        # reads from its own signup with that token.
+        assert set(env) == {"API_URL", "HL_TOKEN"}, sorted(env)
+        signup = api.as_caller(env["HL_TOKEN"]).get_json(f"/platform-experiments/{pe_id}/signups/{agent_id}")
+        assert (signup["flavor"], signup["model"], signup["hyperparameters"]) == ("data-search", "claude-sonnet-5", {"batch_size": 64}), signup
         assert env["API_URL"].startswith("http") and instance["image"]
         assert env["HL_TOKEN"] not in instance["name"]
         assert instance["name"] == instance["name"].lower() and len(instance["name"]) <= 58
@@ -362,8 +363,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         coordinator, _ = coordinator_for(with_repo, pe_id)
         assert coordinator is not None, "the launcher is not asked for the coordinator of an open platform experiment"
         env = coordinator["env"]
-        assert env["AGENT_FLAVOR"] == "coordinator" and env["AGENT_MODEL"] == pe["coordinator"]["model"], env
-        assert set(env) == {"API_URL", "PLATFORM_EXPERIMENT_ID", "AGENT_FLAVOR", "AGENT_MODEL", "HL_TOKEN"}, set(env)
+        assert set(env) == {"API_URL", "HL_TOKEN"} and pe["coordinator"]["model"], set(env)
         assert env["HL_TOKEN"] not in coordinator["name"] and coordinator["name"].count("-") == 2, coordinator["name"]
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["coordinator"]["instance"]["name"] == coordinator["name"]
 

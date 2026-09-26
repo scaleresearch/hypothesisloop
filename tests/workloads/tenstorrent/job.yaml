@@ -1,13 +1,12 @@
 # This file is a full POST /experiments request body (id + metadata + job), not just the job
 # spec. id/metadata below are placeholders -- nothing here knows in advance which hypothesis or
-# platform experiment a submission belongs to, so overwrite hypothesis_id, platform_experiment_id,
-# agent_id (and id, for a fresh submission) before/at submit time. The `job:` block below is the
+# platform experiment a submission belongs to, so set hypothesis_id (and id, for a fresh submission) before/at submit time. An agent's
+# token says whose job it is and where it runs; a person names them with --agent and
+# --platform-experiment. The `job:` block below is the
 # real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
 # for the fully-commented DSL reference.
 id: replace-with-a-unique-job-id
 metadata:
-  agent_id: REPLACE-WITH-YOUR-AGENT-ID
-  platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
   hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
   theory: "your specific prediction for this run"
   code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>

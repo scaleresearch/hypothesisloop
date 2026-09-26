@@ -238,7 +238,7 @@ admitted, billed, evicted and settled by identical code.
 What differs between agents is two independent things, both decided here and set when the agents
 are added (step 4):
 
-- `AGENT_FLAVOR` picks which specialization the harness inlines into the agent's prompt from
+- The flavor (`--flavor`) picks which specialization the harness inlines into the agent's prompt from
   `agents/experimentator/src/hypothesisloop_agent/prompts/flavors/<flavor>.md` — what kind of
   trial it runs and what it varies (`generalist`, `hyperparameter-search`, `architecture-search`,
   `data-search`; a new specialization is a new file there and its name in `AgentFlavors` in
@@ -267,7 +267,7 @@ are added (step 4):
     what evidence prompted it, which hypothesis or finding motivated a narrower slate — since
     that reasoning is what makes the results interpretable afterward, exactly like the flavor mix
     itself.
-- `AGENT_HYPERPARAMETERS` is a small JSON object handed to an agent on top of its flavor (batch
+- The hyperparameters (`--hyperparameters`) are a small JSON object an agent gets on top of its flavor (batch
   size, a specific point in a search space, ...). A sweep is several agents of the same flavor
   launched with different hyperparameter values, same as XManager's `experiment.add` loop.
 
@@ -321,26 +321,26 @@ to read that list.
 Without `--hosted` you run each agent yourself, which is how an experiment with its own agent
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
 one agent with its `agent_id` and its `token`, which acts as that agent in that platform
-experiment and nowhere else. The harness starts only with both, and with the flavor and the model
-the same line shows (`AGENT_FLAVOR`, `AGENT_MODEL`): it registers nothing, defaults nothing, and
-exits if the platform does not know the agent. Write them to one env file per agent, readable by you
+experiment and nowhere else. The harness starts with `API_URL` and that token as `HL_TOKEN`, and
+nothing else: the token says which agent of which platform experiment it is, and the harness reads
+its flavor, model and hyperparameters from its signup. It registers nothing, defaults nothing, and
+exits if the platform does not know the agent. Write the two to one env file per agent, readable by you
 alone, instead of putting a token on a command line, where it would sit in the process list and
 in the shell's history:
 
     umask 077
     hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}' |
-      jq -r '"AGENT_ID=\(.agent_id)\nHL_TOKEN=\(.token)\nAGENT_FLAVOR=\(.flavor)\nAGENT_MODEL=\(.model)\nAGENT_HYPERPARAMETERS=\(.hyperparameters | tojson)"' \
+      jq -r --arg api "$API_URL" '"API_URL=\($api)\nHL_TOKEN=\(.token)"' \
       > /tmp/hlrun/<run>/agent-1.env
 
     podman run -d --name agent-1 --network host --env-file /tmp/hlrun/<run>/agent-1.env \
-      -e PLATFORM_EXPERIMENT_ID=$PLATFORM_EXPERIMENT_ID \
-      -e API_URL=$API_URL -e CLAUDE_CODE_OAUTH_TOKEN \
+      -e CLAUDE_CODE_OAUTH_TOKEN \
       localhost/hypothesisloop-experimentator-$EXPERIMENT
 
 A secret is named with a bare `-e NAME`, which hands the container the value from this shell's
-environment. `hl` in the container reads `AGENT_ID` and `PLATFORM_EXPERIMENT_ID` as its `--agent`
-and `--platform-experiment` defaults. A lost token is printed again by
+environment. `hl` in the container reads its agent and its platform experiment from the token,
+so no command of an agent names either. A lost token is printed again by
 `hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
 nothing for an agent that already joined. `hl platform-experiments agents remove` takes an agent
 out again while the experiment is still open.

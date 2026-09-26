@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import json
+import base64
+import binascii
 import os
 from dataclasses import dataclass, field
 
@@ -17,78 +18,75 @@ def _env_float(name: str, default: float) -> float:
     return float(v) if v else default
 
 
-def _env_json_object(name: str, default: str = "{}") -> dict:
-    """Parses an env var as a small JSON object of hyperparameters. Malformed or non-object JSON
-    fails loudly at startup rather than silently handing the agent an empty dict — a sweep that
-    got its hyperparameters wrong should not run believing it got the defaults."""
-    raw = os.environ.get(name, default) or default
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"agent: {name} must be a JSON object, got {raw!r}: {e}")
-    if not isinstance(value, dict):
-        raise SystemExit(f"agent: {name} must be a JSON object, got {raw!r}")
-    return value
-
-
-# What a platform experiment's coordinator is started as. It is no flavor of an agent: a
-# coordinator is not in the experiment, so it has no AGENT_ID, and HL_TOKEN is the platform
-# experiment's coordinator token.
+# What a platform experiment's coordinator runs as. It is no flavor of an agent: a coordinator is
+# not in the experiment, and HL_TOKEN is the platform experiment's coordinator token.
 COORDINATOR_FLAVOR = "coordinator"
 # What the agent of a draft is started as. It is an agent of the platform experiment like any
-# other, with its own AGENT_ID and token, and its briefing is its own: it plans the experiment
+# other, with its own token, and its briefing is its own: it plans the experiment
 # the others will later run in.
 PLANNER_FLAVOR = "planner"
 
 
-def _agent_id() -> str:
-    if os.environ.get("AGENT_FLAVOR") != COORDINATOR_FLAVOR:
-        return _required("AGENT_ID")
-    if os.environ.get("AGENT_ID"):
-        raise SystemExit("agent: AGENT_ID is set and AGENT_FLAVOR is coordinator: a coordinator is no agent of its "
-                         "platform experiment, and hl would act as that agent")
-    return COORDINATOR_FLAVOR
+def token_scope(token: str) -> tuple[str, str, str]:
+    """What a token the platform derived says of its holder: ("agent", platform experiment, agent)
+    or ("coordinator", platform experiment, ""). It is hls_<scope>.<mac>, the scope being
+    base64url of agent:<pe>/<agent> or coordinator:<pe>. The platform alone verifies it."""
+    scope = ""
+    if token.startswith("hls_") and "." in token:
+        part = token[len("hls_"):].split(".", 1)[0]
+        try:
+            scope = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode()
+        except (binascii.Error, UnicodeDecodeError):
+            scope = ""
+    kind, _, rest = scope.partition(":")
+    pe, _, agent = rest.partition("/")
+    if kind == "agent" and pe and agent:
+        return kind, pe, agent
+    if kind == "coordinator" and pe and not agent:
+        return kind, pe, ""
+    raise SystemExit("agent: HL_TOKEN is neither an agent's token nor a coordinator's. An agent gets its token when "
+                     "it is added with `hl platform-experiments agents add`.")
 
 
 @dataclass
 class Config:
+    """What the harness is started with is API_URL and HL_TOKEN. The token says which agent of
+    which platform experiment this is, or that it is the experiment's coordinator, and the rest is
+    read from the platform at startup (core.prepare)."""
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
     api_url: str = field(default_factory=lambda: _required("API_URL"))
-
-    # Who this agent is and the token that acts as it. Both are handed out when the agent is added
-    # to its platform experiment (POST /platform-experiments/{id}/agents): the harness registers
-    # nothing and signs up nowhere.
-    # A coordinator has none: agent_id is then its flavor, which names it in the activity log
-    # and its working directory and is never sent to the platform.
-    agent_id: str = field(default_factory=_agent_id)
     token: str = field(default_factory=lambda: _required("HL_TOKEN"))
-
-    # Which platform experiment to compete in: an agent competes in exactly the one it
-    # was launched for. Everything about that experiment — objective, metric, job spec, rules —
-    # the agent discovers itself from the experiment's `description` (see core.py's prompt).
-    platform_experiment_id: str = field(default_factory=lambda: _required("PLATFORM_EXPERIMENT_ID"))
-
-    # Which specialization this agent runs: the coordinator decides it and passes it in, the agent
-    # never picks its own. Every flavor competes identically — nothing here is a ranking axis — it
-    # only selects which brief is inlined into the prompt (prompts/flavors/<flavor>.md), which
-    # holds the specialized approach: what kind of trial to run, what to vary, what "winning"
-    # looks like for that specialization.
-    # Required, like the model below: both are decided when the agent is added and the platform
-    # shows them on its roster, so a default here would run something the roster does not say.
-    flavor: str = field(default_factory=lambda: _required("AGENT_FLAVOR"))
-
-    # The model this agent runs on, whichever provider's backend runs it.
-    model: str = field(default_factory=lambda: _required("AGENT_MODEL"))
-
-    # Hyperparameters: a small JSON object of sweep knobs (batch_size, risk_tolerance, ...) this
-    # one agent is handed on top of its flavor when it is added. A sweep is several agents of the
-    # same flavor, each with its own. The agent reads it back via {hyperparameters} in the system
-    # prompt and decides for itself what to do with it.
-    hyperparameters: dict = field(default_factory=lambda: _env_json_object("AGENT_HYPERPARAMETERS"))
 
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
     # experiment closes and submissions start getting rejected (see core.py's stop_reason).
     max_wall_hours: float = field(default_factory=lambda: _env_float("MAX_WALL_HOURS", 0))
+
+    # From the token. A coordinator has no agent id: agent_id is then its flavor, which names it
+    # in the activity log and its working directory and is never sent to the platform.
+    agent_id: str = field(init=False)
+    platform_experiment_id: str = field(init=False)
+
+    # From the agent's signup, or for a coordinator from its platform experiment. flavor selects
+    # the brief inlined into the prompt (prompts/flavors/<flavor>.md), model is what it runs on,
+    # and hyperparameters is a small JSON object of sweep knobs the agent reads back in its prompt.
+    flavor: str = field(init=False, default="")
+    model: str = field(init=False, default="")
+    hyperparameters: dict = field(init=False, default_factory=dict)
+
+    def __post_init__(self):
+        kind, self.platform_experiment_id, agent_id = token_scope(self.token)
+        if kind == "coordinator":
+            self.agent_id = self.flavor = COORDINATOR_FLAVOR
+        else:
+            self.agent_id = agent_id
+
+    def run_as(self, flavor, model, hyperparameters=None) -> None:
+        """Takes what the platform says this one runs as. Neither flavor nor model has a default:
+        the roster shows both, and a default here would run something the roster does not say."""
+        if not flavor or not model:
+            raise SystemExit(f"agent: the platform names no flavor or no model for {self.agent_id} "
+                             f"(flavor {flavor!r}, model {model!r})")
+        self.flavor, self.model, self.hyperparameters = flavor, model, hyperparameters or {}
 
 
 def coordinates(cfg) -> bool:

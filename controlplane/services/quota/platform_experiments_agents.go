@@ -24,9 +24,9 @@ type AddAgentRequest struct {
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
-	Flavor          string         `json:"flavor,omitempty" doc:"Which specialization the agent runs, handed to it as AGENT_FLAVOR: generalist (default), hyperparameter-search, architecture-search or data-search."`
-	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object handed to the agent as AGENT_HYPERPARAMETERS, at most 4096 bytes as JSON."`
-	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, handed to it as AGENT_MODEL. Omitted, the platform's default applies and is what the answer shows."`
+	Flavor          string         `json:"flavor,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
+	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
+	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, the platform's default applies and is what the answer shows."`
 }
 
 // AgentLaunch is what joining needs beyond the store.
@@ -286,7 +286,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut. " +
 			"In a platform experiment that names no repository it starts in an empty directory and the platform keeps the code it pushes (hl code push). " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
-			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
+			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically.",

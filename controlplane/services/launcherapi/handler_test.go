@@ -141,15 +141,9 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnv := map[string]string{
-		"API_URL":                testAPIURL,
-		"AGENT_ID":               "ag-running",
-		"PLATFORM_EXPERIMENT_ID": "pe-1",
-		"AGENT_FLAVOR":           "data-search",
-		"AGENT_HYPERPARAMETERS":  `{"a":"b","batch_size":64}`,
-		"AGENT_MODEL":            "claude-sonnet-5",
-		"HL_TOKEN":               token,
-	}
+	// The token says which agent of which platform experiment the machine is, and the agent
+	// reads the rest from its signup.
+	wantEnv := map[string]string{"API_URL": testAPIURL, "HL_TOKEN": token}
 	if running.Image != testImage || !reflect.DeepEqual(running.Env, wantEnv) {
 		t.Errorf("instance = %+v\nwant env %v", running, wantEnv)
 	}
@@ -178,15 +172,16 @@ func TestALauncherWithNothingToRunIsAnsweredWithTwoEmptyLists(t *testing.T) {
 	}
 }
 
-func TestEveryInstanceIsToldItsFlavorAndModelAndASignupWithoutThemIsLeftOutAndLogged(t *testing.T) {
+func TestAnAgentWhoseModelChangesGetsANewMachineAndASignupWithoutFlavorOrModelIsLeftOutAndLogged(t *testing.T) {
 	agent := hosted("pe-1", "ag-1")
-	agent.Hyperparameters = nil
 	instance, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if instance.Env["AGENT_FLAVOR"] != "data-search" || instance.Env["AGENT_MODEL"] != "claude-sonnet-5" || instance.Env["AGENT_HYPERPARAMETERS"] != "{}" {
-		t.Errorf("env = %v", instance.Env)
+	agent.Model = "another-model"
+	changed, err := instanceFor(agent, agent.Instance.Restarts, testImage, testAPIURL, testSecret, testDigest)
+	if err != nil || changed.Name == instance.Name || !maps.Equal(changed.Env, instance.Env) {
+		t.Errorf("after a change of model: got = %+v, %v, want another name than %s for the same environment", changed, err, instance.Name)
 	}
 
 	noFlavor, noModel := hosted("pe-1", "ag-no-flavor"), hosted("pe-1", "ag-no-model")
@@ -200,7 +195,7 @@ func TestEveryInstanceIsToldItsFlavorAndModelAndASignupWithoutThemIsLeftOutAndLo
 		t.Fatalf("one bad row failed the whole list: %d %s", code, raw)
 	}
 	desired := decode(t, raw)
-	if len(desired.Instances) != 1 || desired.Instances[0].Env["AGENT_ID"] != "ag-whole" {
+	if len(desired.Instances) != 1 || !strings.HasPrefix(desired.Instances[0].Name, "pe1-agwhole-") {
 		t.Fatalf("instances = %+v, want the one whole agent", desired.Instances)
 	}
 	if logs.Len() != 2 {
@@ -321,7 +316,7 @@ func TestAnAgentWhoseWriteFailsIsLeftOutAndTheRestOfTheListStands(t *testing.T) 
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
-	if desired := decode(t, raw); len(desired.Instances) != 1 || desired.Instances[0].Env["AGENT_ID"] != "ag-fine" {
+	if desired := decode(t, raw); len(desired.Instances) != 1 || !strings.HasPrefix(desired.Instances[0].Name, "pe1-agfine-") {
 		t.Fatalf("instances = %+v", desired.Instances)
 	}
 	if logs.Len() != 1 {
@@ -548,9 +543,7 @@ func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{
-		"API_URL": testAPIURL, "PLATFORM_EXPERIMENT_ID": "pe-1", "AGENT_FLAVOR": "coordinator", "AGENT_MODEL": "claude-sonnet-5", "HL_TOKEN": token,
-	}
+	want := map[string]string{"API_URL": testAPIURL, "HL_TOKEN": token}
 	if !maps.Equal(coordinator.Env, want) || coordinator.Image != testImage {
 		t.Errorf("coordinator = %+v, want env %v", coordinator, want)
 	}
@@ -933,9 +926,9 @@ func TestAPlatformExperimentsOwnImageIsWhatItsAgentsAndCoordinatorBoot(t *testin
 	}
 	images := map[string]string{}
 	for _, instance := range answer.Instances {
-		images[instance.Env["PLATFORM_EXPERIMENT_ID"]+"/"+instance.Env["AGENT_FLAVOR"]] = instance.Image
+		images[instance.Name[:strings.LastIndex(instance.Name, "-")]] = instance.Image
 	}
-	want := map[string]string{"pe-own/data-search": own, "pe-own/coordinator": own, "pe-plain/data-search": testImage, "pe-plain/coordinator": testImage}
+	want := map[string]string{"peown-ag1": own, "peown-coordinator": own, "peplain-ag2": testImage, "peplain-coordinator": testImage}
 	if !maps.Equal(images, want) {
 		t.Fatalf("images = %v, want %v", images, want)
 	}

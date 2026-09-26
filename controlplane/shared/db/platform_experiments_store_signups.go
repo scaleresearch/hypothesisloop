@@ -378,21 +378,6 @@ ORDER BY signed_up_at ASC`
 	return agents, rows.Err()
 }
 
-// GetSignupRole returns the role an agent was signed up under. found=false means it is not
-// signed up at all — a caller must not read that as any role.
-func (s *PlatformExperimentsStore) GetSignupRole(ctx context.Context, platformExpID, agentID string) (domain.SignupRole, bool, error) {
-	const q = `SELECT role FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`
-	var role string
-	err := s.pool.pool.QueryRow(ctx, q, platformExpID, agentID).Scan(&role)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("platform_experiments_store.GetSignupRole: %w", err)
-	}
-	return domain.SignupRole(role), true, nil
-}
-
 var (
 	ErrNotSignedUp              = errors.New("agent is not signed up to this platform experiment")
 	ErrPlatformExperimentClosed = errors.New("platform experiment is closed")

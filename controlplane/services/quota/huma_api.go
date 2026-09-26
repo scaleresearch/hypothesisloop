@@ -414,37 +414,27 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
-		Summary: "Read an agent's signup role", Tags: []string{"platform-experiments"},
-		Description: "The role an agent was signed up under, which is what decides whether it is ranked and cut. " +
+		Summary: "Read an agent's signup", Tags: []string{"platform-experiments"},
+		Description: "What an agent was signed up as: its role, which decides whether it is ranked and cut, and the flavor, " +
+			"model and hyperparameters it runs with. An agent started with its token alone reads its own here. " +
 			"404 if that agent is not signed up to this platform experiment — not signed up is not a role.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
-	}) (*struct {
-		Body struct {
-			AgentID string `json:"agent_id"`
-			Role    string `json:"role"`
-		}
-	}, error) {
+	}) (*struct{ Body signupReply }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		role, found, err := peh.svc.store.GetSignupRole(ctx, in.ID, in.AgentID)
+		signup, err := peh.svc.store.GetAgentSignup(ctx, in.ID, in.AgentID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
-		if !found {
+		if signup == nil {
 			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
 		}
-		out := &struct {
-			Body struct {
-				AgentID string `json:"agent_id"`
-				Role    string `json:"role"`
-			}
-		}{}
-		out.Body.AgentID = in.AgentID
-		out.Body.Role = string(role)
-		return out, nil
+		return &struct{ Body signupReply }{Body: signupReply{
+			AgentID: signup.AgentID, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
+		}}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
@@ -872,4 +862,13 @@ type StagesStatusResponse struct {
 	Advances     []domain.StageAdvance `json:"advances"`
 	ActiveAgents []string              `json:"active_agents"`
 	CutAgents    []domain.AgentCut     `json:"cut_agents"`
+}
+
+// signupReply is an agent's signup as any caller in its platform experiment reads it.
+type signupReply struct {
+	AgentID         string         `json:"agent_id"`
+	Role            string         `json:"role"`
+	Flavor          string         `json:"flavor"`
+	Model           string         `json:"model"`
+	Hyperparameters map[string]any `json:"hyperparameters"`
 }

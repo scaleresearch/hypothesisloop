@@ -7,6 +7,7 @@ full body so a test can assert on several fields without risking two different m
 """
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 import uuid
@@ -35,6 +36,15 @@ def link(type_: str, to: str) -> dict:
     """One entry of a POST /hypotheses `links` list; `to` is a hypothesis id or the platform
     experiment id for the objective root."""
     return {"type": type_, "to": to}
+
+
+def token_scope(token: str) -> tuple[str, str, str]:
+    """What a token the platform derived says of its holder: (kind, platform experiment, agent),
+    the agent empty for a coordinator. A launched machine is told who it is by its token alone."""
+    part = token.removeprefix("hls_").split(".", 1)[0]
+    kind, _, rest = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode().partition(":")
+    pe, _, agent = rest.partition("/")
+    return kind, pe, agent
 
 
 @dataclass
