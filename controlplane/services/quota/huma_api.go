@@ -140,6 +140,27 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	// ---- platform experiments ----
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "get-experiment-file", Method: "GET", Path: "/projects/{id}/experiment-file",
+		Summary: "Read what a repository's experiment file states", Tags: []string{"platform-experiments"},
+		Description: "What " + domain.ExperimentFile + " at the head of the default branch of repository states of a platform experiment: name, description, metrics, " +
+			"report_interval_seconds, stages and the submit policies, as POST /platform-experiments with from_repo would take them. Nothing is created. " +
+			"The org of the project must reach the repository, with the refusals of that create: 422 no_experiment_file when the repository has none, " +
+			"invalid_experiment_file when it cannot be used, and why.",
+	}, func(ctx context.Context, in *struct {
+		ID         string `path:"id"`
+		Repository string `query:"repository" required:"true" doc:"owner/name on GitHub"`
+	}) (*struct{ Body *ExperimentFile }, error) {
+		if err := access.Project(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		file, err := peh.experimentFile(ctx, in.ID, in.Repository)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body *ExperimentFile }{Body: file}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,

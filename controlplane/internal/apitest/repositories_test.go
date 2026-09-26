@@ -8,5 +8,5 @@ type noRepositories struct{}
 func (noRepositories) Reachable(context.Context, string, string) (string, error) { return "", nil }
 
 func (noRepositories) ExperimentBase(context.Context, string, string) ([]byte, error) {
-	return nil, nil
+	panic("the handler reached GitHub")
 }

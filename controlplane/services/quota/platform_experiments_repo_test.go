@@ -438,3 +438,30 @@ func TestAnUpdateCannotMoveTheRepositoryOrTheImage(t *testing.T) {
 		t.Fatalf("a whole update: got = %d %s, stored %+v, want the repository and image kept", rec.Code, rec.Body, store.created[0])
 	}
 }
+
+// A person picking a repository in the form is shown what its experiment file states before
+// anything is created: the same reading a create with from_repo makes, without what the file
+// may not state.
+func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.T) {
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
+	store, call := repoAPI(t, authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}), repos)
+
+	rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model", nil)
+	var file map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &file); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if file["repository"] != testRepository || file["name"] == "" || file["description"] == "" || len(file["metrics"].([]any)) == 0 {
+		t.Fatalf("file = %v, want the repository as GitHub names it and what the file states", file)
+	}
+	if _, stated := file["budget_accelerator_hours"]; stated || len(store.created) != 0 {
+		t.Fatalf("file = %v, created %d: what a run costs is never the file's, and a read creates nothing", file, len(store.created))
+	}
+	if rec := call("GET", "/projects/prj-b/experiment-file?repository=acme/model", nil); rec.Code != http.StatusNotFound || len(repos.asked) != 1 {
+		t.Fatalf("another org's project: %d, asked GitHub %d times", rec.Code, len(repos.asked))
+	}
+	repos.files["prj-a"] = "nmae: typo\n"
+	if rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_experiment_file") {
+		t.Fatalf("a file with an unknown key: %d %s", rec.Code, rec.Body)
+	}
+}

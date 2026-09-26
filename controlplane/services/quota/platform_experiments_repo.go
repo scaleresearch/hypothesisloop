@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Repositories reaches GitHub through the installations a project's org connected.
@@ -56,6 +59,45 @@ func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePla
 		return req, fmt.Errorf("lay the request over the experiment file: %w", err)
 	}
 	return merged, nil
+}
+
+// ExperimentFile is what a repository's experiment file states of a platform experiment: the
+// fields a create with from_repo would take from it. A form shows them before anything is
+// created.
+type ExperimentFile struct {
+	Repository                string                    `json:"repository"`
+	Name                      string                    `json:"name,omitempty"`
+	Description               string                    `json:"description,omitempty"`
+	Metrics                   []domain.MetricDefinition `json:"metrics,omitempty"`
+	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty"`
+	Stages                    []domain.Stage            `json:"stages,omitempty"`
+	HypothesisSubmitPolicy    string                    `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy           string                    `json:"job_submit_policy,omitempty"`
+	DefaultQuotaTier          string                    `json:"default_quota_tier,omitempty"`
+	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
+}
+
+// experimentFile reads the experiment file of a repository the project's org reaches, by the
+// decoding a create with from_repo uses, so that what is shown is what such a create would take.
+func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+	named, err := h.repos.Reachable(ctx, projectID, repository)
+	if err != nil {
+		return nil, err
+	}
+	data, err := h.repos.ExperimentBase(ctx, projectID, named)
+	if err != nil {
+		return nil, err
+	}
+	base, err := decodeExperimentBase(data)
+	if err != nil {
+		return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_experiment_file", Message: domain.ExperimentFile + " of " + named + " cannot be used: " + err.Error()}
+	}
+	return &ExperimentFile{
+		Repository: named, Name: base.Name, Description: base.Description, Metrics: base.Metrics,
+		ReportIntervalSeconds: base.ReportIntervalSeconds, Stages: base.Stages,
+		HypothesisSubmitPolicy: base.HypothesisSubmitPolicy, JobSubmitPolicy: base.JobSubmitPolicy,
+		DefaultQuotaTier: base.DefaultQuotaTier, MaxConcurrentAccelerators: base.MaxConcurrentAccelerators,
+	}, nil
 }
 
 // decodeExperimentBase reads the experiment file: YAML shaped like the create body. It cannot

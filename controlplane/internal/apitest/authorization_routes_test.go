@@ -264,6 +264,7 @@ var routes = []route{
 
 	// ---- platform experiments ----
 	{method: "POST", path: "/platform-experiments", body: pe1, rule: createsIn},
+	{method: "GET", path: "/projects/{id}/experiment-file", request: "/projects/<prj>/experiment-file?repository=acme/model", rule: createsIn},
 	{method: "GET", path: "/platform-experiments", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "PUT", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", body: pe1, rule: scoped(coordinatorAudience, reached)},
@@ -326,6 +327,7 @@ var routes = []route{
 	// ---- runtimes and launchers ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},
 	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(reached)},
+	{method: "DELETE", path: "/internal/clusters/{name}", request: "/internal/clusters/<cluster>", rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[],"reconcile_interval_seconds":15,"create_pause_milliseconds":1000}`, rule: only([]string{"launcher"}, reached)},
 	{method: "GET", path: "/metrics", rule: staffOnly},
