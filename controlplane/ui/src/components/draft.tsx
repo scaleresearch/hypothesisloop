@@ -6,6 +6,7 @@ import { fetchExperimentMetrics, fetchPlatformExperimentAgents } from '@/lib/api
 import { formatAccH, formatDate, relTime } from '@/lib/format'
 import { abandonDraft, acceptAndStart, draftState, reviseDraft } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
+import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
 import type { MetricDataPoint, MetricDefinition } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -99,6 +100,7 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
   const count = Number(researchers)
   const valid = Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(count) && count > 0
 
@@ -122,11 +124,11 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
       <CardHeader>Accept and run</CardHeader>
       <CardContent className="grid gap-3">
         <p className="text-sm text-muted">
-          These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} over {proposal.duration_hours} hours
+          These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
           for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the run spends nothing beyond what you enter here.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
-          <FormField label="Budget (accelerator-hours)"><Input type="number" min={0} step="any" value={budget} onChange={e => setBudget(e.target.value)} /></FormField>
+          <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} onChange={e => setBudget(e.target.value)} /></FormField>
           <FormField label="Duration (hours)"><Input type="number" min={0} step="any" value={hours} onChange={e => setHours(e.target.value)} /></FormField>
           <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} onChange={e => setResearchers(e.target.value)} /></FormField>
         </div>

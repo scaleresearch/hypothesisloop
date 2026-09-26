@@ -567,10 +567,10 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                 )}
                 <div className="grid grid-cols-2 gap-3.5">
                   <FormField
-                    label="Accelerator budget — AccH (GPU-hours) *"
+                    label="Budget — AccH (GPU-hours), or CPU core-hours *"
                     hint={lockedWhileRunning
                       ? 'Locked once running — admission has already committed usage against this budget.'
-                      : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted.</>}
+                      : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted. An experiment whose jobs run on CPU cores spends 1 a core-hour, so its budget is CPU core-hours.</>}
                   >
                     <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
                   </FormField>

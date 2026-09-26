@@ -20,6 +20,7 @@ import { SortableTh, Table } from '@/components/ui/table'
 import { Eyebrow } from '@/components/ui/text'
 import { Pagination } from '@/components/ui/pagination'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
+import { budgetUnit, kindOf } from '@/lib/units'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
@@ -286,7 +287,7 @@ function JobsPageContent() {
                       {j.metric && <div className="mt-0.5 truncate text-2xs text-muted" title={j.metric.name}>{j.metric.name}</div>}
                     </td>
                     <td className="whitespace-nowrap text-right font-mono text-2xs">
-                      {cost != null ? `${cost} AccH` : '—'}
+                      {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
                     <td
                       className={clsx('truncate text-xs', j.hypothesis_id && 'cursor-pointer text-accent')}

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { inFlight, occupancy, unitCount, unitRate } from './units'
+import { budgetKind, budgetUnit, CPU_TYPE, inFlight, kindOf, occupancy, unitCount, unitRate } from './units'
 
 describe('a count of a priced type', () => {
-  it('says cores for a CPU class and is a bare number for an accelerator', () => {
+  it('says cores for the CPU type and is a bare number for an accelerator', () => {
     expect(unitCount('cpu', 16)).toBe('16 cores')
     expect(unitCount('cpu', 1)).toBe('1 core')
     expect(unitCount('cpu', 0)).toBe('0 cores')
@@ -11,8 +11,8 @@ describe('a count of a priced type', () => {
     expect(unitCount(undefined, 4)).toBe('4')
   })
 
-  it('prices a CPU class by the core-hour', () => {
-    expect(unitRate('cpu', 0.01)).toBe('0.01 per core-hour')
+  it('prices cores by the core-hour', () => {
+    expect(unitRate('cpu', 1)).toBe('1 per core-hour')
     expect(unitRate('accelerator', 0.25)).toBe('0.25')
     expect(unitRate(undefined, 1)).toBe('1')
   })
@@ -38,5 +38,24 @@ describe('occupancy of one kind', () => {
     expect(occupancy(3, 4, 'chips')).toEqual({ percent: '75%', detail: '3/4 chips busy, live across connected clusters' })
     expect(occupancy(6, 16, 'cores')).toEqual({ percent: '38%', detail: '6/16 cores busy, live across connected clusters' })
     expect(occupancy(0, 0, 'cores')).toEqual({ percent: '—', detail: null })
+  })
+})
+
+describe('the unit of a budget', () => {
+  const gpu = 'nvidia.com/gpu.product=NVIDIA-L40'
+
+  it('is CPU hours for the CPU type, in any casing, and accelerator-hours for every other', () => {
+    expect(budgetUnit(kindOf(CPU_TYPE))).toBe('CPU hours')
+    expect(budgetUnit(kindOf('HypothesisLoop.dev/CPU=core'), 'long')).toBe('CPU core-hours')
+    expect(budgetUnit(kindOf(gpu))).toBe('AccH')
+    expect(budgetUnit(kindOf(undefined), 'long')).toBe('accelerator-hours')
+  })
+
+  it('follows the type an experiment was proposed for, and its jobs when nothing was proposed', () => {
+    expect(budgetKind(CPU_TYPE, [gpu])).toBe('cpu')
+    expect(budgetKind(gpu, [CPU_TYPE])).toBe('accelerator')
+    expect(budgetKind(undefined, [CPU_TYPE, CPU_TYPE])).toBe('cpu')
+    expect(budgetKind(undefined, [CPU_TYPE, gpu])).toBe('accelerator')
+    expect(budgetKind(undefined, [])).toBe('accelerator')
   })
 })

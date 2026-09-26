@@ -18,6 +18,7 @@ import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/stat
 import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
+import { budgetUnit, kindOf } from '@/lib/units'
 import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
 import { graphHref } from '@/lib/hypothesis-graph'
 
@@ -206,7 +207,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
               <Row label="Est. duration" value={j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'} />
-              <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} AccH` : '—'} />
+              <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'} />
               <Row label="Submitted" value={new Date(j.created_at).toLocaleString()} />
               {j.submitted_at && <Row label="Sent to cluster" value={new Date(j.submitted_at).toLocaleString()} />}
               {j.finished_at && (

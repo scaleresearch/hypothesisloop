@@ -55,7 +55,8 @@ import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/form
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
-import { inFlight } from '@/lib/units'
+import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
+import type { Draft } from '@/lib/planning'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -662,6 +663,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
 
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
+  const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, (experiments ?? []).map(exp => exp.accelerator_type)))
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
@@ -922,7 +924,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
       <Card>
         <CardContent>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-            <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
+            <StatTile label="Budget" value={`${pe.budget_accelerator_hours} ${unit}`} />
             <StatTile
               label={held.label}
               value={held.value}
@@ -930,7 +932,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
-            <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} AccH`} />
+            <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} ${unit}`} />
             <StatTile label="Jobs" value={(stats?.total ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />
             <StatTile
               label="Running"
@@ -1186,7 +1188,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                         </div>
                       </td>
                       <td className="text-right font-mono text-xs">{exp.metric?.best.toFixed(4) ?? '—'}</td>
-                      <td className="text-right font-mono text-xs">{cost != null ? `${formatAccH(cost)} AccH` : '—'}</td>
+                      <td className="text-right font-mono text-xs">{cost != null ? `${formatAccH(cost)} ${budgetUnit(kindOf(exp.accelerator_type))}` : '—'}</td>
                       <td className="text-xs text-subtle">{new Date(exp.created_at).toLocaleString()}</td>
                     </tr>
                   )
@@ -1217,10 +1219,10 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                   return (
                     <tr key={q.id}>
                       <td className="font-mono text-xs font-semibold"><AgentLabel id={q.agent_id} /></td>
-                      <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
-                      <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
+                      <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} {unit}</td>
+                      <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} {unit}</td>
                       <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>
-                        {formatAccH(remaining)} AccH
+                        {formatAccH(remaining)} {unit}
                       </td>
                     </tr>
                   )
@@ -1252,7 +1254,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 {relevantDonations.map(d => (
                   <tr key={d.id}>
                     <td className="font-mono text-xs font-semibold">{d.agent_name || d.agent_id}</td>
-                    <td className="text-right font-mono text-xs">{d.credits_want} AccH</td>
+                    <td className="text-right font-mono text-xs">{d.credits_want} {unit}</td>
                     <td className="text-xs">{d.reason}</td>
                     <td className="text-xs text-subtle">{new Date(d.created_at).toLocaleString()}</td>
                   </tr>

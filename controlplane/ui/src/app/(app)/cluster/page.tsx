@@ -132,10 +132,10 @@ function LiveCapacity() {
             <thead>
               <tr>
                 <th>Cluster</th>
-                <th title="An accelerator type, or a CPU class whose unit is one core">Type</th>
+                <th title="An accelerator type, or CPU cores">Type</th>
                 <th>Available</th>
                 <th>Total</th>
-                <th title="What one accelerator of this type, or one core of a CPU class, costs for an hour, in accelerator hours">AccH per hour</th>
+                <th title="What one accelerator of this type, or one CPU core, costs for an hour, in accelerator hours">AccH per hour</th>
               </tr>
             </thead>
             <tbody>

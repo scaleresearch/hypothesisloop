@@ -11,6 +11,8 @@ import { useTenant } from '@/lib/tenant'
 import { quotaRemainingAccH } from '@/lib/quota'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { budgetKind, budgetUnit } from '@/lib/units'
+import type { Draft } from '@/lib/planning'
 import { statusColor } from '@/lib/colors'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -70,6 +72,7 @@ export function PlatformExperimentCard({
   const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {})
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
+  const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
   const daysLeft = !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
@@ -140,7 +143,7 @@ export function PlatformExperimentCard({
           <div>
             <Eyebrow className="block">Budget Used</Eyebrow>
             <div className={clsx('font-mono text-xl font-bold', totalUsed > 0 && 'text-accent')}>
-              {formatAccH(totalUsed)} <span className="text-xs text-muted">AccH</span>
+              {formatAccH(totalUsed)} <span className="text-xs text-muted">{unit}</span>
             </div>
           </div>
           <div>
@@ -160,7 +163,7 @@ export function PlatformExperimentCard({
           <div onClick={e => e.stopPropagation()}>
             <div className="border-t pt-3.5">
               <Eyebrow className="mb-2.5 block">
-                Agent Quotas — Guaranteed &amp; Burst (AccH)
+                Agent Quotas — Guaranteed &amp; Burst ({unit})
               </Eyebrow>
               {!quotas ? (
                 <p className="text-xs text-subtle">Loading quotas…</p>
@@ -182,9 +185,9 @@ export function PlatformExperimentCard({
                       return (
                         <tr key={q.id}>
                           <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                          <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>{formatAccH(remaining)} AccH</td>
+                          <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} {unit}</td>
+                          <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} {unit}</td>
+                          <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>{formatAccH(remaining)} {unit}</td>
                         </tr>
                       )
                     })}

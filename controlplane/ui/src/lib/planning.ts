@@ -22,7 +22,7 @@ export interface Proposal {
   duration_hours: number
   agents: ProposedAgent[]
   baseline_job_id: string
-  // The type the jobs are sized for: an accelerator, or a CPU class for work that needs none.
+  // The type the jobs are sized for: an accelerator, or CPU cores (units.CPU_TYPE) for work that needs none.
   accelerator_type: string
   metric_reason: string
   measurement: string

@@ -264,7 +264,7 @@ export interface ExperimentStats {
   // ('policy'). Derived server-side from the same tally; see shared/domain/fault_class.go.
   evictions_by_class: Record<string, number>
   // accelerator_count summed over SUBMITTED and RUNNING jobs: those on an accelerator type, and
-  // those on a CPU class, whose count is cores.
+  // those on CPU, whose count is cores.
   in_flight_accelerators: number
   in_flight_cores: number
   // Present only when group_by was asked for: the same stats per agent or hypothesis id.
@@ -572,7 +572,7 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
 export interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
-    // kind says what available and total count: devices, or for cpu the cores of a CPU class.
+    // kind says what available and total count: devices, or for cpu cores.
     accelerators: Array<{ accelerator_type: string; kind: TypeKind; available: number; total: number; acch_per_hour: number }>
   }>
 }

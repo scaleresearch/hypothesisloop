@@ -325,7 +325,7 @@ export interface ClusterInfo {
   // window (e.g. a disconnected cluster).
   accelerator_busy: number
   accelerator_total: number
-  // The same for the CPU classes the cluster publishes, in cores, never added to the chips.
+  // The same for the cores the cluster offers to jobs on CPU, never added to the chips.
   core_busy: number
   core_total: number
   // Whether this cluster sits behind a native autoscaler (cluster-autoscaler / Karpenter),

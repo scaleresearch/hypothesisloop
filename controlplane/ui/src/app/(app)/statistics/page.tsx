@@ -67,7 +67,7 @@ function SchedulerQuality() {
   // (used/allocated AccH), which measures spend, not whether chips are actually idle or running
   // a job.
   const chips = occupancy(clusterList.reduce((s, c) => s + c.accelerator_busy, 0), clusterList.reduce((s, c) => s + c.accelerator_total, 0), 'chips')
-  // Cores of the CPU classes clusters publish, counted apart from the chips.
+  // Cores clusters offer to jobs on CPU, counted apart from the chips.
   const cores = occupancy(clusterList.reduce((s, c) => s + (c.core_busy ?? 0), 0), clusterList.reduce((s, c) => s + (c.core_total ?? 0), 0), 'cores')
 
   return (

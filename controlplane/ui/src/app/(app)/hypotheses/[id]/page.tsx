@@ -13,6 +13,7 @@ import { Eyebrow } from '@/components/ui/text'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Loading, EmptyState, InlineError } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
+import { budgetUnit, kindOf } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { Actor, Verdict } from '@/components/actor'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
@@ -259,7 +260,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     </td>
                     <td className="font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className="text-right font-mono text-2xs">
-                      {cost != null ? `${cost} AccH` : '—'}
+                      {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
                     <td className="text-right font-mono text-xs">
                       {j.metric ? <span className="text-accent">{j.metric.best.toFixed(4)}</span> : <span className="text-muted">—</span>}
