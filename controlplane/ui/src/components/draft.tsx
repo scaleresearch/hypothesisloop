@@ -128,6 +128,12 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
           These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
           for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the budget caps everything the run spends, with what planning already spent and burst hours included.
         </p>
+        {proposal.sizing_reason && (
+          <div>
+            <Eyebrow className="mb-1 block">Why this size</Eyebrow>
+            <p className="text-sm">{proposal.sizing_reason}</p>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-3">
           <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} onChange={e => setBudget(e.target.value)} /></FormField>
           <FormField label="Duration (hours)"><Input type="number" min={0} step="any" value={hours} onChange={e => setHours(e.target.value)} /></FormField>

@@ -26,6 +26,9 @@ export interface Proposal {
   accelerator_type: string
   metric_reason: string
   measurement: string
+  // Why the proposed budget, duration and researchers are the least that reach the goal. Absent
+  // on a proposal made before the planner was asked for it.
+  sizing_reason?: string
   out_of_scope?: string[]
   risks?: string[]
   questions?: string[]

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,6 +35,7 @@ const proposal: Proposal = {
   accelerator_type: 'rtx-4090',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
+  sizing_reason: 'The baseline cost 0.1 and took 6 minutes, so 30 trials each for 2 researchers is 6.',
   questions: ['Is 4 hours enough?'],
   risks: ['One seed only.'],
 }
@@ -86,6 +87,7 @@ describe('a proposed draft', () => {
     expect(await screen.findByText('val_loss, lower is better, baseline 1.8')).toBeTruthy()
     expect(screen.getByText('exact_match must stay at or above 1, baseline 1')).toBeTruthy()
     expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()
+    expect(within(screen.getByText('Why this size').parentElement!).getByText(/30 trials each for 2 researchers is 6/)).toBeTruthy()
     expect(screen.getByText('Validation loss on held-out text is the goal itself.')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'job job-base' }).getAttribute('href')).toMatch(/\/jobs\/job-base/)
     expect(screen.queryByRole('status')).toBeNull()
