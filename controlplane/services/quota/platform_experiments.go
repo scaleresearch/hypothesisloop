@@ -68,6 +68,8 @@ type PlatformExperimentsStore interface {
 	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
 	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
+	// PlannerID is the agent that planned the platform experiment as a draft, or "".
+	PlannerID(ctx context.Context, platformExpID string) (string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
 	ListParticipants(ctx context.Context, platformExpID string) ([]string, error)
 	// CompletedJobIDs is the jobs whose metrics rank: the ones that ran to a successful end.

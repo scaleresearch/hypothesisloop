@@ -40,6 +40,8 @@ type QuotaService interface {
 	// reservations — see quota.PlatformExperimentsService.GetObservedAgentQuota. The controller
 	// terminates work, and a termination is a verdict on what actually happened.
 	GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
+	// RunBudget is the budget less what planning spent: what the researchers' shares are carved from.
+	RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error)
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage — see

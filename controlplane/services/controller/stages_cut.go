@@ -53,8 +53,12 @@ func (c *Controller) applyCut(ctx context.Context, pe *domain.PlatformExperiment
 	// Accelerator-hours drives progress itself and always moves. Only observed usage travels into
 	// the transaction — the allocation each unspent figure is measured against is read there,
 	// under lock.
+	runBudget, err := c.quota.RunBudget(ctx, pe)
+	if err != nil {
+		return fmt.Errorf("stages: run budget: %w", err)
+	}
 	dims := []db.StageRedistribution{
-		{ResourceType: domain.ResourceAcceleratorHours, Budget: pe.BudgetAcceleratorHours, ReleaseFrac: releaseFrac,
+		{ResourceType: domain.ResourceAcceleratorHours, Budget: runBudget, ReleaseFrac: releaseFrac,
 			UsedByAgent:      usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedGuaranteedAccH }),
 			UsedBurstByAgent: usedByCutAgent(cut, quotaByAgent, func(q *domain.AgentQuota) float64 { return q.UsedBurstAccH })},
 	}

@@ -191,7 +191,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
-			"The budget caps everything the researchers spend: it is shared among them, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
+			"The budget caps everything the platform experiment spends, planning included: what the planner spent is taken from it, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator and each researcher, and starts_at is now, so POST /platform-experiments/{id}/start starts it and the platform does if nobody calls. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it. " +
@@ -280,7 +280,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 // AcceptRequest is what the person who accepts a draft states themselves: what the run costs,
 // how long it lasts and who runs it. The proposal only proposed them, since an agent wrote it.
 type AcceptRequest struct {
-	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything its researchers spend, burst hours included."`
+	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what planning already spent and burst hours included."`
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from now."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
 }

@@ -105,7 +105,7 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 		})
 	}
 
-	c := New(&noRunningJobsStore{}, nil, zap.NewNop()).WithStagesStore(store, srv.URL)
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL)
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}
@@ -116,4 +116,11 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 				pe.ID, len(store.advanced), len(store.running))
 		}
 	}
+}
+
+// wholeBudget is the quota of platform experiments nobody planned: the run has the whole budget.
+type wholeBudget struct{ QuotaService }
+
+func (wholeBudget) RunBudget(_ context.Context, pe *domain.PlatformExperiment) (float64, error) {
+	return pe.BudgetAcceleratorHours, nil
 }

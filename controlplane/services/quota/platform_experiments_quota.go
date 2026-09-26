@@ -50,6 +50,24 @@ func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID,
 // invisible until settlement writes its cost. Both are undercounts, both self-correct, and both
 // err toward letting real work finish — the right direction for an eviction that is irreversible
 // and unrefunded.
+// RunBudget is what the researchers of pe share: its budget less what its planner spent before
+// the proposal was accepted. The budget a person accepts caps everything the platform
+// experiment spends, planning included, so shares are carved from what planning left.
+func (s *PlatformExperimentsService) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+	planner, err := s.store.PlannerID(ctx, pe.ID)
+	if err != nil {
+		return 0, fmt.Errorf("platform_experiments.RunBudget: %w", err)
+	}
+	if planner == "" {
+		return pe.BudgetAcceleratorHours, nil
+	}
+	planning := &domain.AgentQuota{AgentID: planner, PlatformExperimentID: pe.ID}
+	if err := metricsdb.PopulateUsageOne(ctx, s.metricsDBURL, pe.CreatedAt, planning); err != nil {
+		return 0, fmt.Errorf("platform_experiments.RunBudget: %w", err)
+	}
+	return max(0, pe.BudgetAcceleratorHours-planning.Used()), nil
+}
+
 func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 	if err != nil {

@@ -312,6 +312,14 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	// exhausting the whole budget before the ladder has cut anyone.
 	exploreFrac := pe.Stages[0].LengthPct / 100.0
 	now := time.Now().UTC()
+	// Read before the transaction, which must issue no query of its own.
+	runBudget, err := s.RunBudget(ctx, pe)
+	if err != nil {
+		return nil, err
+	}
+	if runBudget <= 0 {
+		return nil, fmt.Errorf("budget_spent: planning spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share", pe.BudgetAcceleratorHours)
+	}
 
 	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {
 		if len(participants) == 0 {
@@ -336,7 +344,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		for i, p := range participants {
 			agentID := p.AgentID
 			acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
-				pe.BudgetAcceleratorHours*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
+				runBudget*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
 			// The tier decides which column the share lands in, never how large it is: everyone
 			// is allocated the same way and a burst-only participant's guaranteed part is moved
