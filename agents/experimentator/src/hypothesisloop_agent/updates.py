@@ -16,6 +16,8 @@ import os
 import time
 from collections.abc import Callable
 
+from hypothesisloop_agent import config
+
 log = logging.getLogger("llm_agent")
 
 HL_WATCH = ["hl", "watch"]
@@ -32,15 +34,16 @@ IDLE_PROMPT = (
 )
 
 
-def watch_env(api_url: str, agent_id: str, platform_experiment_id: str, workdir: str) -> dict[str, str]:
-    """The environment hl watch needs: identity, API, and a state dir that outlives the process.
-    Without an agent_id the watch is a coordinator's, of the whole platform experiment."""
-    env = {**os.environ, "API_URL": api_url, "PLATFORM_EXPERIMENT_ID": platform_experiment_id,
-           "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
-    env.pop("AGENT_ID", None)
-    if agent_id:
-        env["AGENT_ID"] = agent_id
-    return env
+def watch_env(api_url: str, token: str, workdir: str) -> dict[str, str]:
+    """The environment hl watch needs: the API, the token, which says to hl who is watching, and
+    a state dir that outlives the process."""
+    return {**os.environ, "API_URL": api_url, "HL_TOKEN": token,
+            "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
+
+
+def _agent(env: dict[str, str]) -> str:
+    """The agent the token in env is, or "" for a coordinator's."""
+    return config.token_scope(env["HL_TOKEN"])[2]
 
 
 # How long a coordinator's watch keeps collecting after its first event. A coordinator rereads
@@ -53,7 +56,7 @@ COORDINATOR_SETTLE_S = 120
 def watch_command(env: dict[str, str]) -> list[str]:
     """An agent watches its own resources. A coordinator watches the whole platform experiment,
     narrowed to what may need a decision and gathered into one batch per burst."""
-    if env.get("AGENT_ID"):
+    if _agent(env):
         return HL_WATCH
     return [*HL_WATCH, "--all", "--decisions", "--settle", str(COORDINATOR_SETTLE_S)]
 
@@ -92,7 +95,8 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     COMPLETED job's declared metrics as its event's detail, and two closing events: the count of
     the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
     read is left out. A coordinator's events are every agent's and are handed over as they are."""
-    if "AGENT_ID" not in env or not any(e["kind"] == "experiment.status" for e in events):
+    agent = _agent(env)
+    if not agent or not any(e["kind"] == "experiment.status" for e in events):
         return events
 
     def completed(e: dict) -> bool:
@@ -106,7 +110,7 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
             f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
             for m in job.get("metrics", [])) for job in _events(stdout)}
     events = [dict(e, detail=detail[e["subject"]]) if completed(e) and e["subject"] in detail else e for e in events]
-    _, stdout = await _run_hl([hl, "job", "stats", "--agent", env["AGENT_ID"]], env, lambda: False)
+    _, stdout = await _run_hl([hl, "job", "stats", "--agent", agent], env, lambda: False)
     for stats in _events(stdout):
         counts = stats["by_status"]
         events.append({"kind": "unfinished_jobs",

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import stat
 import tempfile
@@ -13,7 +14,7 @@ COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","
 COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","position":6,"cursor":6}'
 
 
-ENV = {**os.environ, "AGENT_ID": "agent-a"}
+ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
 
 
 def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "") -> tuple[list[str], str]:
@@ -241,7 +242,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", platform_experiment_id="pe-1",
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1",
                                                     max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \

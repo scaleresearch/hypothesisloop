@@ -379,7 +379,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     session starts fresh from it. The session id and the handoff live on disk, see _restart_state.
     """
     cfg = setup.cfg
-    watch_env = updates.watch_env(cfg.api_url, config.watched_agent_id(cfg), cfg.platform_experiment_id, setup.workdir)
+    watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.workdir)
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt,
         model=model,

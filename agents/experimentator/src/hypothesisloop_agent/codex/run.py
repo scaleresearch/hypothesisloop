@@ -71,7 +71,7 @@ async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_
             config={"model_auto_compact_token_limit": 400_000},
         )
         cfg = setup.cfg
-        watch_env = updates.watch_env(cfg.api_url, config.watched_agent_id(cfg), cfg.platform_experiment_id, setup.workdir)
+        watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.workdir)
         prompt = "Begin."
         while True:
             turn = await thread.turn(prompt)

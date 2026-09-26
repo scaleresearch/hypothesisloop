@@ -9,6 +9,7 @@ from unittest import mock
 from claude_agent_sdk import AssistantMessage, TextBlock
 
 from hypothesisloop_agent import progress
+from test_require_joined import AGENT_TOKEN
 from hypothesisloop_agent.claude import run
 
 
@@ -80,7 +81,7 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         printed = []
         beating = progress.Progress(quiet_limit_s=0.15, emit=printed.append)
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
                                                     platform_experiment_id="pe-1", max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", SilentClient), \
                 mock.patch.object(run, "_progress", beating), \

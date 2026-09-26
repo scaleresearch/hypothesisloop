@@ -97,7 +97,3 @@ def plans(cfg) -> bool:
     return cfg.flavor == PLANNER_FLAVOR
 
 
-def watched_agent_id(cfg) -> str:
-    """Whose resources the harness watches: the agent's own, or with "" the whole platform
-    experiment's."""
-    return "" if coordinates(cfg) else cfg.agent_id

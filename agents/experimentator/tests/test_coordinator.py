@@ -20,11 +20,11 @@ class LaunchEnvironmentTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {**LAUNCH_ENV, "AGENT_ID": "ag-1"}, clear=True):
             cfg = config.Config()
         self.assertTrue(config.coordinates(cfg))
-        self.assertEqual((cfg.agent_id, config.watched_agent_id(cfg), cfg.platform_experiment_id), ("coordinator", "", "pe-1"))
+        self.assertEqual((cfg.agent_id, cfg.platform_experiment_id), ("coordinator", "pe-1"))
         with mock.patch.dict(os.environ, {**LAUNCH_ENV, "HL_TOKEN": AGENT_TOKEN}, clear=True):
             cfg = config.Config()
         self.assertFalse(config.coordinates(cfg))
-        self.assertEqual(config.watched_agent_id(cfg), "agent-a")
+        self.assertEqual(cfg.agent_id, "agent-a")
 
 
 class StartupTest(PlatformCase):
@@ -117,18 +117,15 @@ class BriefingTest(unittest.TestCase):
 
 
 class WatchTest(unittest.IsolatedAsyncioTestCase):
-    def test_a_coordinator_watches_the_whole_experiment_and_is_handed_no_agent_id(self):
-        with mock.patch.dict(os.environ, {"AGENT_ID": "left-over"}):
-            env = updates.watch_env("http://api", "", "pe-1", "/tmp/w")
-        self.assertNotIn("AGENT_ID", env)
+    def test_the_token_says_whether_the_watch_is_a_coordinators_of_the_whole_experiment(self):
+        env = updates.watch_env("http://api", COORDINATOR_TOKEN, "/tmp/w")
         self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all", "--decisions", "--settle", "120"])
-        own = updates.watch_env("http://api", "ag-1", "pe-1", "/tmp/w")
-        self.assertEqual((own["AGENT_ID"], updates.watch_command(own)), ("ag-1", ["hl", "watch"]))
+        own = updates.watch_env("http://api", AGENT_TOKEN, "/tmp/w")
+        self.assertEqual((own["HL_TOKEN"], updates.watch_command(own)), (AGENT_TOKEN, ["hl", "watch"]))
 
     async def test_an_ended_job_reaches_a_coordinator_as_it_is_with_no_read_as_an_agent(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", status="{}", stats="{}", quota="{}")
-        env = {k: v for k, v in os.environ.items() if k != "AGENT_ID"}
-        events = await updates.drain(env, command)
+        events = await updates.drain({**os.environ, "HL_TOKEN": COORDINATOR_TOKEN}, command)
         self.assertEqual([e["kind"] for e in events], ["experiment.status"])
         self.assertFalse(os.path.exists(command[0] + ".reads"))
 

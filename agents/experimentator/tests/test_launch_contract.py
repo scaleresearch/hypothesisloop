@@ -78,7 +78,7 @@ class ErrorTurnClient:
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
-                                cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", platform_experiment_id="pe-1",
+                                cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1",
                                                     max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
