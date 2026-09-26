@@ -1,7 +1,6 @@
 import { createBrowserClient, createServerClient } from '@supabase/ssr'
 import type { CookieMethodsServer } from '@supabase/ssr'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
-import type { Provider } from '@supabase/supabase-js'
 
 // Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full, so each is read here
 // and nowhere else.
@@ -43,37 +42,88 @@ export function overHTTPS(headers: Headers, url: URL): boolean {
 
 export const CALLBACK_PATH = '/auth/callback'
 export const LOGIN_PATH = '/login'
+/** The public landing page. */
+export const LANDING_PATH = '/'
+/** The signed-in home, where sign-in lands without a way back. */
+export const HOME_PATH = '/console'
 
-/** Every way to sign in. A new one is an entry here and the provider switched on in Supabase. */
-export const SIGN_IN_METHODS: { provider: Provider; label: string }[] = [
-  { provider: 'github', label: 'Continue with GitHub' },
-]
+/** The sign-in page worded for a first visit. Signing up and signing in are the same flow. */
+export const SIGN_UP_PATH = `${LOGIN_PATH}?mode=sign-up`
+
+/** Every provider the UI can offer, by the name the identity provider knows it by. */
+export const PROVIDER_NAMES = { github: 'GitHub', google: 'Google', apple: 'Apple' } as const
+export type SignInProvider = keyof typeof PROVIDER_NAMES
+
+/**
+ * The providers this deployment offers, in the order NEXT_PUBLIC_SIGN_IN_PROVIDERS lists them.
+ * A deployment names them itself, so a missing or misspelt list is an error and never a default.
+ */
+export function signInProviders(): SignInProvider[] {
+  const listed = (process.env.NEXT_PUBLIC_SIGN_IN_PROVIDERS ?? '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean)
+  const known = Object.keys(PROVIDER_NAMES).join(', ')
+  if (listed.length === 0) {
+    throw new Error(`NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set: list the sign-in providers to offer (${known}) in .env.local, as .env.example shows`)
+  }
+  const unknown = listed.filter(name => !(name in PROVIDER_NAMES))
+  if (unknown.length > 0) throw new Error(`NEXT_PUBLIC_SIGN_IN_PROVIDERS names ${unknown.join(', ')}, and the providers are ${known}`)
+  return listed.filter((name, i) => listed.indexOf(name) === i) as SignInProvider[]
+}
+
+/** The identity provider would not start sign-in with this provider: it is not switched on there. */
+export class ProviderRefused extends Error {
+  constructor(readonly provider: SignInProvider, readonly detail: string) {
+    super(`Sign-in with ${PROVIDER_NAMES[provider]} is not available yet. Choose another way to sign in.`)
+    this.name = 'ProviderRefused'
+  }
+}
 
 // A stand-in for this app's own origin, to resolve a path against.
 const SELF = 'http://self'
 
 /**
- * A place in this app to land on after signing in; anything else is the home page. The value is
+ * A place in this app to land on after signing in; anything else is the signed-in home. The value is
  * resolved exactly as a browser would resolve it, tabs, newlines and backslashes included, and
  * kept only when it stays on this origin.
  */
 export function safeNext(next: string | null): string {
-  if (!next) return '/'
+  if (!next) return HOME_PATH
   let url: URL
   try {
     url = new URL(next, SELF)
   } catch {
-    return '/'
+    return HOME_PATH
   }
-  return url.origin === SELF ? url.pathname + url.search + url.hash : '/'
+  return url.origin === SELF ? url.pathname + url.search + url.hash : HOME_PATH
 }
 
-/** Sends the browser to the provider. It comes back to the callback route, then to `next`. */
-export async function signIn(provider: Provider, next: string): Promise<void> {
+/**
+ * Asks the identity provider's authorize address without following it. A provider that is switched
+ * on answers with a redirect to itself; one that is not answers 400 with a JSON body, which would
+ * otherwise be the page the visitor is left on.
+ */
+async function refusalOf(authorizeURL: string): Promise<string | null> {
+  const answer = await fetch(authorizeURL, { redirect: 'manual' })
+  if (answer.type === 'opaqueredirect' || answer.ok) return null
+  const body = await answer.json().catch(() => null) as { msg?: string; message?: string } | null
+  return body?.msg ?? body?.message ?? `the identity provider answered ${answer.status}`
+}
+
+/**
+ * Sends the browser to the provider. It comes back to the callback route, then to `next`. A
+ * provider the identity provider refuses is a ProviderRefused and the browser stays where it is.
+ */
+export async function signIn(provider: SignInProvider, next: string): Promise<void> {
   const redirectTo = new URL(CALLBACK_PATH, window.location.origin)
   redirectTo.searchParams.set('next', safeNext(next))
-  const { error } = await browserAuth().signInWithOAuth({ provider, options: { redirectTo: redirectTo.toString() } })
+  const { data, error } = await browserAuth().signInWithOAuth({
+    provider,
+    options: { redirectTo: redirectTo.toString(), skipBrowserRedirect: true },
+  })
   if (error) throw error
+  if (!data.url) throw new Error('the identity provider gave no address to sign in at')
+  const refusal = await refusalOf(data.url)
+  if (refusal) throw new ProviderRefused(provider, refusal)
+  window.location.assign(data.url)
 }
 
 /** Ends this browser's session, leaving the person's other devices signed in. */

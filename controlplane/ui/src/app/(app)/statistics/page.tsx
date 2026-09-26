@@ -125,7 +125,7 @@ function SchedulerQuality() {
   )
 }
 
-export default function DashboardPage() {
+export default function StatisticsPage() {
   const router = useProjectRouter()
   const { project, staff } = useTenant()
 
@@ -177,17 +177,17 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" description="Job outcomes in this project: status, capacity tiers, the eviction audit log and completion rate" />
+      <PageHeader title="Statistics" description="Job outcomes in this project: status, capacity tiers, the eviction audit log and completion rate" />
 
       {isLoading && <Loading />}
-      {error && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the job statistics of {project.name}: {error.message}</ErrorMessage>}
 
       {/* KPI row */}
-      <div className="mb-4 grid grid-cols-3 gap-2.5">
+      <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
         <StatTile label="Total Jobs" value={total} />
         <StatTile label="Running" value={running} tone="success" />
-        <StatTile label="Pending" value={pending} tone="warning" sub="submitted + queued + admitted" />
-        <StatTile label="Completion Rate" value={rate != null ? `${rate}%` : '—'} sub="completed of all terminal jobs" />
+        <StatTile label="Pending" value={pending} tone="warning" sub="submitted + queued" />
+        <StatTile label="Completion Rate" value={rate != null ? `${rate}%` : '—'} sub="of finished jobs" />
         <StatTile label="Completed" value={completed} tone="accent" />
         <StatTile label="Evicted" value={evicted} tone="purple" />
         <StatTile label="Failed" value={failed} tone="danger" />
@@ -308,7 +308,7 @@ export default function DashboardPage() {
       {/* Recent evictions — audit log */}
       {recentEvictions.length > 0 && (
         <Card>
-          <CardHeader>Recent Evictions — Audit Log</CardHeader>
+          <CardHeader>Recent Evictions · Audit Log</CardHeader>
           <CardContent scrollX>
             <Table>
               <thead>

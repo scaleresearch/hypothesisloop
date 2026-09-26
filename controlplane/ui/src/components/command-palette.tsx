@@ -27,7 +27,7 @@ const DESTINATIONS: Omit<CommandItem, 'action'>[] = [
   { id: 'nav-agt',  label: 'Research Agents',      sub: 'Go to page', icon: Bot,          keywords: 'agents quota balances' },
   { id: 'nav-jobs', label: 'Jobs',                 sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
   { id: 'nav-clu',  label: 'Compute Resources',    sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
-  { id: 'nav-dash', label: 'Scheduler Quality',    sub: 'Go to page', icon: LineChart,    keywords: 'dashboard metrics quality yield' },
+  { id: 'nav-stat', label: 'Statistics',           sub: 'Go to page', icon: LineChart,    keywords: 'dashboard scheduler quality evictions completion rate' },
 ]
 
 const DEST_HREF: Record<string, string> = {
@@ -36,7 +36,7 @@ const DEST_HREF: Record<string, string> = {
   'nav-agt': '/agents',
   'nav-jobs': '/jobs',
   'nav-clu': '/cluster',
-  'nav-dash': '/dashboard',
+  'nav-stat': '/statistics',
 }
 
 /**

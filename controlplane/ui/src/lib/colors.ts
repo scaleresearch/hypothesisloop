@@ -22,6 +22,11 @@ export const semantic = {
   surfaceRaised: token('surface-raised'),
 } as const
 
+/** Colours a brand prescribes for its own mark, which no theme token may stand in for. */
+export const brand = {
+  google: { blue: '#4285F4', green: '#34A853', yellow: '#FBBC05', red: '#EA4335' },
+} as const
+
 /** A colour at the given opacity (0 to 1), for fills behind a line or dot of the same colour. */
 export function tint(color: string, opacity: number): string {
   return `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`

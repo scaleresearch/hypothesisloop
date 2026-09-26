@@ -26,8 +26,14 @@ describe('a visitor without a session', () => {
     expect(response.headers.get('location')).toBe('http://ui.test/login?next=%2Fjobs%3Fstatus%3DRUNNING%26project%3Dprj_1')
   })
 
-  it('is sent to sign in from the home page and from a record', async () => {
-    expect((await visit('/')).headers.get('location')).toBe('http://ui.test/login?next=%2F')
+  it('reaches the landing page', async () => {
+    const response = await visit('/')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('location')).toBeNull()
+  })
+
+  it('is sent to sign in from the console and from a record', async () => {
+    expect((await visit('/console')).headers.get('location')).toBe('http://ui.test/login?next=%2Fconsole')
     expect((await visit('/platform-experiments/pe-1')).headers.get('location')).toBe('http://ui.test/login?next=%2Fplatform-experiments%2Fpe-1')
   })
 
@@ -48,6 +54,12 @@ describe('a visitor without a session', () => {
 describe('a signed-in visitor', () => {
   beforeEach(() => signedIn(true))
 
+  it('reaches the landing page too, which offers them the console', async () => {
+    const response = await visit('/')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('location')).toBeNull()
+  })
+
   it('reaches the page', async () => {
     const response = await visit('/jobs')
     expect(response.status).toBe(200)
@@ -64,13 +76,13 @@ describe('a signed-in visitor', () => {
   })
 
   it('is sent home from the sign-in page when the way back is another site', async () => {
-    expect((await visit('/login?next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('http://ui.test/')
-    expect((await visit('/login')).headers.get('location')).toBe('http://ui.test/')
+    expect((await visit('/login?next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('http://ui.test/console')
+    expect((await visit('/login')).headers.get('location')).toBe('http://ui.test/console')
   })
 
   it('is sent home when the way back hides another site behind a tab, a newline or a backslash', async () => {
     for (const hostile of ['/%09/evil.example', '/%0A/evil.example', '/%0D/evil.example', '%09//evil.example', '/%5Cevil.example', '%5C%5Cevil.example']) {
-      expect((await visit(`/login?next=${hostile}`)).headers.get('location')).toBe('http://ui.test/')
+      expect((await visit(`/login?next=${hostile}`)).headers.get('location')).toBe('http://ui.test/console')
     }
   })
 })
@@ -132,7 +144,7 @@ describe('the paths the middleware runs on', () => {
   const matcher = new RegExp(`^${config.matcher[0]}$`)
 
   it('are every page', () => {
-    for (const path of ['/', '/login', '/jobs', '/platform-experiments/pe-1', '/settings']) expect(path).toMatch(matcher)
+    for (const path of ['/', '/login', '/console', '/jobs', '/platform-experiments/pe-1', '/settings']) expect(path).toMatch(matcher)
   })
 
   it('leave out the sign-in callback and the framework\'s own assets', () => {

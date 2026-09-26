@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserClient, createServerClient } from '@supabase/ssr'
 import { AuthRetryableFetchError, AuthApiError } from '@supabase/supabase-js'
-import { SIGN_IN_METHODS, accessToken, completeSignIn, hasSession, overHTTPS, safeNext, signIn, signOut } from '@/lib/auth'
+import { ProviderRefused, accessToken, completeSignIn, hasSession, overHTTPS, safeNext, signIn, signInProviders, signOut } from '@/lib/auth'
 
 vi.mock('@supabase/ssr', () => ({ createBrowserClient: vi.fn(), createServerClient: vi.fn() }))
 
@@ -39,17 +39,64 @@ describe('the client', () => {
 })
 
 describe('signing in', () => {
-  it('offers GitHub and nothing else', () => {
-    expect(SIGN_IN_METHODS).toEqual([{ provider: 'github', label: 'Continue with GitHub' }])
+  const AUTHORIZE = 'http://identity.test/auth/v1/authorize?provider=github'
+  const assign = vi.fn()
+
+  beforeEach(() => {
+    assign.mockReset()
+    vi.stubGlobal('location', { origin: 'http://ui.test', protocol: 'http:', assign })
+    auth.signInWithOAuth.mockResolvedValue({ data: { url: AUTHORIZE }, error: null })
   })
 
-  it('sends the browser to the provider and names the callback with the way back', async () => {
-    auth.signInWithOAuth.mockResolvedValue({ data: {}, error: null })
+  it('offers the providers the configuration lists, in its order', () => {
+    expect(signInProviders()).toEqual(['github', 'google', 'apple'])
+    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', ' Apple, github ,apple,')
+    expect(signInProviders()).toEqual(['apple', 'github'])
+    vi.unstubAllEnvs()
+  })
+
+  it('refuses a configuration that lists no provider, or one it does not know', () => {
+    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', '')
+    expect(() => signInProviders()).toThrow('NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set')
+    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', 'github,gitlab')
+    expect(() => signInProviders()).toThrow('NEXT_PUBLIC_SIGN_IN_PROVIDERS names gitlab, and the providers are github, google, apple')
+    vi.unstubAllEnvs()
+  })
+
+  it('asks the identity provider first, then sends the browser to the provider it redirects to', async () => {
+    const ask = vi.fn().mockResolvedValue({ type: 'opaqueredirect', ok: false, status: 0 })
+    vi.stubGlobal('fetch', ask)
     await signIn('github', '/jobs?status=RUNNING')
     expect(auth.signInWithOAuth).toHaveBeenCalledExactlyOnceWith({
       provider: 'github',
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=%2Fjobs%3Fstatus%3DRUNNING` },
+      options: { redirectTo: 'http://ui.test/auth/callback?next=%2Fjobs%3Fstatus%3DRUNNING', skipBrowserRedirect: true },
     })
+    expect(ask).toHaveBeenCalledExactlyOnceWith(AUTHORIZE, { redirect: 'manual' })
+    expect(assign).toHaveBeenCalledExactlyOnceWith(AUTHORIZE)
+  })
+
+  it('stays on the page, saying so, when the identity provider has the provider switched off', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 400, error_code: 'validation_failed', msg: 'Unsupported provider: provider is not enabled' }), { status: 400 }),
+    ))
+    const refusal = await signIn('google', '/').catch(e => e)
+    expect(refusal).toBeInstanceOf(ProviderRefused)
+    expect(refusal.message).toBe('Sign-in with Google is not available yet. Choose another way to sign in.')
+    expect(refusal.detail).toBe('Unsupported provider: provider is not enabled')
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('names the status of a refusal that explains nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 502 })))
+    const refusal = await signIn('apple', '/').catch(e => e)
+    expect(refusal.detail).toBe('the identity provider answered 502')
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('fails loudly when the identity provider cannot be asked', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    await expect(signIn('github', '/')).rejects.toThrow('Failed to fetch')
+    expect(assign).not.toHaveBeenCalled()
   })
 
   it('fails loudly when the provider cannot be started', async () => {
@@ -59,22 +106,22 @@ describe('signing in', () => {
 
   it('returns only to a path of this app', () => {
     expect(safeNext('/jobs?status=RUNNING')).toBe('/jobs?status=RUNNING')
-    expect(safeNext(null)).toBe('/')
-    expect(safeNext('')).toBe('/')
-    expect(safeNext('https://evil.example/')).toBe('/')
-    expect(safeNext('//evil.example/')).toBe('/')
-    expect(safeNext('/\\evil.example/')).toBe('/')
-    expect(safeNext('\\\\evil.example/')).toBe('/')
-    expect(safeNext('javascript:alert(1)')).toBe('/')
-    expect(safeNext('http://')).toBe('/')
+    expect(safeNext(null)).toBe('/console')
+    expect(safeNext('')).toBe('/console')
+    expect(safeNext('https://evil.example/')).toBe('/console')
+    expect(safeNext('//evil.example/')).toBe('/console')
+    expect(safeNext('/\\evil.example/')).toBe('/console')
+    expect(safeNext('\\\\evil.example/')).toBe('/console')
+    expect(safeNext('javascript:alert(1)')).toBe('/console')
+    expect(safeNext('http://')).toBe('/console')
   })
 
   it('reads the way back as a browser would, which drops tabs and newlines before resolving', () => {
     for (const hostile of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '\t//evil.example', '/\t\\evil.example']) {
-      expect(safeNext(hostile)).toBe('/')
+      expect(safeNext(hostile)).toBe('/console')
     }
     for (const encoded of ['/%09/evil.example', '/%0A/evil.example']) {
-      expect(safeNext(decodeURIComponent(encoded))).toBe('/')
+      expect(safeNext(decodeURIComponent(encoded))).toBe('/console')
       // Still encoded, it is a path of this app and stays one.
       expect(safeNext(encoded)).toBe(encoded)
     }

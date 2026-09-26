@@ -67,6 +67,12 @@ export function startIdentityProvider({ port, keyPath, ui }) {
     if (route === 'GET /auth/v1/.well-known/jwks.json') return json(200, { keys: [jwk] })
 
     if (route === 'GET /auth/v1/authorize') {
+      // Supabase's own answer for a provider that is not switched on in the project.
+      if (url.searchParams.get('provider') !== 'github') {
+        return json(400, { code: 400, error_code: 'validation_failed', msg: 'Unsupported provider: provider is not enabled' })
+      }
+      // The UI asks once without following the redirect, to learn whether the provider is on.
+      if (req.headers['sec-fetch-mode'] !== 'navigate') return res.writeHead(302, { Location: `${ISSUER}/provider` }).end()
       state.authorizeRequests.push(url.toString())
       const code = randomUUID()
       state.codes.set(code, { user: state.nextUser, challenge: url.searchParams.get('code_challenge') })

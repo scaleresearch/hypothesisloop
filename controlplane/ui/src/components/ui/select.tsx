@@ -50,7 +50,7 @@ export function Select<T extends string>({
         </span>
         <OptionsIcon />
       </ListboxButton>
-      <ListboxOptions modal={false} anchor={{ to: 'bottom start', gap: 4 }} className={panelClass}>
+      <ListboxOptions modal={false} anchor={{ to: 'bottom start', gap: 4, padding: 8 }} className={panelClass}>
         {options.map(option => (
           <ListboxOption key={option.value} value={option.value} disabled={option.disabled} className={optionClass(fieldSize, mono)}>
             <OptionLabel>{option.label}</OptionLabel>

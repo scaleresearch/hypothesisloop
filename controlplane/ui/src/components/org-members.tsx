@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api'
 import { inviteLink } from '@/lib/invite'
+import { HOME_PATH } from '@/lib/auth'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import type { CreatedOrgInvite, OrgInvite, OrgMember, OrgRole } from '@/types'
 import { Badge } from '@/components/ui/badge'
@@ -165,7 +166,7 @@ export function OrgMembers() {
         await removeOrgMember(org.id, member.user_id)
         if (self) {
           // The org is no longer theirs to see, so the URL stops naming its project before the account is reread.
-          router.replace('/')
+          router.replace(HOME_PATH)
           await refreshMe()
           return
         }

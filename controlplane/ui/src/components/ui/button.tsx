@@ -1,5 +1,6 @@
 import { forwardRef } from 'react'
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, ComponentProps } from 'react'
+import NextLink from 'next/link'
 import { clsx } from 'clsx'
 import { Spinner } from '@/components/ui/status-message'
 
@@ -17,12 +18,13 @@ const base = 'inline-flex items-center justify-center gap-1.5 font-semibold tran
 
 const boxed = 'rounded border shadow-sm active:translate-y-px disabled:shadow-none'
 
+// Hover is written for anything not disabled, so the same classes serve a link, which is never `:enabled`.
 const variantClass: Record<Variant, string> = {
-  default: clsx(boxed, 'border-border-strong bg-surface-raised text-foreground enabled:hover:bg-foreground/5'),
-  primary: clsx(boxed, 'border-primary bg-primary text-primary-foreground enabled:hover:border-primary-hover enabled:hover:bg-primary-hover'),
-  danger: clsx(boxed, 'border-danger/40 bg-danger/10 text-danger enabled:hover:border-danger/60 enabled:hover:bg-danger/20'),
-  ghost: 'rounded text-muted enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
-  link: 'text-accent enabled:hover:underline',
+  default: clsx(boxed, 'border-border-strong bg-surface-raised text-foreground [&:not(:disabled)]:hover:bg-foreground/5'),
+  primary: clsx(boxed, 'border-primary bg-primary text-primary-foreground [&:not(:disabled)]:hover:border-primary-hover [&:not(:disabled)]:hover:bg-primary-hover'),
+  danger: clsx(boxed, 'border-danger/40 bg-danger/10 text-danger [&:not(:disabled)]:hover:border-danger/60 [&:not(:disabled)]:hover:bg-danger/20'),
+  ghost: 'rounded text-muted [&:not(:disabled)]:hover:bg-foreground/5 [&:not(:disabled)]:hover:text-foreground',
+  link: 'text-accent [&:not(:disabled)]:hover:underline',
 }
 
 const sizeClass: Record<Size, string> = {
@@ -49,6 +51,16 @@ export function Button({ variant = 'default', size = 'default', loading, disable
       {children}
     </button>
   )
+}
+
+interface ButtonLinkProps extends ComponentProps<typeof NextLink> {
+  variant?: Variant
+  size?: Size
+}
+
+/** A link that reads as a button, for a step that is a page of its own: Sign in, Console. */
+export function ButtonLink({ variant = 'default', size = 'default', className, ...props }: ButtonLinkProps) {
+  return <NextLink className={clsx(base, variantClass[variant], variant === 'link' ? linkSizeClass[size] : sizeClass[size], className)} {...props} />
 }
 
 interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {

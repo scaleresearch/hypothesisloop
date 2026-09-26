@@ -278,7 +278,7 @@ describe('a member', () => {
     await confirm('Leave')
     expect(removeOrgMember).toHaveBeenCalledExactlyOnceWith('org_a', 'u2')
     await waitFor(() => expect(fetchMe).toHaveBeenCalledTimes(1))
-    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/')
+    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/console')
   })
 })
 

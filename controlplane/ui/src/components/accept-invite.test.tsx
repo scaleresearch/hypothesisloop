@@ -107,7 +107,7 @@ describe('accepting', () => {
     open()
     await accept()
     expect(acceptOrgInvite).toHaveBeenCalledExactlyOnceWith(TOKEN)
-    await waitFor(() => expect(router.replace).toHaveBeenCalledExactlyOnceWith('/?project=prj_1'))
+    await waitFor(() => expect(router.replace).toHaveBeenCalledExactlyOnceWith('/console?project=prj_1'))
     expect(fetchMe).toHaveBeenCalledTimes(1)
     expect(screen.getByText(/You joined as a member/)).toBeTruthy()
   })
@@ -132,8 +132,8 @@ describe('accepting', () => {
     await accept()
     expect(await screen.findByText('The organization has no project yet.')).toBeTruthy()
     expect(router.replace).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Go to the app' }))
-    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/')
+    await userEvent.click(screen.getByRole('button', { name: 'Go to the console' }))
+    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/console')
   })
 
   it.each([
@@ -167,7 +167,7 @@ describe('accepting', () => {
     expect(await screen.findByText('The invite could not be sent: Failed to fetch')).toBeTruthy()
     expect(window.sessionStorage.getItem(STORED)).toBe(TOKEN)
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    await waitFor(() => expect(router.replace).toHaveBeenCalledExactlyOnceWith('/?project=prj_1'))
+    await waitFor(() => expect(router.replace).toHaveBeenCalledExactlyOnceWith('/console?project=prj_1'))
     expect(acceptOrgInvite).toHaveBeenCalledTimes(2)
   })
 })

@@ -814,7 +814,7 @@ function PlatformExperimentsPageContent() {
       </div>
 
       {isLoading && <Loading />}
-      {error && <ErrorMessage>Failed to load platform experiments — is the stack running?</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the platform experiments of {project.name}: {error.message}</ErrorMessage>}
 
       {data && experiments.length === 0 && (statusFilter || search ? (
         <Card>

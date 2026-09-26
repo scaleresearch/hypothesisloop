@@ -72,7 +72,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
           <ComboboxButton aria-label="Show options" className="absolute inset-y-0 right-0 flex items-center px-2">
             <OptionsIcon />
           </ComboboxButton>
-          <ComboboxOptions anchor={{ to: 'bottom start', gap: 4 }} className={panelClass}>
+          <ComboboxOptions anchor={{ to: 'bottom start', gap: 4, padding: 8 }} className={panelClass}>
             {!hideAllOption && (
               <ComboboxOption value="" className={optionClass('sm', mono)}>
                 <OptionLabel>{allLabel}</OptionLabel>

@@ -6,7 +6,7 @@ import { clsx } from 'clsx'
 import useSWR from 'swr'
 import { FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
 import { fetchOrgClusters } from '@/lib/api'
-import { LOGIN_PATH, signOut } from '@/lib/auth'
+import { HOME_PATH, LANDING_PATH, signOut } from '@/lib/auth'
 import { useTenant } from '@/lib/tenant'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 import { ProjectSwitcher } from '@/components/project-switcher'
@@ -21,7 +21,7 @@ const navItems = [
   { href: '/agents',               label: 'Research Agents',      icon: Bot          },
   { href: '/jobs',                 label: 'Jobs',                 icon: ListTree     },
   { href: '/cluster',              label: 'Compute Resources',    icon: Server       },
-  { href: '/dashboard',            label: 'Dashboard',            icon: LineChart    },
+  { href: '/statistics',           label: 'Statistics',           icon: LineChart    },
   { href: '/settings',             label: 'Settings',             icon: Settings     },
 ]
 
@@ -75,7 +75,7 @@ function Account() {
       return
     }
     // A full load, so nothing the last session fetched stays in memory for the next one.
-    window.location.assign(LOGIN_PATH)
+    window.location.assign(LANDING_PATH)
   }
 
   return (
@@ -92,7 +92,7 @@ export function Nav() {
 
   return (
     <nav className="flex h-screen w-56 flex-none flex-col border-r bg-surface">
-      <Link href="/" className="border-b px-4 py-5">
+      <Link href={HOME_PATH} className="border-b px-4 py-5">
         <Logo />
       </Link>
       <ProjectSwitcher />

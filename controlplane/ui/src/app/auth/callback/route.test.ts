@@ -37,13 +37,13 @@ describe('the sign-in callback', () => {
   })
 
   it('sends them home when no way back is named, or it leads to another site', async () => {
-    expect((await arrive('?code=good')).headers.get('location')).toBe('/')
-    expect((await arrive('?code=good&next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('/')
+    expect((await arrive('?code=good')).headers.get('location')).toBe('/console')
+    expect((await arrive('?code=good&next=https%3A%2F%2Fevil.example')).headers.get('location')).toBe('/console')
   })
 
   it('sends them home when the way back hides another site behind a tab, a newline or a backslash', async () => {
     for (const hostile of ['/%09/evil.example', '/%0A/evil.example', '/%5Cevil.example']) {
-      expect((await arrive(`?code=good&next=${hostile}`)).headers.get('location')).toBe('/')
+      expect((await arrive(`?code=good&next=${hostile}`)).headers.get('location')).toBe('/console')
     }
   })
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { ApiError, acceptOrgInvite } from '@/lib/api'
-import { LOGIN_PATH, accessToken } from '@/lib/auth'
+import { HOME_PATH, LOGIN_PATH, accessToken } from '@/lib/auth'
 import { INVITE_PATH, dropInvite, heldInvite } from '@/lib/invite'
 import { useRefreshMe } from '@/lib/tenant'
 import type { OrgMember } from '@/types'
@@ -83,14 +83,14 @@ export function AcceptInvite() {
     setStep({ at: 'joined', member })
     try {
       const project = (await refreshMe()).projects.find(p => p.org_id === member.org_id)
-      if (project) router.replace(`/?project=${project.id}`)
+      if (project) router.replace(`${HOME_PATH}?project=${project.id}`)
       else setStep({ at: 'joined', member, stranded: 'The organization has no project yet.' })
     } catch (e) {
       setStep({ at: 'joined', member, stranded: `Your account could not be read again: ${e instanceof Error ? e.message : String(e)}` })
     }
   }
 
-  const home = <Button onClick={() => router.replace('/')}>Go to the app</Button>
+  const home = <Button onClick={() => router.replace(HOME_PATH)}>Go to the console</Button>
 
   switch (step.at) {
     case 'reading':

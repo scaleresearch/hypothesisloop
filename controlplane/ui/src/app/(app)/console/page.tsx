@@ -17,7 +17,7 @@ const LINKS: Array<{ href: string; title: string; description: string }> = [
   { href: '/jobs', title: 'Jobs', description: 'Live and historical job runs with metrics and lineage.' },
   { href: '/agents', title: 'Agents', description: 'Registered agents, quota allocation, and performance history.' },
   { href: '/cluster', title: 'Compute Resources', description: 'Your clusters, their connectivity and the capacity your jobs can use.' },
-  { href: '/dashboard', title: 'Dashboard', description: 'Job outcomes, the eviction audit log and completion rate.' },
+  { href: '/statistics', title: 'Statistics', description: 'Job outcomes, the eviction audit log and completion rate.' },
   { href: '/settings', title: 'Settings', description: 'Organization, projects, API keys and clusters.' },
 ]
 
