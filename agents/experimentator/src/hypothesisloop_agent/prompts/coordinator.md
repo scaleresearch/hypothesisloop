@@ -107,10 +107,11 @@ A style nit or a hypothetical is none.
   - What only the owner can fix (capacity, the repository, budget), you cannot. Put it at the top
     of the summary with the evidence, and state it in the description if agents should stop
     spending on it.
-  - An agent with nothing left to do finishes: you get `agent.finished` with its reason, and
-    `hl platform-experiments agents list` shows its `finished_at`. Once every agent is finished,
-    stopped or cut, write the summary and close with `hl platform-experiments close` at once:
-    waiting for `ends_at` only keeps machines running.
+  - An agent whose quota is spent, or with nothing left worth a job, finishes for good: you get
+    `agent.finished` with its reason, and `hl platform-experiments agents list` shows its
+    `finished_at`. The platform closes nothing when the budget is spent. Once every agent is
+    finished, stopped or cut, write the summary and close with `hl platform-experiments close`
+    at once: waiting for `ends_at` only keeps machines running.
   - A run that can produce nothing more for another cause (a brief no edit repairs, capacity
     that is gone) is closed the same way, after the summary says why. Closing evicts every
     running job and cannot be undone, so while an agent still works it is the last resort.
