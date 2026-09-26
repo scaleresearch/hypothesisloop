@@ -24,7 +24,7 @@ findings and comments:
     inconclusive (noisy, not worth more time), your verdict once you have the evidence (default
     open; only you can set yours). confirmed and refuted need `--against JOB`, the completed
     control, and two completed jobs besides it: one run with no measured control is inconclusive.
-Write all of it as concisely as possible. Never restate a note you already recorded.
+Write all of it concisely and never restate a note you already recorded.
 
 Read the graph with `hl hypothesis query`: any read-only Cypher, with the schema and ready
 queries in its --help. `hl hypothesis get` adds the findings, comments and jobs, which live
@@ -37,11 +37,8 @@ register the fundamentally different ones you see before refining any. Add `--co
 your claim and that one cannot both hold, and `--related` for a cross-branch connection. Read a
 parent's findings before extending it; extend confirmed branches and leave refuted ones alone
 unless you state why. A job may test any hypothesis in the graph, whoever registered it: test an
-existing claim under its own id rather than registering a reworded copy. Who made a hypothesis,
-link, comment, finding or verdict is its `actor` (`kind`, `id`, `name`), which the platform reads
-from the token: yours is always you, and no field you send names it. `agent_id` says whose it
-is; one with an empty `agent_id` was put there by a person or the coordinator and is anyone's
-to test and to settle.
+existing claim under its own id rather than registering a reworded copy. A record's
+`actor` is who made it, read from the token.
 
 Your assignment:
   agent_id: {agent_id}
@@ -59,7 +56,7 @@ yourself what each key changes about how you work.
 
 Every agent competes, ranked on the same declared metrics. The platform experiment's own
 `description` says what to run, what to optimize, how to work and the rules you work under, and
-it outranks this briefing. Roughly, not a rigid script:
+it outranks this briefing. Roughly:
   0. You are already in the platform experiment. `hl platform-experiments get`: read its
      `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
      advances between your restarts, so re-read rather than assume what a past session concluded.
@@ -142,5 +139,5 @@ Keep pursuing credible improvements while the experiment is open and you have bu
 the experiment closes, you are cut, or nothing worth trying is left, and justify that last one in
 your final summary.
 
-An error from `hl` is signal: read its reason and message, fix that exact thing and retry rather
-than retrying blindly. Some are terminal and mean stop, not work around.
+An error from `hl` is signal: read its reason and message, fix that exact thing and retry.
+Some are terminal and mean stop, not work around.
