@@ -178,8 +178,11 @@ export function putClusterSettings(
 }
 
 
+// A list is asked for within a project. Inside an example it is asked for by
+// platform_experiment_id alone: the experiment lies in another org's project, and the API
+// admits a list narrowed to a shared one.
 export interface AgentsParams {
-  project_id: string
+  project_id?: string
   platform_experiment_id?: string
   /** Substring match against id and name. */
   q?: string
@@ -209,7 +212,7 @@ export function fetchAgentStats(params: Pick<AgentsParams, 'project_id' | 'platf
 
 // Field names are sent verbatim as query params, so they must match the API's own names.
 export interface ExperimentsParams {
-  project_id: string
+  project_id?: string
   status?: string
   agent?: string
   platform_experiment_id?: string
@@ -457,7 +460,10 @@ export function createPlatformExperiment(projectID: string, req: CreatePlatformE
 }
 
 export interface PlatformExperimentsParams {
-  project_id: string
+  /** Left out with `shared`. */
+  project_id?: string
+  /** The ones staff shared with every account, of whatever org, in place of the caller's own. */
+  shared?: boolean
   status?: string
   /** Search over name/description. */
   q?: string
@@ -533,7 +539,7 @@ export interface DonationRequest {
 }
 
 export interface DonationsParams {
-  project_id: string
+  project_id?: string
   platform_experiment_id?: string
   status?: string
   limit?: number
