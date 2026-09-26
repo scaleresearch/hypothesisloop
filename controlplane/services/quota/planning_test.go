@@ -149,15 +149,22 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	}}}}
 	svc, _ := planningAPI(t, store, planner)
 	// Closing a draft derives no standings: it never ran and has no metric to rank on.
-	if err := svc.Close(context.Background(), "pe-dropped", nil); err != nil {
+	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	if err := svc.Close(context.Background(), "pe-dropped", &owner, nil); err != nil {
 		t.Fatalf("closing a draft: %v", err)
 	}
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	status := map[string]domain.PlatformExperimentStatus{}
+	closedBy := map[string]*domain.Actor{}
 	for _, pe := range store.created {
-		status[pe.ID] = pe.Status
+		status[pe.ID], closedBy[pe.ID] = pe.Status, pe.ClosedBy
+	}
+	// Who closed it is what tells a person's close from the end time: a coordinator once
+	// reported "closed by owner" for a run that had simply reached its end.
+	if closedBy["pe-late"] != nil || closedBy["pe-dropped"] == nil || *closedBy["pe-dropped"] != owner {
+		t.Fatalf("closed by = %v, want nobody for the one past its limit and the caller for the dropped one", closedBy)
 	}
 	if status["pe-planning"] != domain.PlatformExpDraft || status["pe-late"] != domain.PlatformExpClosed || status["pe-dropped"] != domain.PlatformExpClosed {
 		t.Fatalf("statuses = %v, want the draft past its limit and the dropped one closed", status)
@@ -177,10 +184,10 @@ func (s *statusStore) ListPlatformExperimentsByStatus(_ context.Context, status 
 	return out, nil
 }
 
-func (s *statusStore) UpdatePlatformExperimentStatus(_ context.Context, id string, status domain.PlatformExperimentStatus) error {
+func (s *statusStore) ClosePlatformExperiment(_ context.Context, id string, by *domain.Actor) error {
 	for _, pe := range s.created {
 		if pe.ID == id {
-			pe.Status = status
+			pe.Status, pe.ClosedBy = domain.PlatformExpClosed, by
 		}
 	}
 	return nil

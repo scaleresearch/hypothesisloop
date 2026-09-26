@@ -112,6 +112,7 @@ VALUES ($1, $2, $3, 'agent', $3, 'watch test comment')`, hypothesisID, peID, age
 			`DELETE FROM hypothesis_comments WHERE platform_experiment_id = $1`,
 			`DELETE FROM experiments WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`,
+			`DELETE FROM experiment_signups WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiments WHERE id = $1`,
 		} {
 			if _, err := pool.pool.Exec(cleanupCtx, q, peID); err != nil {
@@ -457,6 +458,16 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 
+	// The agent's other way out is its own: it says it has nothing left to do.
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "quota spent"); err != nil {
+		t.Fatalf("finish: got = %v, want = nil", err)
+	}
+	if got := awaitEvent(t, events, EventAgentFinished, agentID); got.Detail != "quota spent" || got.PlatformExperimentID != peID {
+		t.Errorf("agent.finished: got = %+v, want = the reason in %s", got, peID)
+	}
+
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ($1, $2, 1)`, peID, agentID)
 
@@ -519,6 +530,11 @@ func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnColumns(t *testing.T
 	before := cursorNow(t, pool)
 	agentID, peID, hypothesisID := seedRun(t, pool, "newkinds-replay", true)
 
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id) VALUES ($1, $2)`, peID, agentID)
+	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "nothing left"); err != nil {
+		t.Fatalf("finish: got = %v, want = nil", err)
+	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 VALUES ($1, $2, 1)`, peID, agentID)
@@ -536,6 +552,7 @@ VALUES ($1, $2, 1)`, peID, agentID)
 		EventPlatformExperimentStatus:      peID,
 		EventPlatformExperimentDescription: peID,
 		EventAgentCut:                      agentID,
+		EventAgentFinished:                 agentID,
 	} {
 		if seen[kind] != wantSubject {
 			t.Errorf("replayed subject for %v: got = %v, want = %v", kind, seen[kind], wantSubject)

@@ -21,7 +21,9 @@ type PlatformExperimentsStore interface {
 	// borrowed the paged list above silently stopped at its default page — see the store.
 	ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error)
 	CountPlatformExperiments(ctx context.Context, filter db.PlatformExperimentsFilter) (int, error)
-	UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error
+	// ClosePlatformExperiment closes it and records why: by is whose credential asked, nil for
+	// the platform at the end time.
+	ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
@@ -54,6 +56,9 @@ type PlatformExperimentsStore interface {
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
+	// FinishAgent records that an agent has nothing left to do: db.ErrNotSignedUp,
+	// db.ErrSignupClosed when the experiment is not running, db.ErrWorkUnfinished.
+	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
 	ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error)
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)

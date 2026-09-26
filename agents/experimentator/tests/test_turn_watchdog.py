@@ -39,8 +39,14 @@ class HangingClient:
 
 def _setup():
     return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
+                           client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
                            cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1",
                                                max_wall_hours=0))
+
+
+# A machine stopped in a running experiment is told exactly that, ahead of what to do with its turn.
+LAST = ("You are being stopped while the platform experiment is still running and you have not finished: "
+        "you were cut at a stage boundary, or this machine is being replaced. " + run._SHUTDOWN_PROMPT)
 
 
 def _result():
@@ -87,12 +93,12 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_stop_interrupts_the_turn_and_gives_one_last_turn(self):
         client = await self.stop_mid_turn(hangs=False)
         self.assertTrue(client.interrupted.is_set())
-        self.assertEqual(client.queries, ["Begin.", run._SHUTDOWN_PROMPT])
+        self.assertEqual(client.queries, ["Begin.", LAST])
         self.assertTrue(client.disconnected)
 
     async def test_the_last_turn_is_cut_off_at_its_deadline(self):
         client = await self.stop_mid_turn(hangs=True)
-        self.assertEqual(client.queries, ["Begin.", run._SHUTDOWN_PROMPT])
+        self.assertEqual(client.queries, ["Begin.", LAST])
         self.assertTrue(client.disconnected)
 
 
@@ -112,7 +118,6 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
             return waiting
 
         setup = _setup()
-        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"})
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", stopped_while_waiting), \
                 mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=finished_since)), \
@@ -121,14 +126,14 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         return HangingClient.instances[-1].queries
 
     async def test_a_stop_between_turns_gives_one_last_turn(self):
-        self.assertEqual(await self.stop_while_idle([], []), ["Begin.", run._SHUTDOWN_PROMPT])
+        self.assertEqual(await self.stop_while_idle([], []), ["Begin.", LAST])
 
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
         done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc best 0.9 last 0.9"}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         self.assertEqual(await self.stop_while_idle([comment], [done]), [
-            "Begin.", run._SHUTDOWN_PROMPT + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
-                                            "experiment.status exp-1 COMPLETED acc best 0.9 last 0.9"])
+            "Begin.", LAST + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
+                           "experiment.status exp-1 COMPLETED acc best 0.9 last 0.9"])
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
@@ -147,7 +152,6 @@ class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
 class ReconnectTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_raised_session_is_followed_by_what_it_left_on_disk_and_a_good_turn_resets_the_backoff(self):
         setup = _setup()
-        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"})
         stop_flag = [False]
         resumed, sleeps = [], []
 

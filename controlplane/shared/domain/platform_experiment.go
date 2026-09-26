@@ -239,10 +239,24 @@ type PlatformExperiment struct {
 	// Revisions are what a person asked the planner to change, oldest first. One made after
 	// ProposedAt, or with ProposedAt absent, is not answered by a proposal yet.
 	Revisions []PlanningRequest `json:"revisions,omitempty"`
+	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
+	// absent when the platform did at EndsAt. Carried by a read of one platform experiment.
+	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
+	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
+	ClosedBy    *Actor      `json:"closed_by,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget
+// leaves the experiment running to its end time.
+type CloseReason string
+
+const (
+	CloseEndTimeReached CloseReason = "end_time_reached"
+	CloseByRequest      CloseReason = "closed_by_request"
+)
 
 // PlanningRequest is one request to a draft's planner to change its proposal.
 type PlanningRequest struct {

@@ -120,7 +120,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage: hl <command> ...
 
-  platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list
+  platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -563,7 +563,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")

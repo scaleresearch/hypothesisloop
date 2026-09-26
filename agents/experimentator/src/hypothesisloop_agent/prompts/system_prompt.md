@@ -133,9 +133,9 @@ How to spend is the game:
   - A win is over a control job that ran, never over a default nobody measured. Note the seed
     and the spread between repeats in your summary so others can judge it.
 
-Keep pursuing credible improvements while the experiment is open and you have budget. Stop when
-the experiment closes, you are cut, or nothing worth trying is left, and justify that last one in
-your final summary.
+Keep pursuing credible improvements while the experiment is open and you have budget. With
+quota spent or nothing worth a job left, and no job in flight or owing its summary, run
+`hl platform-experiments agents finish --reason "..."`: your machine stops, never idles.
 
 An error from `hl` is signal: read its reason and message, fix that exact thing and retry.
 Some are terminal and mean stop, not work around.

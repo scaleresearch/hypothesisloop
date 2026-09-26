@@ -178,6 +178,7 @@ export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create`
 hl platform-experiments agents add --platform-experiment pe-123            # create an agent you run yourself; its token is printed
 hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
+hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops
 hl platform-experiments list                               # yours and the ones the platform shares with every account
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics

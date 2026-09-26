@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -13,6 +14,7 @@ var agentsCommands = []subcommand{
 	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd},
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
+	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish},
 }
 
 func agentsPath(platformExperiment string) string {
@@ -100,4 +102,34 @@ hl platform-experiments agents add --agent ID prints a self-run agent's token ag
 		return parseExit(err)
 	}
 	return call(c, "GET", agentsPath(pe), nil, "agents", fmt.Sprintf("no agents have joined %s", pe), stdout, stderr)
+}
+
+func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT
+
+Says that you have nothing left to do in the platform experiment: your quota is spent, or
+nothing you could still try is worth a job. Your machine is then stopped after this turn and the
+coordinator is told, with the reason. Refused while you have a job queued or running or a
+completed job without its summary. It cannot be taken back.`, stderr)
+	named := experimentFlag(fs)
+	agent := fs.String("agent", "", "agent id (default the token's, else $AGENT_ID)")
+	reason := fs.String("reason", "", "why nothing is left to do")
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	if strings.TrimSpace(*reason) == "" {
+		return parseExit(misuse(fs, "want --reason"))
+	}
+	var err error
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
+	if *agent == "" {
+		return parseExit(misuse(fs, "want --agent: HL_TOKEN names none and $"+agentEnv+" is not set"))
+	}
+	pe, err := namedExperiment(fs, c, *named)
+	if err != nil {
+		return parseExit(err)
+	}
+	return call(c, "POST", agentsPath(pe)+"/"+url.PathEscape(*agent)+"/finish", map[string]string{"reason": *reason}, "", "", stdout, stderr)
 }

@@ -208,9 +208,31 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	spawnTestAgents(t, pes, open, domain.AgentSignup{Hosted: true, Launcher: launcher + "-other"})
 
 	running := newPE()
-	runningAgents := spawnTestAgents(t, pes, running, hosted, hosted, hosted)
+	runningAgents := spawnTestAgents(t, pes, running, hosted, hosted, hosted, hosted, hosted)
+	if err := pes.FinishAgent(ctx, running, runningAgents[3], "too early"); !errors.Is(err, ErrSignupClosed) {
+		t.Errorf("finish before the experiment runs: got = %v, want = ErrSignupClosed", err)
+	}
 	setPEStatus(t, pool, running, domain.PlatformExpRunning, time.Hour)
 	expect(runningAgents[0], false)
+	// An agent with nothing left to do is let wind down like a cut one, and one with a job in
+	// flight is not finished yet.
+	seedExperimentForCapTest(t, pool, "job-"+uuid.New().String()[:8], runningAgents[0], running, 1, domain.StatusRunning)
+	if err := pes.FinishAgent(ctx, running, runningAgents[0], "done"); !errors.Is(err, ErrWorkUnfinished) {
+		t.Errorf("finish with a running job: got = %v, want = ErrWorkUnfinished", err)
+	}
+	for _, agent := range runningAgents[3:] {
+		if err := pes.FinishAgent(ctx, running, agent, "quota spent"); err != nil {
+			t.Fatalf("finish: got = %v, want = nil", err)
+		}
+	}
+	expect(runningAgents[3], true)
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET finished_at = now() - make_interval(secs => $3) WHERE platform_experiment_id = $1 AND agent_id = $2`,
+		running, runningAgents[4], (windDown + time.Second).Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	if signup, err := pes.GetAgentSignup(ctx, running, runningAgents[4]); err != nil || signup.FinishedAt == nil || signup.FinishedReason != "quota spent" || !signup.Instance.Released {
+		t.Errorf("finished signup: got = (%+v, %v), want = its moment, its reason and its machine released", signup, err)
+	}
 	cutTestAgent(t, pool, running, runningAgents[1], 30*time.Second)
 	expect(runningAgents[1], true)
 	cutTestAgent(t, pool, running, runningAgents[2], windDown+time.Second)

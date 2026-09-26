@@ -164,17 +164,23 @@ _TURN_SILENCE_TIMEOUT_S = 900
 # in flight are left running and without a summary: nothing of theirs can be written yet.
 _SHUTDOWN_TURN_S = 60
 _SHUTDOWN_PROMPT = (
-    "You are being stopped and this is your last turn, about a minute long. Start nothing new and "
+    "This is your last turn, about a minute long. Start nothing new and "
     "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
     "finished jobs and set the verdicts your evidence already supports, then end your turn."
 )
 
 
 _COORDINATOR_SHUTDOWN_PROMPT = (
-    "You are being stopped and this is your last turn, about a minute long. Start nothing new. "
-    "Write the summary with everything you have found (`hl platform-experiments summary`), then "
-    "end your turn."
+    "This is your last turn, about a minute long. Start nothing new. "
+    "Write the summary with everything you have found (`hl platform-experiments summary`), and "
+    "where it says why the run ended, say what is stated above. Then end your turn."
 )
+
+
+def _shutdown_prompt(setup: core.RunSetup) -> str:
+    """The last turn's instruction, opened with why the machine stops as the platform has it now."""
+    base = _COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(setup.cfg) else _SHUTDOWN_PROMPT
+    return f"{core.stop_cause(setup)} {base}"
 
 
 class TurnStalled(Exception):
@@ -315,8 +321,7 @@ async def _interrupt_on_stop(client, stopped) -> None:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict],
-                     prompt: str = _SHUTDOWN_PROMPT) -> None:
+async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict], prompt: str) -> None:
     """The shutdown turn, opened with events and whatever else finished since the last delivery."""
     events = [*events, *await updates.drain(watch_env)]
     for line in activity.event_lines(events, agent):
@@ -407,7 +412,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     )
 
     rate_limited_resets_at: float | None = None
-    shutdown_prompt = _COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(cfg) else _SHUTDOWN_PROMPT
 
     def stopped() -> bool:
         return core.stop_requested(setup, started_at, stop_flag)
@@ -451,7 +455,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
             if stopped() and got_result and not rate_limited_resets_at:
                 log.info("stopping: turn interrupted, one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, [], shutdown_prompt)
+                await _last_turn(client, cfg.agent_id, watch_env, [], _shutdown_prompt(setup))
                 await _store_session(setup)
                 return None, False
 
@@ -513,7 +517,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
             if stopped():
                 log.info("stopping: one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, events, shutdown_prompt)
+                await _last_turn(client, cfg.agent_id, watch_env, events, _shutdown_prompt(setup))
                 await _store_session(setup)
                 return None, False
             if events:

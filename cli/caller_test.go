@@ -63,6 +63,7 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	spending := map[string][]string{
 		"job submit": {"job", "submit", job},
 		"data-key":   {"data-key"},
+		"finish":     {"platform-experiments", "agents", "finish", "--reason", "quota spent"},
 	}
 	for name, args := range graphWrites {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })

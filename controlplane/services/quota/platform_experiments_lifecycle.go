@@ -371,11 +371,12 @@ func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary
 	return s.store.SetPlatformExperimentSummary(ctx, id, summary)
 }
 
-// Close transitions a running experiment to closed and records top-3 placements.
+// Close transitions a running experiment to closed and records top-3 placements. by is whose
+// credential asked for it, nil when the platform closes it at its end time.
 // topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries). When it is
 // empty the standings are derived from the metrics store instead: closing must never silently
 // discard the outcome of a run just because the caller was a timer rather than a person.
-func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topResults []AgentResult) error {
+func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *domain.Actor, topResults []AgentResult) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return err
@@ -388,7 +389,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 	}
 	// A draft never ran: closing it abandons the plan, and there are no standings to record.
 	if pe.Status == domain.PlatformExpDraft {
-		return s.store.UpdatePlatformExperimentStatus(ctx, id, domain.PlatformExpClosed)
+		return s.store.ClosePlatformExperiment(ctx, id, by)
 	}
 
 	if len(topResults) == 0 {
@@ -410,7 +411,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 		}
 	}
 
-	return s.store.UpdatePlatformExperimentStatus(ctx, id, domain.PlatformExpClosed)
+	return s.store.ClosePlatformExperiment(ctx, id, by)
 }
 
 // SweepExpired closes every Open/Running platform experiment whose EndsAt has passed. EndsAt is
@@ -429,7 +430,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			if pe.EndsAt.IsZero() || pe.EndsAt.After(now) {
 				continue
 			}
-			if err := s.Close(ctx, pe.ID, nil); err != nil {
+			if err := s.Close(ctx, pe.ID, nil, nil); err != nil {
 				s.logger.Error("sweep_expired: close failed",
 					zap.String("platform_experiment_id", pe.ID), zap.Error(err))
 				continue

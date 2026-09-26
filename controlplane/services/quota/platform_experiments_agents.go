@@ -231,6 +231,24 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 	return nil
 }
 
+// FinishAgent records that an agent has nothing left to do, which releases its machine. Calling
+// it again changes nothing.
+func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
+	err := s.store.FinishAgent(ctx, platformExpID, agentID, reason)
+	switch {
+	case errors.Is(err, db.ErrNotSignedUp):
+		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
+	case errors.Is(err, db.ErrSignupClosed):
+		return refuseSignup(409, "not_running", "platform experiment %s is not running: an agent finishes in one that is", platformExpID)
+	case errors.Is(err, db.ErrWorkUnfinished):
+		return refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, or a completed job without its summary: cancel or wait for the one, write the other, then finish", agentID)
+	case err != nil:
+		return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+	}
+	s.logger.Info("agent finished", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
+	return nil
+}
+
 // WithAgentLaunch attaches what joining needs beyond the store.
 func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsHandler {
 	h.launch = launch
@@ -363,6 +381,39 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			}
 		}{}
 		out.Body.Status = "removed"
+		return out, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "finish-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents/{agent_id}/finish",
+		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
+		DefaultStatus: 200,
+		Description: "Called by the agent itself, with its own token, in a running platform experiment. From then its machine, if the platform runs it, is taken down after its last turn, " +
+			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are. " +
+			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 not_running outside a running experiment. Calling it again changes nothing.",
+	}, func(ctx context.Context, in *struct {
+		ID      string `path:"id"`
+		AgentID string `path:"agent_id"`
+		Body    struct {
+			Reason string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
+		}
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		if caller, _ := auth.FromContext(ctx); caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
+			return nil, huma.Error403Forbidden("an agent finishes itself, with its own token")
+		}
+		if err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason); err != nil {
+			return nil, h.refusal("finish agent", err)
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "finished"
 		return out, nil
 	})
 }

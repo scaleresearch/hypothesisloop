@@ -60,6 +60,9 @@ const (
 	// moved, but it names the platform experiment, so an agent still had to GET to learn whether
 	// the cut fell on it. This is the same row addressed to the only party it stops.
 	EventAgentCut = "agent.cut"
+	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
+	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
+	EventAgentFinished = "agent.finished"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
 	// itself: whether it is still open, and whether the brief still says what it said. The
 	// description event deliberately carries no text — see EventKinds.
@@ -110,6 +113,8 @@ var EventKinds = []EventKindDoc{
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
+	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
+		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
@@ -196,7 +201,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventJobUnderperforming:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventJobUnderperforming:
 		return true
 	default:
 		return false
@@ -488,6 +493,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayEvidence,
 		replayStageBoundaries,
 		replayAgentCuts,
+		replayAgentsFinished,
 		replayPlatformExperiment,
 	} {
 		part, err := derive(ctx, tx, filter.PlatformExperimentID, since)
@@ -687,6 +693,30 @@ WHERE platform_experiment_id = $1 AND cut_xid >= $2`
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("events_store.replayAgentCuts: %w", err)
+	}
+	return events, nil
+}
+
+// replayAgentsFinished derives agent.finished from the signup, which records it once.
+func replayAgentsFinished(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT agent_id, finished_reason, finished_xid FROM experiment_signups
+WHERE platform_experiment_id = $1 AND finished_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsFinished: %w", err)
+	}
+	defer rows.Close()
+
+	var events []Event
+	for rows.Next() {
+		event := Event{Kind: EventAgentFinished, PlatformExperimentID: peID}
+		if err := rows.Scan(&event.AgentID, &event.Detail, &event.Position); err != nil {
+			return nil, fmt.Errorf("events_store.replayAgentsFinished: scan: %w", err)
+		}
+		event.Subject = event.AgentID
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("events_store.replayAgentsFinished: %w", err)
 	}
 	return events, nil
 }

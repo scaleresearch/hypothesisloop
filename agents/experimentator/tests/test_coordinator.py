@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from hypothesisloop_agent import config, core, updates
@@ -136,6 +137,27 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("job", run._COORDINATOR_SHUTDOWN_PROMPT)
         self.assertNotIn("push", run._COORDINATOR_SHUTDOWN_PROMPT)
         self.assertIn("hl platform-experiments summary", run._COORDINATOR_SHUTDOWN_PROMPT)
+
+    # A coordinator wrote "closed by owner at 02:48" for a run that had reached its end time:
+    # nothing told it why it was being stopped.
+    def test_the_last_turn_opens_with_why_the_run_stops_as_the_platform_has_it(self):
+        ended = {"status": "closed", "ends_at": "2026-01-01T02:48:00Z", "closed_at": "2026-01-01T02:48:05Z"}
+        person = {"kind": "user", "id": "u-1", "name": "Ada"}
+        for experiment, signup, flavor, want in (
+            ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time, 2026-01-01T02:48:00Z, and the platform closed it"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "coordinator", "you closed it"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "generalist", "its coordinator closed it"),
+            (ended, {}, "coordinator", "The platform recorded no reason"),
+            ({"status": "running"}, {}, "coordinator", "still running: this machine is being replaced"),
+            ({"status": "running"}, {"finished_at": "2026-01-01T00:20:00Z"}, "generalist", "you said you have nothing left to do"),
+        ):
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
+                                    client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
+            prompt = run._shutdown_prompt(setup)
+            self.assertTrue(prompt.startswith("You are being stopped"), prompt)
+            self.assertIn(want, prompt)
+            self.assertNotIn("owner", prompt)
 
 
 if __name__ == "__main__":

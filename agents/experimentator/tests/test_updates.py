@@ -241,7 +241,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             return [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "agent_id": "agent-a"}]
 
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1",
                                                     max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
@@ -249,5 +249,5 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
             await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
-        self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._SHUTDOWN_PROMPT])
+        self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._shutdown_prompt(setup)])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())

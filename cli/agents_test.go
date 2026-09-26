@@ -99,6 +99,9 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		if r.Method == "DELETE" {
 			return map[string]any{"status": "removed"}
 		}
+		if r.Method == "POST" {
+			return map[string]any{"status": "finished"}
+		}
 		return map[string]any{"agents": []map[string]any{}}
 	})
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
@@ -117,6 +120,18 @@ func TestAgentsRemoveAndList(t *testing.T) {
 
 	*got = nil
 	stderr.Reset()
+	t.Setenv("AGENT_ID", "ag-1")
+	*got = nil
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("finish: exit %d, stderr %s", code, stderr.String())
+	}
+	if r := (*got)[0]; r.Method != "POST" || r.Path != "/platform-experiments/pe-env/agents/ag-1/finish" || !reflect.DeepEqual(r.Body, map[string]any{"reason": "quota spent"}) {
+		t.Fatalf("finish request = %+v", r)
+	}
+	if code := run([]string{"platform-experiments", "agents", "finish"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
+		t.Errorf("finish without a reason: exit %d with %d requests, want 2 and no further one", code, len(*got))
+	}
+	*got = nil
 	if code := run([]string{"platform-experiments", "agents", "list"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("list: exit %d, stderr %s", code, stderr.String())
 	}

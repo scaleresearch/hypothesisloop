@@ -88,6 +88,9 @@ class PlatformClient:
     def put_bytes(self, path: str, content: bytes) -> None:
         _send("PUT", f"{self.api_url}{path}", self.token, content=content, timeout=_BYTES_TIMEOUT_S)
 
+    def get_signup(self, agent_id: str, pe_id: str) -> dict:
+        return self._request("GET", f"/platform-experiments/{pe_id}/signups/{agent_id}")
+
     def get_platform_experiment(self, pe_id: str) -> dict:
         return self._request("GET", f"/platform-experiments/{pe_id}")
 

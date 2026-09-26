@@ -106,7 +106,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
-       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason
+       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
+       pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -114,7 +115,7 @@ WHERE id = $1`
 	var status string
 	var metricsRaw, stagesRaw []byte
 	var coordinator domain.HostedCoordinator
-	var createdBy domain.Actor
+	var createdBy, closedBy domain.Actor
 	var proposal []byte
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
@@ -126,6 +127,7 @@ WHERE id = $1`
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &pe.ProposedAt, &pe.DeclinedReason,
+		&pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID,
 	)
 	pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 	if err != nil {
@@ -141,6 +143,9 @@ WHERE id = $1`
 		createdBy.Kind = domain.ActorUnverified
 	}
 	pe.Actor = &createdBy
+	if closedBy.Kind != "" {
+		pe.ClosedBy = &closedBy
+	}
 	if len(proposal) > 0 {
 		pe.Proposal = proposal
 	}
@@ -390,6 +395,24 @@ WHERE id = $1`
 	_, err := s.pool.pool.Exec(ctx, q, id, string(status))
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.UpdateStatus: %w", err)
+	}
+	return nil
+}
+
+// ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
+// asked, nil when the platform closes it at its end time. One already closed keeps what it has.
+func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error {
+	reason, actor := domain.CloseEndTimeReached, domain.Actor{}
+	if by != nil {
+		reason, actor = domain.CloseByRequest, *by
+	}
+	const q = `
+UPDATE platform_experiments
+SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
+    close_reason = $2, closed_by_kind = $3, closed_by_id = $4
+WHERE id = $1 AND status <> 'closed'`
+	if _, err := s.pool.pool.Exec(ctx, q, id, string(reason), string(actor.Kind), actor.ID); err != nil {
+		return fmt.Errorf("platform_experiments_store.Close: %w", err)
 	}
 	return nil
 }
@@ -661,7 +684,7 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 			continue
 		}
 		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst,
-			release/float64(len(survivorIDs)), 0); err != nil {
+			domain.RoundHours(release/float64(len(survivorIDs))), 0); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
 		}
 	}

@@ -462,6 +462,11 @@ CREATE TABLE IF NOT EXISTS experiment_signups (
     PRIMARY KEY (platform_experiment_id, agent_id),
     CONSTRAINT experiment_signups_quota_tier CHECK (quota_tier IN ('', 'guaranteed', 'burst_only'))
 );
+-- An agent that said it has nothing left to do: from then its machine is no longer wanted.
+-- Written once, by the agent, with the transaction that wrote it for the replay of agent.finished.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_at     TIMESTAMPTZ;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS finished_xid    BIGINT;
 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS role       TEXT NOT NULL DEFAULT 'competitor';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS quota_tier TEXT NOT NULL DEFAULT '';
@@ -858,6 +863,19 @@ DROP TRIGGER IF EXISTS pe_cuts_notify ON platform_experiment_cuts;
 CREATE TRIGGER pe_cuts_notify AFTER INSERT ON platform_experiment_cuts
     FOR EACH ROW EXECUTE FUNCTION hypothesisloop_cuts_notify();
 
+CREATE OR REPLACE FUNCTION hypothesisloop_agent_finished_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('agent.finished', NEW.agent_id,
+        '', NEW.finished_reason, NEW.platform_experiment_id, NEW.agent_id);
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS signup_finished_notify ON experiment_signups;
+CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_signups
+    FOR EACH ROW WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL)
+    EXECUTE FUNCTION hypothesisloop_agent_finished_notify();
+
 -- ---------------------------------------------------------------------------
 -- Tenancy
 -- ---------------------------------------------------------------------------
@@ -1034,6 +1052,11 @@ ON CONFLICT (name) DO NOTHING;
 -- When the platform experiment closed. An agent's token outlives the close by a fixed grace, and
 -- updated_at moves again when the summary is filed.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+-- Why it closed (domain.CloseReason) and, when a caller closed it, whose credential did. Both
+-- are empty on one still running and on one closed before this was kept.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS close_reason   TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_by_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS closed_by_id   TEXT NOT NULL DEFAULT '';
 -- A coordinator the platform runs: one more machine of coordinator_launcher beside the agents',
 -- on coordinator_model. Fixed at creation. The coordinator_instance_* columns say what became
 -- of its machine, exactly as the instance_* columns of experiment_signups do for an agent's.

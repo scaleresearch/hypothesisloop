@@ -132,6 +132,48 @@ def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
     return stop_flag[0] or bool(hours and (time.time() - started_at) / 3600.0 >= hours)
 
 
+def _researches(cfg) -> bool:
+    return not (config.coordinates(cfg) or config.plans(cfg))
+
+
+def _closer(actor: dict | None, coordinates: bool) -> str:
+    kind, name = (actor or {}).get("kind"), (actor or {}).get("name") or "unnamed"
+    if kind == "coordinator":
+        return "you closed it" if coordinates else "its coordinator closed it"
+    if kind == "user":
+        return f"a person closed it ({name})"
+    if kind == "key":
+        return f"it was closed with an API key ({name})"
+    if kind == "staff":
+        return "platform staff closed it"
+    return "the platform does not say who closed it"
+
+
+def stop_cause(setup: RunSetup) -> str:
+    """Why this machine is being stopped, as the platform's records say at this moment. A cause
+    they do not give is said to be unknown, never inferred."""
+    cfg = setup.cfg
+    try:
+        pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
+        if pe["status"] == "closed":
+            closed_at = pe.get("closed_at", "an unrecorded time")
+            if pe.get("close_reason") == "end_time_reached":
+                return f"You are being stopped because the platform experiment reached its end time, {pe['ends_at']}, and the platform closed it."
+            if pe.get("close_reason") == "closed_by_request":
+                return (f"You are being stopped because the platform experiment was closed before its end time: "
+                        f"{_closer(pe.get('closed_by'), config.coordinates(cfg))} at {closed_at}.")
+            return f"You are being stopped because the platform experiment closed at {closed_at}. The platform recorded no reason."
+        if _researches(cfg) and setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id).get("finished_at"):
+            return "You are being stopped because you said you have nothing left to do."
+        if _researches(cfg):
+            return (f"You are being stopped while the platform experiment is still {pe['status']} and you have not "
+                    "finished: you were cut at a stage boundary, or this machine is being replaced.")
+        return f"You are being stopped while the platform experiment is still {pe['status']}: this machine is being replaced."
+    except api_client.APIError as e:
+        log.warning("could not read why the machine stops (%s)", e)
+        return "You are being stopped. The platform could not be asked why."
+
+
 def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | None:
     """Between-event stop check shared by both backends. Returns a reason string, or None."""
     if stop_flag[0]:
@@ -148,6 +190,8 @@ def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | No
         # platform releases its machine, and a revision starts it again with its session.
         if config.plans(cfg) and (pe["status"] != "draft" or pe.get("proposed_at")):
             return "the draft is answered"
+        if _researches(cfg) and setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id).get("finished_at"):
+            return "the agent finished"
     except api_client.APIError as e:
         log.warning("could not check platform experiment status (%s) — continuing", e)
     return None

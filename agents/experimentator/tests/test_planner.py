@@ -56,8 +56,10 @@ class PlannerPromptTest(unittest.TestCase):
 
 
 class PlannerStopTest(unittest.TestCase):
+    signup: dict = {}
+
     def reason(self, cfg, platform_experiment):
-        client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment)
+        client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment, get_signup=lambda *_: self.signup)
         return core.stop_reason(SimpleNamespace(cfg=cfg, client=client), time.time(), [False])
 
     # The planner's machine is rented while it plans and no longer: it stops by itself once the
@@ -70,10 +72,13 @@ class PlannerStopTest(unittest.TestCase):
         self.assertEqual(self.reason(planner(), {"status": "open"}), "the draft is answered")
         self.assertEqual(self.reason(planner(), {"status": "closed"}), "platform experiment closed")
 
-    def test_a_researcher_does_not_stop_in_an_open_experiment(self):
+    # Researchers once finished in twenty minutes and their machines idled to the end time.
+    def test_a_researcher_stops_once_it_finished_and_not_before(self):
         researcher = SimpleNamespace(agent_id="ag-1", flavor="generalist", platform_experiment_id="pe-1", max_wall_hours=0)
         self.assertIsNone(self.reason(researcher, {"status": "open"}))
         self.assertIsNone(self.reason(researcher, {"status": "running"}))
+        self.signup = {"finished_at": "2026-01-01T00:20:00Z"}
+        self.assertEqual(self.reason(researcher, {"status": "running"}), "the agent finished")
 
 
 if __name__ == "__main__":

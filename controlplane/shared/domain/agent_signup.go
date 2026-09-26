@@ -32,6 +32,10 @@ type AgentSignup struct {
 	Hyperparameters map[string]any `json:"hyperparameters"`
 	Model           string         `json:"model"`
 	SignedUpAt      time.Time      `json:"signed_up_at"`
+	// FinishedAt is when the agent said it has nothing left to do, and FinishedReason what it
+	// gave as why. From then its machine is no longer wanted.
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	FinishedReason string     `json:"finished_reason,omitempty"`
 	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`

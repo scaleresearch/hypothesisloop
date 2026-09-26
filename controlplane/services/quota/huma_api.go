@@ -430,6 +430,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		return &struct{ Body signupReply }{Body: signupReply{
 			AgentID: signup.AgentID, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
+			FinishedAt: signup.FinishedAt,
 		}}, nil
 	})
 
@@ -471,7 +472,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Close a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
 			"no further submission is accepted. Optional top_results records the final standings; " +
-			"omitted, standings are derived from observed metrics. Safe to call twice -- a second " +
+			"omitted, standings are derived from observed metrics. The experiment then reads close_reason closed_by_request with closed_by, " +
+			"where one the platform closed at ends_at reads end_time_reached. Safe to call twice -- a second " +
 			"call reports invalid_transition rather than changing anything.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -490,7 +492,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Body != nil {
 			topResults = in.Body.TopResults
 		}
-		if err := peh.svc.Close(ctx, in.ID, topResults); err != nil {
+		caller, _ := auth.FromContext(ctx)
+		by := caller.Actor()
+		if err := peh.svc.Close(ctx, in.ID, &by, topResults); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
 		out := &struct {
@@ -867,4 +871,5 @@ type signupReply struct {
 	Flavor          string         `json:"flavor"`
 	Model           string         `json:"model"`
 	Hyperparameters map[string]any `json:"hyperparameters"`
+	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
 }
