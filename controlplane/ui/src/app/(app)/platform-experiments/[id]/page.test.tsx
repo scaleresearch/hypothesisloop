@@ -18,7 +18,7 @@ vi.mock('@/lib/api', () => ({
   fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentQuotas: vi.fn(), fetchPlatformExperimentResults: vi.fn(),
   fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchStages: vi.fn(),
   fetchExperimentMetrics: vi.fn(), fetchPlatformExperimentTimeseries: vi.fn(), fetchHypothesisStats: vi.fn(),
-  fetchFindings: vi.fn(), fetchUnsummarizedJobIDs: vi.fn(),
+  fetchFindings: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
   MAX_LIST_PAGE_SIZE: 200,
@@ -56,7 +56,6 @@ beforeEach(() => {
   vi.mocked(api.fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
   vi.mocked(api.fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(api.fetchFindings).mockResolvedValue([])
-  vi.mocked(api.fetchUnsummarizedJobIDs).mockResolvedValue(new Set())
   vi.mocked(api.fetchPlatformExperimentAgents).mockResolvedValue([
     { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', hosted: false, signed_up_at: at },
   ])
@@ -84,7 +83,7 @@ describe('a shared platform experiment of another org', () => {
   it('reads its lists within the experiment\'s own project, never the reader\'s', async () => {
     show('project=prj_1', {})
     await screen.findByRole('heading', { name: 'Vision benchmark' })
-    for (const read of [api.fetchExperimentsPage, api.fetchExperimentStats, api.fetchUnsummarizedJobIDs]) {
+    for (const read of [api.fetchExperimentsPage, api.fetchExperimentStats]) {
       await vi.waitFor(() => expect(read).toHaveBeenCalled())
       for (const [params] of vi.mocked(read).mock.calls) {
         expect(params).toMatchObject({ project_id: 'prj_platform', platform_experiment_id: 'pe-x' })

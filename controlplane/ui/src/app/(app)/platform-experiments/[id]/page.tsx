@@ -18,7 +18,6 @@ import {
   fetchPlatformExperimentTimeseries,
   fetchHypothesisStats,
   fetchFindings,
-  fetchUnsummarizedJobIDs,
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
@@ -50,21 +49,6 @@ import type { Draft } from '@/lib/planning'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
-}
-
-// Only shown when a policy narrows past the 'mixed' default, so the common case (anyone may
-// submit either) stays uncluttered — a restriction is the exceptional, worth-flagging state.
-function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
-  const chip = (label: string) => <Pill key={label}>{label}</Pill>
-  const chips: React.ReactNode[] = []
-  if (pe.hypothesis_submit_policy && pe.hypothesis_submit_policy !== 'mixed') {
-    chips.push(chip(`Hypotheses: ${pe.hypothesis_submit_policy === 'human_only' ? 'humans only' : 'agents only'}`))
-  }
-  if (pe.job_submit_policy && pe.job_submit_policy !== 'mixed') {
-    chips.push(chip(`Jobs: ${pe.job_submit_policy === 'human_only' ? 'humans only' : 'agents only'}`))
-  }
-  if (chips.length === 0) return null
-  return <>{chips}</>
 }
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
@@ -140,12 +124,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const { data: findings, error: findingsError } = useSWR(
     ['pe-findings', id],
     () => fetchFindings(id),
-    { refreshInterval: 15_000 },
-  )
-
-  const { data: unsummarized } = useSWR(
-    pe ? ['pe-unsummarized', id] : null,
-    () => fetchUnsummarizedJobIDs({ project_id: pe!.project_id, platform_experiment_id: id }),
     { refreshInterval: 15_000 },
   )
 
@@ -273,7 +251,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             <TextLink href={graphHref(pe.id)} className="text-xs">
               {hypothesisCount} Hypotheses →
             </TextLink>
-            <SubmitPolicyChips pe={pe} />
             <div className="basis-full">
               <ExperimentCode pe={pe} />
             </div>
@@ -349,7 +326,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                           {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
                         </TextLink>
                       ) : <span className="text-xs text-muted">—</span>}
-                      {h.best_job && unsummarized?.has(h.best_job.id) && <div><NoSummary /></div>}
+                      {h.best_job?.summary_due && <div><NoSummary /></div>}
                     </td>
                     <td className="text-xs">
                       {h.best_job?.summary ? (
@@ -566,7 +543,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                                   {best.best.toFixed(4)}
                                 </TextLink>
                               ) : best ? best.best.toFixed(4) : '—'}
-                              {best?.experiment_id && unsummarized?.has(best.experiment_id) && <div><NoSummary /></div>}
+                              {jobRows.find(job => job.id === best?.experiment_id)?.summary_due && <div><NoSummary /></div>}
                             </td>
                           )
                         }) : <td className={num}>—</td>}
@@ -665,7 +642,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                       <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
                         <StatusBadge status={exp.status} />
-                        {unsummarized?.has(exp.id) && <NoSummary className="ml-1.5" />}
+                        {exp.summary_due && <NoSummary className="ml-1.5" />}
                         {evictionText && (
                           <div className="mt-0.5 text-2xs text-subtle" title="eviction_reason">
                             {evictionText}
