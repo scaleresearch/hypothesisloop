@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dev.sh up|hosted|api|ui|status|down
+# dev.sh up|hosted|api|ui|status|require-local|down
 #
 # Runs the control plane and the UI as host processes against the compose datastores, so a code
 # change needs a restart of one process and no image build. Every process is started detached,
@@ -15,10 +15,12 @@
 #            rendered. Everything else keeps running
 #   ui       (re)start the UI, which otherwise reloads by itself
 #   status   which processes run
+#   require-local  fail, naming them, while the processes that rent compute run. What must
+#            never reach a provider (the e2e suite) asks this first
 #   down     stop them all. The tunnels are not part of this (make tunnels-down)
 set -euo pipefail
 
-action="${1:?usage: dev.sh up|hosted|api|ui|status|down}"
+action="${1:?usage: dev.sh up|hosted|api|ui|status|require-local|down}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo}"
 . localdev/lib/auth.sh
@@ -285,13 +287,21 @@ case "${action}" in
   status)
     status
     ;;
+  require-local)
+    for name in cloud-agent agent-launcher; do
+      if running "${name}"; then
+        echo "dev: ${name} runs (pid $(cat "${run}/${name}.pid")), so this stack rents compute (make dev-hosted). Run make dev for a stack that cannot" >&2
+        exit 1
+      fi
+    done
+    ;;
   down)
     for name in "${processes[@]}"; do
       stop "${name}"
     done
     ;;
   *)
-    echo "usage: dev.sh up|hosted|api|ui|status|down" >&2
+    echo "usage: dev.sh up|hosted|api|ui|status|require-local|down" >&2
     exit 1
     ;;
 esac

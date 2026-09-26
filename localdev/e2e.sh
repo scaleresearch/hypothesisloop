@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# e2e.sh [pytest arguments]
+#
+# Runs the e2e suite against the stack `make dev` runs and the local k3s cluster, and leaves both
+# as it found them. With no arguments it runs every test that needs no real accelerator.
+#
+# It refuses a stack that rents (make dev-hosted). The hosted agent tests ask the API as the
+# launcher the control plane gives hosted agents to: against a stack where a real launcher asks
+# under that name, each would end the machines the other reported, and an agent a test hosts
+# would be rented. A job a test submits could likewise be placed on the shared cloud cluster.
+#
+# It holds the stack lock while it runs: the scheduler tests need the cluster's whole capacity
+# and stop the cluster's agents, so nothing else may use the stack meanwhile.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo}"
+# hl-admin, which the tests run, reads the settings the running control plane was started with.
+export HYPOTHESISLOOP_CONFIG="${repo}/controlplane/settings/.hypothesisloop.dev.yaml"
+. localdev/lib/auth.sh
+
+lock=/tmp/hl-stack.lock
+context=k3s-local
+api="http://localhost:8081"
+registry="$(. localdev/lib/node.sh && lib_registry_publish_ip):5000"
+
+bash localdev/dev.sh require-local
+if ! curl -fsS -o /dev/null "${api}/health"; then
+  echo "e2e: no control plane answers at ${api}; start it with make dev" >&2
+  exit 1
+fi
+
+# The cluster's runtime and the workload the tests' jobs run are images, pushed and installed by
+# make reload under one tag. A test job names that tag, so both must be there under it.
+if [[ ! -s localdev/.image-tag ]]; then
+  echo "e2e: no images were pushed to the dev registry yet; run make reload" >&2
+  exit 1
+fi
+tag="$(cat localdev/.image-tag)"
+if ! curl -fsS -o /dev/null -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "http://${registry}/v2/hypothesisloop-workload/manifests/${tag}"; then
+  echo "e2e: the dev registry holds no hypothesisloop-workload:${tag}; run make reload" >&2
+  exit 1
+fi
+installed="$(kubectl --context "${context}" -n hypothesisloop get deployment/hypothesisloop-cluster-agent \
+  -o 'jsonpath={.spec.template.spec.containers[0].image}')"
+if [[ "${installed##*:}" != "${tag}" ]]; then
+  echo "e2e: cluster ${context} runs ${installed}, and the images last pushed are tagged ${tag}; run make reload" >&2
+  exit 1
+fi
+
+if ! mkdir "${lock}" 2>/dev/null; then
+  echo "e2e: the stack is held (${lock}): $(cat "${lock}/owner" 2>/dev/null || echo 'no owner named')" >&2
+  exit 1
+fi
+echo "make e2e (pid $$) since $(date '+%Y-%m-%d %H:%M:%S')" > "${lock}/owner"
+
+# The tests call kubectl with no context, so they get a kubeconfig that holds only this cluster.
+kubeconfig="$(mktemp)"
+nodes_were_up="$(podman ps --filter name=fake- --format '{{.Names}}' | head -1)"
+cleanup() {
+  if [[ -z "${nodes_were_up}" ]]; then
+    bash localdev/k3s-macos/dev-nodes-down.sh || true
+  fi
+  rm -f "${kubeconfig}"
+  rm -rf "${lock}"
+}
+trap cleanup EXIT
+kubectl config view --minify --flatten --context "${context}" > "${kubeconfig}"
+export KUBECONFIG="${kubeconfig}"
+
+bash localdev/k3s-macos/dev-nodes-up.sh
+
+export API_URL="${api}" METRICS_URL="http://localhost:8084"
+HL_TOKEN="$(lib_hl_admin token staff)"
+export HL_TOKEN
+# The tests that work on a real repository run when .env names the sandbox and the stack has the
+# GitHub App that reaches it. They skip themselves otherwise.
+if [[ -n "${HL_GITHUB_APP_ID}" && -n "$(lib_env_value HL_E2E_GITHUB_REPO)" ]]; then
+  HL_E2E_GITHUB_INSTALLATION="$(lib_env_value HL_E2E_GITHUB_INSTALLATION)"
+  HL_E2E_GITHUB_REPO="$(lib_env_value HL_E2E_GITHUB_REPO)"
+  export HL_E2E_GITHUB_INSTALLATION HL_E2E_GITHUB_REPO
+fi
+
+if [[ $# -eq 0 ]]; then
+  set -- e2e -m "not hardware"
+fi
+cd tests
+uv run pytest "$@"

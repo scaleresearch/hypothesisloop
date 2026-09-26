@@ -1,10 +1,10 @@
-.PHONY: dev reset build test agent-test e2e-py lint check images sparse-sdpa-workload-image \
+.PHONY: dev reset build test agent-test lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up registry-prune \
 	helm-prepare helm-lint \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
-	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down k3s-e2e \
-	full-stop full-start reload \
+	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
+	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e tt-reload \
 	git-daemon-start git-daemon-stop git-daemon-status git-daemon-destroy
 
@@ -178,7 +178,7 @@ k3s-down:
 
 # Provisions (or re-syncs) the dev node containers — idempotent, safe to call again after
 # a VM restart killed the background agent containers, without redoing the whole bootstrap.
-# These same nodes serve both interactive dev work and the portable e2e suite (k3s-e2e below).
+# These same nodes serve both interactive dev work and the e2e suite (make e2e).
 # Usage: make k3s-dev-nodes-up [NODE_COUNT=4]
 k3s-dev-nodes-up:
 	NODE_COUNT="$(NODE_COUNT)" bash localdev/k3s-macos/dev-nodes-up.sh
@@ -187,14 +187,19 @@ k3s-dev-nodes-up:
 k3s-dev-nodes-down:
 	bash localdev/k3s-macos/dev-nodes-down.sh
 
-# The e2e suite requires API_URL and a staff HL_TOKEN; these targets point it at the local stack
-# unless the caller set them. E2E_ENV also carries what the suite's hl-admin calls read.
-E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
-E2E_ENV = . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
+# The e2e suite against the stack `make dev` runs and the local k3s cluster, in one command
+# (localdev/e2e.sh). It refuses a stack that rents compute (make dev-hosted) and one somebody
+# else holds, brings the dev nodes up, and leaves the nodes, the API and the UI as it found them.
+# The cluster's runtime and the test workload are images: `make reload` first when they changed.
+# Usage: make e2e                                        every test that needs no real accelerator
+#        make e2e E2E_ARGS='e2e/test_accounts.py -x'      what pytest is given instead
+e2e:
+	bash localdev/e2e.sh $(E2E_ARGS)
 
-# Provisions dev nodes, runs the portable e2e suite, tears them back down — pass/fail either way.
-k3s-e2e: render-settings
-	bash -c '$(E2E_ENV) bash localdev/k3s-macos/run-e2e.sh'
+# What a suite run on another host's stack (tt-e2e) is started with: the API's address, a staff
+# token, and what the suite's hl-admin calls read. Refused on a stack that rents, as make e2e is.
+E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
+E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
 # ---- Convenience: local cluster + control plane in one command -------------
 full-up: k3s-up controlplane-up
@@ -207,13 +212,20 @@ full-stop:
 full-start:
 	bash localdev/k3s-macos/start.sh
 
-# Rebuild every image from current source and push it to the registry, then bounce the
-# control-plane containers and cluster-agent/node-agent pods so they run it under the new TAG.
-# Use this after a Go change, before re-running the e2e suites. The settings are rendered again
-# first: a control plane built from source that added a required key does not start on the
-# settings rendered before it.
-reload: render-settings images
+# What still runs from images is the local cluster's runtime (cluster-agent, node-agent) and the
+# workload the e2e tests' jobs run. This rebuilds every image from the tree, pushes it to the dev
+# registry and installs the runtime on the local cluster under the new TAG. Needed after a change
+# under runtime/k8s, tests/workloads/generic or a package those binaries compile in, and before
+# the first `make e2e`. A control plane change needs `make dev-api` and no image.
+reload: stack-not-held render-settings images
 	bash localdev/k3s-macos/reload.sh
+
+# Restarting the local cluster's agents takes the cluster away from whoever runs jobs on it, so
+# what does that stops while somebody holds the stack (make e2e does for as long as it runs).
+stack-not-held:
+	@if [ -d /tmp/hl-stack.lock ]; then \
+		echo "make: the stack is held (/tmp/hl-stack.lock): $$(cat /tmp/hl-stack.lock/owner 2>/dev/null || echo no owner named)" >&2; exit 1; \
+	fi
 
 # ---- Real Tenstorrent hardware: k3s + tt-operator device stack --------------
 # Counterpart to k3s-up, for an actual Tenstorrent host instead of simulated
@@ -237,7 +249,7 @@ tt-dev-nodes-up:
 # k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
 tt-hardware-image: check-tag
-	podman build -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
+	podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
 	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
@@ -389,26 +401,6 @@ test:
 
 agent-test:
 	cd agents/experimentator && uv run python -m unittest discover -s tests
-
-# Portable e2e suite (pytest), API-only/parallel lane -- fast local loop. See tests/improve.md for
-# the marker scheme (parallel/exclusive/slow/hardware/accelerator) and the migration this replaces.
-e2e-py: render-settings
-	bash -c '$(E2E_ENV) cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"'
-
-# The repository tests against GitHub itself: an agent clones a project's repository and pushes a
-# branch with credentials the platform mints. Needs the local stack started with a GitHub App
-# (.env names one, localdev/lib/auth.sh) and the two HL_E2E_GITHUB_* keys of .env.example. The
-# repository's id is looked up from GitHub with gh.
-e2e-github: render-settings
-	bash -c '$(E2E_ENV) set -euo pipefail; \
-	  for key in INSTALLATION REPO; do \
-	    name="HL_E2E_GITHUB_$$key"; value="$$(lib_env_value "$$name")"; \
-	    test -n "$$value" || { echo "make e2e-github: .env does not set $$name" >&2; exit 1; }; \
-	    export "$$name=$$value"; \
-	  done; \
-	  test -n "$$HL_GITHUB_APP_ID" || { echo "make e2e-github: .env does not set GITHUB_APP_ID, so the local stack has no GitHub App" >&2; exit 1; }; \
-	  HL_E2E_GITHUB_REPO_ID="$$(gh api "repos/$$HL_E2E_GITHUB_REPO" --jq .id)"; export HL_E2E_GITHUB_REPO_ID; \
-	  cd tests && uv run pytest e2e/test_project_repo.py'
 
 # The GitHub client's checks against github.com itself, as the App .env names
 # (controlplane/shared/github/github_live_test.go). Both the token checks and the push check use

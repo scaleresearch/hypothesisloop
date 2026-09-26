@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run by `make reload` once it has rebuilt and pushed every image under TAG: re-installs the
-# node-agent/cluster-agent pinned to TAG, force-recreates the control-plane containers and
-# bounces the pods so they run the new images. Every node already pulls from the registry via
-# the registries.yaml install.sh/dev-nodes-up.sh wrote. Every wait polls for the actual condition.
+# node-agent/cluster-agent of the local cluster pinned to TAG and bounces their pods so they run
+# the new images. The control plane is no part of this: it runs from the tree (make dev-api).
+# Every node already pulls from the registry via the registries.yaml install.sh/dev-nodes-up.sh
+# wrote. Every wait polls for the actual condition.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-local"
@@ -20,13 +21,6 @@ CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONT
   API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
   REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" RUNTIME_TOKEN="$(lib_runtime_token local)" \
   bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
-
-echo "==> Recreating control-plane containers..."
-TAG="${TAG}" podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" \
-  up -d --force-recreate control-service metrics-service >/dev/null
-wait_for 20 1 "control-service to accept connections" \
-curl -sf -o /dev/null "http://localhost:${API_HOST_PORT:-8081}/health"
-lib_register_local_clusters
 
 if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
 echo "==> Restarting cluster-agent/node-agent pods..."

@@ -15,7 +15,7 @@ trap 'bash "${DIR}/dev-nodes-down.sh"' EXIT
 t0=$(date +%s)
 # No marker deselection: this host has real Tenstorrent silicon and owns every exclusive
 # cluster resource the suite needs, so it runs everything -- including the hardware-only and
-# exclusive tests the portable lane (e2e-py/k3s-e2e) otherwise excludes.
+# exclusive tests the quick lane otherwise excludes.
 (cd "${DIR}/../../tests" && uv run pytest e2e "$@"); rc=$?
 echo "==> pytest e2e (full suite): $(( $(date +%s) - t0 ))s"
 exit "$rc"

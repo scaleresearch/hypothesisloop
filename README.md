@@ -497,22 +497,29 @@ on hosts that have it). Tests are grouped with pytest markers: `parallel` (API-o
 concurrently), `exclusive` (needs the whole cluster idle - node death, connectivity loss,
 daemonset redeploy, preemption), `slow`, and `hardware`.
 
-Running pytest directly requires `API_URL`, the control plane's base URL, and `HL_TOKEN`, a staff
-token for it; the make targets set both for the local stack. Tests that register orgs and clusters
-run `hl-admin`, which reads `HYPOTHESISLOOP_CONFIG` and `DATABASE_URL`.
+`make e2e` runs the suite against the stack `make dev` runs and the local k3s cluster
+(`localdev/e2e.sh`). It brings the dev nodes up, gives the tests the API's address, a staff token
+and a kubeconfig that holds only the local cluster, and leaves the nodes, the API and the UI as it
+found them. It refuses a stack that rents compute (`make dev-hosted`): the hosted agent tests ask
+the API as the launcher hosted agents are given to, which would end a real launcher's machines.
+It also refuses while somebody else holds the stack (`/tmp/hl-stack.lock`), and holds it itself
+while it runs. The tests sign their users in with the key made on this machine, which the local
+settings always accept beside the Supabase project. A test creates its own org, project and
+experiments and closes what it started, so the suite does not need an empty database.
 
 ```bash
-make e2e-py                                              # portable lane: parallel-safe tests only
-export API_URL=http://localhost:8081                     # required by every pytest command below
-export HL_TOKEN="$(make -s staff-token)"                 # likewise
-export HYPOTHESISLOOP_CONFIG=$PWD/controlplane/settings/hypothesisloop.yaml   # read by hl-admin
-export DATABASE_URL='postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable'
-cd tests && uv run pytest e2e -k job_lifecycle           # only tests whose name matches
-cd tests && uv run pytest e2e -m "not exclusive and not slow and not hardware"  # same as e2e-py
-cd tests && uv run pytest e2e -m exclusive               # cluster-mutating tests, one at a time
-cd tests && uv run pytest e2e -m hardware                # hardware-only tests (needs real silicon)
-cd tests && uv run pytest e2e/test_job_lifecycle.py -v   # run a single test file directly
+make dev                                             # the control plane and UI, nothing that rents
+make reload                                          # once, and after a runtime or workload change
+make e2e                                             # every test that needs no real accelerator
+make e2e E2E_ARGS='e2e/test_accounts.py -x'          # what pytest is given instead
+make e2e E2E_ARGS='e2e -m "not exclusive and not slow and not hardware"'   # the quick lane
+make e2e E2E_ARGS='e2e -k job_lifecycle'             # only tests whose name matches
 ```
+
+The cluster's runtime (cluster-agent, node-agent) and the workload the tests' jobs run are images.
+`make reload` builds and installs them, and is needed again only after a change under
+`runtime/k8s`, `tests/workloads/generic` or a package those binaries compile in. A control plane
+change needs `make dev-api`.
 
 Test files live under `tests/e2e/`, built on the shared API client (`tests/support/api.py`),
 polling helper (`tests/support/wait.py`), and kubectl helpers (`tests/support/cluster.py`) - see
@@ -546,6 +553,10 @@ between.
 
 | Target                            | Description                                                        |
 |-----------------------------------|----------------------------------------------------------------------|
+| `make dev`                        | The control plane and the UI as host processes against the compose datastores; starts in seconds, nothing rents |
+| `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
+| `make dev-hosted`                 | `make dev` plus agent-launcher (Fly.io) and cloud-agent (vast.ai), with public tunnels (`make tunnels`); rents compute |
+| `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |
 | `make controlplane-up`            | Build images + start the control plane                             |
 | `make controlplane-down`          | Stop the control plane                                              |
 | `make cluster-agent-up CLUSTER=x API_URL=... METRICS_URL=...` | Install node-agent + cluster-agent on the cluster `kubectl` currently points at (or `KUBECONFIG_PATH`/`KUBE_CONTEXT`), one per target cluster |
@@ -554,7 +565,7 @@ between.
 | `make k3s-down`                   | Destroy the local k3s cluster                                       |
 | `make full-up`                    | k3s-up + controlplane-up                                            |
 | `make full-stop` / `make full-start` | Pause/resume everything (podman machine, k3s, control plane) without destroying cluster state |
-| `make reload`                     | Rebuild every image from current source, push it to the registry, and bounce all containers/pods to run it - use after a Go change |
+| `make reload`                     | Rebuild every image, push it to the dev registry and install the local cluster's runtime under the new tag - use after a runtime or test workload change |
 | `make reset`                      | controlplane-down + controlplane-up                                 |
 
 ## Development

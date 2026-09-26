@@ -24,13 +24,13 @@ API_URL = os.environ.get("API_URL")
 if not API_URL:
     raise pytest.UsageError(
         "API_URL is required: set it to the control plane's base URL, "
-        "e.g. API_URL=http://localhost:8081 for the local stack (the make e2e targets pass it)."
+        "e.g. API_URL=http://localhost:8081 for the local stack (make e2e passes it)."
     )
 HL_TOKEN = os.environ.get("HL_TOKEN")
 if not HL_TOKEN:
     raise pytest.UsageError(
         "HL_TOKEN is required: set it to a staff token of the control plane at API_URL "
-        "(the make e2e targets mint one for the local stack)."
+        "(make e2e mints one for the local stack)."
     )
 HL_BIN = REPO_ROOT / "bin" / "hl"
 # The org and project every deployment's schema creates, which the suite's own resources live in.
@@ -78,7 +78,7 @@ def preflight() -> None:
         time.sleep(2)
     pytest.exit(
         f"the control plane at {API_URL} did not serve a request within 120s "
-        f"(last error: {last_error}). Start it (make controlplane-up) or wait for its migrations "
+        f"(last error: {last_error}). Start it (make dev) or wait for its migrations "
         "to finish before running the suite.",
         returncode=2,
     )
