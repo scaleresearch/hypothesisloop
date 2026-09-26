@@ -73,7 +73,13 @@ lib_render_settings() {
   fi
   # The local runtimes install the images `make images` pushes to the dev registry, under the
   # tag of this tree (make's own TAG when make runs this).
-  local image_tag="${TAG:-$(bash "${LIB_AUTH_REPO}/localdev/lib/image-tag.sh")}"
+  local image_tag="${TAG:-}"
+  if [[ -z "${image_tag}" ]]; then
+    image_tag="$(bash "${LIB_AUTH_REPO}/localdev/lib/image-tag.sh")" && [[ -n "${image_tag}" ]] || {
+      echo "render-settings: no image tag: localdev/lib/image-tag.sh failed, set TAG" >&2
+      return 1
+    }
+  fi
   sed -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \

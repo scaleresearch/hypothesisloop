@@ -20,9 +20,11 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	}
 	dir := t.TempDir()
 	rendered := filepath.Join(dir, "rendered.yaml")
+	// The tag is stated: computing it reads the git state of the tree, which is absent in an
+	// exported checkout and changes under a tree others are writing to.
 	// The key is made in the test's directory, and what a developer's .env adds is left out: its
 	// secrets and its identity provider are that machine's.
-	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_LOCAL_IDENTITY_PROVIDER="" && lib_render_settings host.example.internal "$2"`
+	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_LOCAL_IDENTITY_PROVIDER="" && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {
