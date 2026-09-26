@@ -6,7 +6,6 @@ import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse, ClusterInfo } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { budgetUnit, unitCount, unitRate } from '@/lib/units'
-import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { OrgClusters } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
@@ -65,27 +64,18 @@ function AllClusters() {
                   <th>Status</th>
                   <th>Last Seen</th>
                   <th>Autoscaler</th>
-                  <th>Scheduler settings</th>
                 </tr>
               </thead>
               <tbody>
                 {data.clusters.map((c: ClusterInfo) => (
                   <tr key={c.cluster_name}>
-                    <td className="font-mono text-xs font-semibold">
-                      {c.cluster_name}
-                      {c.cluster_id && <div className="text-2xs font-normal text-muted">{c.cluster_id}</div>}
-                    </td>
+                    <td className="font-mono text-xs font-semibold">{c.cluster_name}</td>
                     <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                     <td className="font-mono text-xs text-muted">{new Date(c.last_seen_at).toLocaleString()}</td>
                     <td>
                       <span className={clsx('text-xs font-semibold', c.autoscaler_enabled && 'text-success')}>
                         {c.autoscaler_enabled ? 'Enabled' : 'Off'}
                       </span>
-                    </td>
-                    <td>
-                      {c.cluster_id
-                        ? <ClusterSettingsEditor clusterID={c.cluster_id} />
-                        : <span className="text-xs text-muted">no cluster_id reported</span>}
                     </td>
                   </tr>
                 ))}
