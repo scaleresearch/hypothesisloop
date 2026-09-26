@@ -17,8 +17,6 @@ import {
   fetchPlatformExperimentResults,
   fetchExperimentsPage,
   fetchExperimentStats,
-  fetchDonationsPage,
-  MAX_LIST_PAGE_SIZE,
   fetchStages,
   fetchExperimentMetrics,
   fetchPlatformExperimentTimeseries,
@@ -560,12 +558,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
     { refreshInterval: 15_000 },
   )
 
-  const { data: donations } = useSWR(
-    pe ? ['pe-donations-open', id] : null,
-    () => fetchDonationsPage({ project_id: pe!.project_id, platform_experiment_id: id, status: 'open', limit: MAX_LIST_PAGE_SIZE }),
-    { refreshInterval: 15_000 },
-  )
-
   const { data: stagesStatus, error: stagesError } = useSWR<StagesStatus>(
     ['pe-stages', id],
     () => fetchStages(id),
@@ -692,9 +684,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   // Default both selectors to "everything" until the user narrows them down.
   const activeAgentIds = selectedAgentIds ?? new Set(knownAgentIds)
   const activeMetricKeys = selectedMetricKeys ?? new Set(metrics.map(m => m.key))
-
-  // The open requests of this experiment, as the read above asked for them.
-  const relevantDonations = donations?.items ?? []
 
   const readOnly = isReadOnly(me, pe)
 
@@ -1158,34 +1147,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         </CardContent>
       </Card>
 
-      {/* Compute Donation Requests from agents in this experiment */}
-      {relevantDonations.length > 0 && (
-        <Card>
-          <CardHeader>Compute Donation Requests ({relevantDonations.length})</CardHeader>
-          <CardContent scrollX>
-            <Table>
-              <thead>
-                <tr>
-                  <th>Agent</th>
-                  <th className="text-right">Wants</th>
-                  <th>Reason</th>
-                  <th>Requested</th>
-                </tr>
-              </thead>
-              <tbody>
-                {relevantDonations.map(d => (
-                  <tr key={d.id}>
-                    <td className="font-mono text-xs font-semibold">{d.agent_name || d.agent_id}</td>
-                    <td className="text-right font-mono text-xs">{d.credits_want} {unit}</td>
-                    <td className="text-xs">{d.reason}</td>
-                    <td className="text-xs text-subtle">{new Date(d.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
     </div>
     </ReadOnlyProvider>
   )

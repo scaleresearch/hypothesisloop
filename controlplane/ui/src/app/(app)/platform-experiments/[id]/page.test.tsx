@@ -16,7 +16,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', () => ({
   fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentQuotas: vi.fn(), fetchPlatformExperimentResults: vi.fn(),
-  fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchDonationsPage: vi.fn(), fetchStages: vi.fn(),
+  fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchStages: vi.fn(),
   fetchExperimentMetrics: vi.fn(), fetchPlatformExperimentTimeseries: vi.fn(), fetchHypothesisStats: vi.fn(),
   fetchFindings: vi.fn(), fetchUnsummarizedJobIDs: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
@@ -53,7 +53,6 @@ beforeEach(() => {
   vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({ metrics: [], bests: [] })
   vi.mocked(api.fetchExperimentsPage).mockResolvedValue({ items: [], total: 0 })
   vi.mocked(api.fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
-  vi.mocked(api.fetchDonationsPage).mockResolvedValue({ items: [], total: 0 })
   vi.mocked(api.fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
   vi.mocked(api.fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(api.fetchFindings).mockResolvedValue([])
@@ -85,7 +84,7 @@ describe('a shared platform experiment of another org', () => {
   it('reads its lists within the experiment\'s own project, never the reader\'s', async () => {
     show('project=prj_1', {})
     await screen.findByRole('heading', { name: 'Vision benchmark' })
-    for (const read of [api.fetchExperimentsPage, api.fetchExperimentStats, api.fetchDonationsPage, api.fetchUnsummarizedJobIDs]) {
+    for (const read of [api.fetchExperimentsPage, api.fetchExperimentStats, api.fetchUnsummarizedJobIDs]) {
       await vi.waitFor(() => expect(read).toHaveBeenCalled())
       for (const [params] of vi.mocked(read).mock.calls) {
         expect(params).toMatchObject({ project_id: 'prj_platform', platform_experiment_id: 'pe-x' })
