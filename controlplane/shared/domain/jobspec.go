@@ -41,6 +41,9 @@ type JobSpec struct {
 	// into domain.Experiment.ResolvedJob's copy of this field — Job itself is NEVER rewritten, so a
 	// GET always shows exactly what was submitted; every downstream consumer (Footprint, BuildJobs,
 	// cost estimation) reads domain.Experiment.EffectiveJob() instead of this field directly.
+	//
+	// For a type of kind cpu (TypeKind) the count is the node's cores: cpu is left out or equals
+	// the count, and memory and storage left out mean "max". Submission writes that into the job.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
@@ -65,7 +68,8 @@ type JobSpec struct {
 	// AcceptableAcceleratorTypes are alternatives the job runs equally well on, in preference
 	// order, written in the same driver-published form. Admission may place the job on any of
 	// them when the requested type is busy, and rewrites the experiment's type to whichever it
-	// actually got — so billing always reflects the hardware that really ran.
+	// actually got — so billing always reflects the hardware that really ran. Every alternative
+	// is of the kind of AcceleratorType: a count is cores or devices, never either.
 	AcceptableAcceleratorTypes []AcceleratorType `json:"acceptable_accelerator_types,omitempty" yaml:"acceptable_accelerator_types,omitempty"`
 
 	// NodeSelector constrains placement to nodes carrying these labels. Plain Kubernetes node

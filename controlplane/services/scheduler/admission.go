@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -59,6 +60,44 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 	return total, nil
 }
 
+// countSetsCores is the one rule of a type whose unit is a core (domain.TypeKindCPU): the count
+// of each node is its cores. It writes that into a job that names no cpu, refuses one that names
+// another, and gives a node that names no memory or storage its share of the node it lands on.
+// Everything that reads the job afterwards, the stored row, the footprint, the resolved spec and
+// every runtime, sees a job whose cpu is its count and needs no rule of its own.
+func countSetsCores(job *domain.JobSpec) error {
+	shape := func(field string, count int, cpu, memory, storage *string) error {
+		if count < 1 {
+			return fmt.Errorf("%s.accelerator_count must be at least 1: for a type of kind cpu the count is the node's cores", field)
+		}
+		switch cores, err := workload.ParseCPUCores(*cpu); {
+		case *cpu == "":
+			*cpu = strconv.Itoa(count)
+		case err != nil:
+			return fmt.Errorf("%s.cpu: %w", field, err)
+		case *cpu == domain.MaxResourceSentinel || cores != float64(count):
+			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a type of kind cpu the count is the node's cores, so leave cpu out or make it equal", field, *cpu, field, count)
+		}
+		if *memory == "" {
+			*memory = domain.MaxResourceSentinel
+		}
+		if *storage == "" {
+			*storage = domain.MaxResourceSentinel
+		}
+		return nil
+	}
+	if len(job.Groups) == 0 {
+		return shape("job", job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
+	}
+	for i := range job.Groups {
+		group := &job.Groups[i]
+		if err := shape(fmt.Sprintf("job.groups[%q]", group.Name), group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ValidateExperiment checks required fields are populated and no resource dimension exceeds
 // its per-job cap — applied before any quota debit, so one absurd submission can't consume an
 // entire budget in one shot.
@@ -95,6 +134,11 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	for label := range exp.Job.NodeSelector {
 		if strings.HasPrefix(label, domain.NodeLabelReservedPrefix) {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
+		}
+	}
+	if requested := exp.Job.AcceleratorType; requested.Kind() == domain.TypeKindCPU || (requested == "" && exp.Job.GroupAcceleratorType().Kind() == domain.TypeKindCPU) {
+		if err := countSetsCores(&exp.Job); err != nil {
+			return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 		}
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
@@ -182,6 +226,12 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			}
 			if _, ok := t.LookupCost(); !ok {
 				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
+			}
+			// A count of a cpu type is cores and of an accelerator type devices, so one count
+			// cannot stand for both, and the cores a cpu type's count sets would be free on the
+			// other kind.
+			if requested := exp.Job.AcceleratorType; t.Kind() != requested.Kind() {
+				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("acceptable accelerator type %q is of kind %s and job.accelerator_type %q of kind %s: a job's alternatives are of the kind of the type it asks for", t, t.Kind(), requested, requested.Kind())}
 			}
 		}
 		exp.AcceleratorType = exp.Job.AcceleratorType
