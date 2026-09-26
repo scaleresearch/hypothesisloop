@@ -45,6 +45,7 @@ def _proposal(job_id: str, code_ref: str = "", **more) -> dict:
         "budget_accelerator_hours": 2, "duration_hours": 3, "agents": [{"flavor": "hyperparameter-search"}, {}],
         "baseline_job_id": job_id, "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
+        "sizing_reason": "A trial costs what the baseline did: two researchers with a few trials each fit in 2 hours of budget.",
     } | more
 
 

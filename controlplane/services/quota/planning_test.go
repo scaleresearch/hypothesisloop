@@ -288,6 +288,7 @@ func aProposal(more map[string]any) map[string]any {
 		"baseline_job_id": "job-1",
 		"metric_reason":   "Validation loss on held-out text is the goal itself.",
 		"measurement":     "bench.py trains for a fixed number of steps and scores a split the training never reads.",
+		"sizing_reason":   "The baseline cost 0.1 and took 6 minutes: 2 researchers with 30 trials each need 6 and 4 hours.",
 		"questions":       []string{"Is 4 hours enough?"},
 	}
 	for key, value := range more {
@@ -358,6 +359,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"more machines than it gets":             {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 		"a planner among the agents":             {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
 		"no reason for the metric":               {map[string]any{"metric_reason": ""}, "missing_explanation"},
+		"no reason for the size":                 {map[string]any{"sizing_reason": " "}, "missing_explanation"},
 		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
 	} {
 		store := draftWithPlanner()

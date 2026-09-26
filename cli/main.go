@@ -767,6 +767,8 @@ it says optional:
   baseline_job_id: job-...             # your COMPLETED job with its summary filed
   metric_reason: why this metric is the goal, in plain words
   measurement: how it is measured, in plain words
+  sizing_reason: why this budget, duration and number of researchers are the least that reach
+    the goal, with the arithmetic from the baseline's cost and time
   out_of_scope: [optional sentences]
   risks: [optional sentences]
   questions: [optional sentences]

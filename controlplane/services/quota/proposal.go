@@ -37,6 +37,7 @@ type Proposal struct {
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
+	SizingReason string   `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal: the arithmetic from what the baseline cost and how long it took, in plain words."`
 	OutOfScope   []string `json:"out_of_scope,omitempty"`
 	Risks        []string `json:"risks,omitempty"`
 	Questions    []string `json:"questions,omitempty" doc:"What the person should answer before starting, when the goal left it open."`
@@ -108,7 +109,7 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 			return experiment, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
-	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement} {
+	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement, "sizing_reason": p.SizingReason} {
 		if strings.TrimSpace(text) == "" {
 			return experiment, refusedProposal("missing_explanation", "%s is required: the person who confirms reads it in place of the code", name)
 		}
