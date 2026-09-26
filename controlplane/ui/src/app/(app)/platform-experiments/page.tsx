@@ -2,217 +2,33 @@
 
 import React, { Suspense, useState } from 'react'
 import useSWR from 'swr'
-import { useProjectRouter, useQueryParam } from '@/lib/query-state'
+import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { clsx } from 'clsx'
 import {
   fetchPlatformExperimentsPage,
-  fetchPlatformExperimentQuotas,
-  fetchExperimentStats,
-  fetchHypothesisStats,
-  HYPOTHESIS_STATUSES,
   createPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, MetricDefinition, SubmitterPolicy } from '@/types'
+import type { PlatformExperiment, MetricDefinition, SubmitterPolicy } from '@/types'
 import { PlatformExperimentStatus } from '@/types'
 import type { Stage } from '@/lib/api'
-import { quotaRemainingAccH } from '@/lib/quota'
 import { COMMON_ML_METRICS } from '@/types'
-import { hypothesisActivity } from '@/lib/hypothesis-progress'
-import { formatDate, isZeroDate } from '@/lib/format'
+import { isZeroDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
 import { Disclosure } from '@/components/ui/disclosure'
 import { RepositorySelect } from '@/components/repository-select'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { PlatformExperimentCard } from '@/components/platform-experiment-card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Table } from '@/components/ui/table'
 import { Segmented, Tabs } from '@/components/ui/tabs'
 import { Eyebrow, Pill } from '@/components/ui/text'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
-import { CollapsibleDescription } from '@/components/ui/collapsible-description'
-import { statusColor } from '@/lib/colors'
-import { formatAccH } from '@/lib/format'
-
-function StatusBadge({ status }: { status: string }) {
-  return <Badge status={status}>{status}</Badge>
-}
-
-// The primary metric ranks the leaderboard, so its pill carries the accent ring.
-function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) {
-  return (
-    <Pill tone={m.direction === 'maximize' ? 'success' : 'warning'} active={primary} title={primary ? 'Primary metric — used for ranking' : undefined}>
-      {primary && <span className="opacity-80">★</span>}
-      {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
-    </Pill>
-  )
-}
-
-function ExperimentCard({
-  pe,
-  onEdit,
-}: {
-  pe: PlatformExperiment
-  onEdit: (pe: PlatformExperiment) => void
-}) {
-  const router = useProjectRouter()
-  const [expanded, setExpanded] = useState(false)
-
-  // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
-  // expand toggle needs this data too, otherwise it shows 0 until the card is expanded once.
-  const { data: quotas } = useSWR<AgentQuota[]>(
-    ['pe-quotas', pe.id],
-    () => fetchPlatformExperimentQuotas(pe.id),
-    { refreshInterval: 10_000 },
-  )
-
-  const { data: verdicts } = useSWR(
-    ['pe-hypothesis-stats', pe.id],
-    () => fetchHypothesisStats(pe.id),
-    { refreshInterval: 15_000 },
-  )
-  const { data: hypothesisStats } = useSWR(
-    ['pe-stats-by-hypothesis', pe.id],
-    () => fetchExperimentStats({ project_id: pe.project_id, platform_experiment_id: pe.id, group_by: 'hypothesis' }),
-    { refreshInterval: 15_000 },
-  )
-  const hypothesisCount = verdicts?.total ?? 0
-  const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {})
-
-  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
-  const daysLeft = !isZeroDate(pe.ends_at)
-    ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
-    : null
-
-  return (
-    <Card className="cursor-pointer">
-      <CardHeader
-        className="justify-between"
-        onClick={() => router.push(`/platform-experiments/${pe.id}`)}
-        tabIndex={0}
-        role="link"
-        onKeyDown={e => { if (e.key === 'Enter') router.push(`/platform-experiments/${pe.id}`) }}
-      >
-        <div className="flex items-center gap-2.5">
-          <StatusBadge status={pe.status} />
-          <span className="text-base font-bold">{pe.name}</span>
-        </div>
-        <div className="flex items-center gap-3 font-normal">
-          {!isZeroDate(pe.starts_at) && (
-            <span className="text-xs text-subtle">{formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}</span>
-          )}
-          {daysLeft != null && daysLeft > 0 && (
-            <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
-          )}
-          <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
-          <span className="text-xs text-muted" onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
-        </div>
-      </CardHeader>
-
-      <CardContent onClick={() => router.push(`/platform-experiments/${pe.id}`)}>
-        {pe.description && <CollapsibleDescription text={pe.description} className="mb-3" />}
-
-        {pe.metrics && pe.metrics.length > 0 && (
-          <div className="mb-3.5 flex flex-wrap gap-1.5">
-            {pe.metrics.map((m, i) => <MetricChip key={m.key} m={m} primary={i === 0} />)}
-          </div>
-        )}
-
-        {pe.stages && pe.stages.length > 0 && (
-          <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
-            <Eyebrow className="mr-0.5">Ladder</Eyebrow>
-            {pe.stages.map((s, i) => {
-              const active = i + 1 === pe.current_stage
-              return (
-                <Pill
-                  key={i}
-                  tone={active ? 'accent' : undefined}
-                  active={active}
-                  title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}${s.max_job_hours ? `; no job may run longer than ${s.max_job_hours}h` : '; no job length limit'}`}
-                >
-                  {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
-                </Pill>
-              )
-            })}
-          </div>
-        )}
-
-        <div className="mb-3.5 grid grid-cols-4 gap-4">
-          <div>
-            <Eyebrow className="block">Budget</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.budget_accelerator_hours} <span className="text-xs text-muted">AccH</span></div>
-          </div>
-          <div>
-            <Eyebrow className="block">Agents</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.signup_count} <span className="text-xs text-muted">/ {pe.max_agents}</span></div>
-          </div>
-          <div>
-            <Eyebrow className="block">Budget Used</Eyebrow>
-            <div className={clsx('font-mono text-xl font-bold', totalUsed > 0 && 'text-accent')}>
-              {formatAccH(totalUsed)} <span className="text-xs text-muted">AccH</span>
-            </div>
-          </div>
-          <div>
-            <Eyebrow className="block">Hypotheses</Eyebrow>
-            <div className="flex flex-wrap items-baseline gap-2.5">
-              {HYPOTHESIS_STATUSES.map(v => (
-                <span key={v} className="font-mono text-sm" style={{ color: statusColor(v) }}>
-                  {verdicts?.by_status[v] ?? 0} <span className="text-2xs text-muted">{v}</span>
-                </span>
-              ))}
-            </div>
-            {activity && <div className="text-2xs text-muted">{activity}</div>}
-          </div>
-        </div>
-
-        {expanded && (
-          <div onClick={e => e.stopPropagation()}>
-            <div className="border-t pt-3.5">
-              <Eyebrow className="mb-2.5 block">
-                Agent Quotas — Guaranteed &amp; Burst (AccH)
-              </Eyebrow>
-              {!quotas ? (
-                <p className="text-xs text-subtle">Loading quotas…</p>
-              ) : quotas.length === 0 ? (
-                <p className="text-xs text-subtle">No quotas allocated yet.</p>
-              ) : (
-                <Table>
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th>Guaranteed</th>
-                      <th>Burst</th>
-                      <th>Remaining</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quotas.map(q => {
-                      const remaining = quotaRemainingAccH(q)
-                      return (
-                        <tr key={q.id}>
-                          <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
-                          <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>{formatAccH(remaining)} AccH</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </Table>
-              )}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
 
 // ---- Experiment Modal (create / edit) ----
 
@@ -874,7 +690,7 @@ function PlatformExperimentsPageContent() {
       ))}
 
       {experiments.map(pe => (
-        <ExperimentCard
+        <PlatformExperimentCard
           key={pe.id}
           pe={pe}
           onEdit={pe => setModal({ open: true, editing: pe })}
