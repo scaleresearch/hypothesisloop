@@ -22,4 +22,8 @@ WORKDIR /app
 
 COPY train.py .
 
+# Python buffers stdout in blocks when it is not a terminal, so the lines would reach the
+# container log only at exit and a run stopped mid-way would leave no log at all.
+ENV PYTHONUNBUFFERED=1
+
 ENTRYPOINT ["python3", "train.py"]
