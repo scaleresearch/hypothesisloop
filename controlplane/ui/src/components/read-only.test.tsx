@@ -89,7 +89,7 @@ describe('a shared platform experiment of another org shows no control that writ
     const panel = (
       <>
         <ObjectiveBar graph={graph} pe={pe} onAddIdea={() => {}} />
-        <HypothesisPanel graph={graph} nodeByID={new Map([[node.id, node]])} evidence={new Map()} selected="hyp-1" onSelect={() => {}} onAddIdea={() => {}} />
+        <HypothesisPanel graph={graph} nodeByID={new Map([[node.id, node]])} selected="hyp-1" onSelect={() => {}} onAddIdea={() => {}} />
       </>
     )
     const own = show(panel, false)

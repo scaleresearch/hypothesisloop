@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { clsx } from 'clsx'
 import type { HypothesisGraph } from '@/types'
-import type { HypothesisEvidence } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
@@ -15,7 +14,6 @@ import type { GraphFilters } from '@/lib/hypothesis-graph'
 interface HypothesisOutlineProps {
   graph: HypothesisGraph
   rootLabel: string
-  evidence: Map<string, HypothesisEvidence>
   selected: string
   hits: Set<string>
   filters: GraphFilters
@@ -23,7 +21,7 @@ interface HypothesisOutlineProps {
 }
 
 /** The graph as an indented builds_on tree: scannable, and reachable by keyboard and screen reader. */
-export function HypothesisOutline({ graph, rootLabel, evidence, selected, hits, filters, onSelect }: HypothesisOutlineProps) {
+export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, onSelect }: HypothesisOutlineProps) {
   const rows = useMemo(() => outlineRows(graph), [graph])
   const selectedRef = useRef<HTMLButtonElement>(null)
 
@@ -63,7 +61,7 @@ export function HypothesisOutline({ graph, rootLabel, evidence, selected, hits, 
                 also builds on {alsoBuildsOn.length}
               </span>
             )}
-            <NodeMeta item={node} evidence={evidence.get(node.id)} />
+            <NodeMeta item={node} />
           </RowButton>
         </li>
       ))}

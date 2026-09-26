@@ -1,8 +1,7 @@
 'use client'
 
 import { TextLink } from '@/components/ui/link'
-import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
-import type { HypothesisEvidence } from '@/lib/api'
+import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType, PlatformExperiment } from '@/types'
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
@@ -18,8 +17,7 @@ import { useReadOnly } from '@/lib/read-only'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph
-  nodeByID: Map<string, HypothesisListItem>
-  evidence: Map<string, HypothesisEvidence>
+  nodeByID: Map<string, HypothesisGraphNode>
   selected: string
   onSelect: (id: string) => void
   onAddIdea: (parentID: string) => void
@@ -51,7 +49,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   )
 }
 
-export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
+export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
   const readOnly = useReadOnly()
   const node = nodeByID.get(selected)
   if (!node) {
@@ -68,7 +66,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
     )
   }
 
-  const { finding, best_job: bestJob } = evidence.get(node.id) ?? {}
+  const { finding, best_job: bestJob } = node
   const out = graph.edges.filter(e => e.from === node.id).map(e => ({ type: e.type, id: e.to }))
   const incoming = graph.edges.filter(e => e.to === node.id).map(e => ({ type: e.type, id: e.from }))
 
@@ -127,7 +125,7 @@ function PanelLink({ id, type, graph, nodeByID, onSelect }: {
   id: string
   type: HypothesisLinkType
   graph: HypothesisGraph
-  nodeByID: Map<string, HypothesisListItem>
+  nodeByID: Map<string, HypothesisGraphNode>
   onSelect: (id: string) => void
 }) {
   const target = nodeByID.get(id)

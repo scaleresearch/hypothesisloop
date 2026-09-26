@@ -9,8 +9,7 @@ import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
-import type { HypothesisGraph, HypothesisListItem } from '@/types'
-import type { HypothesisEvidence } from '@/lib/api'
+import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
 import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
 import { Dot } from '@/components/ui/badge'
 import { Eyebrow } from '@/components/ui/text'
@@ -22,8 +21,8 @@ import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 const COUNT = 'inline-flex items-center gap-0.5'
 
 /** Who registered it, evidence counts and best result, shared by graph nodes and outline rows. */
-export function NodeMeta({ item, evidence }: { item: HypothesisListItem; evidence?: HypothesisEvidence }) {
-  const newer = evidence?.finding !== undefined && filedAfterVerdict(item, evidence.finding.created_at)
+export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
+  const newer = item.finding !== undefined && filedAfterVerdict(item, item.finding.created_at)
   return (
     <span className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
       <Actor actor={item.actor} agentID={item.agent_id} compact />
@@ -34,16 +33,16 @@ export function NodeMeta({ item, evidence }: { item: HypothesisListItem; evidenc
         <FileText size={11} /> {item.finding_count}
       </span>
       <span className={COUNT} title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
-      {evidence?.best_job && (
-        <span className={clsx(COUNT, 'text-accent')} title={`Best ${evidence.best_job.metric.name} of its jobs`}>
-          {evidence.best_job.metric.best.toFixed(4)}
+      {item.best_job && (
+        <span className={clsx(COUNT, 'text-accent')} title={`Best ${item.best_job.metric.name} of its jobs`}>
+          {item.best_job.metric.best.toFixed(4)}
         </span>
       )}
     </span>
   )
 }
 
-type HypothesisNodeData = { item: HypothesisListItem; evidence?: HypothesisEvidence }
+type HypothesisNodeData = { item: HypothesisGraphNode }
 type ObjectiveNodeData = { label: string }
 
 // Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
@@ -68,7 +67,7 @@ function HiddenHandles() {
 }
 
 const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<HypothesisNodeData>>) {
-  const { item, evidence } = data
+  const { item } = data
   const { selected, hits, dimmed } = useContext(Highlight)
   const color = statusColor(item.status)
   return (
@@ -87,7 +86,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
         <span className="font-mono text-2xs font-bold uppercase tracking-wide" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
-        <NodeMeta item={item} evidence={evidence} />
+        <NodeMeta item={item} />
       </div>
     </div>
   )
@@ -134,7 +133,6 @@ interface HypothesisGraphCanvasProps {
   graph: HypothesisGraph
   positions: Map<string, Position>
   rootLabel: string
-  evidence: Map<string, HypothesisEvidence>
   /** The id named in the URL, centred on whenever it changes, so the side panel opening never hides it. */
   focus: string
   selected: string
@@ -153,7 +151,7 @@ export function HypothesisGraphCanvas(props: HypothesisGraphCanvasProps) {
   )
 }
 
-function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, filters, minimap, onSelect }: HypothesisGraphCanvasProps) {
+function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, minimap, onSelect }: HypothesisGraphCanvasProps) {
   const { setCenter, setViewport, getZoom } = useReactFlow()
   const width = useStore(s => s.width)
   const height = useStore(s => s.height)
@@ -180,9 +178,9 @@ function Canvas({ graph, positions, rootLabel, evidence, focus, selected, hits, 
       position: positions.get(item.id)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      data: { item, evidence: evidence.get(item.id) },
+      data: { item },
     })),
-  ], [graph, positions, rootLabel, evidence])
+  ], [graph, positions, rootLabel])
   const highlight = useMemo(() => ({ selected, hits, dimmed }), [selected, hits, dimmed])
 
   const edges = useMemo<Edge[]>(() => {

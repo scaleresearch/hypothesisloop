@@ -168,7 +168,6 @@ function HypothesesPageContent() {
               <HypothesisOutline
                 graph={graph}
                 rootLabel={pe.name}
-                evidence={nodeByID}
                 selected={selected}
                 hits={hits}
                 filters={filters}
@@ -180,7 +179,6 @@ function HypothesesPageContent() {
                 graph={graph}
                 positions={positions}
                 rootLabel={pe.name}
-                evidence={nodeByID}
                 focus={focus}
                 selected={selected}
                 hits={hits}
@@ -206,7 +204,6 @@ function HypothesesPageContent() {
               <HypothesisPanel
                 graph={graph}
                 nodeByID={nodeByID}
-                evidence={nodeByID}
                 selected={selected}
                 onSelect={setFocus}
                 onAddIdea={setAddUnder}
