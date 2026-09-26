@@ -156,6 +156,45 @@ func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id stri
 func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	access := doc.Access
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
+		Summary: "Ask a draft's planner to change its proposal", Tags: []string{"platform-experiments"},
+		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
+			"the proposal stays readable, proposed_at is cleared, and the platform starts the planner again with what it knew, with the planning limit to propose anew. " +
+			"409 invalid_transition for anything but a draft with a proposal: while the planner still works there is nothing to revise yet.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Message string `json:"message" doc:"What to change, in plain words."`
+		}
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		message := strings.TrimSpace(in.Body.Message)
+		if message == "" || len(message) > maxRevisionBytes {
+			return nil, huma.Error422UnprocessableEntity(fmt.Sprintf("message is required and at most %d bytes: say what to change in a sentence or two", maxRevisionBytes))
+		}
+		caller, _ := auth.FromContext(ctx)
+		switch err := h.svc.store.Revise(ctx, in.ID, message, caller.Actor(), time.Now().UTC().Add(h.planning.Limit)); {
+		case errors.Is(err, db.ErrNotDraft):
+			return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is revised", in.ID)
+		case errors.Is(err, db.ErrNothingProposed):
+			return nil, invalidTransition("draft %s has no proposal to revise yet: its planner is still working", in.ID)
+		case err != nil:
+			return nil, h.refusal("revise", err)
+		}
+		h.logger.Info("draft revision asked", zap.String("id", in.ID))
+		pe, err := h.svc.store.GetPlatformExperiment(ctx, in.ID)
+		if err != nil || pe == nil {
+			return nil, h.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
+		}
+		if err := h.nameActors(ctx, pe); err != nil {
+			return nil, h.refusal("name actors", err)
+		}
+		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "accept-draft", Method: "POST", Path: "/platform-experiments/{id}/accept",
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
@@ -341,6 +380,24 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	}
 	return accepted, nil
 }
+
+// nameActors names whoever created pe and whoever asked for its revisions, when it carries them.
+func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
+	var actors []*domain.Actor
+	if pe.CreatedBy != nil {
+		actors = append(actors, pe.CreatedBy)
+	}
+	for i := range pe.Revisions {
+		actors = append(actors, &pe.Revisions[i].By)
+	}
+	if len(actors) == 0 {
+		return nil
+	}
+	return h.svc.store.NameActors(ctx, actors)
+}
+
+// maxRevisionBytes bounds one request to change a proposal.
+const maxRevisionBytes = domain.MaxGoalBytes
 
 func notADraft(pe *domain.PlatformExperiment) error {
 	return &reasonError{status: http.StatusConflict, Reason: "not_a_draft", Message: "platform experiment " + pe.ID + " is " + string(pe.Status) + ": only a draft is proposed, revised or accepted"}

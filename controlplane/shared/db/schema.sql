@@ -157,6 +157,19 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_id   TEXT N
 -- machine only while proposed_at is NULL.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposal    JSONB;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPTZ;
+
+-- What a person asked a draft's planner to change in its proposal, one row per request, and
+-- whose credential asked (domain.Actor: kind and id). A draft has no hypothesis a comment could
+-- hang on, so the requests are kept with the draft and read with it.
+CREATE TABLE IF NOT EXISTS planning_requests (
+    id                     BIGSERIAL   PRIMARY KEY,
+    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id) ON DELETE CASCADE,
+    message                TEXT        NOT NULL,
+    actor_kind             TEXT        NOT NULL,
+    actor_id               TEXT        NOT NULL DEFAULT '',
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS planning_requests_by_experiment ON planning_requests (platform_experiment_id, id);
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS default_quota_tier TEXT NOT NULL DEFAULT '';
 

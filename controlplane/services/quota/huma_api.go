@@ -340,7 +340,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. repository is the code it works on, owner/name on GitHub, " +
-			"and repository_url the address agents clone and jobs check out. Both are absent when it names none.",
+			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
+			"One made from a sentence carries goal, and while it is a draft what its planner proposed (proposal, proposed_at) and what a person asked to change (revisions): " +
+			"a draft with no proposed_at is being planned, one with it waits to be accepted.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -360,6 +362,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
+		if err := peh.nameActors(ctx, pe); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 

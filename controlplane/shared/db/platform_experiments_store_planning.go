@@ -13,7 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-
 // CreateDraft creates a draft platform experiment with its planner, an agent of the draft's org
 // signed up as the platform runs it, or creates neither. A draft takes no other signup: joining
 // is for an open platform experiment (enrolTx), which a draft becomes when it is accepted.
@@ -187,4 +186,56 @@ func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experiment
 		return false, fmt.Errorf("platform_experiments_store.JobHasFinding: %w", err)
 	}
 	return found, nil
+}
+
+// Revise records what a person asked a proposed draft's planner to change and gives the draft
+// back to the planner: the proposal stays to be read, proposed_at is cleared, which is what
+// the launcher keeps the planner's machine by, and the draft ends at planUntil unless the
+// planner proposes again. ErrNotDraft, and ErrNothingProposed while the planner still works.
+func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var status string
+	var proposed bool
+	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
+		return ErrNotDraft
+	}
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: lock draft: %w", err)
+	}
+	if !proposed {
+		return ErrNothingProposed
+	}
+	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,
+		id, message, string(by.Kind), by.ID); err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: commit: %w", err)
+	}
+	return nil
+}
+
+func (s *PlatformExperimentsStore) planningRequests(ctx context.Context, id string) ([]domain.PlanningRequest, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT message, actor_kind, actor_id, created_at FROM planning_requests WHERE platform_experiment_id = $1 ORDER BY id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.PlanningRequest
+	for rows.Next() {
+		var request domain.PlanningRequest
+		if err := rows.Scan(&request.Message, &request.By.Kind, &request.By.ID, &request.At); err != nil {
+			return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)
+		}
+		out = append(out, request)
+	}
+	return out, rows.Err()
 }

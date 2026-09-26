@@ -142,9 +142,19 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if found, _ := listed(); found {
 		t.Fatal("a planner is kept beside a proposal that waits for a person")
 	}
-	// A revision clears the proposal, and the planner has a plan to make again.
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL WHERE id = $1`, pe); err != nil {
+	// A revision gives the draft back, and the planner has a plan to make again.
+	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
+	until := time.Now().UTC().Add(30 * time.Minute)
+	if err := pes.Revise(ctx, pe, "it must fit one accelerator", by, until); err != nil {
 		t.Fatal(err)
+	}
+	if err := pes.Revise(ctx, pe, "again", by, until); err != ErrNothingProposed {
+		t.Fatalf("revising a draft that is being planned: got = %v, want ErrNothingProposed", err)
+	}
+	revised, err := pes.GetPlatformExperiment(ctx, pe)
+	if err != nil || revised.ProposedAt != nil || len(revised.Revisions) != 1 || revised.Revisions[0].Message != "it must fit one accelerator" ||
+		revised.Revisions[0].By.Kind != domain.ActorUser || revised.Revisions[0].By.ID != "u-planning" || revised.EndsAt.Sub(until).Abs() > time.Second {
+		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
 	if found, ending := listed(); !found || ending {
 		t.Fatalf("revising: listed %v, ending %v, want kept", found, ending)
@@ -160,6 +170,9 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, 0)
 	if found, ending := listed(); !found || !ending {
 		t.Fatalf("just closed: listed %v, ending %v, want winding down like any agent", found, ending)
+	}
+	if err := pes.Revise(ctx, pe, "too late", by, until); err != ErrNotDraft {
+		t.Fatalf("revising a closed draft: got = %v, want ErrNotDraft", err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, planner)
 	if err != nil || signup.Instance == nil {

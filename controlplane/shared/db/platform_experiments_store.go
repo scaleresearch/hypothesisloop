@@ -145,6 +145,11 @@ WHERE id = $1`
 	if len(proposal) > 0 {
 		pe.Proposal = proposal
 	}
+	if pe.Goal != "" {
+		if pe.Revisions, err = s.planningRequests(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal metrics: %w", err)
 	}

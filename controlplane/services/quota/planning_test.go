@@ -506,3 +506,79 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 		t.Errorf("a proposal for CPU alone: got = %d %v, want 200", code, out)
 	}
 }
+
+func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
+	for _, pe := range s.created {
+		if pe.ID != id || pe.Status != domain.PlatformExpDraft {
+			continue
+		}
+		if pe.ProposedAt == nil {
+			return db.ErrNothingProposed
+		}
+		pe.ProposedAt, pe.EndsAt = nil, planUntil
+		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, By: by, At: time.Now().UTC()})
+		return nil
+	}
+	return db.ErrNotDraft
+}
+
+func (s *draftStore) NameActors(_ context.Context, actors []*domain.Actor) error {
+	for _, actor := range actors {
+		actor.Name = "named " + actor.ID
+	}
+	return nil
+}
+
+func (s *draftStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
+
+// A person who reads a proposal and wants it otherwise says so in a sentence, and the draft
+// goes back to the planner with the proposal still there to read.
+func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	_, call := planningAPI(t, store, planner)
+	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "too early"}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Fatalf("revising before anything is proposed: got = %d %v, want 409 invalid_transition", code, out)
+	}
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	for name, message := range map[string]string{"nothing": "  ", "an essay": strings.Repeat("x", maxRevisionBytes+1)} {
+		if code, _ := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": message}); code != http.StatusUnprocessableEntity || store.created[0].ProposedAt == nil {
+			t.Errorf("%s: got = %d, want 422 and the proposal left standing", name, code)
+		}
+	}
+	before := time.Now()
+	code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": " It must fit one RTX 4090. "})
+	if code != http.StatusOK {
+		t.Fatalf("revise: got = %d %v, want 200", code, out)
+	}
+	pe := store.created[0]
+	if pe.ProposedAt != nil || out["proposed_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
+		t.Errorf("revised draft %+v, want no proposed_at and the proposal kept", pe)
+	}
+	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].By.Kind != domain.ActorUser || pe.Revisions[0].By.ID != "u-1" {
+		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
+	}
+	if left := pe.EndsAt.Sub(before); left < DefaultPlanning.Limit-time.Minute || left > DefaultPlanning.Limit+time.Minute {
+		t.Errorf("the planner has %v to propose again, want the planning limit", left)
+	}
+	// Read back, whoever asked is named.
+	code, out = call("GET", "/platform-experiments/pe-draft", nil)
+	revisions, _ := out["revisions"].([]any)
+	if code != http.StatusOK || len(revisions) != 1 || revisions[0].(map[string]any)["by"].(map[string]any)["name"] != "named u-1" {
+		t.Errorf("read back: got = %d %v, want the revision with its author named", code, out["revisions"])
+	}
+	// The planner proposes again, and the draft waits for the person again.
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"budget_accelerator_hours": 4})); code != http.StatusOK || store.created[0].ProposedAt == nil {
+		t.Fatalf("proposing again: %d %v", code, out)
+	}
+	// The planner cannot ask itself for a revision, and an accepted draft takes none.
+	if code, _ := propose("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "m"}); code != http.StatusForbidden {
+		t.Errorf("the planner revising: got = %d, want 403", code)
+	}
+	store.created[0].Status = domain.PlatformExpOpen
+	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "m"}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("revising what is no draft: got = %d %v, want 409 invalid_transition", code, out)
+	}
+}

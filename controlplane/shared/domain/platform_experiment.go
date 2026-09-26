@@ -236,9 +236,19 @@ type PlatformExperiment struct {
 	// Carried by a read of one platform experiment and left out of a list.
 	Proposal   json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it."`
 	ProposedAt *time.Time      `json:"proposed_at,omitempty"`
+	// Revisions are what a person asked the planner to change, oldest first. One made after
+	// ProposedAt, or with ProposedAt absent, is not answered by a proposal yet.
+	Revisions []PlanningRequest `json:"revisions,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PlanningRequest is one request to a draft's planner to change its proposal.
+type PlanningRequest struct {
+	Message string    `json:"message"`
+	By      Actor     `json:"by"`
+	At      time.Time `json:"at"`
 }
 
 // MaxGoalBytes bounds the sentence a draft is created from.
