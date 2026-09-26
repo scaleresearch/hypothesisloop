@@ -36,4 +36,9 @@ const (
 	// ManagedByValue is the constant value ManagedBy is set to, identifying this system as the
 	// writer (as opposed to which key is being written).
 	ManagedByValue = "hypothesisloop"
+
+	// CPUClassLabel names the CPU class a node offers its cores as. A runtime configured with a
+	// class reports the type CPUClassLabel + "=" + <name>, one unit per whole core, and jobs ask
+	// for cores of that type (the catalog prices it with kind: cpu).
+	CPUClassLabel = "cpu.hypothesisloop.dev/class"
 )

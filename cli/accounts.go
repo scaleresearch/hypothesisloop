@@ -401,7 +401,7 @@ type registeredCluster struct {
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
+	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--cpu-class CLASS] [--org ORG]
 
 Registers the cluster name for the org and prints the one command that attaches it, complete:
 the addresses its agent reaches the platform at, the registry and tag of its images and the
@@ -426,8 +426,15 @@ To detach the node again, on the node:
   sudo bare-agent detach        removes the cluster here, stops its jobs and the agent
   sudo bare-agent uninstall     removes the agent from the node
 
+With --cpu-class the command also makes the cluster offer its cores to jobs that need no
+accelerator: one unit a whole core of the type cpu.hypothesisloop.dev/class=CLASS, which the
+platform's catalog must price (hl capacity shows it once it does). Either kind of cluster takes
+it, beside whatever accelerators it has. A bare-metal node whose command names no class keeps
+the one it was installed with.
+
 hl cluster remove NAME detaches from this side: the agent stops its jobs and stays stopped.`, stderr)
 	bareMetal := fs.Bool("bare-metal", false, "print the command for a bare-metal node")
+	cpuClass := fs.String("cpu-class", "", "the name of the CPU class the cluster offers its cores as")
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -441,9 +448,9 @@ hl cluster remove NAME detaches from this side: the agent stops its jobs and sta
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
-	command := kubernetesCommand(registered)
+	command := kubernetesCommand(registered, *cpuClass)
 	if *bareMetal {
-		command = bareMetalCommand(registered)
+		command = bareMetalCommand(registered, *cpuClass)
 	}
 	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", command, registered.Name, registered.RuntimeToken)
 	return 0
@@ -460,14 +467,18 @@ const kubernetesScript = `[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty
 	`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"`
 
 // kubernetesCommand attaches a Kubernetes cluster and holds no token.
-func kubernetesCommand(registered registeredCluster) string {
+func kubernetesCommand(registered registeredCluster, cpuClass string) string {
 	set := func(key, value string) string {
 		return " --set-string " + shellQuote(key+"="+helmValue(value))
 	}
-	return fmt.Sprintf("sh -c %s sh %s %s", shellQuote(kubernetesScript),
+	command := fmt.Sprintf("sh -c %s sh %s %s", shellQuote(kubernetesScript),
 		shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"), shellQuote("0.1.0+"+registered.ImageTag)) +
 		set("clusterName", registered.Name) + set("apiURL", registered.APIURL) + set("metricsURL", registered.MetricsURL) +
 		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) + set("jobImage", registered.JobImage)
+	if cpuClass != "" {
+		command += set("cpuClass", cpuClass)
+	}
+	return command
 }
 
 // helmValue writes text as one value of helm's --set-string, which splits on commas and reads a
@@ -480,15 +491,20 @@ func helmValue(text string) string {
 // that carries it, with no container started, and the agent installs itself: it knows its own
 // unit and settings file, and asks for the runtime token on standard input. It is staged
 // beside its place because a running agent's binary cannot be written over. $1 is the cluster
-// name, $2 the API address, $3 the image that carries the agent and $4 the job image.
+// name, $2 the API address, $3 the image that carries the agent, $4 the job image and $5, when
+// given, the CPU class the node offers its cores as.
 const bareMetalScript = `engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
 	`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
-	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"`
+	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}`
 
 // bareMetalCommand installs the agent of a bare-metal node and holds no token.
-func bareMetalCommand(registered registeredCluster) string {
-	return fmt.Sprintf("sudo sh -c %s sh %s %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
+func bareMetalCommand(registered registeredCluster, cpuClass string) string {
+	command := fmt.Sprintf("sudo sh -c %s sh %s %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
 		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag), shellQuote(registered.JobImage))
+	if cpuClass != "" {
+		command += " " + shellQuote(cpuClass)
+	}
+	return command
 }
 
 // shellQuote writes text as one word of a POSIX shell command, whatever it holds.

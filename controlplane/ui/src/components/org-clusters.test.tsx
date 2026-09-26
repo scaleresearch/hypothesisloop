@@ -356,7 +356,7 @@ describe('adding a cluster', () => {
     expect((await screen.findByTestId('secret')).textContent).toBe(
       `sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
       'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
-      `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh 'gpu-box-1' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234' 'registry.cluster.test/images/hypothesisloop-job:abc1234'`,
+      `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" \${5:+--cpu-class "$5"}' sh 'gpu-box-1' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234' 'registry.cluster.test/images/hypothesisloop-job:abc1234'`,
     )
     expect(screen.getByText(/Run it on the node/)).toBeTruthy()
     expect(screen.getByText(/sudo bare-agent detach/)).toBeTruthy()

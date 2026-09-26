@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/bare-metal/internal/hostinstall"
+	"github.com/scaleresearch/hypothesisloop/runtime/bare-metal/internal/podexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
@@ -60,6 +61,7 @@ func install(args []string) error {
 	cluster := flags.String("cluster", "", "the name this node was registered under")
 	apiURL := flags.String("api-url", "", "the platform's API address, as this node and its job containers reach it")
 	jobImage := flags.String("job-image", "", "the image a job that names none runs in on this node")
+	cpuClass := flags.String("cpu-class", "", "the name of the CPU class this node offers its cores as, one unit a core; not given, the node keeps the one installed for the same cluster, and given empty it offers none")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -86,7 +88,10 @@ func install(args []string) error {
 	if err != nil {
 		return err
 	}
-	settings := hostinstall.Settings{ClusterName: *cluster, APIURL: *apiURL, JobImage: *jobImage}
+	settings := hostinstall.Settings{ClusterName: *cluster, APIURL: *apiURL, JobImage: *jobImage, CPUClass: cpuClassFor(flags, *cluster, *cpuClass, installed)}
+	if err := podexec.ValidCPUClass(settings.CPUClass); err != nil {
+		return err
+	}
 	if settings.Token, err = readToken(settings.ClusterName, installed); err != nil {
 		return err
 	}
@@ -99,7 +104,7 @@ func install(args []string) error {
 	}
 
 	err = hostinstall.Install(host, binary, settings, func() (string, error) {
-		executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage)
+		executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage, settings.CPUClass)
 		if err != nil {
 			return "", err
 		}
@@ -128,6 +133,19 @@ func install(args []string) error {
 	say("the agent of cluster %s is started and starts at boot: journalctl -u %s -f", settings.ClusterName, hostinstall.UnitName)
 	say("to detach this node: sudo bare-agent detach")
 	return nil
+}
+
+// cpuClassFor is the class a node is installed with: the one --cpu-class names, also when that
+// is none, and otherwise the one the node already holds for the same cluster. The printed
+// command of a newer image tag names no class, and an upgrade with it must not take the node's
+// cores away from the jobs that ask for them.
+func cpuClassFor(flags *flag.FlagSet, cluster, given string, installed hostinstall.Settings) string {
+	named := false
+	flags.Visit(func(f *flag.Flag) { named = named || f.Name == "cpu-class" })
+	if !named && installed.ClusterName == cluster {
+		return installed.CPUClass
+	}
+	return given
 }
 
 // readToken reads the runtime token from standard input, without echo when that is a terminal,
@@ -219,7 +237,7 @@ func detach(args []string) error {
 	}
 	// With the unit stopped this process is the node's only agent, and the loop that keeps a
 	// node in step is what stops everything a removed cluster's node still runs.
-	executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage)
+	executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage, settings.CPUClass)
 	if err != nil {
 		return err
 	}

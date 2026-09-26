@@ -37,11 +37,12 @@ const KIND_HINT: Record<Kind, string> = {
 // What `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalScript). It runs on the node
 // as root: the node's engine copies the agent out of the image that carries it, and the agent
 // installs itself as a systemd unit and asks for the runtime token. $1 is the cluster name, $2 the
-// API address, $3 the image that carries the agent and $4 the job image.
+// API address, $3 the image that carries the agent, $4 the job image and $5, when given, the CPU
+// class the node offers its cores as (hl cluster add --cpu-class).
 const BARE_METAL_SCRIPT =
   'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ' +
   'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
-  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"'
+  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}'
 
 // What `hl cluster add` prints (cli/accounts.go kubernetesScript). It reads the runtime token,
 // without echo when a person types it, and hands it to helm on standard input. $1 is the chart,

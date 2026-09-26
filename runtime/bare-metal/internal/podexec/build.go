@@ -161,7 +161,12 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	if err != nil {
 		return containerSpec{}, err
 	}
-	if group.AcceleratorCount > 0 && len(placement.DevicePaths) != group.AcceleratorCount {
+	if e.onCPUClass(exp.AcceleratorType) {
+		// Cores are no devices, and a job on them that was handed one would hold it unpriced.
+		if len(placement.DevicePaths) != 0 {
+			return containerSpec{}, fmt.Errorf("podexec: %d device(s) were placed for a job on the CPU class %q", len(placement.DevicePaths), exp.AcceleratorType)
+		}
+	} else if group.AcceleratorCount > 0 && len(placement.DevicePaths) != group.AcceleratorCount {
 		return containerSpec{}, fmt.Errorf("podexec: accelerator %q requested %d device(s) but placement resolved %d", exp.AcceleratorType, group.AcceleratorCount, len(placement.DevicePaths))
 	}
 

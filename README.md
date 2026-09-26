@@ -294,11 +294,14 @@ all of them. Sums show cores apart from accelerators (`in_flight_cores`, `core_b
 `core_total` of a cluster, `cores_available` in `hl capacity`), while
 `max_concurrent_accelerators` caps the two together.
 
-A Kubernetes cluster offers a CPU class when its chart is installed with `--set-string
-cpuClass=epyc-9354`: the agent then labels each schedulable node and publishes one unit per
-whole allocatable core, and the control plane prices the type in `accelerator_types` with
-`kind: cpu`. The local dev nodes publish `cpu.hypothesisloop.dev/class=dev-node`. A bare-metal
-node and a rented cluster publish no CPU class yet, so they take jobs on their accelerators only.
+A cluster offers a CPU class when its owner names one: `hl cluster add my-cluster --cpu-class
+epyc-9354` prints the install command with it. A Kubernetes cluster gets the chart value
+`cpuClass=epyc-9354`, and its agent labels each schedulable node and publishes one unit per
+whole allocatable core. A bare-metal node gets `bare-agent install --cpu-class epyc-9354` and
+offers one unit per core beside its accelerators, so a job on cores and a job on a chip share
+the node within its cores and memory. The control plane prices the type in `accelerator_types`
+with `kind: cpu`. The local dev nodes publish `cpu.hypothesisloop.dev/class=dev-node`. A rented
+cluster publishes no CPU class yet and takes jobs on its accelerators only.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
@@ -490,7 +493,7 @@ newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-
 shows the command to run on the node and below it the cluster's runtime token.
 
 ```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' \
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}' \
   sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed' \
   'registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
 ```

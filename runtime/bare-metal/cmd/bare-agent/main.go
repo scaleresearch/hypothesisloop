@@ -14,6 +14,8 @@
 //	RUNTIME_TOKEN         — the cluster's runtime token
 //	JOB_IMAGE             — the image a job that names none runs in; set, the node also takes
 //	                        those jobs
+//	CPU_CLASS             — optional: the name of the CPU class this node offers its cores
+//	                        as, one unit a core, beside its accelerators
 //	SCRATCH_DIR           — a directory measured as this node's storage in place of the engine's store,
 //	                        for an engine whose store is not on this host (default: the engine's store)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
@@ -66,7 +68,7 @@ func main() {
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
-	exec, err := newExecutor(clusterName, apiURL, os.Getenv("JOB_IMAGE"))
+	exec, err := newExecutor(clusterName, apiURL, os.Getenv("JOB_IMAGE"), os.Getenv("CPU_CLASS"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
 		os.Exit(1)
@@ -122,10 +124,11 @@ func main() {
 	}
 }
 
-func newExecutor(clusterName, apiURL, jobImage string) (*podexec.Executor, error) {
+func newExecutor(clusterName, apiURL, jobImage, cpuClass string) (*podexec.Executor, error) {
 	return podexec.New(podexec.Config{
 		ClusterName: clusterName,
 		JobImage:    jobImage,
+		CPUClass:    cpuClass,
 		APIURL:      apiURL,
 		StorageDir:  os.Getenv("SCRATCH_DIR"),
 		NodeLabels:  parseNodeLabels(os.Getenv("NODE_LABELS")),

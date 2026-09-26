@@ -238,12 +238,43 @@ func TestClusterAddPrintsTheCommandThatInstallsABareMetalNodesAgentAndItsToken(t
 		t.Fatalf("the node's command holds the token or reads it with hl: %q", command)
 	}
 	if !strings.HasPrefix(command, `sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) ||
-		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh `) ||
+		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}' sh `) ||
 		!strings.HasSuffix(command, ` sh 'gpu-box' 'https://api.example/a?b=1&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234' 'registry.example/images/hypothesisloop-job:abc1234'`) {
 		t.Fatalf("command = %q", command)
 	}
 	if rest != "\nIt asks for the runtime token of gpu-box:\nhls_cnVudGltZQ.c2ln\n" {
 		t.Fatalf("after the command: %q, want the token shown once beside it", rest)
+	}
+}
+
+// A CPU class is the cluster owner's to name, so it is a flag of the command that prints the
+// install command and one more value of that command. Without it both commands are as they were.
+func TestClusterAddCarriesACPUClassIntoEitherInstallCommand(t *testing.T) {
+	accountsServer(t, nil, fmt.Sprintf(registeredAnswer, "box"))
+	first := func(args ...string) string {
+		t.Helper()
+		code, stdout, stderr := hl(t, append([]string{"cluster", "add", "box", "--org", "org-1"}, args...)...)
+		if code != 0 {
+			t.Fatalf("hl cluster add %v: exit code = %d, stderr = %s", args, code, stderr)
+		}
+		command, _, _ := strings.Cut(stdout, "\n")
+		return command
+	}
+
+	plain, classed := first("--bare-metal"), first("--bare-metal", "--cpu-class", "epyc-9354")
+	if classed != plain+" 'epyc-9354'" {
+		t.Errorf("bare-metal command with a class = %q, want the plain one and the class as its last word", classed)
+	}
+	if strings.Contains(plain, "epyc") || !strings.Contains(plain, `${5:+--cpu-class "$5"}`) {
+		t.Errorf("bare-metal command with no class = %q", plain)
+	}
+
+	plain, classed = first(), first("--cpu-class", "epyc-9354")
+	if classed != plain+" --set-string 'cpuClass=epyc-9354'" {
+		t.Errorf("kubernetes command with a class = %q, want the plain one and the chart's cpuClass", classed)
+	}
+	if strings.Contains(plain, "cpuClass") {
+		t.Errorf("kubernetes command with no class sets one: %q", plain)
 	}
 }
 

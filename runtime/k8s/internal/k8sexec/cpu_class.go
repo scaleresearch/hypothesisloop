@@ -11,13 +11,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 const (
 	// CPUClassLabel names a node's CPU class. With CPUClassResource it makes the class a type
 	// like any device-plugin accelerator: capacity is reported as "cpu.hypothesisloop.dev/class=
 	// <name>", and a job on it requests the resource on nodes carrying the label.
-	CPUClassLabel = "cpu.hypothesisloop.dev/class"
+	CPUClassLabel = workloadkeys.CPUClassLabel
 	// CPUClassResource is one core of the node's CPU class.
 	CPUClassResource corev1.ResourceName = "cpu.hypothesisloop.dev/core"
 )

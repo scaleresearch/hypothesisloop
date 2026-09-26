@@ -13,7 +13,7 @@ import (
 
 // totalCPUCores returns this node's logical core count — the bare-node analogue of summing
 // k8s Node.Status.Allocatable across schedulable nodes (there is exactly one node here).
-func totalCPUCores() float64 {
+var totalCPUCores = func() float64 {
 	return float64(runtime.NumCPU())
 }
 
