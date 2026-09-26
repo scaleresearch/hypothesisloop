@@ -4,6 +4,7 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
+  startPlatformExperiment,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { PlatformExperimentStatus } from '@/types'
@@ -11,7 +12,7 @@ import type { AgentSignup, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
+  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), startPlatformExperiment: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -192,5 +193,39 @@ describe('the machines the platform runs', () => {
     show()
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('group', { name: 'Coordinator' })).toBeNull()
+  })
+})
+
+describe('starting the experiment', () => {
+  it('asks first, says what it fixes, then starts it once', async () => {
+    vi.mocked(startPlatformExperiment).mockResolvedValue()
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
+    expect(startPlatformExperiment).not.toHaveBeenCalled()
+    const question = within(screen.getByRole('dialog'))
+    expect(question.getByText(/No agent can join or be removed afterwards\./)).toBeTruthy()
+    await userEvent.click(question.getByRole('button', { name: 'Start' }))
+    expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1')
+  })
+
+  it('does nothing when the answer is no', async () => {
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(startPlatformExperiment).not.toHaveBeenCalled()
+  })
+
+  it('shows the API\'s refusal, as when nobody has joined', async () => {
+    vi.mocked(startPlatformExperiment).mockRejectedValue(new Error('no agents have signed up'))
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' }))
+    expect(await screen.findByText('no agents have signed up')).toBeTruthy()
+  })
+
+  it.each([PlatformExperimentStatus.DRAFT, PlatformExperimentStatus.RUNNING, PlatformExperimentStatus.CLOSED])('is not offered while it is %s', async status => {
+    show(status)
+    await screen.findByRole('cell', { name: 'ag-old' })
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
   })
 })

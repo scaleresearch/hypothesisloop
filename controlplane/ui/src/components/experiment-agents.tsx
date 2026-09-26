@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
+  startPlatformExperiment,
 } from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
@@ -113,9 +114,25 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
+  const [starting, setStarting] = useState<'asked' | 'sent' | null>(null)
+  const { mutate: reread } = useSWRConfig()
   const readOnly = useReadOnly()
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
+
+  async function start() {
+    setStarting('sent')
+    setRowError('')
+    try {
+      await startPlatformExperiment(pe.id)
+      // The page reads the experiment under this key, and its status is what just changed.
+      await reread(['pe', pe.id])
+    } catch (e) {
+      setRowError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStarting(null)
+    }
+  }
 
   async function remove(agent: AgentSignup) {
     setRemoving(null)
@@ -155,6 +172,12 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {readOnly ? null : started
             ? <span className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
+          {!readOnly && pe.status === PlatformExperimentStatus.OPEN && (
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Button size="sm" variant="primary" loading={starting === 'sent'} onClick={() => setStarting('asked')}>Start now</Button>
+              <span className="text-xs text-subtle">Otherwise it starts by itself at its start time. Either way the agents present then are the ones that take part.</span>
+            </div>
+          )}
           {shown.map(agent => (
             <Secret
               key={agent.agent_id}
@@ -223,6 +246,16 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             </Table>
           )}
         </div>
+        <ConfirmDialog
+          open={starting === 'asked'}
+          title="Start this platform experiment now?"
+          confirmLabel="Start"
+          variant="primary"
+          onConfirm={start}
+          onCancel={() => setStarting(null)}
+        >
+          Signup closes and the budget is divided among the agents that have joined. No agent can join or be removed afterwards.
+        </ConfirmDialog>
         {removing && (
           <ConfirmDialog
             open

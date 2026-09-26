@@ -459,6 +459,12 @@ export function createPlatformExperiment(projectID: string, req: CreatePlatformE
   return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
 }
 
+// Closes signup and divides the budget among the agents present, once and from status open. The
+// API refuses it when nobody has joined.
+export async function startPlatformExperiment(id: string): Promise<void> {
+  await apiSend('POST', `/platform-experiments/${id}/start`)
+}
+
 export interface PlatformExperimentsParams {
   /** The project's own. The ones staff shared with every account are listed with them, in every project. */
   project_id?: string
