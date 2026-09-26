@@ -109,5 +109,5 @@ continuing — do this as routine housekeeping, not just when someone complains 
 - `podman stop -t 90 agent-<n>` for each agent you run yourself (the agent takes one last turn
   of up to a minute to file owed summaries and verdicts). A hosted agent needs nothing: its token
   works for two more minutes and its machine is taken down after them. Leave branches/commits in
-  the project's repository intact.
+  the experiment's repository intact.
 - Final pass over `$FINDINGS_FILE` — anything still open should say so explicitly.

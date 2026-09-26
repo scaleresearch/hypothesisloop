@@ -72,16 +72,18 @@ silently improvise.
    bare-metal node's `bare-agent` process (no systemd unit — restart its `start.sh` by hand; if it
    used an ephemeral cloudflare tunnel URL, prefer a plain LAN URL instead since that survives
    reboots without needing a new tunnel).
-3. **Code repository**: a GitHub repository attached to the project `$HL_PROJECT`, holding
+3. **Code repository**: a GitHub repository the platform experiment names, holding
    `$EXPERIMENT`'s own `seed/` (never `tests/workloads/`). A missing `seed/` isn't automatically
    a bug — some experiments point at a sibling's `seed/` in prose; check `experiment.md` first.
-   Attach it once per project: in the UI under Settings, or with `POST /projects/{id}/repo`,
-   after installing the platform's GitHub App on the repository. An operator with the database
-   can record it with `hl-admin repo attach PROJECT INSTALLATION REPOSITORY_ID`.
-   `GET /projects/{id}/repo` shows what is attached. No address and no git token is handed to
-   anyone: an agent reads the address from its platform experiment (`code_repo_url` in
-   `hl platform-experiments get`) and does not start while the project has no repository.
-   **The attached repository is a separate repo, and no live mirror of this one** — after editing
+   The org connects GitHub once: an owner installs the platform's GitHub App on the GitHub
+   account and connects that installation in the UI under Settings
+   (`POST /orgs/{id}/github-installations`). An operator with the database can connect it with
+   `hl-admin github connect ORG INSTALLATION_ID`. `GET /orgs/{id}/github-repositories` lists what
+   an experiment of the org may name, and the experiment names one as `repository` (owner/name)
+   when it is created (step 2). No address and no git token is handed to anyone: an agent reads
+   the address from its platform experiment (`repository_url` in `hl platform-experiments get`)
+   and does not start while the experiment names no repository.
+   **That repository is a separate repo, and no live mirror of this one** — after editing
    `seed/`, push it to the repository's default branch too, and diff-check before spawning
    agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
    submit, and optionally `.hypothesisloop/experiment.yaml`, the create body step 2 can read.
@@ -120,7 +122,7 @@ silently improvise.
    (`imagePullPolicy: IfNotPresent`) — a build that never made it past `podman build` (no
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
    the per-experiment `seed/build_and_push.sh` where one exists (it takes the registry from `localdev/.host-address`, pushes and renders the
-   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to the attached repository with
+   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to the experiment's repository with
    the rest of `seed/`, and run it again whenever the host address changes), or `make <name>-workload-image` for the platform's
    own images. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
    `localdev/.host-address`) from any cluster node before spawning any agents.
@@ -142,7 +144,7 @@ Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `d
 `ends_at` (RFC3339).
 
 With `from_repo: true` in the file, every field it leaves out is read from
-`.hypothesisloop/experiment.yaml` at the head of the default branch of the project's repository.
+`.hypothesisloop/experiment.yaml` at the head of the default branch of the repository the same request names.
 `budget_accelerator_hours`, `max_agents` and `ends_at` are always stated in the request and
 never read from the repository.
 
@@ -153,7 +155,7 @@ platform experiment's coordinator token and briefed with
 `agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
 for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
-default applies. Both keys need the project's repository (`no_repository` without one) and are
+default applies. Both keys need `repository` in the request (`no_repository` without one) and are
 read from the request only. Creating makes the experiment and no agent. With a hosted coordinator
 and hosted agents, creating the experiment, adding the agents and `hl platform-experiments start`
 is all there is to do: the coordinator keeps the
