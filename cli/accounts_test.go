@@ -80,8 +80,8 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
 		{[]string{"cluster", "remove", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east", nil},
 		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
-		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
 		{[]string{"cluster", "priority", "gpu-east", "250", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/gpu-east", map[string]any{"priority": 250}},
+		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
 		{[]string{"cluster", "enable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/enable", nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -321,16 +321,6 @@ func TestClusterDisablePrintsTheClusterAndARefusalFails(t *testing.T) {
 	}
 }
 
-func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
-	accountsServer(t, nil, `{"clusters":[],"api_keys":[],"projects":[]}`)
-	for _, group := range []string{"cluster", "api-key", "project"} {
-		code, stdout, stderr := hl(t, group, "list", "--org", "org-1")
-		if code != 0 || stdout != "" || !strings.Contains(stderr, group+" list: none") {
-			t.Fatalf("hl %s list: exit code = %d, stdout = %q, stderr = %q", group, code, stdout, stderr)
-		}
-	}
-}
-
 func TestClusterPriorityAsksForANameAndAWholeNumberAndPrintsARefusal(t *testing.T) {
 	calls := accountsServer(t, nil, `{"name":"gpu-east","priority":250}`)
 	for _, args := range [][]string{
@@ -360,6 +350,16 @@ func TestClusterPriorityAsksForANameAndAWholeNumberAndPrintsARefusal(t *testing.
 	code, stdout, stderr = hl(t, "cluster", "priority", "platform", "5", "--org", "org-1")
 	if code != 1 || stdout != "" || !strings.Contains(stderr, "shared cluster holds the platform's priority") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal", code, stdout, stderr)
+	}
+}
+
+func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
+	accountsServer(t, nil, `{"clusters":[],"api_keys":[],"projects":[]}`)
+	for _, group := range []string{"cluster", "api-key", "project"} {
+		code, stdout, stderr := hl(t, group, "list", "--org", "org-1")
+		if code != 0 || stdout != "" || !strings.Contains(stderr, group+" list: none") {
+			t.Fatalf("hl %s list: exit code = %d, stdout = %q, stderr = %q", group, code, stdout, stderr)
+		}
 	}
 }
 

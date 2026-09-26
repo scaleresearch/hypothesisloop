@@ -545,15 +545,6 @@ runtime reports next. The settings kept under the old id are deleted.`, stderr)
 	return onCluster(c, fs, args, "DELETE", "/identity", stdout, stderr)
 }
 
-func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
-
-Turns a cluster off for the org's jobs: from now on none of them is placed on it. The cluster is
-any that hl cluster list shows, one the org registered or one the platform shares, and the
-decision is this org's alone. Its jobs already placed there are not touched and run to their
-end. A job that waits because the org turned off every cluster it could use reads
-not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`, stderr)
-	return onCluster(c, fs, args, "POST", "/disable", stdout, stderr)
 func clusterPriority(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("cluster priority", `usage: hl cluster priority NAME VALUE [--org ORG]
 
@@ -583,6 +574,15 @@ priorities, in the order placement goes by.`, stderr)
 	return call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(operands[0])), map[string]int{"priority": priority}, "", "", stdout, stderr)
 }
 
+func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
+
+Turns a cluster off for the org's jobs: from now on none of them is placed on it. The cluster is
+any that hl cluster list shows, one the org registered or one the platform shares, and the
+decision is this org's alone. Its jobs already placed there are not touched and run to their
+end. A job that waits because the org turned off every cluster it could use reads
+not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`, stderr)
+	return onCluster(c, fs, args, "POST", "/disable", stdout, stderr)
 }
 
 func clusterEnable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
