@@ -402,6 +402,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			Status string `json:"status"`
 		}
 	}, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
 		if caller, _ := auth.FromContext(ctx); caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
 			return nil, huma.Error403Forbidden("an agent finishes itself, with its own token")
 		}

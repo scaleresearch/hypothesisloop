@@ -305,6 +305,7 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/share", request: "/platform-experiments/<pe>/share", rule: staffOnly},
 	{method: "POST", path: "/platform-experiments/{id}/unshare", request: "/platform-experiments/<pe>/unshare", rule: staffOnly},
 	{method: "DELETE", path: "/platform-experiments/{id}/agents/{agent_id}", request: "/platform-experiments/<pe>/agents/<agent>", rule: scoped(coordinatorAudience, reached)},
+	{method: "POST", path: "/platform-experiments/{id}/agents/{agent_id}/finish", request: "/platform-experiments/<pe>/agents/<agent>/finish", body: `{"reason":"nothing left"}`, rule: ownSession(agentAudience, "agent")},
 
 	// ---- donations ----
 	{method: "GET", path: "/donations", request: "/donations?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
