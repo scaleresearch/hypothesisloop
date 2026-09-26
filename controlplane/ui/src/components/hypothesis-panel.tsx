@@ -14,7 +14,7 @@ import { linkGroups } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
-import { useReadOnly } from '@/lib/example'
+import { useReadOnly } from '@/lib/read-only'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph

@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
-import { useReadOnly } from '@/lib/example'
+import { useReadOnly } from '@/lib/read-only'
 
 /** Marks a hypothesis or note that came from a person, wherever one is shown. */
 function HumanAuthor({ author }: { author: string }) {

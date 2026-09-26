@@ -3,15 +3,24 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { fetchAgentsPage } from '@/lib/api'
-import { useListScope } from '@/lib/example'
+import { useTenant } from '@/lib/tenant'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const LISTED = 50
 
-/** Picks an agent by id or name; typing searches all of them on the server. */
-export function AgentSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const scope = useListScope()
+/**
+ * Picks an agent by id or name; typing searches all of them on the server. The agents are the
+ * selected project's, or with `platformExperimentID` those of that platform experiment alone,
+ * for a shared one that lies in no project of the caller's.
+ */
+export function AgentSelect({ value, onChange, platformExperimentID }: {
+  value: string
+  onChange: (id: string) => void
+  platformExperimentID?: string
+}) {
+  const { project } = useTenant()
   const [q, setQ] = useState('')
+  const scope = platformExperimentID ? { platform_experiment_id: platformExperimentID } : { project_id: project.id }
   const { data } = useSWR(
     ['agent-search', scope, q],
     () => fetchAgentsPage({ ...scope, q, limit: LISTED }),

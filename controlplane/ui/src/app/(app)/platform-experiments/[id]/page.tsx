@@ -2,7 +2,9 @@
 
 import { Fragment, useMemo, useState } from 'react'
 import { useProjectRouter } from '@/lib/query-state'
-import { useReadOnly, useRecordScope } from '@/lib/example'
+import { isReadOnly, ReadOnlyProvider, useRecordScope } from '@/lib/read-only'
+import { useTenant } from '@/lib/tenant'
+import { SharedBadge } from '@/components/shared-badge'
 import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
@@ -504,8 +506,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     () => fetchPlatformExperiment(id),
     { refreshInterval: 15_000 },
   )
-  const scoped = useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
-  const readOnly = useReadOnly()
+  const { me } = useTenant()
+  useRecordScope(pe?.project_id)
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
     ['pe-quotas', id],
@@ -613,7 +615,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     (statsError || hypothesisStatsError) && 'job counts',
   ].filter(Boolean) as string[]
 
-  if (peLoading || !scoped) return <Loading />
+  if (peLoading) return <Loading />
   if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
   if (failed.length > 0) return <ErrorMessage>Could not load {failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
@@ -677,17 +679,19 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
   const relevantAgents = new Set((quotas ?? []).map(q => q.agent_id))
   const relevantDonations = (donations?.items ?? []).filter(d => relevantAgents.has(d.agent_id))
 
+  const readOnly = isReadOnly(me, pe)
+
   return (
+    <ReadOnlyProvider value={readOnly}>
     <div>
       {/* Header */}
       <PageHeader
-        back={readOnly
-          ? { label: 'Examples', onClick: () => router.push('/examples') }
-          : { label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
+        back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
         title={pe.name}
         description={
           <div className="flex flex-wrap items-center gap-2.5">
             <StatusBadge status={pe.status} />
+            <SharedBadge pe={pe} />
             {!isZeroDate(pe.starts_at) && (
               <span className="text-xs text-subtle">
                 {formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}
@@ -703,6 +707,12 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           </div>
         }
       />
+
+      {readOnly && (
+        <p role="note" className="-mt-3 mb-4 text-xs text-muted">
+          The platform shares this experiment with every account. You can read everything in it and change nothing.
+        </p>
+      )}
 
       {/* Description + metrics */}
       {(pe.description || (pe.metrics && pe.metrics.length > 0)) && (
@@ -1238,5 +1248,6 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
         </Card>
       )}
     </div>
+    </ReadOnlyProvider>
   )
 }

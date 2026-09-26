@@ -17,7 +17,7 @@ import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { InstanceHealth } from '@/components/instance-health'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
-import { useReadOnly } from '@/lib/example'
+import { useReadOnly } from '@/lib/read-only'
 
 // The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
 // accepted when the harness image carries a prompt for it.

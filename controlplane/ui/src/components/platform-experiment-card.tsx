@@ -6,7 +6,7 @@ import { clsx } from 'clsx'
 import { fetchPlatformExperimentQuotas, fetchExperimentStats, fetchHypothesisStats, HYPOTHESIS_STATUSES } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, MetricDefinition } from '@/types'
 import { useProjectRouter } from '@/lib/query-state'
-import { platformExperimentHref } from '@/lib/example'
+import { isReadOnly } from '@/lib/read-only'
 import { useTenant } from '@/lib/tenant'
 import { quotaRemainingAccH } from '@/lib/quota'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
@@ -14,6 +14,7 @@ import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { statusColor } from '@/lib/colors'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
 import { Table } from '@/components/ui/table'
 import { Eyebrow, Pill } from '@/components/ui/text'
@@ -33,21 +34,19 @@ function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) 
   )
 }
 
-/**
- * One platform experiment in a list, opening its page. Without `onEdit` it offers no edit, which
- * is how a list of examples shows it.
- */
+/** One platform experiment in a list, opening its page. One the caller only reads offers no edit. */
 export function PlatformExperimentCard({
   pe,
   onEdit,
 }: {
   pe: PlatformExperiment
-  onEdit?: (pe: PlatformExperiment) => void
+  onEdit: (pe: PlatformExperiment) => void
 }) {
   const router = useProjectRouter()
   const { me } = useTenant()
   const [expanded, setExpanded] = useState(false)
-  const href = platformExperimentHref(me, pe)
+  const readOnly = isReadOnly(me, pe)
+  const href = `/platform-experiments/${pe.id}`
 
   // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
   // expand toggle needs this data too, otherwise it shows 0 until the card is expanded once.
@@ -87,6 +86,7 @@ export function PlatformExperimentCard({
         <div className="flex items-center gap-2.5">
           <StatusBadge status={pe.status} />
           <span className="text-base font-bold">{pe.name}</span>
+          <SharedBadge pe={pe} />
         </div>
         <div className="flex items-center gap-3 font-normal">
           {!isZeroDate(pe.starts_at) && (
@@ -95,7 +95,7 @@ export function PlatformExperimentCard({
           {daysLeft != null && daysLeft > 0 && (
             <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
           )}
-          {onEdit && <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>}
+          {!readOnly && <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>}
           <span className="text-xs text-muted" onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
         </div>
       </CardHeader>

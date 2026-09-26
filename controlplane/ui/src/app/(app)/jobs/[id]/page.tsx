@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import { useRecordScope } from '@/lib/example'
+import { useRecordScope } from '@/lib/read-only'
 import { Link } from '@/components/ui/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -32,7 +32,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
-  const scoped = useRecordScope(job)
+  useRecordScope(job?.project_id)
   const { data: logs, error: logsError } = useSWR(
     job ? `logs-${id}` : null,
     () => fetchExperimentLogs(id),
@@ -51,7 +51,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     </div>
   )
 
-  if (!job || !scoped) return <Loading />
+  if (!job) return <Loading />
 
   const j = job
   // evictionLabel maps the code to its human label and keeps any explanation the scheduler

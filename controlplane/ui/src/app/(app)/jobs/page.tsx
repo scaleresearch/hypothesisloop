@@ -23,7 +23,7 @@ import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
-import { useExample, useListScope } from '@/lib/example'
+import { listProject, useExperimentAccess } from '@/lib/read-only'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
@@ -40,15 +40,15 @@ export default function JobsPage() {
 }
 
 function JobsPageContent() {
-  const { org } = useTenant()
+  const { org, project } = useTenant()
   const router = useProjectRouter()
-  const example = useExample()
-  const scope = useListScope()
-  const scopeKey = 'project_id' in scope ? scope.project_id : 'example'
   const [agentFilter, setAgentFilter] = useState('')
-  const [peParam, setPEFilter] = useQueryParam('platform_experiment_id')
-  // An example's jobs are that experiment's, whatever the URL filters by.
-  const peFilter = example ? example.id : peParam
+  const [peFilter, setPEFilter] = useQueryParam('platform_experiment_id')
+  // The jobs of a shared platform experiment of another org are asked for by it alone and
+  // cannot be cancelled. Which it is is known once the experiment has been read.
+  const access = useExperimentAccess(peFilter || undefined)
+  const scope = listProject(project, access)
+  const scopeKey = scope.project_id ?? 'shared'
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -76,7 +76,7 @@ function JobsPageContent() {
   const sort = `${sortDir === 'desc' ? '-' : ''}${sortKey}`
 
   const { data, error, isLoading, mutate } = useSWR(
-    ['jobs', scopeKey, agentFilter, peFilter, statusFilter, page, sort],
+    access.known ? ['jobs', scopeKey, agentFilter, peFilter, statusFilter, page, sort] : null,
     () => fetchExperimentsPage({
       ...scope,
       agent: agentFilter || undefined,
@@ -90,7 +90,7 @@ function JobsPageContent() {
   )
 
   const { data: unsummarized } = useSWR(
-    ['jobs-unsummarized', scopeKey, agentFilter, peFilter],
+    access.known ? ['jobs-unsummarized', scopeKey, agentFilter, peFilter] : null,
     () => fetchUnsummarizedJobIDs({ ...scope, agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
@@ -117,7 +117,7 @@ function JobsPageContent() {
   // read uses, minus its paging. Tallying the visible rows instead would report the page's
   // shape under a label that reads as the platform's.
   const { data: stats } = useSWR(
-    ['job-stats', scopeKey, agentFilter, peFilter, statusFilter],
+    access.known ? ['job-stats', scopeKey, agentFilter, peFilter, statusFilter] : null,
     () => fetchExperimentStats({
       ...scope,
       agent: agentFilter || undefined,
@@ -164,19 +164,21 @@ function JobsPageContent() {
 
         <div className="flex items-center gap-2">
           <Eyebrow>Agent</Eyebrow>
-          <AgentSelect value={agentFilter} onChange={v => { setAgentFilter(v); setPage(0) }} />
+          <AgentSelect
+            value={agentFilter}
+            onChange={v => { setAgentFilter(v); setPage(0) }}
+            platformExperimentID={scope.project_id ? undefined : peFilter}
+          />
         </div>
 
-        {!example && (
-          <div className="flex items-center gap-2">
-            <Eyebrow>Platform Experiment</Eyebrow>
-            <PlatformExperimentSelect
-              value={peFilter}
-              onChange={v => { setPEFilter(v); setPage(0) }}
-              allLabel="All experiments"
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <Eyebrow>Platform Experiment</Eyebrow>
+          <PlatformExperimentSelect
+            value={peFilter}
+            onChange={v => { setPEFilter(v); setPage(0) }}
+            allLabel="All experiments"
+          />
+        </div>
       </div>
 
       {isLoading && <Loading />}
@@ -304,7 +306,7 @@ function JobsPageContent() {
                       {relTime(j.created_at)}
                     </td>
                     <td onClick={e => e.stopPropagation()}>
-                      {!example && CANCELABLE.has(status) && (
+                      {!access.readOnly && CANCELABLE.has(status) && (
                         <Button
                           variant="danger"
                           size="sm"

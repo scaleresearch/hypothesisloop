@@ -8,7 +8,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const LISTED = 50
 
-/** Picks a platform experiment by name; typing searches all of them on the server. */
+/** Picks a platform experiment by name; typing searches all of them on the server. The shared ones are among every project's. */
 export function PlatformExperimentSelect({ value, onChange, allLabel, placeholder, hideAllOption, className }: {
   value: string
   onChange: (id: string) => void
@@ -38,7 +38,7 @@ export function PlatformExperimentSelect({ value, onChange, allLabel, placeholde
       hideAllOption={hideAllOption}
       className={className}
       options={(selected && !listed.some(p => p.id === selected.id) ? [selected, ...listed] : listed)
-        .map(p => ({ value: p.id, label: `${p.name} (${p.status})` }))}
+        .map(p => ({ value: p.id, label: `${p.name} (${p.status}${p.shared ? ', shared' : ''})` }))}
       hint={more > 0 ? `${more} more, type to search` : undefined}
     />
   )

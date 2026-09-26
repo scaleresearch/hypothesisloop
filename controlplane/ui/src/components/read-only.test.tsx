@@ -5,9 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchExperimentStats, fetchHypothesisStats, fetchPlatformExperimentAgents, fetchPlatformExperimentQuotas,
 } from '@/lib/api'
-import { ExampleContext } from '@/lib/example'
+import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { ExampleBanner } from '@/components/example-banner'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { AddCommentForm, AddIdeaForm, AddLinkForm } from '@/components/human-idea'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
@@ -18,7 +17,7 @@ import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs, Me, Platf
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/platform-experiments/pe-x',
-  useSearchParams: () => new URLSearchParams('example=pe-x'),
+  useSearchParams: () => new URLSearchParams('project=prj_1'),
 }))
 vi.mock('@/lib/api', () => ({
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
@@ -47,14 +46,14 @@ const node = {
 const graph: HypothesisGraph = { root: 'pe-x', nodes: [node], edges: [] } as unknown as HypothesisGraph
 
 // Each case renders the same thing twice: as the owner sees it, where the control must be there
-// for its absence to mean anything, and inside an example.
-function show(ui: ReactNode, example: boolean) {
+// for its absence to mean anything, and as an account that only reads the shared experiment.
+function show(ui: ReactNode, readOnly: boolean) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <TenantContext.Provider value={resolved.tenant}>
-        <ExampleContext.Provider value={example ? { id: 'pe-x', pe } : null}>{ui}</ExampleContext.Provider>
+        <ReadOnlyProvider value={readOnly}>{ui}</ReadOnlyProvider>
       </TenantContext.Provider>
     </SWRConfig>,
   )
@@ -73,7 +72,7 @@ beforeEach(() => {
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
 })
 
-describe('an example shows no control that writes', () => {
+describe('a shared platform experiment of another org shows no control that writes', () => {
   it('to its agents: no add, no token, no remove', async () => {
     const own = show(<ExperimentAgents pe={pe} />, false)
     await screen.findByRole('cell', { name: 'ag-self' })
@@ -99,9 +98,9 @@ describe('an example shows no control that writes', () => {
 
     show(panel, true)
     expect(names('button').filter(n => n?.includes('Add idea'))).toEqual([])
-    // Reading on stays possible, inside the example.
-    expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/hypotheses/hyp-1?example=pe-x')
-    expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/platform-experiments/pe-x?example=pe-x')
+    // Reading on stays possible, from the reader's own project.
+    expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/hypotheses/hyp-1?project=prj_1')
+    expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/platform-experiments/pe-x?project=prj_1')
   })
 
   it('to a hypothesis: no idea, link or comment form', () => {
@@ -118,32 +117,24 @@ describe('an example shows no control that writes', () => {
     expect(screen.getByText('Add link')).toBeTruthy()
     own.unmount()
 
-    const example = show(forms, true)
-    expect(example.container.textContent).toBe('')
+    const shared = show(forms, true)
+    expect(shared.container.textContent).toBe('')
   })
 
-  it('to the experiment in the list: no edit, and it opens as an example', async () => {
-    const own = show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />, false)
+  it('to the experiment in the list: no edit, and a badge that says why', () => {
+    const own = show(<PlatformExperimentCard pe={{ ...pe, project_id: 'prj_1' }} onEdit={() => {}} />, false)
     expect(names('button')).toContain('Edit')
+    expect(screen.getByText('Shared')).toBeTruthy()
     own.unmount()
 
-    show(<PlatformExperimentCard pe={pe} />, true)
+    const plain = show(<PlatformExperimentCard pe={{ ...pe, shared: false, project_id: 'prj_1' }} onEdit={() => {}} />, false)
+    expect(screen.queryByText(/Shared/)).toBeNull()
+    plain.unmount()
+
+    // The card tells from the experiment itself: it sits in the list of the reader's own project.
+    show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />, false)
     expect(screen.getByText('Vision benchmark')).toBeTruthy()
+    expect(screen.getByText('Shared · read only')).toBeTruthy()
     expect(names('button')).toEqual([])
-  })
-})
-
-describe('the banner', () => {
-  it('names the example on its pages and leads back to the list', () => {
-    show(<ExampleBanner />, true)
-    const banner = screen.getByRole('note')
-    expect(banner.textContent).toContain('Example, read only')
-    expect(banner.textContent).toContain('Vision benchmark')
-    expect(screen.getByRole('link', { name: 'All examples' }).getAttribute('href')).toBe('/examples')
-  })
-
-  it('is absent everywhere else', () => {
-    show(<ExampleBanner />, false)
-    expect(screen.queryByRole('note')).toBeNull()
   })
 })

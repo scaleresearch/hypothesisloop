@@ -3,8 +3,8 @@
 import useSWR from 'swr'
 import { Link } from '@/components/ui/link'
 import { useProjectRouter } from '@/lib/query-state'
-import { useRecordScope } from '@/lib/example'
-import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
+import { ReadOnlyProvider, useExperimentAccess, useRecordScope } from '@/lib/read-only'
+import { fetchHypothesis } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Card, CardHeader, CardContent, InsetCard, RowLink } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
@@ -47,11 +47,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   const { data, error, mutate } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
 
-  const { data: pe, error: peError } = useSWR<PlatformExperiment>(
-    data ? ['pe', data.platform_experiment_id] : null,
-    () => fetchPlatformExperiment(data!.platform_experiment_id),
-  )
-  const scoped = useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
+  const access = useExperimentAccess(data?.platform_experiment_id)
+  const pe = access.pe
+  useRecordScope(pe?.project_id)
 
   if (error) return (
     <div>
@@ -61,8 +59,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
     </div>
   )
 
-  // Whether it is an example is known from its platform experiment.
-  if (!data || (!pe && !peError) || !scoped) return <Loading />
+  if (!data) return <Loading />
 
   const jobs = [...(data.jobs ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const findings = data.findings ?? []
@@ -76,6 +73,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
+    <ReadOnlyProvider value={access.readOnly}>
     <div>
       <PageHeader
         back={{
@@ -276,5 +274,6 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         </CardContent>
       </Card>
     </div>
+    </ReadOnlyProvider>
   )
 }
