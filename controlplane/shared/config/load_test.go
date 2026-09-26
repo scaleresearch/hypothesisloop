@@ -152,19 +152,32 @@ func TestLoadRequiresTheUIOrigin(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresAnIssuerAndAnAudienceOnceJWTKeysAreListed(t *testing.T) {
-	keys := "  jwt_keys:\n    - {kid: k1, kty: EC, alg: ES256, crv: P-256, x: AA, y: AA}"
-	withKeys := strings.Replace(productionConfig(t), "  jwt_keys: []", keys, 1)
-	withIssuer := strings.Replace(withKeys, `  issuer: ""`, "  issuer: https://issuer.example/auth/v1", 1)
-	withAudience := strings.Replace(withKeys, `  audience: ""`, "  audience: authenticated", 1)
-	for name, text := range map[string]string{"neither": withKeys, "no audience": withIssuer, "no issuer": withAudience} {
-		if err := loadText(t, text); err == nil {
-			t.Errorf("Load accepted jwt_keys with %s", name)
+func TestLoadRequiresEveryIdentityProviderToBeCompleteAndListedOnce(t *testing.T) {
+	const key = "{kid: k1, kty: EC, alg: ES256, crv: P-256, x: AA, y: AA}"
+	with := func(providers string) string {
+		return strings.Replace(productionConfig(t), "  identity_providers: []", "  identity_providers: ["+providers+"]", 1)
+	}
+	supabase := "{issuer: https://issuer.example/auth/v1, audience: authenticated, jwt_keys: [" + key + "]}"
+	local := "{issuer: http://localhost/dev, audience: dev, jwt_keys: [" + key + "]}"
+	for name, providers := range map[string]string{
+		"no issuer":         "{audience: authenticated, jwt_keys: [" + key + "]}",
+		"no audience":       "{issuer: https://issuer.example/auth/v1, jwt_keys: [" + key + "]}",
+		"no keys":           "{issuer: https://issuer.example/auth/v1, audience: authenticated}",
+		"one issuer twice":  supabase + ", " + supabase,
+		"a field it has no": "{issuer: https://issuer.example/auth/v1, audience: authenticated, jwt_keys: [" + key + "], jwks_url: https://issuer.example}",
+	} {
+		if err := loadText(t, with(providers)); err == nil {
+			t.Errorf("Load accepted an identity provider with %s", name)
 		}
 	}
-	both := strings.Replace(withIssuer, `  audience: ""`, "  audience: authenticated", 1)
-	if err := loadText(t, both); err != nil {
-		t.Fatalf("Load rejected jwt_keys with an issuer and an audience: %v", err)
+	for name, providers := range map[string]string{"one provider": supabase, "two providers": supabase + ", " + local} {
+		if err := loadText(t, with(providers)); err != nil {
+			t.Errorf("Load rejected %s: %v", name, err)
+		}
+	}
+	// The keys the file had before identity providers were a list are refused by name.
+	if err := loadText(t, strings.Replace(productionConfig(t), "  identity_providers: []", "  issuer: https://issuer.example/auth/v1", 1)); err == nil {
+		t.Error("Load accepted auth.issuer outside an identity provider")
 	}
 }
 

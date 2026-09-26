@@ -59,6 +59,39 @@ func parseJWK(k config.JWTKey) (verifyingKey, error) {
 	}
 }
 
+// identityProvider is one configured issuer, parsed once at startup.
+type identityProvider struct {
+	audience string
+	keys     map[string]verifyingKey
+}
+
+// parseIdentityProviders keys the configured providers by issuer. Two providers may use the same
+// kid: a key is only ever looked up within the provider a token's issuer names.
+func parseIdentityProviders(configured []config.IdentityProvider) (map[string]identityProvider, error) {
+	providers := make(map[string]identityProvider, len(configured))
+	for _, c := range configured {
+		if c.Issuer == "" || c.Audience == "" || len(c.JWTKeys) == 0 {
+			return nil, fmt.Errorf("identity provider %q needs an issuer, an audience and at least one key", c.Issuer)
+		}
+		if _, dup := providers[c.Issuer]; dup {
+			return nil, fmt.Errorf("identity provider %s is listed twice", c.Issuer)
+		}
+		keys := make(map[string]verifyingKey, len(c.JWTKeys))
+		for _, k := range c.JWTKeys {
+			parsed, err := parseJWK(k)
+			if err != nil {
+				return nil, fmt.Errorf("identity provider %s: %w", c.Issuer, err)
+			}
+			if _, dup := keys[k.Kid]; dup {
+				return nil, fmt.Errorf("identity provider %s: jwt key %s is listed twice", c.Issuer, k.Kid)
+			}
+			keys[k.Kid] = parsed
+		}
+		providers[c.Issuer] = identityProvider{audience: c.Audience, keys: keys}
+	}
+	return providers, nil
+}
+
 func bigInt(b64 string) (*big.Int, error) {
 	raw, err := encoding.DecodeString(b64)
 	if err != nil || len(raw) == 0 {
@@ -101,10 +134,13 @@ func (c jwtClaims) displayName() string {
 	return c.UserMetadata.Name
 }
 
-// verifyJWT checks a JWT's signature against the configured key its header names, then its
-// issuer, audience and validity window, and returns its claims. An anonymous session is refused:
-// an account is a person the identity provider knows.
-func verifyJWT(token, issuer, audience string, keys map[string]verifyingKey, now time.Time) (jwtClaims, error) {
+// verifyJWT finds the configured identity provider the token's issuer claim names, checks the
+// signature against that provider's key the header names, then that provider's audience and the
+// validity window, and returns the claims. The issuer is read before the signature is checked
+// only to pick whose keys may vouch for the token: a token claiming one provider and signed by
+// another's key is refused. An anonymous session is refused: an account is a person the identity
+// provider knows.
+func verifyJWT(token string, providers map[string]identityProvider, now time.Time) (jwtClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return jwtClaims{}, errors.New("malformed token")
@@ -116,9 +152,17 @@ func verifyJWT(token, issuer, audience string, keys map[string]verifyingKey, now
 	if err := decodeSegment(parts[0], &header); err != nil {
 		return jwtClaims{}, errors.New("malformed token header")
 	}
-	key, ok := keys[header.Kid]
+	var claims jwtClaims
+	if err := decodeSegment(parts[1], &claims); err != nil {
+		return jwtClaims{}, errors.New("malformed token claims")
+	}
+	provider, ok := providers[claims.Issuer]
 	if !ok {
-		return jwtClaims{}, errors.New("token is signed by a key that is not configured")
+		return jwtClaims{}, errors.New("token is from an issuer that is not configured")
+	}
+	key, ok := provider.keys[header.Kid]
+	if !ok {
+		return jwtClaims{}, errors.New("token is signed by a key its issuer does not list")
 	}
 	if header.Alg != key.alg {
 		return jwtClaims{}, errors.New("token algorithm does not match its key")
@@ -142,14 +186,8 @@ func verifyJWT(token, issuer, audience string, keys map[string]verifyingKey, now
 			return jwtClaims{}, errors.New("bad signature")
 		}
 	}
-	var claims jwtClaims
-	if err := decodeSegment(parts[1], &claims); err != nil {
-		return jwtClaims{}, errors.New("malformed token claims")
-	}
 	switch {
-	case claims.Issuer != issuer:
-		return jwtClaims{}, errors.New("token is from another issuer")
-	case !slices.Contains(claims.Audience, audience):
+	case !slices.Contains(claims.Audience, provider.audience):
 		return jwtClaims{}, errors.New("token is for another audience")
 	case claims.Expiry == 0 || !now.Before(time.Unix(int64(claims.Expiry), 0)):
 		return jwtClaims{}, errors.New("token has expired")

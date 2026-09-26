@@ -47,47 +47,64 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "issuer": {
-          "type": "string"
-        },
-        "audience": {
-          "type": "string"
-        },
-        "jwtKeys": {
+        "identityProviders": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "kid": {
-                "type": "string"
+              "issuer": {
+                "type": "string",
+                "minLength": 1
               },
-              "kty": {
-                "type": "string"
+              "audience": {
+                "type": "string",
+                "minLength": 1
               },
-              "alg": {
-                "type": "string"
-              },
-              "crv": {
-                "type": "string"
-              },
-              "x": {
-                "type": "string"
-              },
-              "y": {
-                "type": "string"
-              },
-              "n": {
-                "type": "string"
-              },
-              "e": {
-                "type": "string"
+              "jwt_keys": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kid": {
+                      "type": "string"
+                    },
+                    "kty": {
+                      "type": "string"
+                    },
+                    "alg": {
+                      "type": "string"
+                    },
+                    "crv": {
+                      "type": "string"
+                    },
+                    "x": {
+                      "type": "string"
+                    },
+                    "y": {
+                      "type": "string"
+                    },
+                    "n": {
+                      "type": "string"
+                    },
+                    "e": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kid",
+                    "kty",
+                    "alg"
+                  ]
+                },
+                "minItems": 1
               }
             },
             "required": [
-              "kid",
-              "kty",
-              "alg"
+              "issuer",
+              "audience",
+              "jwt_keys"
             ]
           }
         },

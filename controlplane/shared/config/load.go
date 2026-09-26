@@ -264,8 +264,15 @@ func (c *Config) build() error {
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}
-	if len(c.Auth.JWTKeys) > 0 && (c.Auth.Issuer == "" || c.Auth.Audience == "") {
-		return fmt.Errorf("auth issuer and audience are required when jwt_keys are listed")
+	issuers := map[string]bool{}
+	for _, provider := range c.Auth.IdentityProviders {
+		if provider.Issuer == "" || provider.Audience == "" || len(provider.JWTKeys) == 0 {
+			return fmt.Errorf("auth identity_providers: issuer, audience and jwt_keys are all required of each (issuer %q)", provider.Issuer)
+		}
+		if issuers[provider.Issuer] {
+			return fmt.Errorf("auth identity_providers: issuer %q is listed twice", provider.Issuer)
+		}
+		issuers[provider.Issuer] = true
 	}
 	if g := c.GitHub; g.Configured() && (g.AppID <= 0 || g.AppSlug == "" || g.ClientID == "" || g.ClientSecret == "" || g.PrivateKey == "") {
 		return fmt.Errorf("github app_id, app_slug, client_id, client_secret and private_key are all required once any of them is set")

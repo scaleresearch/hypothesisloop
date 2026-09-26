@@ -45,14 +45,14 @@ chartChecksum: ""
 # Who may call the API: the auth section of hypothesisloop.yaml, which explains each value. The
 # signing secret is not here. It comes from the Secret.
 auth:
-  # The identity provider people sign in with. With no keys listed no person's token is accepted
-  # and the API takes API keys and derived tokens only.
-  issuer: ""
-  audience: ""
-  # The provider's public keys as its JWKS document lists them, with these fields only:
-  # kid, kty, alg and crv, x, y (ES256) or n, e (RS256). In a values file write "y" and "n" in
-  # quotes: helm reads a bare y or n as a boolean.
-  jwtKeys: []
+  # The identity providers people sign in with, written as they are into auth.identity_providers
+  # of hypothesisloop.yaml, so each entry has that file's keys: issuer, audience and jwt_keys. A
+  # deployment lists the one it uses. With none listed no person's token is accepted and the API
+  # takes API keys and derived tokens only.
+  # jwt_keys are the provider's public keys as its JWKS document lists them, with these fields
+  # only: kid, kty, alg and crv, x, y (ES256) or n, e (RS256). In a values file write "y" and "n"
+  # in quotes: helm reads a bare y or n as a boolean.
+  identityProviders: []
   # Required: the address people open the UI at.
   uiOrigin: ""
 

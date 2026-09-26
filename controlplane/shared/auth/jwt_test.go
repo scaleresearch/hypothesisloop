@@ -93,24 +93,25 @@ func goodClaims() map[string]any {
 	return map[string]any{"iss": testIssuer, "aud": testAudience, "sub": "user-1", "exp": testNow.Add(time.Hour).Unix(), "name": "Ada Lovelace"}
 }
 
-func keysOf(t *testing.T, signers ...testSigner) map[string]verifyingKey {
+// providersOf is the test issuer as the one configured identity provider, with these keys.
+func providersOf(t *testing.T, signers ...testSigner) map[string]identityProvider {
 	t.Helper()
-	keys := map[string]verifyingKey{}
+	provider := config.IdentityProvider{Issuer: testIssuer, Audience: testAudience}
 	for _, s := range signers {
-		parsed, err := parseJWK(s.jwk)
-		if err != nil {
-			t.Fatalf("parse jwk %s: %v", s.jwk.Kid, err)
-		}
-		keys[s.jwk.Kid] = parsed
+		provider.JWTKeys = append(provider.JWTKeys, s.jwk)
 	}
-	return keys
+	providers, err := parseIdentityProviders([]config.IdentityProvider{provider})
+	if err != nil {
+		t.Fatalf("parse identity provider: %v", err)
+	}
+	return providers
 }
 
 func TestAJWTSignedByAConfiguredKeyVerifies(t *testing.T) {
 	ec, rs := newECSigner(t, "ec-1"), newRSASigner(t, "rsa-1")
-	keys := keysOf(t, ec, rs)
+	keys := providersOf(t, ec, rs)
 	for _, signer := range []testSigner{ec, rs} {
-		claims, err := verifyJWT(signer.token(t, goodClaims()), testIssuer, testAudience, keys, testNow)
+		claims, err := verifyJWT(signer.token(t, goodClaims()), keys, testNow)
 		if err != nil || claims.Subject != "user-1" || claims.displayName() != "Ada Lovelace" {
 			t.Errorf("%s: got = %+v, %v, want user-1, Ada Lovelace", signer.jwk.Alg, claims, err)
 		}
@@ -122,7 +123,7 @@ func TestTheAudienceMayBeOneOfSeveralAndNotBeforeMayHavePassed(t *testing.T) {
 	claims := goodClaims()
 	claims["aud"] = []string{"another-service", testAudience}
 	claims["nbf"] = testNow.Unix()
-	if _, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow); err != nil {
+	if _, err := verifyJWT(ec.token(t, claims), providersOf(t, ec), testNow); err != nil {
 		t.Fatalf("got = %v, want it accepted", err)
 	}
 }
@@ -132,12 +133,12 @@ func TestTheNameIsReadWhereSupabasePutsItToo(t *testing.T) {
 	claims := goodClaims()
 	delete(claims, "name")
 	claims["user_metadata"] = map[string]any{"name": "Grace Hopper"}
-	got, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow)
+	got, err := verifyJWT(ec.token(t, claims), providersOf(t, ec), testNow)
 	if err != nil || got.displayName() != "Grace Hopper" {
 		t.Fatalf("got = %q, %v, want Grace Hopper", got.displayName(), err)
 	}
 	delete(claims, "user_metadata")
-	if got, err := verifyJWT(ec.token(t, claims), testIssuer, testAudience, keysOf(t, ec), testNow); err != nil || got.displayName() != "" {
+	if got, err := verifyJWT(ec.token(t, claims), providersOf(t, ec), testNow); err != nil || got.displayName() != "" {
 		t.Fatalf("a token with no name: got = %q, %v, want it accepted with an empty name", got.displayName(), err)
 	}
 }
@@ -146,7 +147,7 @@ func TestJWTsThatMustBeRefused(t *testing.T) {
 	configured, unlisted := newECSigner(t, "ec-1"), newECSigner(t, "ec-2")
 	impostor := newECSigner(t, "ec-1")
 	rs := newRSASigner(t, "rsa-1")
-	keys := keysOf(t, configured, rs)
+	keys := providersOf(t, configured, rs)
 
 	with := func(change func(map[string]any)) map[string]any {
 		claims := goodClaims()
@@ -190,12 +191,12 @@ func TestJWTsThatMustBeRefused(t *testing.T) {
 		"not a token":                        "hello",
 		"empty":                              "",
 	} {
-		if claims, err := verifyJWT(token, testIssuer, testAudience, keys, testNow); err == nil {
+		if claims, err := verifyJWT(token, keys, testNow); err == nil {
 			t.Errorf("%s: got subject %q, want a refusal", name, claims.Subject)
 		}
 	}
-	if _, err := verifyJWT(good, testIssuer, testAudience, map[string]verifyingKey{}, testNow); err == nil {
-		t.Error("a valid token with no keys configured: got = nil, want a refusal")
+	if _, err := verifyJWT(good, map[string]identityProvider{}, testNow); err == nil {
+		t.Error("a valid token with no identity provider configured: got = nil, want a refusal")
 	}
 }
 
@@ -215,6 +216,73 @@ func TestOnlyStrongKeysOfKnownKindsAreAccepted(t *testing.T) {
 		"RSA without n":     {Kid: "k", Kty: "RSA", Alg: "RS256", E: "AQAB"},
 	} {
 		if _, err := parseJWK(key); err == nil {
+			t.Errorf("%s: got = nil, want an error", name)
+		}
+	}
+}
+
+// Two providers are two separate sets of users: a token is only ever checked against the keys
+// and the audience of the provider its issuer names.
+func TestATokenIsCheckedAgainstItsOwnIssuerOnly(t *testing.T) {
+	const localIssuer, localAudience = "http://localhost/dev", "dev"
+	hosted, local := newECSigner(t, "hosted-1"), newECSigner(t, "local-1")
+	// Both providers happen to name a key alike, as two JWKS documents may.
+	hostedShared, localShared := newECSigner(t, "shared"), newECSigner(t, "shared")
+	stranger := newECSigner(t, "hosted-1")
+	providers, err := parseIdentityProviders([]config.IdentityProvider{
+		{Issuer: testIssuer, Audience: testAudience, JWTKeys: []config.JWTKey{hosted.jwk, hostedShared.jwk}},
+		{Issuer: localIssuer, Audience: localAudience, JWTKeys: []config.JWTKey{local.jwk, localShared.jwk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(issuer, audience string) map[string]any {
+		c := goodClaims()
+		c["iss"], c["aud"] = issuer, audience
+		return c
+	}
+
+	for name, token := range map[string]string{
+		"the hosted provider's":               hosted.token(t, claims(testIssuer, testAudience)),
+		"the local provider's":                local.token(t, claims(localIssuer, localAudience)),
+		"the hosted provider's, shared kid":   hostedShared.token(t, claims(testIssuer, testAudience)),
+		"the local provider's, shared kid":    localShared.token(t, claims(localIssuer, localAudience)),
+		"audiences that include its issuer's": local.token(t, map[string]any{"iss": localIssuer, "aud": []string{testAudience, localAudience}, "sub": "user-1", "exp": testNow.Add(time.Hour).Unix()}),
+	} {
+		if got, err := verifyJWT(token, providers, testNow); err != nil || got.Subject != "user-1" {
+			t.Errorf("%s token: got = %+v, %v, want user-1", name, got, err)
+		}
+	}
+
+	for name, token := range map[string]string{
+		"an issuer that is not configured":                      hosted.token(t, claims("https://evil.example/auth/v1", testAudience)),
+		"an unconfigured issuer with the local audience":        local.token(t, claims("https://evil.example/auth/v1", localAudience)),
+		"the right issuer and a key nobody listed":              stranger.token(t, claims(testIssuer, testAudience)),
+		"the hosted issuer signed by the local provider's key":  local.token(t, claims(testIssuer, testAudience)),
+		"the local issuer signed by the hosted provider's key":  hosted.token(t, claims(localIssuer, localAudience)),
+		"the hosted issuer under the other provider's same kid": localShared.token(t, claims(testIssuer, testAudience)),
+		"the hosted issuer with the local audience":             hosted.token(t, claims(testIssuer, localAudience)),
+		"the local issuer with the hosted audience":             local.token(t, claims(localIssuer, testAudience)),
+		"no issuer": hosted.token(t, map[string]any{"aud": testAudience, "sub": "user-1", "exp": testNow.Add(time.Hour).Unix()}),
+	} {
+		if got, err := verifyJWT(token, providers, testNow); err == nil {
+			t.Errorf("%s: got subject %q, want a refusal", name, got.Subject)
+		}
+	}
+}
+
+func TestIdentityProvidersThatMustBeRefused(t *testing.T) {
+	ec := newECSigner(t, "ec-1")
+	whole := config.IdentityProvider{Issuer: testIssuer, Audience: testAudience, JWTKeys: []config.JWTKey{ec.jwk}}
+	for name, providers := range map[string][]config.IdentityProvider{
+		"one issuer listed twice":   {whole, whole},
+		"no issuer":                 {{Audience: testAudience, JWTKeys: whole.JWTKeys}},
+		"no audience":               {{Issuer: testIssuer, JWTKeys: whole.JWTKeys}},
+		"no keys":                   {{Issuer: testIssuer, Audience: testAudience}},
+		"one kid twice in one list": {{Issuer: testIssuer, Audience: testAudience, JWTKeys: []config.JWTKey{ec.jwk, ec.jwk}}},
+		"a symmetric key":           {{Issuer: testIssuer, Audience: testAudience, JWTKeys: []config.JWTKey{{Kid: "k", Kty: "oct"}}}},
+	} {
+		if _, err := parseIdentityProviders(providers); err == nil {
 			t.Errorf("%s: got = nil, want an error", name)
 		}
 	}

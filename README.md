@@ -125,15 +125,19 @@ tokens and that UI:
 
 ```yaml
 auth:
-  issuer: https://<project-ref>.supabase.co/auth/v1
-  audience: authenticated
-  jwt_keys: [...]        # the keys of https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+  identity_providers:
+    - issuer: https://<project-ref>.supabase.co/auth/v1
+      audience: authenticated
+      jwt_keys: [...]    # the keys of https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
   ui_origin: http://localhost:3000
 ```
 
-`make controlplane-up` renders these for a stand-in identity provider instead (see
-`localdev/lib/auth.sh`), so the local stack takes no Supabase token as it comes. The UI's browser
-run uses that stand-in:
+A deployment lists the one provider it signs people in with. Locally `make render-settings`
+(`localdev/lib/auth.sh`) always lists a stand-in whose key is made on this machine, which the e2e
+suite and the UI's browser run sign their users with, and with `LOCAL_IDENTITY_PROVIDER=supabase`
+in `.env` the Supabase project beside it, so signing in with GitHub and the tests work on the
+same running stack. A token is checked against the one provider its issuer names. The UI's
+browser run uses the stand-in:
 
 ```bash
 cd controlplane/ui

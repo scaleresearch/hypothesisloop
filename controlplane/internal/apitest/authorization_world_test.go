@@ -245,7 +245,8 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	w := &world{keys: map[string]*domain.APIKey{}}
 	signer, jwk := newWorldSigner(t)
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{
-		SigningSecret: worldSecret, Issuer: worldIssuer, Audience: worldAudience, JWTKeys: []config.JWTKey{jwk},
+		SigningSecret:     worldSecret,
+		IdentityProviders: []config.IdentityProvider{{Issuer: worldIssuer, Audience: worldAudience, JWTKeys: []config.JWTKey{jwk}}},
 	}, w)
 	if err != nil {
 		t.Fatal(err)

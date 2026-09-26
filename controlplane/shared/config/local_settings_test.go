@@ -20,9 +20,9 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	}
 	dir := t.TempDir()
 	rendered := filepath.Join(dir, "rendered.yaml")
-	// The key is made in the test's directory, and the section a developer's .env adds is left
-	// out: its secrets are that machine's.
-	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && lib_render_settings host.example.internal "$2"`
+	// The key is made in the test's directory, and what a developer's .env adds is left out: its
+	// secrets and its identity provider are that machine's.
+	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GITHUB_APP_ID="" && HL_LOCAL_IDENTITY_PROVIDER="" && lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -32,6 +32,10 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	cfg, err := Load(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
+	}
+	if providers := cfg.Auth.IdentityProviders; len(providers) != 1 || providers[0].Issuer != "http://localhost/hypothesisloop-dev" ||
+		providers[0].Audience != "hypothesisloop-dev" || len(providers[0].JWTKeys) != 1 || providers[0].JWTKeys[0].Kid != "local-dev" {
+		t.Errorf("identity providers = %+v, want the one key made on this machine", providers)
 	}
 	if cfg.Agents.Launcher == "" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)

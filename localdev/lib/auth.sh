@@ -6,10 +6,10 @@
 LIB_AUTH_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export HYPOTHESISLOOP_SIGNING_SECRET="${HYPOTHESISLOOP_SIGNING_SECRET:-local-development-signing-secret-do-not-deploy}"
 
-# The identity provider local development stands in for. The private key is made on this machine
-# by the first render and never leaves it; the e2e suite signs its users' tokens with it.
-# LOCAL_IDENTITY_PROVIDER=supabase in .env renders the Supabase project's issuer and keys
-# instead, so a person signs in for real and the e2e suite's own users are refused.
+# Who signs people in on the local stack. The first is always a key made on this machine by the
+# first render, which never leaves it: the e2e suite and the browser run sign their users with it.
+# LOCAL_IDENTITY_PROVIDER=supabase in .env lists the Supabase project beside it, so a person
+# signs in for real on the same stack the tests run against.
 export HL_DEV_JWT_KEY="${LIB_AUTH_REPO}/localdev/.dev-jwt-key.pem"
 export HL_DEV_JWT_KID="local-dev"
 export HL_DEV_JWT_ISSUER="http://localhost/hypothesisloop-dev"
@@ -44,10 +44,17 @@ if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
 fi
 
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
-# which are the committed ones with this host's address and the local JWT key filled in, and the
-# GitHub App's section when there is one.
+# which are the committed ones with this host's address and the local identity providers filled
+# in, and the GitHub App's section when there is one.
 lib_render_settings() {
-  local host_address="$1" output="$2" coordinate issuer audience keys project
+  local host_address="$1" output="$2" coordinate providers project issuer keys rendered
+  if [[ ! -f "${HL_DEV_JWT_KEY}" ]]; then
+    (umask 077 && openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${HL_DEV_JWT_KEY}")
+  fi
+  coordinate() {
+    openssl ec -in "${HL_DEV_JWT_KEY}" -pubout -outform DER 2>/dev/null | tail -c 64 | "$@" | base64 | tr '+/' '-_' | tr -d '=\n'
+  }
+  providers="{issuer: \"${HL_DEV_JWT_ISSUER}\", audience: ${HL_DEV_JWT_AUDIENCE}, jwt_keys: [{kid: ${HL_DEV_JWT_KID}, kty: EC, alg: ES256, crv: P-256, x: \"$(coordinate head -c 32)\", y: \"$(coordinate tail -c 32)\"}]}"
   if [[ "${HL_LOCAL_IDENTITY_PROVIDER}" == "supabase" ]]; then
     project="$(lib_env_value SUPABASE_PROJECT_REF)"
     if [[ -z "${project}" ]]; then
@@ -55,29 +62,20 @@ lib_render_settings() {
       return 1
     fi
     issuer="https://${project}.supabase.co/auth/v1"
-    audience="authenticated"
     keys="$(curl -fsS "${issuer}/.well-known/jwks.json" | python3 -c 'import json, sys; print(json.dumps([{f: k[f] for f in ("kid", "kty", "alg", "crv", "x", "y", "n", "e") if f in k} for k in json.load(sys.stdin)["keys"]]))')" || {
       echo "render-settings: could not read the signing keys of ${issuer}" >&2
       return 1
     }
-  else
-    if [[ ! -f "${HL_DEV_JWT_KEY}" ]]; then
-      (umask 077 && openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${HL_DEV_JWT_KEY}")
-    fi
-    coordinate() {
-      openssl ec -in "${HL_DEV_JWT_KEY}" -pubout -outform DER 2>/dev/null | tail -c 64 | "$@" | base64 | tr '+/' '-_' | tr -d '=\n'
-    }
-    issuer="${HL_DEV_JWT_ISSUER}"
-    audience="${HL_DEV_JWT_AUDIENCE}"
-    keys="[{kid: ${HL_DEV_JWT_KID}, kty: EC, alg: ES256, crv: P-256, x: \"$(coordinate head -c 32)\", y: \"$(coordinate tail -c 32)\"}]"
+    providers="${providers}, {issuer: \"${issuer}\", audience: authenticated, jwt_keys: ${keys}}"
+  elif [[ -n "${HL_LOCAL_IDENTITY_PROVIDER}" ]]; then
+    echo "render-settings: .env sets LOCAL_IDENTITY_PROVIDER=${HL_LOCAL_IDENTITY_PROVIDER}; it is empty or supabase" >&2
+    return 1
   fi
   sed -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
-      -e "s|^  issuer: \"\"$|  issuer: ${issuer}|" \
-      -e "s|^  audience: \"\"$|  audience: ${audience}|" \
-      -e "s|^  jwt_keys: \[\]$|  jwt_keys: ${keys}|" \
+      -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
-  for rendered in "issuer: ${issuer}" "audience: ${audience}" "kid"; do
-    grep -q "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
+  for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do
+    grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the auth section of the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
   if [[ -n "${HL_GITHUB_APP_ID}" ]]; then
     if grep -q '^github:' "${output}"; then

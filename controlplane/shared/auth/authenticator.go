@@ -63,28 +63,17 @@ func NewStoreDirectory(pool *db.Pool) StoreDirectory {
 // token is valid while the row it names says so, an API key while it is not revoked.
 type Authenticator struct {
 	signingSecret string
-	issuer        string
-	audience      string
-	keys          map[string]verifyingKey
+	providers     map[string]identityProvider
 	directory     Directory
 	now           func() time.Time
 }
 
 func NewAuthenticator(cfg config.AuthConfig, directory Directory) (*Authenticator, error) {
-	keys := make(map[string]verifyingKey, len(cfg.JWTKeys))
-	for _, k := range cfg.JWTKeys {
-		parsed, err := parseJWK(k)
-		if err != nil {
-			return nil, fmt.Errorf("auth: %w", err)
-		}
-		if _, dup := keys[k.Kid]; dup {
-			return nil, fmt.Errorf("auth: jwt key %s is listed twice", k.Kid)
-		}
-		keys[k.Kid] = parsed
+	providers, err := parseIdentityProviders(cfg.IdentityProviders)
+	if err != nil {
+		return nil, fmt.Errorf("auth: %w", err)
 	}
-	return &Authenticator{
-		signingSecret: cfg.SigningSecret, issuer: cfg.Issuer, audience: cfg.Audience, keys: keys, directory: directory, now: time.Now,
-	}, nil
+	return &Authenticator{signingSecret: cfg.SigningSecret, providers: providers, directory: directory, now: time.Now}, nil
 }
 
 // BearerToken returns the token of an Authorization header.
@@ -221,7 +210,7 @@ func (a *Authenticator) apiKey(ctx context.Context, token string) (Principal, er
 }
 
 func (a *Authenticator) user(ctx context.Context, token string) (Principal, error) {
-	claims, err := verifyJWT(token, a.issuer, a.audience, a.keys, a.now())
+	claims, err := verifyJWT(token, a.providers, a.now())
 	if err != nil {
 		return Principal{}, unauthenticated("%s", err)
 	}

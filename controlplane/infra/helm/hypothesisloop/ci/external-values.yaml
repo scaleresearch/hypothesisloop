@@ -10,15 +10,16 @@ images:
 secretName: deployment-secrets
 secretChecksum: 0f0f0f
 auth:
-  issuer: https://project.supabase.example.invalid/auth/v1
-  audience: authenticated
-  jwtKeys:
-    - kid: made-up-key
-      kty: EC
-      alg: ES256
-      crv: P-256
-      x: f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU
-      "y": x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
+  identityProviders:
+    - issuer: https://project.supabase.example.invalid/auth/v1
+      audience: authenticated
+      jwt_keys:
+        - kid: made-up-key
+          kty: EC
+          alg: ES256
+          crv: P-256
+          x: f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU
+          "y": x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
   uiOrigin: https://ui.example.invalid
 agents:
   launcher: main

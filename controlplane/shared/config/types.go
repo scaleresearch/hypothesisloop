@@ -204,15 +204,23 @@ type JWTKey struct {
 	E   string `yaml:"e"`
 }
 
-// AuthConfig is everything a token is checked against. There is no switch that turns the check
-// off: local development authenticates with a staff token derived from SigningSecret.
-type AuthConfig struct {
-	// Issuer, Audience and JWTKeys verify a person's JWT: who issued it, that it was issued for
-	// this API, and its signature. The keys are listed here and never fetched, so rotating one
-	// is a config change and a restart. With no keys listed no JWT is accepted.
+// IdentityProvider is one issuer of people's JWTs: who issues them, the audience it issues them
+// for this API under, and the public keys that verify its signature. The keys are listed here and
+// never fetched, so rotating one is a config change and a restart.
+type IdentityProvider struct {
 	Issuer   string   `yaml:"issuer"`
 	Audience string   `yaml:"audience"`
 	JWTKeys  []JWTKey `yaml:"jwt_keys"`
+}
+
+// AuthConfig is everything a token is checked against. There is no switch that turns the check
+// off: local development authenticates with a staff token derived from SigningSecret.
+type AuthConfig struct {
+	// IdentityProviders are the issuers whose JWTs name a person. A token is checked against
+	// the one provider its issuer claim names, so one provider's key never vouches for
+	// another's users. A deployment lists the one it signs people in with; local development
+	// lists a key made on the machine beside it. With none listed no JWT is accepted.
+	IdentityProviders []IdentityProvider `yaml:"identity_providers"`
 	// SigningSecret derives every hls_ token the platform hands to what it launches. It is a
 	// secret of the deployment: the settings file names the environment variable that holds it.
 	SigningSecret string `yaml:"signing_secret"`

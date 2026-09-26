@@ -1,6 +1,7 @@
 package helm_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -54,7 +55,7 @@ func TestTheRenderedConfigLoadsWithTheEnvironmentEachServiceIsGiven(t *testing.T
 
 func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	inCluster := loadRendered(t, charttest.Render(t, charttest.InCluster), charttest.InCluster, configLoaders[0])
-	if got := inCluster.Auth; got.Issuer != "" || got.Audience != "" || len(got.JWTKeys) != 0 || got.UIOrigin != "http://ui.example.invalid:30300" {
+	if got := inCluster.Auth; len(got.IdentityProviders) != 0 || got.UIOrigin != "http://ui.example.invalid:30300" {
 		t.Errorf("in-cluster auth = %+v, want no identity provider and the UI's origin", got)
 	}
 	if got, want := inCluster.Agents, (config.AgentsConfig{
@@ -87,8 +88,8 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	wantKey := config.JWTKey{Kid: "made-up-key", Kty: "EC", Alg: "ES256", Crv: "P-256",
 		X: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU", Y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}
 	auth := external.Auth
-	if auth.Issuer != "https://project.supabase.example.invalid/auth/v1" || auth.Audience != "authenticated" ||
-		len(auth.JWTKeys) != 1 || auth.JWTKeys[0] != wantKey || auth.UIOrigin != "https://ui.example.invalid" {
+	wantProviders := []config.IdentityProvider{{Issuer: "https://project.supabase.example.invalid/auth/v1", Audience: "authenticated", JWTKeys: []config.JWTKey{wantKey}}}
+	if !reflect.DeepEqual(auth.IdentityProviders, wantProviders) || auth.UIOrigin != "https://ui.example.invalid" {
 		t.Errorf("external auth = %+v, want the identity provider of the values", auth)
 	}
 }
@@ -260,8 +261,11 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"cloud-agent with no org":     {charttest.External, `cloudAgent.org=""`, "cloudAgent.org is required"},
 		"a cluster name with a shell": {charttest.External, `cloudAgent.clusterName="a; rm"`, "/cloudAgent/clusterName"},
 		"an App with no client id":    {charttest.External, `github.clientId=""`, "github.clientId is required"},
-		"keys as text":                {charttest.External, `auth.jwtKeys="kid"`, "/auth/jwtKeys"},
-		"a key field nobody reads":    {charttest.External, `auth.jwtKeys=[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]`, "/auth/jwtKeys/0"},
+		"providers as text":           {charttest.External, `auth.identityProviders="supabase"`, "/auth/identityProviders"},
+		"a provider with no audience": {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256"}]}]`, "/auth/identityProviders/0"},
+		"a provider with no keys":     {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[]}]`, "/auth/identityProviders/0/jwt_keys"},
+		"a key field nobody reads":    {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]}]`, "/auth/identityProviders/0/jwt_keys/0"},
+		"the issuer outside the list": {charttest.External, `auth.issuer="https://a.example"`, "issuer"},
 		"an origin that is a number":  {charttest.External, `auth.uiOrigin=3000`, "/auth/uiOrigin"},
 		"a flag that is text":         {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
 		"a secret passed as a value":  {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
