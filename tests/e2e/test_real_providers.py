@@ -18,9 +18,6 @@ environment says where it runs:
     VAST_API_KEY                      the account the cloud cluster rents jobs on
 
     cd tests && uv run pytest e2e/test_real_providers.py -m real_providers -s
-
-The hang is injected only where the vendor gives a way into a running sandbox (fly). Elsewhere
-the rule that ends a silent agent is covered by the launcher's and the control plane's own tests.
 """
 from __future__ import annotations
 
@@ -132,16 +129,15 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
         print(f"\nlost sandbox replaced and working after {time.monotonic() - lost_at:.0f}s")
 
         # A harness that hangs with its machine still running: only its silence says so.
-        if provider == "fly":
-            hung = researchers[0]
-            vendors.freeze_harness(provider, vendor_id(hung))
-            frozen_at = time.monotonic()
-            ended = eventually("the frozen researcher is ended as silent and replaced", lambda: _instance(org, pe_id, hung),
-                               deadline=Deadline.in_seconds(1.25 * PROGRESS_LIMIT_S + 4 * MINUTE),
-                               accept=lambda i: i["restarts"] == 1 and i["name"] != names[hung] and i["state"] == "running", interval=10)
-            assert ended["end_reason"] == "silent" and "no progress" in ended["exit_log"], ended
-            assert time.monotonic() - frozen_at >= PROGRESS_LIMIT_S - 30, "a working agent was ended before its limit"
-            assert _instance(org, pe_id, researchers[1])["restarts"] == 0, "the researcher that kept working was replaced"
+        hung = researchers[0]
+        vendors.freeze_harness(provider, vendor_id(hung))
+        frozen_at = time.monotonic()
+        ended = eventually("the frozen researcher is ended as silent and replaced", lambda: _instance(org, pe_id, hung),
+                           deadline=Deadline.in_seconds(1.25 * PROGRESS_LIMIT_S + 4 * MINUTE),
+                           accept=lambda i: i["restarts"] == 1 and i["name"] != names[hung] and i["state"] == "running", interval=10)
+        assert ended["end_reason"] == "silent" and "no progress" in ended["exit_log"], ended
+        assert time.monotonic() - frozen_at >= PROGRESS_LIMIT_S - 30, "a working agent was ended before its limit"
+        assert _instance(org, pe_id, researchers[1])["restarts"] == 0, "the researcher that kept working was replaced"
 
         # Both jobs finish with the declared metric, each pinned to the commit it ran, and the
         # coordinator files its summary and closes.

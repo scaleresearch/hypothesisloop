@@ -6,7 +6,10 @@ Every key comes from the environment and is never part of a URL, an argument or 
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
+import struct
 
 import requests
 
@@ -59,10 +62,35 @@ _FREEZE = ("for p in /proc/[0-9]*; do if tr '\\0' ' ' < $p/cmdline 2>/dev/null |
            "then kill -STOP ${p#/proc/} && echo frozen ${p#/proc/}; fi; done")
 
 
+def _e2b_run(sandbox_id: str, script: str) -> str:
+    """Runs a shell script inside a sandbox through the vendor's process service there, which
+    speaks the Connect protocol: envelopes of a flag byte, a length and a JSON message."""
+    shown = requests.get(f"https://api.e2b.app/sandboxes/{sandbox_id}", headers=_e2b_headers(), timeout=TIMEOUT)
+    shown.raise_for_status()
+    message = json.dumps({"process": {"cmd": "sh", "args": ["-c", script]}, "stdin": False}).encode()
+    r = requests.post(f"https://49983-{sandbox_id}.e2b.app/process.Process/Start", data=struct.pack(">BI", 0, len(message)) + message,
+                      headers={"X-Access-Token": shown.json()["envdAccessToken"], "Content-Type": "application/connect+json", "Connect-Protocol-Version": "1"},
+                      timeout=60)
+    r.raise_for_status()
+    out, rest = b"", r.content
+    while len(rest) >= 5:
+        flags, size = struct.unpack(">BI", rest[:5])
+        event, rest = json.loads(rest[5:5 + size] or b"{}"), rest[5 + size:]
+        if flags & 0x02:
+            assert not event.get("error"), f"the process service refused the command: {event}"
+            break
+        data = (event.get("event") or {}).get("data") or {}
+        out += base64.b64decode(data.get("stdout") or "")
+    return out.decode()
+
+
 def freeze_harness(provider: str, vendor_id: str) -> str:
-    """Freezes the agent harness inside a sandbox. Only the vendors with a way in are supported."""
-    if provider != "fly":
-        raise NotImplementedError(f"no way into a {provider} sandbox from here")
+    """Freezes the agent harness inside a sandbox, by the vendor's own way of running a command
+    in one."""
+    if provider == "e2b":
+        out = _e2b_run(vendor_id, _FREEZE)
+        assert "frozen" in out, f"no harness process was found to freeze: {out!r}"
+        return out.strip()
     r = requests.post(f"https://api.machines.dev/v1/apps/{os.environ['FLY_APP']}/machines/{vendor_id}/exec",
                       json={"command": ["sh", "-c", _FREEZE], "timeout": 20}, headers=_fly_headers(), timeout=60)
     r.raise_for_status()
