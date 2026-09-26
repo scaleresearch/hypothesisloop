@@ -186,7 +186,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     staff = {"kind": "staff", "id": "", "name": "staff"}
     own = json.loads(api.hl("hypothesis", "submit", "--platform-experiment", pe_id, "--text",
                             f"an idea of the caller's own {uuid.uuid4().hex[:8]}", "--builds-on", "root"))
-    assert (own["agent_id"], own["source"], own["actor"]) == ("", "human", staff), own
+    assert (own["agent_id"], own["actor"]) == ("", staff) and "source" not in own, own
     note = json.loads(api.hl("hypothesis", "comment", own["id"], "--text", "a note of the caller's own"))
     assert (note["agent_id"], note["actor"]) == ("", staff), note
     links = json.loads(api.hl("hypothesis", "link", own["id"], "--type", "related", "--to", hyp_id))

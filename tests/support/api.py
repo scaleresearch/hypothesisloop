@@ -376,7 +376,7 @@ class API:
         return r.json()
 
     def register_human_hypothesis(self, pe_id: str, text: str, links: list[dict] | None = None) -> dict:
-        """A hypothesis no agent owns, which reads as a human's: source human, no agent_id."""
+        """A hypothesis no agent owns, made by whoever the token is: no agent_id."""
         r = self.post_hypothesis(pe_id, text, links=links)
         r.raise_for_status()
         return r.json()

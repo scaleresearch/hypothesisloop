@@ -79,9 +79,9 @@ function HypothesesPageContent() {
   const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
   const ownerOptions = useMemo(() => {
     const nodes = graph?.nodes ?? []
-    const agents = Array.from(new Set(nodes.filter(n => n.source !== 'human').map(n => n.agent_id))).sort()
+    const agents = Array.from(new Set(nodes.map(n => n.agent_id).filter(Boolean))).sort()
     const options = agents.map(a => ({ value: a, label: a }))
-    if (nodes.some(n => n.source === 'human')) options.push({ value: HUMAN_OWNER, label: 'Humans' })
+    if (nodes.some(n => !n.agent_id && n.actor.kind === 'user')) options.push({ value: HUMAN_OWNER, label: 'Humans' })
     return options
   }, [graph])
 

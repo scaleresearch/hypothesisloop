@@ -166,7 +166,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   const readOnly = useReadOnly()
 
   if (readOnly) return null
-  if (hypothesis.source !== 'human') {
+  if (hypothesis.agent_id) {
     return (
       <p className="mt-3 text-xs text-subtle">
         Only <span className="font-mono">{hypothesis.agent_id}</span> can add links from this hypothesis.

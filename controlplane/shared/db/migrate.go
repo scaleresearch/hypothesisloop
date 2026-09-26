@@ -88,7 +88,7 @@ func MoveLegacyHypotheses(ctx context.Context, pool *Pool, importRows func([]*do
 	if !found {
 		return nil
 	}
-	r, err := tx.Query(ctx, `SELECT id, COALESCE(agent_id, ''), source, author, platform_experiment_id, text,
+	r, err := tx.Query(ctx, `SELECT id, COALESCE(agent_id, ''), author, platform_experiment_id, text,
        status::text, created_at, status_changed_at FROM hypotheses ORDER BY created_at`)
 	if err != nil {
 		return fmt.Errorf("db.MoveLegacyHypotheses: %w", err)
@@ -96,7 +96,7 @@ func MoveLegacyHypotheses(ctx context.Context, pool *Pool, importRows func([]*do
 	var rows []*domain.Hypothesis
 	for r.Next() {
 		h := &domain.Hypothesis{}
-		if err := r.Scan(&h.ID, &h.AgentID, &h.Source, &h.Actor.Name, &h.PlatformExperimentID, &h.Text,
+		if err := r.Scan(&h.ID, &h.AgentID, &h.Actor.Name, &h.PlatformExperimentID, &h.Text,
 			&h.Status, &h.CreatedAt, &h.StatusChangedAt); err != nil {
 			r.Close()
 			return fmt.Errorf("db.MoveLegacyHypotheses: scan: %w", err)

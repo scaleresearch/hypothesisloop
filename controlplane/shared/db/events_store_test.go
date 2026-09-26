@@ -652,7 +652,7 @@ func TestNoCursorPassesAWriteEmitIsStillMaking(t *testing.T) {
 	var position, during int64
 	err := NewEventsStore(pool, noHypothesisEvents{}).Emit(context.Background(), func(stamp Stamp) ([]Event, error) {
 		position, during = stamp.Position, cursorNow(t, pool)
-		return []Event{{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID}}, nil
+		return []Event{{Kind: EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID}}, nil
 	})
 	if err != nil {
 		t.Fatalf("Emit: got = %v, want = nil", err)
@@ -762,8 +762,8 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 		{Kind: EventStageBoundary, Value: "1", Detail: "advanced"},
 		{Kind: EventPlatformExperimentStatus, Value: "closed"},
 		{Kind: EventPlatformExperimentDescription},
-		{Kind: EventCommentNew, Value: "agent", AgentID: "agent-b"},
-		{Kind: EventCommentNew, Value: "human"},
+		{Kind: EventCommentNew, AgentID: "agent-b"},
+		{Kind: EventCommentNew},
 	}
 	refused := []Event{
 		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
@@ -894,7 +894,7 @@ func TestReplayInterleavesTheGraphsHypothesisEventsWithPostgresEventsInPositionO
 		t.Fatalf("comment position: got = %v, want = nil", err)
 	}
 	graph := fixedHypothesisEvents{
-		{Kind: EventHypothesisNew, Subject: hypothesisID, Value: "agent", PlatformExperimentID: peID, Position: commentPosition + 1},
+		{Kind: EventHypothesisNew, Subject: hypothesisID, PlatformExperimentID: peID, Position: commentPosition + 1},
 		{Kind: EventHypothesisLink, Subject: hypothesisID, Value: "related", PlatformExperimentID: peID, Position: commentPosition + 1000},
 		{Kind: EventHypothesisStatus, Subject: hypothesisID, Value: "refuted", PlatformExperimentID: peID, Position: before - 1},
 	}
@@ -925,10 +925,10 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 		{Kind: EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"},
 		{Kind: EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"},
 		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
-		{Kind: EventHypothesisNew, Value: "agent", AgentID: "agent-a"},
+		{Kind: EventHypothesisNew, AgentID: "agent-a"},
 		{Kind: EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"},
 		{Kind: EventFindingNew, Value: "job-1", AgentID: "agent-b"},
-		{Kind: EventCommentNew, Value: "human"},
+		{Kind: EventCommentNew},
 		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
 		{Kind: EventAgentCut, Value: "1", AgentID: "agent-b"},
 		{Kind: EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},

@@ -114,7 +114,7 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"Body {platform_experiment_id, cypher, params}; answer " +
 	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +
 	"Schema: (:Objective {id}) is the root of one platform experiment, id = platform_experiment_id. " +
-	"(:Hypothesis {id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, status, created_at, status_changed_at, " +
+	"(:Hypothesis {id, platform_experiment_id, agent_id, actor_kind, actor_id, text, status, created_at, status_changed_at, " +
 	"status_actor_kind, status_actor_id}). agent_id is whose hypothesis it is, empty on one no agent owns. actor_kind " +
 	"(user, key, agent, coordinator, staff) and actor_id are the credential that registered it, and status_actor_* the one " +
 	"that gave the verdict; a node from before they were kept has neither, and author holds the name it stated. " +

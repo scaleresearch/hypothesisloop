@@ -84,7 +84,7 @@ func TestACommentKeepsWhoseItIsAndWhoWroteIt(t *testing.T) {
 	}
 	for _, w := range written {
 		c, err := hyps.CreateHypothesisComment(ctx, hypothesisID, peID, w.owner, w.actor, "note")
-		if err != nil || c.AgentID != w.owner || c.Actor != w.actor || c.Source != domain.SourceOf(w.owner) {
+		if err != nil || c.AgentID != w.owner || c.Actor != w.actor {
 			t.Fatalf("comment of %q by %+v: got = %+v, %v", w.owner, w.actor, c, err)
 		}
 	}

@@ -108,7 +108,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
 
     pool = api.hypotheses(pe_id)
     row = next(h for h in pool if h["id"] == human["id"])
-    assert (row.get("source"), row.get("actor")) == ("human", {"kind": "staff", "id": "", "name": "staff"}) and "author" not in row, row
+    assert row.get("actor") == {"kind": "staff", "id": "", "name": "staff"} and "author" not in row and "source" not in row, row
     assert not row.get("agent_id"), f"human hypothesis has an owning agent: {row.get('agent_id')!r}"
 
     agent_on_human_resp = api.post_hypothesis(pe_id, human_text, agent_id=agent_b)
@@ -120,7 +120,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
 
     # Registered for an agent by another credential: the agent owns it, and who did it is kept.
     for_agent = api.register_hypothesis(pe_id, agent_a, f"registered for the agent {run_id}")
-    assert (for_agent["agent_id"], for_agent["source"], for_agent["actor"]) == (agent_a, "agent", {"kind": "staff", "id": "", "name": "staff"}), for_agent
+    assert (for_agent["agent_id"], for_agent["actor"]) == (agent_a, {"kind": "staff", "id": "", "name": "staff"}), for_agent
 
     code, human_job = api.submit_job_expect(pe_id, agent_b, hours=0.02, hyp_id=human["id"])
     assert code == 202, "a job against a human-owned hypothesis must be admitted"
@@ -161,10 +161,10 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
         (c for c in api.hypothesis(agent_hyp["id"]).get("comments") or [] if c.get("text") == human_comment), None
     )
     assert comment_row is not None
-    assert (comment_row.get("source"), comment_row.get("agent_id")) == ("human", "") and "author" not in comment_row, comment_row
+    assert comment_row.get("agent_id") == "" and "author" not in comment_row and "source" not in comment_row, comment_row
     assert comment_row["actor"] == {"kind": "staff", "id": "", "name": "staff"}, comment_row
     by_agent = api.post_hypothesis_comment(agent_hyp["id"], f"its owner's note {run_id}", agent_id=agent_a)
-    assert by_agent.status_code == 201 and by_agent.json()["agent_id"] == agent_a and by_agent.json()["source"] == "agent", by_agent.text
+    assert by_agent.status_code == 201 and by_agent.json()["agent_id"] == agent_a, by_agent.text
     assert by_agent.json()["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "a note written for an agent names who wrote it"
 
     # Status is the owner's verdict: an unowned (human) row may be settled by any agent...

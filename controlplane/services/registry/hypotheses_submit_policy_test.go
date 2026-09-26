@@ -45,8 +45,8 @@ func TestRegisterHypothesisAllowsAHumanWhenPolicyIsHumanOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (human, human_only policy): err = %v, want nil", err)
 	}
-	if h.Source != domain.HypothesisSourceHuman {
-		t.Errorf("source = %v, want %v", h.Source, domain.HypothesisSourceHuman)
+	if h.AgentID != "" {
+		t.Errorf("owner = %q, want no agent", h.AgentID)
 	}
 }
 
@@ -68,8 +68,8 @@ func TestRegisterHypothesisAllowsAnAgentWhenPolicyIsAgentOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterHypothesis (agent, agent_only policy): err = %v, want nil", err)
 	}
-	if h.Source != domain.HypothesisSourceAgent {
-		t.Errorf("source = %v, want %v", h.Source, domain.HypothesisSourceAgent)
+	if h.AgentID == "" {
+		t.Error("owner is empty, want the agent")
 	}
 }
 

@@ -33,7 +33,7 @@ func (s jobSubmitPolicyStore) GetAgent(_ context.Context, id string) (*domain.Ag
 // only thing a test here is exercising.
 func agentOwnHypothesis() oneHypothesis {
 	return oneHypothesis{h: &domain.Hypothesis{
-		ID: "h-agent", Source: domain.HypothesisSourceAgent, AgentID: "agent-1",
+		ID: "h-agent", AgentID: "agent-1",
 		PlatformExperimentID: "pe-1", Text: "an agent's own idea",
 	}}
 }

@@ -71,7 +71,7 @@ func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, pla
 	s.comments = append(s.comments, text)
 	s.commentActors = append(s.commentActors, actor)
 	return &domain.HypothesisComment{
-		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID, Source: domain.SourceOf(agentID),
+		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID,
 		AgentID: agentID, Actor: actor, Text: text,
 	}, nil
 }
@@ -146,7 +146,7 @@ func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domai
 		return existing, []domain.Link{}, true, announce, err
 	}
 	h := &domain.Hypothesis{
-		ID: id, AgentID: n.AgentID, Source: domain.SourceOf(n.AgentID), Actor: n.Actor,
+		ID: id, AgentID: n.AgentID, Actor: n.Actor,
 		PlatformExperimentID: n.PlatformExperimentID, Text: n.Text, Status: domain.HypothesisOpen, CreatedAt: g.tick(),
 	}
 	g.rows[id] = h
@@ -251,8 +251,8 @@ func TestRegisterHypothesisStoresAHumanRowWithAnEmptyAgentIDAndItsActor(t *testi
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	if h.Source != domain.HypothesisSourceHuman {
-		t.Errorf("source: got = %v, want %v", h.Source, domain.HypothesisSourceHuman)
+	if h.AgentID != "" {
+		t.Errorf("owner: got = %q, want no agent", h.AgentID)
 	}
 	if want := (domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "user-ada"}); h.Actor != want {
 		t.Errorf("actor: got = %+v, want %+v", h.Actor, want)
@@ -340,8 +340,8 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 	if err != nil {
 		t.Fatalf("AddHypothesisComment on a human row: got = %v, want nil", err)
 	}
-	if c.AgentID != "agent-1" || c.Source != domain.HypothesisSourceAgent {
-		t.Errorf("comment attribution: got = (%v, %v), want (agent-1, %v)", c.AgentID, c.Source, domain.HypothesisSourceAgent)
+	if c.AgentID != "agent-1" {
+		t.Errorf("comment owner: got = %v, want agent-1", c.AgentID)
 	}
 	if c.HypothesisID != human.ID {
 		t.Errorf("comment hypothesis_id: got = %v, want %v", c.HypothesisID, human.ID)
@@ -360,7 +360,7 @@ func TestRegisteringANewHypothesisStampsTheGraphWriteWithItsEventsPosition(t *te
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, Value: "agent", PlatformExperimentID: "pe-1",
+	want := db.Event{Kind: db.EventHypothesisNew, Subject: h.ID, PlatformExperimentID: "pe-1",
 		AgentID: "agent-1", Position: 1}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)

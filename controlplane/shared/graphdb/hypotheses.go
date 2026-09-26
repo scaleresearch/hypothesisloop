@@ -95,9 +95,9 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
-  source: $source, author: '', actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
+  author: '', actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
 RETURN h`, map[string]any{
-			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID, "source": string(domain.SourceOf(n.AgentID)),
+			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID,
 			"actor_kind": string(n.Actor.Kind), "actor_id": n.Actor.ID, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
 			"position": n.Stamp.Position,
 		})
@@ -406,7 +406,7 @@ func (s *Store) ImportLegacy(ctx context.Context, rows []*domain.Hypothesis) err
 			statusChangedAt = h.StatusChangedAt.UTC()
 		}
 		params = append(params, map[string]any{
-			"id": h.ID, "pe": h.PlatformExperimentID, "agent_id": h.AgentID, "source": string(h.Source),
+			"id": h.ID, "pe": h.PlatformExperimentID, "agent_id": h.AgentID,
 			"author": h.Actor.Name, "text": h.Text, "normalized": domain.NormalizeHypothesisText(h.Text),
 			"status": string(h.Status), "created_at": h.CreatedAt.UTC(), "status_changed_at": statusChangedAt,
 		})
@@ -415,7 +415,7 @@ func (s *Store) ImportLegacy(ctx context.Context, rows []*domain.Hypothesis) err
 		return collect(ctx, tx, `UNWIND $rows AS row
 MERGE (o:Objective {id: row.pe})
 MERGE (h:Hypothesis {id: row.id})
-ON CREATE SET h.platform_experiment_id = row.pe, h.agent_id = row.agent_id, h.source = row.source,
+ON CREATE SET h.platform_experiment_id = row.pe, h.agent_id = row.agent_id,
   h.author = row.author, h.text = row.text, h.normalized_text = row.normalized, h.status = row.status,
   h.created_at = row.created_at, h.status_changed_at = row.status_changed_at, h.created_xid = 0,
   h.status_changed_xid = CASE WHEN row.status_changed_at IS NULL THEN null ELSE 0 END
@@ -705,7 +705,6 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 	h := &domain.Hypothesis{
 		ID:                   d.str(p["id"]),
 		AgentID:              d.str(p["agent_id"]),
-		Source:               domain.HypothesisSource(d.str(p["source"])),
 		PlatformExperimentID: d.str(p["platform_experiment_id"]),
 		Text:                 d.str(p["text"]),
 		Status:               domain.HypothesisStatus(d.str(p["status"])),

@@ -872,7 +872,7 @@ func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidN
 // repair.
 func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThanGoingLiveOnly(t *testing.T) {
 	source := newFakeEvents(
-		db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
+		db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
 			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150},
 	)
 	server := watchServer(t, source)
@@ -902,7 +902,7 @@ func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThan
 // A replay starts at the floor it resumes from, the event that set the floor included. One this
 // connection already received live must not be sent again when a narrowed kind is re-added.
 func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *testing.T) {
-	pool := db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1", Value: "agent",
+	pool := db.Event{Kind: db.EventHypothesisNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
 	source := newFakeEvents()
 	server := watchServer(t, source)
@@ -979,7 +979,7 @@ func TestNarrowingAFilterStopsTheDroppedKindAndKeepsTheOnesLeft(t *testing.T) {
 		t.Fatalf("reported kinds after narrowing: got = %v, want = [experiment.status]", got.Kinds)
 	}
 
-	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1", Value: "agent",
+	source.live <- db.Event{Kind: db.EventCommentNew, Subject: "hyp-1",
 		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
 	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
 

@@ -5,9 +5,9 @@ export const NODE_HEIGHT = 92
 
 export const HUMAN_OWNER = 'human'
 
-/** The value the agent filter matches: the registering agent, or HUMAN_OWNER for any person. */
+/** The value the agent filter matches: the agent whose hypothesis it is, or HUMAN_OWNER for one a person registered as their own. */
 function ownerKey(h: Hypothesis): string {
-  return h.source === 'human' ? HUMAN_OWNER : h.agent_id
+  return h.agent_id || (h.actor.kind === 'user' ? HUMAN_OWNER : '')
 }
 
 export interface GraphFilters {

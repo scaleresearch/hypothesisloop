@@ -35,8 +35,6 @@ var (
 // agentID is the agent whose hypothesis it is, empty for one no agent owns, which the submit
 // policy reads as a human's. actor is the credential registering it.
 func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
-	source := domain.SourceOf(agentID)
-
 	hypothesisPolicy, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
@@ -44,13 +42,12 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 	if !found {
 		return nil, nil, false, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
-	switch source {
-	case domain.HypothesisSourceHuman:
+	if agentID == "" {
 		if !hypothesisPolicy.AllowsHuman() {
 			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from agents only — this one names no agent_id, which makes it a human submission; read the experiment's hypothesis_submit_policy before retrying, a human identity cannot submit hypotheses here",
 				ErrHypothesisSubmitterNotAllowed, platformExperimentID)
 		}
-	case domain.HypothesisSourceAgent:
+	} else {
 		if !hypothesisPolicy.AllowsAgent() {
 			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from humans only — this is an autonomous-agent submission (agent_id=%s); read the experiment's hypothesis_submit_policy before retrying, an agent identity cannot submit hypotheses here",
 				ErrHypothesisSubmitterNotAllowed, platformExperimentID, agentID)
@@ -70,7 +67,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil || !announce {
 			return nil, err
 		}
-		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Source),
+		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID,
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
 	var similar *graphdb.SimilarError

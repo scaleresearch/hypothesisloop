@@ -149,11 +149,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: hypothesisNotInExperiment(exp),
 		}
 	}
-	// A human-submitted idea is testable like any other: any agent may bind a job to it. The
+	// An idea no agent owns is testable like any other: any agent may bind a job to it. The
 	// hypothesis is the idea, the job is the agent's — exp.AgentID is the owner every accounting
 	// path keys on, so quota is debited from the running agent and its result lands in that
 	// agent's standings, exactly as for a hypothesis it registered itself. Nothing here has to
-	// know the row's source. Refusing instead (the earlier rule) made a human idea inert and
+	// know whose the row is. Refusing instead (the earlier rule) made a human idea inert and
 	// pushed agents into registering a near-duplicate claim to test one, which fights the pool's
 	// own dedup and splits one claim's evidence across two rows.
 	//

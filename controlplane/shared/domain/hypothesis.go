@@ -14,12 +14,12 @@ import (
 // platform experiment return the existing hypothesis (see NormalizeHypothesisText); the same claim
 // in a different platform experiment is a distinct hypothesis.
 // The pool is shared with humans: AgentID is the agent whose hypothesis it is, empty on one no
-// agent owns (see HypothesisSource). Actor is whose credential registered it, which is another
-// fact: a person or an API key may register an agent's hypothesis for it.
+// agent owns: such a row holds no quota and appears in no standings, any agent may test it and
+// anyone may settle it. Actor is whose credential registered it, which is another fact: a person
+// or an API key may register an agent's hypothesis for it.
 type Hypothesis struct {
 	ID                   string           `json:"id"`
 	AgentID              string           `json:"agent_id"`
-	Source               HypothesisSource `json:"source"`
 	Actor                Actor            `json:"actor"`
 	PlatformExperimentID string           `json:"platform_experiment_id"`
 	Text                 string           `json:"text"`
@@ -32,25 +32,6 @@ type Hypothesis struct {
 	// this says who gave it: the agent itself, or the person or API key acting for it.
 	StatusActor *Actor `json:"status_actor"`
 }
-
-// HypothesisSource records who put a row in the pool. A human watching a run adds an idea from
-// the UI under a name they type; there is no auth, so that name is a claim, not an identity —
-// exactly what agent_id already is. Human and agent rows sit in the same pool, behind the same
-// GET /hypotheses, under the same UNIQUE (platform_experiment_id, normalized_text) dedup. What
-// differs is only who is accountable for the row itself: a human holds no quota and appears in no
-// standings, because AgentID — the owner column both of those paths key on — is empty on it. It is
-// not a lesser row otherwise. Agents run jobs against human ideas and file findings on them, all
-// attributed to the agent that ran them (Experiment.AgentID), and anyone may settle its status
-// since nobody owns it (see HypothesisStatus).
-type HypothesisSource string
-
-const (
-	// HypothesisSourceAgent is a row an agent owns, the one AgentID names.
-	HypothesisSourceAgent HypothesisSource = "agent"
-	// HypothesisSourceHuman is a row no agent owns: a person's, a key's, a coordinator's or
-	// staff's. Which one is its Actor.
-	HypothesisSourceHuman HypothesisSource = "human"
-)
 
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
 // wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
@@ -188,22 +169,13 @@ type HypothesisFinding struct {
 // AgentID is the agent whose note it is, empty on one no agent owns. Actor is whose credential
 // wrote it, which is another fact: a person or an API key may write an agent's note for it.
 type HypothesisComment struct {
-	ID                   string           `json:"id"`
-	HypothesisID         string           `json:"hypothesis_id"`
-	PlatformExperimentID string           `json:"platform_experiment_id"`
-	AgentID              string           `json:"agent_id"`
-	Source               HypothesisSource `json:"source"`
-	Actor                Actor            `json:"actor"`
-	Text                 string           `json:"text"`
-	CreatedAt            time.Time        `json:"created_at"`
-}
-
-// SourceOf is the source of a record owned by agentID: an agent's, or with no owner a human's.
-func SourceOf(agentID string) HypothesisSource {
-	if agentID != "" {
-		return HypothesisSourceAgent
-	}
-	return HypothesisSourceHuman
+	ID                   string    `json:"id"`
+	HypothesisID         string    `json:"hypothesis_id"`
+	PlatformExperimentID string    `json:"platform_experiment_id"`
+	AgentID              string    `json:"agent_id"`
+	Actor                Actor     `json:"actor"`
+	Text                 string    `json:"text"`
+	CreatedAt            time.Time `json:"created_at"`
 }
 
 // NormalizeHypothesisText collapses a hypothesis statement to a canonical form (lowercased,

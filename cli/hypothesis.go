@@ -625,7 +625,7 @@ experiment's nodes is refused. Prints a JSON object per row keyed by column, 200
 
 Schema:
   (:Objective {id})   the root, id = $pe
-  (:Hypothesis {id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, status,
+  (:Hypothesis {id, platform_experiment_id, agent_id, actor_kind, actor_id, text, status,
                 created_at, status_changed_at, status_actor_kind, status_actor_id})
       the times are datetimes: compare with datetime('RFC3339')
       agent_id: whose hypothesis it is, '' on one no agent owns

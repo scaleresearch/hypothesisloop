@@ -414,11 +414,11 @@ func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 	// A key registers and links for an agent: the agent owns both, and the key is kept as who did it.
 	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
 	forAgent, out, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: key, PlatformExperimentID: pe, Text: "for the agent", Links: onRoot(pe)})
-	if err != nil || forAgent.AgentID != "agent-2" || forAgent.Source != domain.HypothesisSourceAgent || forAgent.Actor != key || len(out) != 1 || out[0].Actor != key {
+	if err != nil || forAgent.AgentID != "agent-2" || forAgent.Actor != key || len(out) != 1 || out[0].Actor != key {
 		t.Fatalf("a key registering for an agent: got = %+v with links %+v, %v, want agent-2's by key-1", forAgent, out, err)
 	}
-	if human.AgentID != "" || human.Source != domain.HypothesisSourceHuman || human.Actor != userActor("user-dana") {
-		t.Errorf("a person's hypothesis: got = %+v, want no agent, source human, by user-dana", human)
+	if human.AgentID != "" || human.Actor != userActor("user-dana") {
+		t.Errorf("a person's hypothesis: got = %+v, want no agent, by user-dana", human)
 	}
 	if read, err := s.GetHypothesis(ctx, forAgent.ID); err != nil || read.Actor != key {
 		t.Errorf("read back: got = %+v, %v, want actor key-1", read, err)
@@ -844,8 +844,8 @@ func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.
 		t.Fatalf("ReplayEvents: got = %v, want nil", err)
 	}
 	want := map[db.Event]bool{
-		{Kind: db.EventHypothesisNew, Subject: a.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
-		{Kind: db.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
+		{Kind: db.EventHypothesisNew, Subject: a.ID, PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                                      true,
+		{Kind: db.EventHypothesisNew, Subject: b.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                                      true,
 		{Kind: db.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
 		{Kind: db.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
 	}

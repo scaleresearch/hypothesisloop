@@ -166,7 +166,7 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 		}
 		return nil, fmt.Errorf("summary: create finding: %w", err)
 	}
-	if h != nil && (h.AgentID == exp.AgentID || h.Source == domain.HypothesisSourceHuman) {
+	if h != nil && (h.AgentID == exp.AgentID || h.AgentID == "") {
 		return h, nil
 	}
 	return nil, nil

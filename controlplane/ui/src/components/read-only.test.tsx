@@ -40,7 +40,7 @@ const pe = {
   budget_accelerator_hours: 100, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
 } as PlatformExperiment
 const node = {
-  id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', source: 'human', actor: { kind: 'user', id: 'u1', name: 'Ada' }, status_actor: null, agent_id: '',
+  id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', actor: { kind: 'user', id: 'u1', name: 'Ada' }, status_actor: null, agent_id: '',
   created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
 } as unknown as HypothesisListItem
 const graph: HypothesisGraph = { root: 'pe-x', nodes: [node], edges: [] } as unknown as HypothesisGraph

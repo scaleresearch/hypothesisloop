@@ -147,8 +147,8 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 					if err := json.Unmarshal(body, &got); err != nil {
 						return written{}, err
 					}
-					if got.Source != domain.SourceOf(tc.owner) {
-						return written{}, errors.New("source is " + string(got.Source))
+					if bytes.Contains(body, []byte(`"source"`)) {
+						return written{}, errors.New("the answer still states a source")
 					}
 					return written{got.AgentID, got.Actor}, nil
 				}},
@@ -169,8 +169,8 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 					if err := json.Unmarshal(body, &got); err != nil {
 						return written{}, err
 					}
-					if got.Source != domain.SourceOf(tc.owner) {
-						return written{}, errors.New("source is " + string(got.Source))
+					if bytes.Contains(body, []byte(`"source"`)) {
+						return written{}, errors.New("the answer still states a source")
 					}
 					return written{got.AgentID, got.Actor}, nil
 				}},

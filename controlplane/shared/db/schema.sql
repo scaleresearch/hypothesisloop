@@ -400,6 +400,8 @@ CREATE TABLE IF NOT EXISTS hypothesis_comments (
     platform_experiment_id TEXT NOT NULL REFERENCES platform_experiments(id),
     -- NULL on a comment no agent owns.
     agent_id       TEXT        REFERENCES agents(id),
+    -- Kept for the rows that have it and no longer read or written: who wrote a comment is its
+    -- actor, and whose it is agent_id.
     source         TEXT        NOT NULL DEFAULT 'agent',
     author         TEXT        NOT NULL DEFAULT '',
     text           TEXT        NOT NULL,
@@ -869,7 +871,7 @@ CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
 
 CREATE OR REPLACE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
 BEGIN
-    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, NEW.source, '',
+    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, '', '',
         NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''));
     RETURN NULL;
 END;

@@ -199,15 +199,14 @@ func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesi
 		HypothesisID:         hypothesisID,
 		PlatformExperimentID: platformExperimentID,
 		AgentID:              agentID,
-		Source:               domain.SourceOf(agentID),
 		Actor:                actor,
 		Text:                 text,
 		CreatedAt:            time.Now().UTC(),
 	}
 	const q = `
-INSERT INTO hypothesis_comments (id, hypothesis_id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, created_at)
-VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)`
-	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, c.Source, string(actor.Kind), actor.ID, c.Text, c.CreatedAt); err != nil {
+INSERT INTO hypothesis_comments (id, hypothesis_id, platform_experiment_id, agent_id, actor_kind, actor_id, text, created_at)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
+	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, string(actor.Kind), actor.ID, c.Text, c.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
@@ -221,7 +220,7 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)`
 // first — bounded like ListFindingsByHypothesis, for the same reason.
 func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
-	const q = `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), source, actor_kind, actor_id, author, text, created_at
+	const q = `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), actor_kind, actor_id, author, text, created_at
 FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
@@ -234,7 +233,7 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 		c := &domain.HypothesisComment{}
 		var actorKind domain.ActorKind
 		var actorID, author string
-		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.PlatformExperimentID, &c.AgentID, &c.Source, &actorKind, &actorID, &author, &c.Text, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.PlatformExperimentID, &c.AgentID, &actorKind, &actorID, &author, &c.Text, &c.CreatedAt); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: scan: %w", err)
 		}
 		c.Actor = domain.StoredActor(actorKind, actorID, author, c.AgentID)

@@ -355,10 +355,6 @@ export interface ClusterSettings {
 // agent, or a person or key acting for it, may change it.
 export type HypothesisStatus = 'open' | 'confirmed' | 'refuted' | 'inconclusive'
 
-// Whether an agent owns a row of the pool. A row with no owning agent is `human`: it sits in the
-// same pool under the same dedup, but owns no job, holds no quota, and appears in no standings.
-type HypothesisSource = 'agent' | 'human'
-
 // Whose credential made a record, as the platform authenticated it. Nothing a request says sets
 // it. `unverified` is a record from before actors were kept: its name is the one stated then.
 export type ActorKind = 'user' | 'key' | 'agent' | 'coordinator' | 'staff' | 'unverified'
@@ -373,9 +369,9 @@ export interface Actor {
 
 export interface Hypothesis {
   id: string
-  /** The agent whose hypothesis it is, empty on one no agent owns. */
+  /** The agent whose hypothesis it is, empty on one no agent owns: such a row sits in the same
+   *  pool under the same dedup, but owns no job, holds no quota and appears in no standings. */
   agent_id: string
-  source: HypothesisSource
   /** Who registered it, which is another credential than the agent's when one registered it for the agent. */
   actor: Actor
   platform_experiment_id: string
@@ -455,7 +451,6 @@ export interface HypothesisComment {
   id: string
   hypothesis_id: string
   agent_id: string
-  source: HypothesisSource
   actor: Actor
   text: string
   created_at: string

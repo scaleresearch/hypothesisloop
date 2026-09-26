@@ -110,16 +110,16 @@ var EventKinds = []EventKindDoc{
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
 		Description: "This agent was cut at a stage boundary. Its own stop condition, without a GET to find out whether the cut was its."},
-	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "'agent' or 'human'",
-		Description: "An idea entered the shared pool. The claim itself comes from GET /hypotheses/{id}."},
+	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "empty by design",
+		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
 		Description: "A claim was settled. A settled claim is to read, not to retest."},
 	{Kind: EventHypothesisLink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
 		Description: "A link was added to an existing hypothesis. detail is the target: a hypothesis id, or the platform experiment id for the objective. Links given at registration ride on hypothesis.new instead."},
 	{Kind: EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
 		Description: "A result was attached to a claim — someone's number is now readable instead of yours being re-derived."},
-	{Kind: EventCommentNew, Subject: "hypothesis id", Value: "'agent' or 'human'",
-		Description: "Someone said something on a claim, humans included."},
+	{Kind: EventCommentNew, Subject: "hypothesis id", Value: "empty by design",
+		Description: "Someone said something on a claim, people included. agent_id is whose note it is, empty on one no agent owns."},
 	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
 		Description: "The run itself moved. 'closed' is a stop condition for every agent in it."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
@@ -608,7 +608,7 @@ func replayEvidence(ctx context.Context, tx pgx.Tx, peID string, since int64) ([
 SELECT 'finding.new', f.hypothesis_id, f.experiment_id, '', f.agent_id, f.created_xid
 FROM hypothesis_findings f WHERE f.platform_experiment_id = $1 AND f.created_xid >= $2
 UNION ALL
-SELECT 'comment.new', c.hypothesis_id, c.source, '', COALESCE(c.agent_id, ''), c.created_xid
+SELECT 'comment.new', c.hypothesis_id, '', '', COALESCE(c.agent_id, ''), c.created_xid
 FROM hypothesis_comments c WHERE c.platform_experiment_id = $1 AND c.created_xid >= $2`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
