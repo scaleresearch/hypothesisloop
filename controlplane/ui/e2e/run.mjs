@@ -717,7 +717,7 @@ async function scenarios(browser) {
   const draftGoal = 'Does a cosine learning-rate schedule beat a constant one?'
   let draftNow = {
     id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', shared: false,
-    budget_accelerator_hours: 0.5, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
+    budget_accelerator_hours: 2, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
     ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
   const draftWrites = []

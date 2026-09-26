@@ -37,7 +37,7 @@ type Planning struct {
 // DefaultPlanning is what the settings file ships with (its planning section), for a handler
 // built without one, as tests build it.
 var DefaultPlanning = Planning{
-	AllowanceAcceleratorHours: 0.5, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
+	AllowanceAcceleratorHours: 2.0, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
 	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,
 }
 

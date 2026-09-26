@@ -305,8 +305,8 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 
 func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no allowance":     {"  allowance_accelerator_hours: 0.5\n", ""},
-		"a free allowance": {"  allowance_accelerator_hours: 0.5", "  allowance_accelerator_hours: 0"},
+		"no allowance":     {"  allowance_accelerator_hours: 2.0\n", ""},
+		"a free allowance": {"  allowance_accelerator_hours: 2.0", "  allowance_accelerator_hours: 0"},
 		"no limit":         {"  limit_minutes: 30\n", ""},
 		"no wait":          {"  proposed_for_days: 7\n", ""},
 		"no concurrent":    {"  max_concurrent_per_org: 2\n", ""},

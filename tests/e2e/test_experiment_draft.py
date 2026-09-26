@@ -52,7 +52,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
     draft = created.json()
     pe_id = draft["id"]
     try:
-        assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 0.5, draft
+        assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 2.0, draft
         assert draft["created_by"]["kind"] in ("staff", "user", "key"), draft["created_by"]
         assert "repository_url" not in draft
 
@@ -121,7 +121,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         api.post(f"/platform-experiments/{pe_id}/start")
         eventually("the accepted draft to run", lambda: api.get_json(f"/platform-experiments/{pe_id}"), accept=lambda p: p["status"] == "running", deadline=deadline)
         shares = {q["agent_id"]: q["guaranteed_accelerator_hours"] for q in api.platform_experiment_quotas(pe_id)}
-        assert shares[planner_id] == 0.5, "the planner's quota is still the planning allowance"
+        assert shares[planner_id] == 2.0, "the planner's quota is still the planning allowance"
         assert all(shares[a["agent_id"]] > 0 for a in researchers), shares
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "the planner is run in the experiment it planned"

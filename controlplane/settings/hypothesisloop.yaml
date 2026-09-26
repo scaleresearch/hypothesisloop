@@ -89,7 +89,8 @@ agents:
 #
 #   allowance_accelerator_hours  a draft's whole budget: what its planner's baseline job may cost.
 #              What the job did cost stays with the experiment: once the draft is accepted it
-#              counts in the run's consumed budget and stage progress.
+#              counts in the run's consumed budget and stage progress. A CPU core costs 1.0 an
+#              hour, so 2.0 is a baseline on 4 cores for the whole limit_minutes below.
 #   limit_minutes         how long the planner has to propose, from the goal and again from each
 #              revision. A draft with no proposal by then is closed and its machine released.
 #   proposed_for_days     how long a proposal waits for a person before the draft is closed. No
@@ -98,7 +99,7 @@ agents:
 #   max_per_day_per_org   how many drafts one org may create in 24 hours. Over either bound a new
 #              draft is refused with 429 planning_limit.
 planning:
-  allowance_accelerator_hours: 0.5
+  allowance_accelerator_hours: 2.0
   limit_minutes: 30
   proposed_for_days: 7
   max_concurrent_per_org: 2
