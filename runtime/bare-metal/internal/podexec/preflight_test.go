@@ -80,3 +80,33 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 		t.Errorf("a node with no accelerator:\n%s", said)
 	}
 }
+
+// An agent that cannot load the NVIDIA library reads a GPU node as one with no GPUs. The card is
+// on the PCI bus whatever the agent can load, so it stops and says so.
+func TestPreflightStopsANodeWhoseNVIDIACardsItCannotRead(t *testing.T) {
+	server := healthy(t)
+	bus := t.TempDir()
+	for name, attributes := range map[string][2]string{
+		"0000:01:00.0": {"0x10de", "0x030200"},
+		"0000:01:00.1": {"0x10de", "0x040300"},
+		"0000:02:00.0": {"0x8086", "0x030000"},
+	} {
+		if err := os.MkdirAll(filepath.Join(bus, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(bus, name, "vendor"), []byte(attributes[0]+"\n"), 0o644)
+		os.WriteFile(filepath.Join(bus, name, "class"), []byte(attributes[1]+"\n"), 0o644)
+	}
+	old := pciDevicesDir
+	pciDevicesDir = bus
+	defer func() { pciDevicesDir = old }()
+
+	_, err := preflightExecutor(server.URL).Preflight(context.Background(), server.Client())
+	if err == nil || !strings.Contains(err.Error(), "1 NVIDIA card(s)") {
+		t.Fatalf("err = %v, want the one GPU on the bus named, its audio function and the Intel card left out", err)
+	}
+	gpu := acceleratorDevice{DevicePath: "/dev/nvidia0", Labels: []string{"nvidia.com/gpu.product=NVIDIA-L40"}}
+	if _, err := preflightExecutor(server.URL, gpu).Preflight(context.Background(), server.Client()); err != nil {
+		t.Fatalf("a node that reads its GPU: %v", err)
+	}
+}
