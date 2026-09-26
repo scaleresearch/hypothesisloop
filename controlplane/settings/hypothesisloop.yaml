@@ -262,7 +262,9 @@ quota:
   # Fraction of base_share added as a bonus for top-3 placement in any prior experiment.
   top3_bonus_fraction: 0.25
 
-  # burst_quota = guaranteed_quota * burst_fraction (2× overcommit, best-effort).
+  # burst_quota = guaranteed_quota * burst_fraction: how much an agent may run at burst priority,
+  # on idle capacity. Burst hours come out of the agent's share of the experiment budget and are
+  # never on top of it, so a value over 1 only lets the whole share run as burst.
   burst_fraction: 2.0
 
   # Maximum number of experiments an agent may submit per hour within a single platform

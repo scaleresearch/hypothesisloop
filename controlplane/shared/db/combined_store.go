@@ -199,6 +199,11 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	if exp.EstimatedCostAccH > 0 && usedAcc+exp.EstimatedCostAccH > limitAcc {
 		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc), nil
 	}
+	// Burst hours are inside the agent's share of the budget, so a job at either priority is
+	// held to what is left of the share.
+	if spent := observed.Used() + desiredGuaranteedAcc + desiredBurstAcc; exp.EstimatedCostAccH > 0 && spent+exp.EstimatedCostAccH > allocation.Share() {
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, the agent's share of the experiment budget has %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, allocation.Share()-spent), nil
+	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err
 	}
@@ -249,12 +254,12 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: quota: %w", err)
 	}
-	var desired float64
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch),0) FROM experiments
-		WHERE agent_id=$1 AND platform_experiment_id=$2 AND capacity_tier=$3
+	var desired, desiredAll float64
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier=$3),0), COALESCE(SUM(estimated_cost_acch),0) FROM experiments
+		WHERE agent_id=$1 AND platform_experiment_id=$2
 		AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
-		agentID, platformExpID, tier).Scan(&desired); err != nil {
+		agentID, platformExpID, tier).Scan(&desired, &desiredAll); err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: desired usage: %w", err)
 	}
 	used, limit := observed.UsedBurstAccH, allocation.BurstAcceleratorHours
@@ -264,6 +269,9 @@ func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Conte
 	projected := used + desired - oldCost + estimatedCost
 	if projected > limit {
 		return fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, have %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, limit-(used+desired-oldCost)), nil
+	}
+	if spent := observed.Used() + desiredAll - oldCost; spent+estimatedCost > allocation.Share() {
+		return fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, the agent's share of the experiment budget has %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, allocation.Share()-spent), nil
 	}
 	if acceleratorCount > 0 {
 		var maxConcurrent *int

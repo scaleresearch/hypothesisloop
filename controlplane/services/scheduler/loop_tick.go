@@ -854,7 +854,7 @@ func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool 
 	if exp.CapacityTier == domain.CapacityGuaranteed {
 		used, limit = quota.UsedGuaranteedAccH, quota.GuaranteedAcceleratorHours
 	}
-	return used-exp.EstimatedCostAccH+newCost <= limit
+	return used-exp.EstimatedCostAccH+newCost <= limit && quota.Used()-exp.EstimatedCostAccH+newCost <= quota.Share()
 }
 
 // footprintStr renders a Footprint for logging — domain.Footprint's struct-keyed map can't be

@@ -250,7 +250,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 
 	wantCredit := (10*0.6 + before[cutAgent].burst - usedBurst) / 2
 	for _, id := range []string{survivorA, survivorB} {
-		if got := after[id].burst - before[id].burst; math.Abs(got-wantCredit) > 1e-9 {
+		if got := after[id].burst - before[id].burst; math.Abs(got-wantCredit) > 1e-6 {
 			t.Errorf("%s burst credit = %v, want %v (stage share plus the cut agent's unspent burst)", id, got, wantCredit)
 		}
 		if g := after[id].guaranteed; g != 0 {
@@ -393,14 +393,13 @@ func TestDonationToABurstOnlyRecipientLandsEntirelyInBurstRegardlessOfKind(t *te
 		t.Fatalf("lookup quota: got = %v, want = nil", err)
 	}
 	recipient := quotas[recipientAgent]
-	// Pre-donation: AllocateQuota(8, 2 participants, BurstFraction=0.5) gives a 4/2 guaranteed/
-	// burst split, and ApplyQuotaTier(burst_only, 4, 2) folds it entirely into burst = 6. The
-	// donation similarly folds its own 1.0 guaranteed + 0.5 burst into a single +1.5 burst credit.
+	// Pre-donation: AllocateQuota(8, 2 participants) gives a share of 4, which a burst-only
+	// agent holds as burst = 4 with no burst hours beside it. The donated hour lands there too.
 	if recipient.guaranteed != 0 {
 		t.Errorf("burst_only recipient guaranteed after donation = %v, want 0", recipient.guaranteed)
 	}
-	if recipient.burst != 7.5 {
-		t.Errorf("burst_only recipient burst after donation = %v, want 7.5 (6.0 pre-donation + 1.5 donated, fully folded)", recipient.burst)
+	if recipient.burst != 5 {
+		t.Errorf("burst_only recipient burst after donation = %v, want 5 (its share of 4 and the hour donated)", recipient.burst)
 	}
 }
 

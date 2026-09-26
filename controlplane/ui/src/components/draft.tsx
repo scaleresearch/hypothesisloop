@@ -126,7 +126,7 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
       <CardContent className="grid gap-3">
         <p className="text-sm text-muted">
           These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
-          for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the run spends nothing beyond what you enter here.
+          for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the budget caps everything the run spends, burst hours included.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} onChange={e => setBudget(e.target.value)} /></FormField>

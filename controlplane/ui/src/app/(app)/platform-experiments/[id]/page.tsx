@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState } from 'react'
+import { quotaShareAccH } from '@/lib/quota'
 import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly, ReadOnlyProvider, useRecordScope } from '@/lib/read-only'
 import { useTenant } from '@/lib/tenant'
@@ -503,7 +504,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 {scoreboard.map(agentId => {
                   const quota = (quotas ?? []).find(q => q.agent_id === agentId)
                   const usedAccH = quota ? quota.used_guaranteed_acch + quota.used_burst_acch : 0
-                  const totalAccH = quota ? quota.guaranteed_accelerator_hours + quota.burst_accelerator_hours : 0
+                  const totalAccH = quota ? quotaShareAccH(quota) : 0
                   const isCut = (stagesStatus?.cut_agents ?? []).some(c => c.agent_id === agentId)
                   const isActive = !isCut && (stagesStatus?.cut_agents.length ?? 0) > 0
                     && (stagesStatus?.active_agents ?? []).includes(agentId)

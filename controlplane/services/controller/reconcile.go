@@ -151,8 +151,11 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	spent := func(budget, used float64) bool {
 		return budget > 0 && used >= budget*0.99
 	}
-	guaranteedExhausted := spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH)
-	burstExhausted := spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH)
+	// Burst hours are inside the agent's share of the budget: a spent share ends work at either
+	// priority.
+	shareExhausted := spent(aq.Share(), aq.Used())
+	guaranteedExhausted := shareExhausted || spent(aq.GuaranteedAcceleratorHours, aq.UsedGuaranteedAccH)
+	burstExhausted := shareExhausted || spent(aq.BurstAcceleratorHours, aq.UsedBurstAccH)
 
 	if !guaranteedExhausted && !burstExhausted {
 		return nil

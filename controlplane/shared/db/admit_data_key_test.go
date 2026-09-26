@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,18 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	}
 	if got, _ := store.GetExperiment(ctx, exp.ID); got.DataKey != exp.DataKey {
 		t.Fatalf("re-submission replaced the key with %+v", got.DataKey)
+	}
+
+	// Burst hours are inside the agent's share of the budget: with 8 of its 10 hours spent, a
+	// burst job of 3 is refused though 5 burst hours are unused.
+	burst := *exp
+	burst.ID, burst.CapacityTier, burst.EstimatedCostAccH = exp.ID+"-burst", domain.CapacityBurst, 3
+	spent := func(context.Context) (*domain.AgentQuota, error) {
+		return &domain.AgentQuota{UsedGuaranteedAccH: 8}, nil
+	}
+	decision, reason, err = store.AdmitExperimentTx(ctx, &burst, spent, SubmissionRateLimit{}, func(context.Context) error { return nil })
+	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "share of the experiment budget has 2.00 remaining") {
+		t.Fatalf("burst job past the share = %v %q %v, want it refused for the share", decision, reason, err)
 	}
 }
 

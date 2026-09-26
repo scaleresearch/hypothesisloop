@@ -19,6 +19,22 @@ type AgentQuota struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Share is the agent's part of the platform experiment's budget, all it may spend at either
+// priority: its guaranteed hours, or its burst hours when its tier gives it none guaranteed.
+// The shares of a platform experiment sum to the budget released so far, which is what makes
+// the budget a cap on everything the experiment spends.
+func (q *AgentQuota) Share() float64 {
+	if q.GuaranteedAcceleratorHours > 0 {
+		return q.GuaranteedAcceleratorHours
+	}
+	return q.BurstAcceleratorHours
+}
+
+// Used is what the agent has spent of its share, at either priority.
+func (q *AgentQuota) Used() float64 {
+	return q.UsedGuaranteedAccH + q.UsedBurstAccH
+}
+
 // DominantUtilization is used/guaranteed AccH — the fairness signal scheduler.sortBurst orders
 // on. Always reads the *guaranteed* columns, even for burst-tier ordering: an agent's standing
 // under its guaranteed allocation is the fairness signal both passes use — burst's own usage is

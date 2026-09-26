@@ -14,16 +14,22 @@ func TestApplyQuotaTierFoldsGuaranteedIntoBurstOnly(t *testing.T) {
 	if g != 0 {
 		t.Errorf("guaranteed = %v, want 0", g)
 	}
-	if b != 14 {
-		t.Errorf("burst = %v, want 14 (10 guaranteed + 4 burst preserved)", b)
+	if b != 10 {
+		t.Errorf("burst = %v, want 10: the share, with no burst hours on top of it", b)
 	}
 }
 
-func TestApplyQuotaTierPreservesTotalEntitlement(t *testing.T) {
+// Whatever the tier, an agent's share of the budget is what was carved for it, and shares of
+// 0.4 of a 1.5 hour budget between two agents are 0.3 each with no noise from the division.
+func TestAShareIsTheSameUnderEitherTier(t *testing.T) {
+	guaranteed, burst := AllocateQuota(1.5*0.4, 2, 0, 0, QuotaConfig{BurstFraction: 2})
+	if guaranteed != 0.3 || burst != 0.6 {
+		t.Fatalf("allocated (%v, %v), want (0.3, 0.6)", guaranteed, burst)
+	}
 	for _, tier := range []QuotaTier{QuotaTierGuaranteed, QuotaTierBurstOnly} {
-		g, b := ApplyQuotaTier(tier, 10, 4)
-		if g+b != 14 {
-			t.Errorf("tier=%q: total = %v, want 14 (nothing minted or dropped)", tier, g+b)
+		g, b := ApplyQuotaTier(tier, guaranteed, burst)
+		if share := (&AgentQuota{GuaranteedAcceleratorHours: g, BurstAcceleratorHours: b}).Share(); share != 0.3 {
+			t.Errorf("tier=%q: share = %v, want 0.3", tier, share)
 		}
 	}
 }
