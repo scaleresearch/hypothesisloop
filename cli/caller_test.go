@@ -183,7 +183,8 @@ func TestACoordinatorReadsTheWholeExperimentWhereAnAgentReadsItsOwn(t *testing.T
 func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "ok"} })
 	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	// The token says which experiment it coordinates, whatever the environment holds.
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-stale")
 	t.Setenv("AGENT_ID", "")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"platform-experiments", "summary", "--text", "what was found"}, &stdout, &stderr); code != 0 {
@@ -208,10 +209,10 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		t.Errorf("an update that names no field: exit %d, want 2", code)
 	}
 	want := []recorded{
-		{Method: "POST", Path: "/platform-experiments/pe-env/summary", Body: map[string]any{"summary": "what was found"}},
+		{Method: "POST", Path: "/platform-experiments/pe-1/summary", Body: map[string]any{"summary": "what was found"}},
 		{Method: "POST", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
-		{Method: "POST", Path: "/platform-experiments/pe-env/close", Body: map[string]any{}},
-		{Method: "PATCH", Path: "/platform-experiments/pe-env", Body: map[string]any{"description": "from a file\n"}},
+		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
 	}
 	if !reflect.DeepEqual(*got, want) {

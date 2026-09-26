@@ -242,7 +242,7 @@ func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if code != 0 || listQuery != "agent=jane&needs_summary=true&platform_experiment_id=pe-1" {
+	if code != 0 || listQuery != "agent_id=jane&needs_summary=true&platform_experiment_id=pe-1" {
 		t.Fatalf("exit %d, list query %q, stderr %s", code, listQuery, stderr.String())
 	}
 	if want := `{"id":"job-3","status":"QUEUED"}` + "\n"; stdout.String() != want {
@@ -540,7 +540,7 @@ func TestJobListNeedsSummary(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if gotQuery != "agent=a&needs_summary=true&platform_experiment_id=pe-1" {
+	if gotQuery != "agent_id=a&needs_summary=true&platform_experiment_id=pe-1" {
 		t.Fatalf("got query %s", gotQuery)
 	}
 }
