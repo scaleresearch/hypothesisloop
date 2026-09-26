@@ -3,10 +3,6 @@ package objectstore
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -41,52 +37,18 @@ func (c *Client) PutSession(ctx context.Context, platformExperimentID, agentID s
 	if err != nil {
 		return err
 	}
-	if len(snapshot) == 0 {
-		return fmt.Errorf("objectstore: put %s: the session is empty", key)
-	}
-	req, err := c.signedRequest(ctx, http.MethodPut, "/"+c.Bucket+"/"+key, nil, snapshot)
-	if err != nil {
-		return err
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("objectstore: put %s: %w", key, err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("objectstore: put %s: status %d: %s", key, resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return nil
+	return c.put(ctx, key, snapshot)
 }
 
-// GetSession returns the stored session, or ErrNoSession. One larger than maxBytes is an error:
-// nothing this package stored is.
+// GetSession returns the stored session, or ErrNoSession.
 func (c *Client) GetSession(ctx context.Context, platformExperimentID, agentID string, maxBytes int64) ([]byte, error) {
 	key, err := sessionKey(platformExperimentID, agentID)
 	if err != nil {
 		return nil, err
 	}
-	req, err := c.signedRequest(ctx, http.MethodGet, "/"+c.Bucket+"/"+key, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("objectstore: get %s: %w", key, err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("objectstore: get %s: read body: %w", key, err)
-	}
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
+	body, found, err := c.get(ctx, key, maxBytes)
+	if err == nil && !found {
 		return nil, ErrNoSession
-	case resp.StatusCode != http.StatusOK:
-		return nil, fmt.Errorf("objectstore: get %s: status %d: %s", key, resp.StatusCode, strings.TrimSpace(string(body[:min(len(body), 4<<10)])))
-	case int64(len(body)) > maxBytes:
-		return nil, fmt.Errorf("objectstore: get %s: larger than %d bytes", key, maxBytes)
 	}
-	return body, nil
+	return body, err
 }

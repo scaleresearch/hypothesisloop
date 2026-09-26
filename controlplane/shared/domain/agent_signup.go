@@ -146,6 +146,10 @@ const (
 // MaxAgentSessionBytes bounds the session snapshot an agent or a coordinator stores.
 const MaxAgentSessionBytes = 32 << 20
 
+// MaxAgentCodeBytes bounds one git bundle of an agent's code, in a platform experiment that has
+// no repository.
+const MaxAgentCodeBytes = 32 << 20
+
 // MaxAgentInstanceLogBytes bounds the log tail kept of an exited machine.
 const MaxAgentInstanceLogBytes = 4 << 10
 
