@@ -190,6 +190,12 @@ data_store:
 #
 # acch_rate is cost in accelerator-hours (AccH), H100-equivalent (H100 = 1.0).
 #
+# kind says what one unit of the type is: accelerator (the default) for a device, cpu for one
+# core of a CPU class a cluster publishes. An entry of kind cpu is priced per core-hour:
+#   - name:      cpu.hypothesisloop.dev/class=<cpu-model>
+#     kind:      cpu
+#     acch_rate: 0.01
+#
 # Accelerators are the resource dimension admitted/preempted on. RAM/storage are hard
 # physical-fit-checked at admission instead of hours-quota-tracked. Agents declare accelerator
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.

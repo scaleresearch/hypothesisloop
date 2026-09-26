@@ -1056,10 +1056,13 @@ func TestAnOrgSetsThePriorityOfAClusterItRegistered(t *testing.T) {
 	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
 	var view WithdrawnCluster
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-first"}, http.StatusOK, nil)
-	for caller, priority := range map[string]int{"owner": 1, "org-key": 1000, "staff": 250} {
-		w.ok(caller, "PATCH", path, map[string]any{"priority": priority}, http.StatusOK, &view)
-		if view.Priority != priority || view.Shared || len(view.Requeued) != 0 || view.Requeued == nil {
-			t.Fatalf("%s set priority %d: got = %+v", caller, priority, view)
+	for _, set := range []struct {
+		caller   string
+		priority int
+	}{{"owner", 1}, {"org-key", 1000}, {"staff", 250}} {
+		w.ok(set.caller, "PATCH", path, map[string]any{"priority": set.priority}, http.StatusOK, &view)
+		if view.Priority != set.priority || view.Shared || len(view.Requeued) != 0 || view.Requeued == nil {
+			t.Fatalf("%s set priority %d: got = %+v", set.caller, set.priority, view)
 		}
 	}
 	w.ok("owner", "PATCH", "/orgs/"+w.orgA+"/clusters/zz-first", map[string]any{"priority": 900}, http.StatusOK, nil)

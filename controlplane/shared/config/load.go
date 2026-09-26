@@ -143,6 +143,7 @@ func (c *Config) build() error {
 		return fmt.Errorf("accelerator_types must not be empty")
 	}
 	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
+	c.KindByName = make(map[string]domain.TypeKind, len(c.AcceleratorTypes))
 
 	seenNames := map[string]bool{}
 	for _, g := range c.AcceleratorTypes {
@@ -155,8 +156,13 @@ func (c *Config) build() error {
 		if seenNames[g.Name] {
 			return fmt.Errorf("accelerator_type names must be unique: %q", g.Name)
 		}
+		kind, err := domain.ParseTypeKind(g.Kind)
+		if err != nil {
+			return fmt.Errorf("accelerator_type %q: %w", g.Name, err)
+		}
 		seenNames[g.Name] = true
 		c.RateByName[g.Name] = g.AccHRate
+		c.KindByName[g.Name] = kind
 	}
 	if c.Quota.BurstFraction <= 0 {
 		return fmt.Errorf("quota burst_fraction must be positive")
