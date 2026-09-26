@@ -278,7 +278,8 @@ func (m briefMetrics) MarshalJSON() ([]byte, error) {
 }
 
 // briefJobs is one compact line per job, ending in env: the settings that differ between these
-// jobs, always present so that a reader can index it.
+// jobs, always present so that a reader can index it. A job listed alone has nothing to differ
+// from, and an empty env there would read as a job that set none, so it shows all of its own.
 func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 	briefs := make([]jobBrief, len(jobs))
 	envs := make([]map[string]any, len(jobs))
@@ -298,7 +299,7 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 	for i := range briefs {
 		varied := map[string]any{}
 		for key, value := range envs[i] {
-			if slices.ContainsFunc(envs, func(other map[string]any) bool { return other[key] != value }) {
+			if len(envs) == 1 || slices.ContainsFunc(envs, func(other map[string]any) bool { return other[key] != value }) {
 				varied[key] = value
 			}
 		}
@@ -320,7 +321,8 @@ func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
 One job per line, newest first: ids, status, metrics (best and last of each declared metric),
-reasons, theory, cost and env, the settings that differ between the listed jobs. hl job status ID
+reasons, theory, cost and env, the settings that differ between the listed jobs (all of them
+for a job listed alone). hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")

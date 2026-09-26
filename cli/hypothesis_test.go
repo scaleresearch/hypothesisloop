@@ -598,3 +598,30 @@ func TestHypothesisSubmitTakesCommaSeparatedIDs(t *testing.T) {
 		t.Fatalf("links = %v, want %v", (*got)[0].Body["links"], want)
 	}
 }
+
+// Every job of hl hypothesis get read "env":{} in a run where each hypothesis had one job: env is
+// what differs between the listed jobs, and one job differs from nothing.
+func TestTheOnlyJobOfAHypothesisShowsItsWholeEnvAndSeveralShowWhatDiffers(t *testing.T) {
+	job := func(id, lr string) map[string]any {
+		return map[string]any{"id": id, "status": "COMPLETED", "job": map[string]any{"env": map[string]any{"LR": lr, "HIDDEN": "16"}}}
+	}
+	var jobs []any
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "h-1", "text": "t", "job_count": len(jobs), "jobs": jobs}
+	})
+	get := func() string {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"hypothesis", "get", "h-1"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		return stdout.String()
+	}
+	jobs = []any{job("job-1", "0.3")}
+	if out := get(); !strings.Contains(out, `"env":{"HIDDEN":"16","LR":"0.3"}`) {
+		t.Errorf("one job: %s, want its whole env", out)
+	}
+	jobs = []any{job("job-1", "0.3"), job("job-2", "0.1")}
+	if out := get(); !strings.Contains(out, `"env":{"LR":"0.3"}`) || !strings.Contains(out, `"env":{"LR":"0.1"}`) || strings.Contains(out, "HIDDEN") {
+		t.Errorf("two jobs: %s, want only what differs", out)
+	}
+}

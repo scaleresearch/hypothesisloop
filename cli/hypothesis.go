@@ -546,7 +546,8 @@ func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID [--limit N]
 
 One hypothesis with its links (in and out), findings, comments and jobs, oldest first. A job is
-as brief as in hl job list, metrics included; hl job status ID prints its whole record.`, stderr)
+as brief as in hl job list, metrics included, with the env that differs between its jobs (all
+of it for an only job); hl job status ID prints its whole record.`, stderr)
 	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
