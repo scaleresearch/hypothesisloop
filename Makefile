@@ -329,11 +329,13 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	job:infra/images/job/Dockerfile:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
-# The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
+# The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here
+# and removed when the builds end: left behind, it goes stale with the next change to go.mod and
+# plain `go build` then fails on it.
 # The dev registry is started only when it is the one pushed to.
 locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
-	go mod vendor
-	@for entry in $(IMAGE_TARGETS); do \
+	@trap 'rm -rf vendor' EXIT; go mod vendor || exit 1; \
+	for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
 		podman build --platform $(IMAGE_PLATFORM) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
