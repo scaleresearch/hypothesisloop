@@ -96,7 +96,7 @@ func hypothesisWriteError(err error) error {
 		return huma.Error409Conflict(unsupported.Detail)
 	}
 	switch {
-	case errors.Is(err, domain.ErrHypothesisOrigin), errors.Is(err, graphdb.ErrInvalidLink),
+	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
 		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner), errors.Is(err, ErrHypothesisSubmitterNotAllowed):
@@ -178,14 +178,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if err := access.Within(ctx, "hypothesis", placedIn); err != nil {
 				return err
 			}
-		}
-		return nil
-	}
-	// recordHumanWrite is called once a person's write is in. A failure here leaves the write
-	// without its account, so it is an error to the caller and loud in the log.
-	recordHumanWrite := func(ctx context.Context, origin auth.Origin, kind domain.HumanWriteKind, subject, platformExperimentID string) error {
-		if err := h.svc.RecordHumanWrite(ctx, origin, kind, subject, platformExperimentID); err != nil {
-			return h.internal("record the account behind a "+string(kind), err)
 		}
 		return nil
 	}
@@ -385,16 +377,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
 			"related link. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
-			"experiment. Exactly one of agent_id (an agent's row) or author (a human's, submitted from the UI) must be set; " +
-			"both sit in the same graph under the same dedup, and any agent may submit a job against either. What a human " +
-			"author does not get is quota or a place in the standings — those key on agent_id.",
+			"experiment. " +
+			"Who registered it is the caller, answered as actor, and no field of the body names it: author is refused. " +
+			"agent_id says whose hypothesis it is: an agent token's is its own agent's, named or not, and any other caller names an agent it " +
+			"reaches to register for it, or names none and the hypothesis has no owning agent. Both sit in the same graph under the same " +
+			"dedup, and any agent may submit a job against either. What one with no owning agent does not get is quota or a place in the " +
+			"standings — those key on agent_id.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			// Neither is schema-required, and that is deliberate: exactly one of them must be
-			// set, which is a rule about the PAIR that no per-field "required" can express.
-			// domain.ClassifyHypothesisOrigin owns it.
-			AgentID              string            `json:"agent_id,omitempty" required:"false"`
-			Author               string            `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
+			AgentID              string            `json:"agent_id,omitempty" required:"false" doc:"The agent whose hypothesis this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
 			PlatformExperimentID string            `json:"platform_experiment_id"`
 			Text                 string            `json:"text"`
 			Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
@@ -414,7 +405,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		origin, err := access.Origin(ctx, b.AgentID, b.Author)
+		owner, actor, err := access.Writer(ctx, b.AgentID)
 		if err != nil {
 			return nil, err
 		}
@@ -425,7 +416,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := referencesInScope(ctx, referenced...); err != nil {
 			return nil, err
 		}
-		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, origin.AgentID, origin.Author, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
+		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, owner, actor, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
 			return nil, hypothesisWriteError(err)
@@ -433,8 +424,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		status := http.StatusCreated
 		if existed {
 			status = http.StatusOK
-		} else if err := recordHumanWrite(ctx, origin, domain.HumanWriteHypothesis, hyp.ID, hyp.PlatformExperimentID); err != nil {
-			return nil, err
 		}
 		return &struct {
 			Status int
@@ -447,15 +436,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Link a hypothesis to another", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
 		Description: "Adds one outgoing link: builds_on (to a hypothesis, or the platform_experiment_id for the " +
-			"objective), contradicts or related (to a hypothesis in the same platform experiment). Only the registering " +
-			"agent_id may link from its hypothesis; a human-submitted one can be linked by anyone, others get 403. " +
+			"objective), contradicts or related (to a hypothesis in the same platform experiment). Only the agent whose " +
+			"hypothesis it is may link from it, and one with no owning agent can be linked by anyone; others get 403. " +
+			"agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. " +
 			"400 on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
 			"are append-only and re-adding one changes nothing. Returns the hypothesis's outgoing links.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			AgentID string          `json:"agent_id,omitempty" required:"false"`
-			Author  string          `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
+			AgentID string          `json:"agent_id,omitempty" required:"false" doc:"The agent whose link this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
 			Type    domain.LinkType `json:"type" doc:"builds_on, contradicts or related."`
 			To      string          `json:"to" doc:"A hypothesis id, or the platform_experiment_id for the objective (builds_on only)."`
 		}
@@ -463,25 +452,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status int
 		Body   []domain.Link
 	}, error) {
-		from, err := loadHypothesis(ctx, in.ID)
-		if err != nil {
+		if _, err := loadHypothesis(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		if err := referencesInScope(ctx, in.Body.To); err != nil {
 			return nil, err
 		}
-		origin, err := access.Origin(ctx, in.Body.AgentID, in.Body.Author)
+		owner, actor, err := access.Writer(ctx, in.Body.AgentID)
 		if err != nil {
 			return nil, err
 		}
-		links, err := h.svc.AddHypothesisLink(ctx, in.ID, origin.AgentID, origin.Author, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
+		links, err := h.svc.AddHypothesisLink(ctx, in.ID, owner, actor, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
 		if err != nil {
 			h.logger.Info("add hypothesis link", zap.Error(err))
 			return nil, hypothesisWriteError(err)
-		}
-		subject := in.ID + " " + string(in.Body.Type) + " " + in.Body.To
-		if err := recordHumanWrite(ctx, origin, domain.HumanWriteLink, subject, from.PlatformExperimentID); err != nil {
-			return nil, err
 		}
 		return &struct {
 			Status int
@@ -659,6 +643,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		hyp, err := loadHypothesis(ctx, in.ID)
 		if err != nil {
 			return nil, err
+		}
+		if err := h.svc.NameHypothesis(ctx, hyp); err != nil {
+			return nil, h.internal("name the hypothesis's actors", err)
 		}
 		links, err := h.svc.GetHypothesisLinks(ctx, in.ID)
 		if err != nil {

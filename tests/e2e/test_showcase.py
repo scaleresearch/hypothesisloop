@@ -74,10 +74,10 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         ]
         # What it may never do to it: every write, and every credential.
         writes = [
-            ("POST", "/hypotheses", {"author": "Mallory", "platform_experiment_id": pe_id, "text": "an intruding claim",
+            ("POST", "/hypotheses", {"platform_experiment_id": pe_id, "text": "an intruding claim",
                                      "links": [{"type": "builds_on", "to": pe_id}]}),
             ("POST", f"/hypotheses/{hyp_id}/comments", {"text": "an intruding comment"}),
-            ("POST", f"/hypotheses/{hyp_id}/links", {"author": "Mallory", "type": "related", "to": pe_id}),
+            ("POST", f"/hypotheses/{hyp_id}/links", {"type": "related", "to": pe_id}),
             ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed", "despite": "an intruder settles it with a reason of its own"}),
             # A whole body: one that is not is refused for its shape before anyone's reach is looked at.
                 ("PUT", f"/platform-experiments/{pe_id}", {

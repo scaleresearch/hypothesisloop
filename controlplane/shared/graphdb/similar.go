@@ -118,14 +118,14 @@ func untoldSimilar(ctx context.Context, tx neo4j.ManagedTransaction, n NewHypoth
 	}
 	records, err := collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe})
 OPTIONAL MATCH (h)-[:BUILDS_ON]->(t)
-RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]any{"pe": n.PlatformExperimentID})
+RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_id, ''), h.author, h.status, h.text, collect(t.id)`, map[string]any{"pe": n.PlatformExperimentID})
 	if err != nil {
 		return nil, err
 	}
 	var d decoder
 	texts := make([]string, len(records))
 	for i, r := range records {
-		texts[i] = d.str(r.Values[4])
+		texts[i] = d.str(r.Values[6])
 	}
 	scores := similarities(n.Text, texts)
 	type scored struct {
@@ -134,8 +134,9 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 	}
 	var found []scored
 	for i, r := range records {
-		h := domain.SimilarHypothesis{ID: d.str(r.Values[0]), AgentID: d.str(r.Values[1]), Author: d.str(r.Values[2]),
-			Status: domain.HypothesisStatus(d.str(r.Values[3])), Text: texts[i], BuildsOn: []string{}}
+		h := domain.SimilarHypothesis{ID: d.str(r.Values[0]), AgentID: d.str(r.Values[1]),
+			Status: domain.HypothesisStatus(d.str(r.Values[5])), Text: texts[i], BuildsOn: []string{}}
+		h.Actor = domain.StoredActor(domain.ActorKind(d.str(r.Values[2])), d.str(r.Values[3]), d.str(r.Values[4]), h.AgentID)
 		if told[h.ID] {
 			continue
 		}
@@ -147,7 +148,7 @@ RETURN h.id, h.agent_id, h.author, h.status, h.text, collect(t.id)`, map[string]
 		default:
 			continue
 		}
-		for _, id := range r.Values[5].([]any) {
+		for _, id := range r.Values[7].([]any) {
 			h.BuildsOn = append(h.BuildsOn, d.str(id))
 		}
 		found = append(found, scored{h, scores[i]})

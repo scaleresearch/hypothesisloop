@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"strings"
 	"testing"
 
@@ -31,8 +30,12 @@ var (
 // keeps, holding one hypothesis of agent-1 and one of agent-2 in pe-1 and one in pe-other.
 type registryAs struct {
 	store                  *poolStore
+	graph                  *fakeGraph
 	router                 chi.Router
 	own, rivals, elsewhere *domain.Hypothesis
+	// unowned is a hypothesis of pe-1 no agent owns, and seeded how many hypotheses there are.
+	unowned *domain.Hypothesis
+	seeded  int
 }
 
 func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
@@ -41,14 +44,19 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	svc := poolService(store)
 	ctx := context.Background()
 	seed := func(agent, pe, text string) *domain.Hypothesis {
-		hyp, _, _, err := svc.RegisterHypothesis(ctx, agent, "", pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)
+		hyp, _, _, err := svc.RegisterHypothesis(ctx, agent, agentActor(agent), pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return hyp
 	}
-	fixture := &registryAs{store: store, router: chi.NewRouter(),
+	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), router: chi.NewRouter(),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
+	unowned, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.unowned, fixture.seeded = unowned, len(fixture.graph.rows)
 	RegisterHuma(apidocs.New(fixture.router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
 	return fixture
 }
@@ -83,45 +91,18 @@ func with(base map[string]any, origin map[string]any) map[string]any {
 	return out
 }
 
-// The two graph writes that take agent_id or author, as each origin an agent token might claim.
-func TestAnAgentTokenWritesToTheGraphAsItsOwnAgentOnly(t *testing.T) {
-	for origin, tc := range map[string]struct {
-		fields map[string]any
-		want   int
-	}{
-		"itself":                  {map[string]any{"agent_id": "agent-1"}, http.StatusCreated},
-		"a person":                {map[string]any{"author": "Mallory"}, http.StatusForbidden},
-		"itself and a person":     {map[string]any{"agent_id": "agent-1", "author": "Mallory"}, http.StatusForbidden},
-		"another agent":           {map[string]any{"agent_id": "agent-2"}, http.StatusForbidden},
-		"nobody":                  {map[string]any{}, http.StatusForbidden},
-		"an agent of another org": {map[string]any{"agent_id": "agent-9"}, http.StatusForbidden},
-	} {
-		f := newRegistryAs(t, agentOne)
-		for route, rec := range map[string]*httptest.ResponseRecorder{
-			"POST /hypotheses": f.do(t, http.MethodPost, "/hypotheses", with(map[string]any{
-				"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}, tc.fields)),
-			"POST /hypotheses/{id}/links": f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/links",
-				with(map[string]any{"type": "related", "to": f.rivals.ID}, tc.fields)),
-		} {
-			if rec.Code != tc.want {
-				t.Errorf("%s as %s: got = %d %s, want = %d", route, origin, rec.Code, rec.Body, tc.want)
-			}
-		}
-		if len(f.store.humanWrites) != 0 {
-			t.Errorf("as %s: an agent token left human writes %+v", origin, f.store.humanWrites)
-		}
-	}
-}
-
 var (
 	keyOne      = auth.Principal{Kind: auth.KindKey, KeyID: "key-1", OrgIDs: []string{"org-a"}}
 	coordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
 	staffToken  = auth.Principal{Kind: auth.KindStaff}
 )
 
-// Who wrote a comment is the credential that sent it. agent_id says whose note it is, and no
-// caller's word on who they are is taken: there is no field for it.
-func TestACommentIsWrittenByTheCredentialThatSentIt(t *testing.T) {
+// Who made a hypothesis, a link or a comment is the credential that sent it. agent_id says whose
+// record it is, and no caller's word on who they are is taken: there is no field for it.
+func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
+	adaNamed := domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}
+	agent := domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}
+	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}
 	for name, tc := range map[string]struct {
 		caller auth.Principal
 		fields map[string]any
@@ -129,19 +110,20 @@ func TestACommentIsWrittenByTheCredentialThatSentIt(t *testing.T) {
 		owner  string
 		actor  domain.Actor
 	}{
-		"an agent naming itself":             {agentOne, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}},
-		"an agent naming nobody":             {agentOne, nil, 201, "agent-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}},
+		"an agent naming itself":             {agentOne, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", agent},
+		"an agent naming nobody":             {agentOne, nil, 201, "agent-1", agent},
 		"an agent naming another":            {agentOne, map[string]any{"agent_id": "agent-2"}, 403, "", domain.Actor{}},
 		"an agent naming one of another org": {agentOne, map[string]any{"agent_id": "agent-9"}, 403, "", domain.Actor{}},
 		"an agent claiming a person's name":  {agentOne, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
-		"a person":                           {ada, nil, 201, "", domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}},
+		"an agent as itself and a person":    {agentOne, map[string]any{"agent_id": "agent-1", "author": "Mallory"}, 422, "", domain.Actor{}},
+		"a person":                           {ada, nil, 201, "", adaNamed},
 		"a person claiming another's name":   {ada, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
-		"a person for an agent":              {ada, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}},
+		"a person for an agent":              {ada, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", adaNamed},
 		"a person for another org's agent":   {ada, map[string]any{"agent_id": "agent-9"}, 404, "", domain.Actor{}},
 		"a person with no name":              {nameless, nil, 201, "", domain.Actor{Kind: domain.ActorUser, ID: "user-x", Name: "user-x"}},
-		"an api key":                         {keyOne, nil, 201, "", domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"an api key":                         {keyOne, nil, 201, "", key},
 		"an api key claiming a name":         {keyOne, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
-		"an api key for an agent":            {keyOne, map[string]any{"agent_id": "agent-2"}, 201, "agent-2", domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"an api key for an agent":            {keyOne, map[string]any{"agent_id": "agent-2"}, 201, "agent-2", key},
 		"a coordinator":                      {coordinator, nil, 201, "", domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1", Name: "coordinator"}},
 		"a coordinator claiming a name":      {coordinator, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
 		"a staff token":                      {staffToken, nil, 201, "", domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
@@ -149,35 +131,88 @@ func TestACommentIsWrittenByTheCredentialThatSentIt(t *testing.T) {
 	} {
 		f := newRegistryAs(t, tc.caller)
 		f.store.actorNames = map[string]string{"user-ada": "Ada Lovelace", "key-1": "laptop"}
-		rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", with(map[string]any{"text": "a note"}, tc.fields))
-		if rec.Code != tc.want {
-			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
-			continue
+		type written struct {
+			owner string
+			actor domain.Actor
+		}
+		routes := map[string]struct {
+			rec  *httptest.ResponseRecorder
+			read func(body []byte) (written, error)
+		}{
+			"POST /hypotheses": {
+				f.do(t, http.MethodPost, "/hypotheses", with(map[string]any{
+					"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}, tc.fields)),
+				func(body []byte) (written, error) {
+					var got hypothesisResponse
+					if err := json.Unmarshal(body, &got); err != nil {
+						return written{}, err
+					}
+					if got.Source != domain.SourceOf(tc.owner) {
+						return written{}, errors.New("source is " + string(got.Source))
+					}
+					return written{got.AgentID, got.Actor}, nil
+				}},
+			// From a hypothesis no agent owns, which anyone may link.
+			"POST /hypotheses/{id}/links": {
+				f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/links", with(map[string]any{"type": "related", "to": f.rivals.ID}, tc.fields)),
+				func(body []byte) (written, error) {
+					var got []domain.Link
+					if err := json.Unmarshal(body, &got); err != nil || len(got) != 1 {
+						return written{}, errors.New("want one link")
+					}
+					return written{got[0].AgentID, got[0].Actor}, nil
+				}},
+			"POST /hypotheses/{id}/comments": {
+				f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", with(map[string]any{"text": "a note"}, tc.fields)),
+				func(body []byte) (written, error) {
+					var got domain.HypothesisComment
+					if err := json.Unmarshal(body, &got); err != nil {
+						return written{}, err
+					}
+					if got.Source != domain.SourceOf(tc.owner) {
+						return written{}, errors.New("source is " + string(got.Source))
+					}
+					return written{got.AgentID, got.Actor}, nil
+				}},
+		}
+		for route, r := range routes {
+			if r.rec.Code != tc.want {
+				t.Errorf("%s by %s: got = %d %s, want = %d", route, name, r.rec.Code, r.rec.Body, tc.want)
+				continue
+			}
+			if tc.want != http.StatusCreated {
+				continue
+			}
+			got, err := r.read(r.rec.Body.Bytes())
+			if err != nil || got.owner != tc.owner || got.actor != tc.actor || strings.Contains(r.rec.Body.String(), `"author"`) {
+				t.Errorf("%s by %s: got = %s (%v), want owner %q, actor %+v and no author", route, name, r.rec.Body, err, tc.owner, tc.actor)
+			}
 		}
 		if tc.want != http.StatusCreated {
-			if len(f.store.comments) != 0 {
-				t.Errorf("%s: a refused comment was written: %v", name, f.store.comments)
+			if len(f.store.comments) != 0 || len(f.graph.rows) != f.seeded {
+				t.Errorf("%s: a refused write left something behind: comments %v, %d hypotheses of %d seeded", name, f.store.comments, len(f.graph.rows), f.seeded)
 			}
 			continue
 		}
-		var got domain.HypothesisComment
-		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-			t.Fatalf("%s: %v in %s", name, err, rec.Body)
+		// What is stored is the kind and the id. The name is looked up when the record is read.
+		if len(f.store.commentActors) != 1 || f.store.commentActors[0].Kind != tc.actor.Kind || f.store.commentActors[0].ID != tc.actor.ID {
+			t.Errorf("%s: stored comment actors = %+v, want one of kind %s and id %q", name, f.store.commentActors, tc.actor.Kind, tc.actor.ID)
 		}
-		if got.AgentID != tc.owner || got.Actor != tc.actor || got.Source != domain.SourceOf(tc.owner) || strings.Contains(rec.Body.String(), `"author"`) {
-			t.Errorf("%s: got = %s, want owner %q and actor %+v and no author", name, rec.Body, tc.owner, tc.actor)
-		}
-		// What is stored is the kind and the id. The name is looked up when the comment is read.
-		stored := tc.actor
-		if stored.Kind != domain.ActorUser {
-			stored.Name = ""
-		}
-		if len(f.store.commentActors) != 1 || f.store.commentActors[0].Kind != stored.Kind || f.store.commentActors[0].ID != stored.ID {
-			t.Errorf("%s: stored actors = %+v, want one of kind %s and id %q", name, f.store.commentActors, stored.Kind, stored.ID)
-		}
-		if len(f.store.humanWrites) != 0 {
-			t.Errorf("%s: the account was kept beside the comment as well as on it: %+v", name, f.store.humanWrites)
-		}
+	}
+}
+
+// Registering a claim that is already there answers the hypothesis as it stands: it stays whose
+// it was and by whom, whoever asks again.
+func TestRegisteringAnExistingClaimLeavesWhoRegisteredIt(t *testing.T) {
+	f := newRegistryAs(t, ada)
+	again := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
+		"platform_experiment_id": "pe-1", "text": "Warmup  helps", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
+	var got hypothesisResponse
+	if err := json.Unmarshal(again.Body.Bytes(), &got); err != nil || again.Code != http.StatusOK || !got.AlreadyExisted {
+		t.Fatalf("registering the same text again: got = %d %s (%v), want 200 and already_existed", again.Code, again.Body, err)
+	}
+	if want := (domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}); got.AgentID != "agent-1" || got.Actor != want {
+		t.Fatalf("the existing hypothesis: got agent %q actor %+v, want agent-1 and %+v", got.AgentID, got.Actor, want)
 	}
 }
 
@@ -191,62 +226,6 @@ func TestAnAgentTokenSettlesAsItselfOnly(t *testing.T) {
 	}
 	if got := status(f.own.ID, "agent-1"); got != http.StatusOK {
 		t.Errorf("settling its own: got = %d, want = 200", got)
-	}
-}
-
-// A signed-in user registers and links under the name the identity provider states, the account
-// is kept beside it, and naming an agent makes the write that agent's.
-func TestAUsersWriteCarriesTheProvidersNameAndTheirAccount(t *testing.T) {
-	f := newRegistryAs(t, ada)
-	register := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
-		"author": "Mallory", "platform_experiment_id": "pe-1", "text": "cosine decay",
-		"links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
-	var registered hypothesisResponse
-	if err := json.Unmarshal(register.Body.Bytes(), &registered); err != nil || register.Code != http.StatusCreated {
-		t.Fatalf("register: got = %d %s (%v), want = 201", register.Code, register.Body, err)
-	}
-	if registered.Author != "Ada Lovelace" || registered.AgentID != "" {
-		t.Fatalf("registered as author %q agent %q, want Ada Lovelace and no agent", registered.Author, registered.AgentID)
-	}
-	link := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(registered.ID)+"/links", map[string]any{"type": "related", "to": f.own.ID})
-	if link.Code != http.StatusCreated {
-		t.Fatalf("link: %d %s, want 201", link.Code, link.Body)
-	}
-	want := []domain.HumanWrite{
-		{UserID: "user-ada", Author: "Ada Lovelace", Kind: domain.HumanWriteHypothesis, Subject: registered.ID, PlatformExperimentID: "pe-1"},
-		{UserID: "user-ada", Author: "Ada Lovelace", Kind: domain.HumanWriteLink, Subject: registered.ID + " related " + f.own.ID, PlatformExperimentID: "pe-1"},
-	}
-	if !slices.Equal(f.store.humanWrites, want) {
-		t.Fatalf("accounts kept:\n got = %+v\nwant = %+v", f.store.humanWrites, want)
-	}
-
-	again := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
-		"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
-	if again.Code != http.StatusOK || len(f.store.humanWrites) != len(want) {
-		t.Fatalf("registering the same text again: got = %d with %d accounts kept, want 200 and no new one", again.Code, len(f.store.humanWrites))
-	}
-
-}
-
-func TestAUserWithNoNameIsToldSoAndWritesNothing(t *testing.T) {
-	f := newRegistryAs(t, nameless)
-	for route, rec := range map[string]*httptest.ResponseRecorder{
-		"register": f.do(t, http.MethodPost, "/hypotheses", map[string]any{
-			"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}),
-	} {
-		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no name") {
-			t.Errorf("%s: got = %d %s, want 400 saying the sign-in carries no name", route, rec.Code, rec.Body)
-		}
-	}
-}
-
-func TestAWriteWhoseAccountCouldNotBeKeptIsAnErrorWithoutTheCause(t *testing.T) {
-	f := newRegistryAs(t, ada)
-	f.store.failRecord = errors.New("pq: connection refused at 10.0.0.7")
-	rec := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
-		"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
-	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "pq:") {
-		t.Fatalf("got = %d %s, want 500 with no cause in the body", rec.Code, rec.Body)
 	}
 }
 

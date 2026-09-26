@@ -27,7 +27,7 @@ func TestConcurrentLinksCannotCloseAMultiHopCycle(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, errs[i] = s.AddLink(ctx, l[0], "agent-1", "", domain.LinkSpec{Type: domain.LinkBuildsOn, To: l[1]}, stampAt(1))
+				_, errs[i] = s.AddLink(ctx, l[0], "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkBuildsOn, To: l[1]}, stampAt(1))
 			}()
 		}
 		wg.Wait()
@@ -69,7 +69,7 @@ func TestConcurrentNearDuplicateRegistrationsCreateOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _, _, _, errs[i] = s.Register(context.Background(), NewHypothesis{
-				Source: domain.HypothesisSourceAgent, AgentID: fmt.Sprintf("agent-%d", i), PlatformExperimentID: pe,
+				AgentID: fmt.Sprintf("agent-%d", i), PlatformExperimentID: pe,
 				Text: text, Links: onRoot(pe),
 			})
 		}()

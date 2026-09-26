@@ -1,8 +1,6 @@
 package domain
 
 import (
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -15,13 +13,14 @@ import (
 // (platform_experiment_id, normalized text) makes registering the same claim twice within one
 // platform experiment return the existing hypothesis (see NormalizeHypothesisText); the same claim
 // in a different platform experiment is a distinct hypothesis.
-// The pool is shared with humans: AgentID is set on agent rows and empty on human ones, where
-// Author carries the name the person typed instead. See HypothesisSource.
+// The pool is shared with humans: AgentID is the agent whose hypothesis it is, empty on one no
+// agent owns (see HypothesisSource). Actor is whose credential registered it, which is another
+// fact: a person or an API key may register an agent's hypothesis for it.
 type Hypothesis struct {
 	ID                   string           `json:"id"`
 	AgentID              string           `json:"agent_id"`
 	Source               HypothesisSource `json:"source"`
-	Author               string           `json:"author"`
+	Actor                Actor            `json:"actor"`
 	PlatformExperimentID string           `json:"platform_experiment_id"`
 	Text                 string           `json:"text"`
 	Status               HypothesisStatus `json:"status"`
@@ -47,28 +46,6 @@ const (
 	// HypothesisSourceHuman is a row submitted from the UI, attributed to Author.
 	HypothesisSourceHuman HypothesisSource = "human"
 )
-
-// ErrHypothesisOrigin is what a caller sending a bad agent_id/author pair gets — bad input, so
-// the HTTP layer maps it to 400 rather than 500.
-var ErrHypothesisOrigin = errors.New("exactly one of agent_id/author must be set")
-
-// ClassifyHypothesisOrigin derives the source of a new pool row from the two mutually exclusive
-// ways of naming who is behind it. Exactly one of agentID/author must be set: both set would
-// make a row owned and unowned at once, and neither leaves it attributable to nobody. Neither
-// case is coerced into the other — this is the single place the rule is applied, at registration,
-// so no read path ever has to guess what a half-filled row meant.
-func ClassifyHypothesisOrigin(agentID, author string) (HypothesisSource, error) {
-	switch {
-	case agentID != "" && author != "":
-		return "", fmt.Errorf("%w, got both (agent_id=%q, author=%q)", ErrHypothesisOrigin, agentID, author)
-	case agentID != "":
-		return HypothesisSourceAgent, nil
-	case author != "":
-		return HypothesisSourceHuman, nil
-	default:
-		return "", fmt.Errorf("%w, got neither", ErrHypothesisOrigin)
-	}
-}
 
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
 // wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
@@ -134,15 +111,15 @@ type LinkSpec struct {
 
 // Link is one edge seen from one of its ends. HypothesisID, Text and Status describe the other end;
 // when that end is the objective root, HypothesisID is the platform experiment id and Text and
-// Status are empty. AgentID or Author (exactly one, as on a hypothesis) and CreatedAt describe who
-// created the edge and when.
+// Status are empty. AgentID is the agent whose link it is, empty when no agent owns it, Actor
+// whose credential made it, and CreatedAt when.
 type Link struct {
 	Type         LinkType  `json:"type"`
 	HypothesisID string    `json:"hypothesis_id"`
 	Text         string    `json:"text"`
 	Status       string    `json:"status"`
 	AgentID      string    `json:"agent_id"`
-	Author       string    `json:"author"`
+	Actor        Actor     `json:"actor"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -176,7 +153,7 @@ type GraphEdge struct {
 	To        string    `json:"to"`
 	Type      LinkType  `json:"type"`
 	AgentID   string    `json:"agent_id"`
-	Author    string    `json:"author"`
+	Actor     Actor     `json:"actor"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -236,7 +213,7 @@ func NormalizeHypothesisText(text string) string {
 type SimilarHypothesis struct {
 	ID       string           `json:"id"`
 	AgentID  string           `json:"agent_id,omitempty"`
-	Author   string           `json:"author,omitempty"`
+	Actor    Actor            `json:"actor"`
 	Status   HypothesisStatus `json:"status"`
 	Text     string           `json:"text"`
 	BuildsOn []string         `json:"builds_on"`

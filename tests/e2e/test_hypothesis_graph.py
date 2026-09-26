@@ -169,7 +169,7 @@ def test_link_rules(api, graph_pe, experiment, run_id):
     assert not_owner.status_code == 403, f"agent_b linked from agent_a's hypothesis: {not_owner.status_code}"
     assert ("contradicts", theirs["id"]) not in _out(api.hypothesis(a["id"]))
 
-    human = api.register_human_hypothesis(pe_id, f"dana-{run_id}", f"human idea {run_id}")
+    human = api.register_human_hypothesis(pe_id, f"human idea {run_id}")
     by_anyone = api.post_hypothesis_link(human["id"], "related", theirs["id"], agent_id=agent_b)
     assert by_anyone.status_code == 201, f"a human hypothesis must be linkable by any agent: {by_anyone.text}"
 

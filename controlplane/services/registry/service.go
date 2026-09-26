@@ -36,7 +36,6 @@ type Store interface {
 	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error)
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
-	RecordHumanWrite(ctx context.Context, w domain.HumanWrite) error
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
@@ -47,7 +46,7 @@ type Store interface {
 // Implemented by graphdb.Store.
 type Graph interface {
 	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error)
-	AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
+	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
 	UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)

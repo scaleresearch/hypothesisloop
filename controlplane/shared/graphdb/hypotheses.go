@@ -34,9 +34,10 @@ func linkTypeOf(rel string) domain.LinkType { return domain.LinkType(strings.ToL
 
 // NewHypothesis is a registration: who, where, the claim, and where it sits in the graph.
 type NewHypothesis struct {
-	Source               domain.HypothesisSource
+	// AgentID is the agent whose hypothesis it is, empty when no agent owns it, and Actor whose
+	// credential registers it.
 	AgentID              string
-	Author               string
+	Actor                domain.Actor
 	PlatformExperimentID string
 	Text                 string
 	Links                []domain.LinkSpec
@@ -94,17 +95,17 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
-  source: $source, author: $author, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
+  source: $source, author: '', actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
 RETURN h`, map[string]any{
-			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID, "source": string(n.Source),
-			"author": n.Author, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
+			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID, "source": string(domain.SourceOf(n.AgentID)),
+			"actor_kind": string(n.Actor.Kind), "actor_id": n.Actor.ID, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
 			"position": n.Stamp.Position,
 		})
 		if err != nil {
 			return nil, err
 		}
 		for _, spec := range n.Links {
-			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, n.AgentID, n.Author, at, n.Stamp.Position); err != nil {
+			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, n.AgentID, n.Actor, at, n.Stamp.Position); err != nil {
 				return nil, err
 			}
 		}
@@ -136,8 +137,9 @@ type LinkResult struct {
 
 // AddLink adds one outgoing link from an existing hypothesis at watch stream position
 // stamp.Position. Only its registering agent may, or anyone when it was submitted by a human.
-// Links are append-only.
-func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spec domain.LinkSpec, stamp db.Stamp) (*LinkResult, error) {
+// Links are append-only. agentID is the agent whose link it is, empty when no agent owns it, and
+// actor whose credential adds it.
+func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*LinkResult, error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		from, err := getHypothesis(ctx, tx, fromID)
@@ -164,7 +166,7 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID, author string, spe
 				return nil, err
 			}
 		}
-		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, agentID, author, at, stamp.Position)
+		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, agentID, actor, at, stamp.Position)
 		if err != nil {
 			return nil, err
 		}
@@ -366,15 +368,17 @@ func (s *Store) ExperimentGraph(ctx context.Context, platformExperimentID string
 			return nil, err
 		}
 		records, err := collect(ctx, tx, `MATCH (a:Hypothesis {platform_experiment_id: $pe})-[r]->(b)
-RETURN a.id, b.id, type(r), r.agent_id, r.author, r.created_at ORDER BY r.created_at, a.id, b.id`, params)
+RETURN a.id, b.id, type(r), r.agent_id, coalesce(r.actor_kind, 'unverified'), coalesce(r.actor_id, ''), r.author, r.created_at ORDER BY r.created_at, a.id, b.id`, params)
 		if err != nil {
 			return nil, err
 		}
 		var d decoder
 		edges := make([]domain.GraphEdge, 0, len(records))
 		for _, r := range records {
-			edges = append(edges, domain.GraphEdge{From: d.str(r.Values[0]), To: d.str(r.Values[1]), Type: linkTypeOf(d.str(r.Values[2])),
-				AgentID: d.str(r.Values[3]), Author: d.str(r.Values[4]), CreatedAt: d.time(r.Values[5])})
+			edge := domain.GraphEdge{From: d.str(r.Values[0]), To: d.str(r.Values[1]), Type: linkTypeOf(d.str(r.Values[2])),
+				AgentID: d.str(r.Values[3]), CreatedAt: d.time(r.Values[7])}
+			edge.Actor = domain.StoredActor(domain.ActorKind(d.str(r.Values[4])), d.str(r.Values[5]), d.str(r.Values[6]), edge.AgentID)
+			edges = append(edges, edge)
 		}
 		if d.err != nil {
 			return nil, d.err
@@ -390,7 +394,8 @@ RETURN a.id, b.id, type(r), r.agent_id, r.author, r.created_at ORDER BY r.create
 
 // ImportLegacy copies hypotheses from the retired Postgres table into the graph, each building on
 // its experiment's objective. Rows already present (by id) are left as they are, so a rerun after
-// an interrupted migration is harmless.
+// an interrupted migration is harmless. They come from before the credential behind a write was
+// kept, so each is stored with no actor and the author it stated, which is h.Actor.Name.
 func (s *Store) ImportLegacy(ctx context.Context, rows []*domain.Hypothesis) error {
 	params := make([]map[string]any, 0, len(rows))
 	for _, h := range rows {
@@ -400,7 +405,7 @@ func (s *Store) ImportLegacy(ctx context.Context, rows []*domain.Hypothesis) err
 		}
 		params = append(params, map[string]any{
 			"id": h.ID, "pe": h.PlatformExperimentID, "agent_id": h.AgentID, "source": string(h.Source),
-			"author": h.Author, "text": h.Text, "normalized": domain.NormalizeHypothesisText(h.Text),
+			"author": h.Actor.Name, "text": h.Text, "normalized": domain.NormalizeHypothesisText(h.Text),
 			"status": string(h.Status), "created_at": h.CreatedAt.UTC(), "status_changed_at": statusChangedAt,
 		})
 	}
@@ -546,11 +551,12 @@ MATCH p = (t)-[:BUILDS_ON *BFS]->(f) RETURN count(p)`, map[string]any{"from": fr
 // createLink merges one edge from fromID, reporting whether it was new. The relationship type is
 // spliced into the statement because Cypher cannot parameterise it; it only ever comes from
 // relTypes, after validateLinks.
-func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, agentID, author string, at time.Time, position int64) (bool, error) {
+func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, agentID string, actor domain.Actor, at time.Time, position int64) (bool, error) {
 	records, err := collect(ctx, tx, linkMatch(platformExperimentID, spec)+`
 MERGE (h)-[r:`+relTypes[spec.Type]+`]->(t)
-ON CREATE SET r.agent_id = $agent_id, r.author = $author, r.created_at = $at, r.created_xid = $position
-RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID, "author": author, "at": at, "position": position})
+ON CREATE SET r.agent_id = $agent_id, r.author = '', r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position
+RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID,
+		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "position": position})
 	if err != nil {
 		return false, err
 	}
@@ -575,9 +581,9 @@ func linksTx(ctx context.Context, tx neo4j.ManagedTransaction, cypher, id string
 			Type:         linkTypeOf(d.str(r.Values[0])),
 			HypothesisID: d.str(t.Props["id"]),
 			AgentID:      d.str(rel.Props["agent_id"]),
-			Author:       d.str(rel.Props["author"]),
 			CreatedAt:    d.time(rel.Props["created_at"]),
 		}
+		link.Actor = storedActor(&d, rel.Props, "actor_kind", "actor_id", link.AgentID)
 		if slices.Contains(t.Labels, "Hypothesis") {
 			link.Text = d.str(t.Props["text"])
 			link.Status = d.str(t.Props["status"])
@@ -649,12 +655,12 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 		ID:                   d.str(p["id"]),
 		AgentID:              d.str(p["agent_id"]),
 		Source:               domain.HypothesisSource(d.str(p["source"])),
-		Author:               d.str(p["author"]),
 		PlatformExperimentID: d.str(p["platform_experiment_id"]),
 		Text:                 d.str(p["text"]),
 		Status:               domain.HypothesisStatus(d.str(p["status"])),
 		CreatedAt:            d.time(p["created_at"]),
 	}
+	h.Actor = storedActor(&d, p, "actor_kind", "actor_id", h.AgentID)
 	if v, ok := p["status_changed_at"]; ok && v != nil {
 		changed := d.time(v)
 		h.StatusChangedAt = &changed
@@ -663,6 +669,17 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 		return nil, fmt.Errorf("hypothesis %v: %w", p["id"], d.err)
 	}
 	return h, nil
+}
+
+// storedActor reads the actor kept under two properties of a node or relationship. One written
+// before the credential behind a write was kept has neither and is unverified, named by the
+// author it stated or else the agent it named.
+func storedActor(d *decoder, props map[string]any, kindProp, idProp, agentID string) domain.Actor {
+	kind, ok := props[kindProp]
+	if !ok || kind == nil {
+		return domain.StoredActor(domain.ActorUnverified, "", d.str(props["author"]), agentID)
+	}
+	return domain.StoredActor(domain.ActorKind(d.str(kind)), d.str(props[idProp]), "", agentID)
 }
 
 // wrap prefixes err with op unless it is one of this package's own sentinel errors, whose message

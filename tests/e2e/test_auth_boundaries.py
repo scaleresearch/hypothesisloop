@@ -201,12 +201,11 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", "/donations", {"agent_id": theirs.agent, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "r"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": theirs.agent}, 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as the rival"), agent_id=theirs.agent), 403),
-        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as a person"), author="Mallory"), 403),
-        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as both"), agent_id=mine.agent, author="Mallory"), 403),
-        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as nobody")), 403),
+        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as a person"), author="Mallory"), 422),
+        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as both"), agent_id=mine.agent, author="Mallory"), 422),
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"author": "Mallory", "text": "as a person"}, 422),
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"agent_id": theirs.agent, "text": "as the rival"}, 403),
-        ("POST", f"/hypotheses/{mine.hypothesis_id}/links", {"author": "Mallory", "type": "related", "to": theirs.hypothesis_id}, 403),
+        ("POST", f"/hypotheses/{mine.hypothesis_id}/links", {"author": "Mallory", "type": "related", "to": theirs.hypothesis_id}, 422),
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/links", {"agent_id": mine.agent, "type": "related", "to": mine.hypothesis_id}, 403),
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/status", {"agent_id": theirs.agent, "status": "refuted"}, 403),
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/status", {"agent_id": mine.agent, "status": "refuted"}, 403),
@@ -220,13 +219,14 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
     assert org.key.hypothesis(theirs.hypothesis_id)["status"] == "open"
     donations = {d["id"]: d["status"] for d in org.key.get_json(f"/donations?platform_experiment_id={pe_id}")}
     assert donations[theirs.donation_id] == "open"
-    refused = ("as the rival", "as a person", "as both", "as nobody")
+    refused = ("as the rival", "as a person", "as both")
     left = [h["text"] for h in org.key.hypotheses(pe_id) if h["text"].startswith(refused)]
     assert not left, f"a refused registration left a hypothesis behind: {left}"
 
     _assert_each(mine.token, "an agent on its own", [
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"agent_id": mine.agent, "text": "my own note"}, 201),
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"text": "my own note, naming nobody"}, 201),
+        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("naming nobody")), 201),
         ("POST", f"/experiments/{mine.job_id}/metrics", SAMPLE, 204),
     ])
 
@@ -301,12 +301,20 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
     pe_id = person.create_platform_experiment(f"jwt-{subject}", 1.0, 1)
     try:
         person.signup_and_start(pe_id, [agent])
-        own = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("a person's idea"), author="Mallory"))
+        ada = {"kind": "user", "id": subject, "name": "Ada Lovelace"}
+        as_another = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("under another name"), author="Mallory"))
+        assert as_another.status_code == 422, f"a person stating who they are: {as_another.status_code} {as_another.text}"
+        own = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("a person's idea")))
         assert own.status_code == 201, f"a person's hypothesis: {own.status_code} {own.text}"
-        assert own.json()["author"] == "Ada Lovelace" and not own.json().get("agent_id"), own.text
+        assert own.json()["actor"] == ada and not own.json().get("agent_id") and "author" not in own.json(), own.text
+        assert own.json()["links"][0]["actor"] == ada, own.text
         for_agent = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("the agent's idea"), agent_id=agent))
         assert for_agent.status_code == 201, f"a person naming their agent: {for_agent.status_code} {for_agent.text}"
-        assert for_agent.json()["agent_id"] == agent and not for_agent.json().get("author"), for_agent.text
+        assert for_agent.json()["agent_id"] == agent and for_agent.json()["actor"] == ada, "a hypothesis registered for an agent names the person who did it"
+        linked = person.post(f"/hypotheses/{own.json()['id']}/links", {"type": "related", "to": for_agent.json()["id"]})
+        assert linked.status_code == 201 and all(l["actor"] == ada for l in linked.json()), linked.text
+        graph = person.get_json(f"/hypotheses/graph?platform_experiment_id={pe_id}")
+        assert {n["actor"]["id"] for n in graph["nodes"]} == {subject} and {e["actor"]["id"] for e in graph["edges"]} == {subject}, graph
         comment = person.post(f"/hypotheses/{own.json()['id']}/comments", {"text": "my note"})
         assert comment.status_code == 201, comment.text
         assert comment.json()["actor"] == {"kind": "user", "id": subject, "name": "Ada Lovelace"} and "author" not in comment.json(), comment.text
@@ -317,8 +325,9 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
         assert for_agent_note.json()["actor"] == {"kind": "user", "id": subject, "name": "Ada Lovelace"}, "a note written for an agent names the person who wrote it"
 
         nameless = api.as_caller(_jwt(key, sub=subject), me["orgs"][0]["id"], me["projects"][0]["id"])
-        refused = nameless.post("/hypotheses", _hypothesis_body(pe_id, _claim("nobody's idea")))
-        assert refused.status_code == 400 and "no name" in refused.text, f"a person with no name: {refused.status_code} {refused.text}"
+        # A sign-in that states no name is still the same account, under the name last stated.
+        unnamed = nameless.post("/hypotheses", _hypothesis_body(pe_id, _claim("stated with no name")))
+        assert unnamed.status_code == 201 and unnamed.json()["actor"] == ada, f"a sign-in with no name: {unnamed.status_code} {unnamed.text}"
         assert nameless.post("/hypotheses", _hypothesis_body(pe_id, _claim("the agent's second"), agent_id=agent)).status_code == 201
 
         stranger = _jwt(key, sub=f"jwt-stranger-{uuid.uuid4().hex[:10]}-{run_id}", name="Eve")

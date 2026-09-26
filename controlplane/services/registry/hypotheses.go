@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
@@ -33,14 +32,10 @@ var (
 // hypotheses not named in distinctFrom or a contradicts/related link, nothing is created and the
 // error wraps a *graphdb.SimilarError listing them.
 //
-// A human submitting from the UI passes author instead of agentID. This is the one place the
-// exactly-one-of rule is applied (domain.ClassifyHypothesisOrigin): an invalid pair is an error
-// here, never a value coerced into a row for some later read to interpret.
-func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
-	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
-	}
+// agentID is the agent whose hypothesis it is, empty for one no agent owns, which the submit
+// policy reads as a human's. actor is the credential registering it.
+func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
+	source := domain.SourceOf(agentID)
 
 	hypothesisPolicy, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
 	if err != nil {
@@ -52,8 +47,8 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 	switch source {
 	case domain.HypothesisSourceHuman:
 		if !hypothesisPolicy.AllowsHuman() {
-			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from agents only — this is a human submission (author=%q); read the experiment's hypothesis_submit_policy before retrying, a human identity cannot submit hypotheses here",
-				ErrHypothesisSubmitterNotAllowed, platformExperimentID, author)
+			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from agents only — this one names no agent_id, which makes it a human submission; read the experiment's hypothesis_submit_policy before retrying, a human identity cannot submit hypotheses here",
+				ErrHypothesisSubmitterNotAllowed, platformExperimentID)
 		}
 	case domain.HypothesisSourceAgent:
 		if !hypothesisPolicy.AllowsAgent() {
@@ -68,7 +63,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var announce bool
 		h, out, alreadyExisted, announce, err = s.graph.Register(ctx, graphdb.NewHypothesis{
-			Source: source, AgentID: agentID, Author: author,
+			AgentID: agentID, Actor: actor,
 			PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
 			Stamp: stamp,
 		})
@@ -78,32 +73,63 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID, author, platf
 		return []db.Event{{Kind: db.EventHypothesisNew, Subject: h.ID, Value: string(h.Source),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
 	})
+	var similar *graphdb.SimilarError
+	if errors.As(err, &similar) {
+		named := make([]*domain.Actor, len(similar.Similar))
+		for i := range similar.Similar {
+			named[i] = &similar.Similar[i].Actor
+		}
+		if nameErr := s.store.NameActors(ctx, named); nameErr != nil {
+			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", nameErr)
+		}
+	}
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
+	if err := s.store.NameActors(ctx, append(linkActors(out), hypothesisActors(h)...)); err != nil {
+		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+	}
 	s.logger.Info("hypothesis registered",
-		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("author", author),
+		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID),
 		zap.String("platform_experiment_id", platformExperimentID), zap.Bool("already_existed", alreadyExisted))
 	return h, out, alreadyExisted, nil
 }
 
-// AddHypothesisLink adds one outgoing link from an existing hypothesis on behalf of its registering
-// agent, or of anyone when a human submitted it. Re-adding an existing link changes nothing. Returns
-// the hypothesis's outgoing links.
-func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID, author string, spec domain.LinkSpec) ([]domain.Link, error) {
-	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
-	if err != nil {
-		return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
+// hypothesisActors and linkActors are the actors a hypothesis and its links carry, for naming.
+func hypothesisActors(h *domain.Hypothesis) []*domain.Actor {
+	return []*domain.Actor{&h.Actor}
+}
+
+func linkActors(links []domain.Link) []*domain.Actor {
+	actors := make([]*domain.Actor, len(links))
+	for i := range links {
+		actors[i] = &links[i].Actor
 	}
-	if source == domain.HypothesisSourceAgent {
+	return actors
+}
+
+func itemActors(items []*domain.HypothesisListItem) []*domain.Actor {
+	var actors []*domain.Actor
+	for _, item := range items {
+		actors = append(actors, hypothesisActors(item.Hypothesis)...)
+	}
+	return actors
+}
+
+// AddHypothesisLink adds one outgoing link from an existing hypothesis on behalf of its registering
+// agent, or of anyone when no agent owns it. Re-adding an existing link changes nothing. Returns
+// the hypothesis's outgoing links. agentID is the agent whose link it is, empty when no agent
+// owns it, and actor the credential adding it.
+func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, actor domain.Actor, spec domain.LinkSpec) ([]domain.Link, error) {
+	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
 			return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
 		}
 	}
 	var result *graphdb.LinkResult
-	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err := s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var err error
-		result, err = s.graph.AddLink(ctx, id, agentID, author, spec, stamp)
+		result, err = s.graph.AddLink(ctx, id, agentID, actor, spec, stamp)
 		if err != nil || !result.Announce {
 			return nil, err
 		}
@@ -115,11 +141,15 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID, author str
 	}
 	s.logger.Info("hypothesis link added",
 		zap.String("from", id), zap.String("type", string(spec.Type)), zap.String("to", spec.To),
-		zap.String("agent", agentID), zap.String("author", author), zap.Bool("created", result.Created))
+		zap.String("agent", agentID), zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID), zap.Bool("created", result.Created))
+	if err := s.store.NameActors(ctx, linkActors(result.Out)); err != nil {
+		return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
+	}
 	return result.Out, nil
 }
 
-// GetHypothesis returns a single hypothesis by ID, nil when there is none.
+// GetHypothesis returns a single hypothesis by ID, nil when there is none. Its actors carry no
+// name until NameHypothesis gives them one: most callers read it to decide and answer nothing.
 func (s *Service) GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error) {
 	h, err := s.graph.GetHypothesis(ctx, id)
 	if err != nil {
@@ -128,10 +158,21 @@ func (s *Service) GetHypothesis(ctx context.Context, id string) (*domain.Hypothe
 	return h, nil
 }
 
+// NameHypothesis names the actors of a hypothesis that is about to be answered.
+func (s *Service) NameHypothesis(ctx context.Context, h *domain.Hypothesis) error {
+	if err := s.store.NameActors(ctx, hypothesisActors(h)); err != nil {
+		return fmt.Errorf("registry.NameHypothesis: %w", err)
+	}
+	return nil
+}
+
 // GetHypothesisLinks returns the links touching one hypothesis, both directions.
 func (s *Service) GetHypothesisLinks(ctx context.Context, id string) (domain.HypothesisLinks, error) {
 	links, err := s.graph.Links(ctx, id)
 	if err != nil {
+		return domain.HypothesisLinks{}, fmt.Errorf("registry.GetHypothesisLinks: %w", err)
+	}
+	if err := s.store.NameActors(ctx, append(linkActors(links.Out), linkActors(links.In)...)); err != nil {
 		return domain.HypothesisLinks{}, fmt.Errorf("registry.GetHypothesisLinks: %w", err)
 	}
 	return links, nil
@@ -148,6 +189,9 @@ func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
 	if err := s.addActivity(ctx, items); err != nil {
+		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
+	}
+	if err := s.store.NameActors(ctx, itemActors(items)); err != nil {
 		return nil, fmt.Errorf("registry.ListHypotheses: %w", err)
 	}
 	return items, nil
@@ -176,6 +220,13 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	if err := s.addActivity(ctx, nodes); err != nil {
+		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+	}
+	actors := itemActors(nodes)
+	for i := range edges {
+		actors = append(actors, &edges[i].Actor)
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	return nodes, edges, nil
@@ -352,6 +403,9 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
 		}
 	}
+	if err := s.store.NameActors(ctx, hypothesisActors(h)); err != nil {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+	}
 	return h, nil
 }
 
@@ -391,17 +445,6 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID),
 		zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID))
 	return c, nil
-}
-
-// RecordHumanWrite keeps the account behind a signed-in person's contribution. Origin.UserID is
-// empty for every other write, which records nothing.
-func (s *Service) RecordHumanWrite(ctx context.Context, origin auth.Origin, kind domain.HumanWriteKind, subject, platformExperimentID string) error {
-	if origin.UserID == "" {
-		return nil
-	}
-	return s.store.RecordHumanWrite(ctx, domain.HumanWrite{
-		UserID: origin.UserID, Author: origin.Author, Kind: kind, Subject: subject, PlatformExperimentID: platformExperimentID,
-	})
 }
 
 // ListHypothesisComments returns one page of the comments filed against a hypothesis, oldest

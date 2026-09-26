@@ -98,11 +98,17 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
 
     human_name = f"dana-ops-{run_id}"
     human_text = "Warmup for the first 500 steps stabilizes task_success_rate at batch size 512"
-    human = api.register_human_hypothesis(pe_id, human_name, human_text)
+    # Nothing a request says names who registered it: the field is refused, and the actor is the
+    # credential, here the staff token, which names nobody.
+    named = api.post("/hypotheses", {"author": human_name, "platform_experiment_id": pe_id, "text": human_text,
+                                     "links": [link("builds_on", pe_id)]})
+    assert named.status_code == 422, f"a hypothesis stating its author: {named.status_code} {named.text}"
+    human = api.register_human_hypothesis(pe_id, human_text)
+    assert human["actor"] == {"kind": "staff", "id": "", "name": "staff"} and "author" not in human, human
 
     pool = api.hypotheses(pe_id)
     row = next(h for h in pool if h["id"] == human["id"])
-    assert (row.get("source"), row.get("author")) == ("human", human_name)
+    assert (row.get("source"), row.get("actor")) == ("human", {"kind": "staff", "id": "", "name": "staff"}) and "author" not in row, row
     assert not row.get("agent_id"), f"human hypothesis has an owning agent: {row.get('agent_id')!r}"
 
     agent_on_human_resp = api.post_hypothesis(pe_id, human_text, agent_id=agent_b)
@@ -110,11 +116,11 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     agent_on_human = agent_on_human_resp.json()
     assert agent_on_human["id"] == human["id"]
     assert agent_on_human["already_existed"] is True
+    assert not agent_on_human["agent_id"] and agent_on_human["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "restating a claim changed whose it is"
 
-    both_resp = api.post_hypothesis(pe_id, "both-set probe", agent_id=agent_a, author=human_name)
-    assert both_resp.status_code == 400
-    neither_resp = api.post_hypothesis(pe_id, "neither-set probe")
-    assert neither_resp.status_code == 400
+    # Registered for an agent by another credential: the agent owns it, and who did it is kept.
+    for_agent = api.register_hypothesis(pe_id, agent_a, f"registered for the agent {run_id}")
+    assert (for_agent["agent_id"], for_agent["source"], for_agent["actor"]) == (agent_a, "agent", {"kind": "staff", "id": "", "name": "staff"}), for_agent
 
     code, human_job = api.submit_job_expect(pe_id, agent_b, hours=0.02, hyp_id=human["id"])
     assert code == 202, "a job against a human-owned hypothesis must be admitted"

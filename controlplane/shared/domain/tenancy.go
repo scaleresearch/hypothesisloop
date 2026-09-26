@@ -265,26 +265,6 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-type HumanWriteKind string
-
-const (
-	HumanWriteHypothesis HumanWriteKind = "hypothesis"
-	HumanWriteLink       HumanWriteKind = "link"
-	HumanWriteComment    HumanWriteKind = "comment"
-)
-
-// HumanWrite records which signed-in user made a contribution to the hypothesis graph. The
-// contribution itself carries Author, a name the user chooses with the identity provider, so
-// the account is kept beside it. Subject is the hypothesis id, the comment id, or for a link
-// "<from> <type> <to>".
-type HumanWrite struct {
-	UserID               string
-	Author               string
-	Kind                 HumanWriteKind
-	Subject              string
-	PlatformExperimentID string
-}
-
 // ReasonClusterNotRegistered is the reason on the 401 a runtime token gets once its cluster is
 // no longer registered. A runtime reads it as its cluster having been removed: it stops the
 // workloads it holds and exits. Any other 401 is a token somebody has to fix, and the runtime

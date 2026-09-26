@@ -96,7 +96,7 @@ func MoveLegacyHypotheses(ctx context.Context, pool *Pool, importRows func([]*do
 	var rows []*domain.Hypothesis
 	for r.Next() {
 		h := &domain.Hypothesis{}
-		if err := r.Scan(&h.ID, &h.AgentID, &h.Source, &h.Author, &h.PlatformExperimentID, &h.Text,
+		if err := r.Scan(&h.ID, &h.AgentID, &h.Source, &h.Actor.Name, &h.PlatformExperimentID, &h.Text,
 			&h.Status, &h.CreatedAt, &h.StatusChangedAt); err != nil {
 			r.Close()
 			return fmt.Errorf("db.MoveLegacyHypotheses: scan: %w", err)

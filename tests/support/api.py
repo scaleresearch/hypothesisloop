@@ -352,21 +352,20 @@ class API:
     # ---- hypotheses ----------------------------------------------------------------------------
 
     def post_hypothesis(
-        self, pe_id: str, text: str = "", agent_id: str = "", author: str = "", links: list[dict] | None = None,
+        self, pe_id: str, text: str = "", agent_id: str = "", links: list[dict] | None = None,
         distinct_from: list[str] | None = None,
     ) -> requests.Response:
-        """links=None places the hypothesis on the objective root; pass [] to send none. The default
-        text is one word per submitter, so two submitters' defaults never read alike."""
+        """A hypothesis of agent_id's, or with none one no agent owns. Who registered it is the
+        caller either way. links=None places the hypothesis on the objective root; pass [] to
+        send none. The default text is one word per owner, so two owners' defaults never read alike."""
         return self.post(
             "/hypotheses",
             {
-                "agent_id": agent_id,
-                "author": author,
                 "platform_experiment_id": pe_id,
-                "text": text or f"e2e_{(agent_id or author).replace('-', '_')}",
+                "text": text or f"e2e_{(agent_id or 'unowned').replace('-', '_')}",
                 "links": [link("builds_on", pe_id)] if links is None else links,
                 "distinct_from": distinct_from or [],
-            },
+            } | ({"agent_id": agent_id} if agent_id else {}),
         )
 
     def register_hypothesis(
@@ -376,8 +375,9 @@ class API:
         r.raise_for_status()
         return r.json()
 
-    def register_human_hypothesis(self, pe_id: str, author: str, text: str, links: list[dict] | None = None) -> dict:
-        r = self.post_hypothesis(pe_id, text, author=author, links=links)
+    def register_human_hypothesis(self, pe_id: str, text: str, links: list[dict] | None = None) -> dict:
+        """A hypothesis no agent owns, which reads as a human's: source human, no agent_id."""
+        r = self.post_hypothesis(pe_id, text, links=links)
         r.raise_for_status()
         return r.json()
 
@@ -387,8 +387,8 @@ class API:
     def hypotheses(self, pe_id: str, limit: int = 200, **filters: str) -> list[dict]:
         return self.get_json("/hypotheses", params={"platform_experiment_id": pe_id, "limit": limit, **filters})
 
-    def post_hypothesis_link(self, hyp_id: str, type_: str, to: str, agent_id: str = "", author: str = "") -> requests.Response:
-        return self.post(f"/hypotheses/{hyp_id}/links", {"agent_id": agent_id, "author": author, "type": type_, "to": to})
+    def post_hypothesis_link(self, hyp_id: str, type_: str, to: str, agent_id: str = "") -> requests.Response:
+        return self.post(f"/hypotheses/{hyp_id}/links", {"type": type_, "to": to} | ({"agent_id": agent_id} if agent_id else {}))
 
     def hypothesis_graph(self, pe_id: str) -> dict:
         return self.get_json("/hypotheses/graph", params={"platform_experiment_id": pe_id})

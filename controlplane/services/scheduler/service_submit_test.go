@@ -119,7 +119,7 @@ func humanIdeaSubmission() *domain.Experiment {
 // humanHypothesis is the one human-submitted row a submission names, in platformExperimentID.
 func humanHypothesis(platformExperimentID string) oneHypothesis {
 	return oneHypothesis{h: &domain.Hypothesis{
-		ID: "h-human", Source: domain.HypothesisSourceHuman, Author: "Ada",
+		ID: "h-human", Source: domain.HypothesisSourceHuman, Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-ada"},
 		PlatformExperimentID: platformExperimentID, Text: "warmup helps",
 	}}
 }
@@ -234,8 +234,8 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 		want bool
 	}{
 		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, true},
-		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisOpen}, true},
-		{domain.Hypothesis{ID: "hyp-1", Author: "jane", Source: domain.HypothesisSourceHuman, Status: domain.HypothesisConfirmed}, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Source: domain.HypothesisSourceHuman, Status: domain.HypothesisOpen}, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Source: domain.HypothesisSourceHuman, Status: domain.HypothesisConfirmed}, true},
 		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Source: domain.HypothesisSourceAgent, Status: domain.HypothesisOpen}, false},
 	} {
 		store := &finishedJobStore{}
