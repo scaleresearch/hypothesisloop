@@ -1044,20 +1044,9 @@ SELECT DISTINCT e.last_cluster, 'default' FROM experiments e
 WHERE e.last_cluster <> '' AND NOT EXISTS (SELECT 1 FROM clusters)
 ON CONFLICT (name) DO NOTHING;
 
--- The account behind a person's hypothesis, link or comment. author on the contribution is the
--- name the identity provider states for them, which they choose themselves. subject is the
--- hypothesis id, the comment id, or for a link "<from> <type> <to>".
-CREATE TABLE IF NOT EXISTS human_writes (
-    id                     BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id                TEXT        NOT NULL REFERENCES users(id),
-    author                 TEXT        NOT NULL,
-    kind                   TEXT        NOT NULL,
-    subject                TEXT        NOT NULL,
-    platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT human_writes_kind CHECK (kind IN ('hypothesis', 'link', 'comment'))
-);
-CREATE INDEX IF NOT EXISTS idx_human_writes_subject ON human_writes(subject);
+-- human_writes held the account behind a person's hypothesis, link or comment, in a table no
+-- read joined. Each record now carries its actor, and db.MoveHumanWrites folds the rows of an
+-- older database into the records and drops the table.
 
 -- When the platform experiment closed. An agent's token outlives the close by a fixed grace, and
 -- updated_at moves again when the summary is filed.

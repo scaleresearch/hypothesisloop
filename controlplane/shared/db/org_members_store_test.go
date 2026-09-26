@@ -355,9 +355,8 @@ func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 	bySecond, _ := newTestInvite(t, accounts, orgID, second, domain.OrgRoleOwner, domain.InviteLifetime)
 	byOwner, _ := newTestInvite(t, accounts, orgID, owner, domain.OrgRoleMember, domain.InviteLifetime)
 	createTestPEIn(t, pool, "pe-leaving-"+suffix, project.ID)
-	if _, err := pool.pool.Exec(ctx, `
-INSERT INTO human_writes (user_id, author, kind, subject, platform_experiment_id) VALUES ($1, 'Member', 'comment', 'c-1', $2)`,
-		member, "pe-leaving-"+suffix); err != nil {
+	if _, err := NewHypothesesStore(pool).CreateHypothesisComment(ctx, "hyp-leaving-"+suffix, "pe-leaving-"+suffix, "",
+		domain.Actor{Kind: domain.ActorUser, ID: member}, "a note"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +401,7 @@ INSERT INTO human_writes (user_id, author, kind, subject, platform_experiment_id
 	}
 	var writes int
 	var acceptedBy string
-	if err := pool.pool.QueryRow(ctx, `SELECT count(*) FROM human_writes WHERE user_id = $1`, member).Scan(&writes); err != nil || writes != 1 {
+	if err := pool.pool.QueryRow(ctx, `SELECT count(*) FROM hypothesis_comments WHERE actor_kind = 'user' AND actor_id = $1`, member).Scan(&writes); err != nil || writes != 1 {
 		t.Errorf("what the one removed wrote: got = %d rows, %v, want it kept", writes, err)
 	}
 	if err := pool.pool.QueryRow(ctx, `SELECT accepted_by FROM org_invites WHERE id = $1`, joinedBy.ID).Scan(&acceptedBy); err != nil || acceptedBy != second {

@@ -368,8 +368,10 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, pool *db.Pool, stor
 	return schedulerHandler, clusterAgentRouter
 }
 
-// openGraph connects to the hypothesis graph, makes sure its schema exists, and moves any
-// hypotheses still in the retired Postgres table into it (see db.MoveLegacyHypotheses).
+// openGraph connects to the hypothesis graph, makes sure its schema exists, moves any hypotheses
+// still in the retired Postgres table into it (see db.MoveLegacyHypotheses), and gives the
+// records of signed-in people written before actors were kept their account (see
+// db.MoveHumanWrites).
 func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, error) {
 	graph, err := graphdb.Open(ctx, url)
 	if err != nil {
@@ -385,6 +387,13 @@ func openGraph(ctx context.Context, url string, pool *db.Pool) (*graphdb.Store, 
 	if err != nil {
 		graph.Close(ctx) //nolint:errcheck
 		return nil, fmt.Errorf("move hypotheses from postgres to the graph: %w", err)
+	}
+	err = db.MoveHumanWrites(ctx, pool, func(writes []db.HumanWrite) error {
+		return graph.CreditUsers(ctx, writes)
+	})
+	if err != nil {
+		graph.Close(ctx) //nolint:errcheck
+		return nil, fmt.Errorf("give earlier records the accounts behind them: %w", err)
 	}
 	return graph, nil
 }

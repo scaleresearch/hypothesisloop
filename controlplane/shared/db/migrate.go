@@ -130,3 +130,72 @@ FROM hypotheses h WHERE h.id = c.hypothesis_id AND c.platform_experiment_id IS N
 	}
 	return nil
 }
+
+// HumanWrite is a row of the retired human_writes table: the signed-in user behind one
+// hypothesis, link or comment written before a record kept its actor. Subject is the hypothesis
+// id, the comment id, or for a link "<from> <type> <to>".
+type HumanWrite struct {
+	UserID  string
+	Kind    string
+	Subject string
+}
+
+// humanWritesLockKey serialises MoveHumanWrites across control-service replicas.
+const humanWritesLockKey = int64(0x68756d616e7772)
+
+// MoveHumanWrites gives the records written before actors were kept the account human_writes
+// holds for them, then drops the table. A comment it names becomes the user's here, and the rows
+// for hypotheses and links go to creditGraph, which does the same in the graph. Every other old
+// record stays unverified: no account is inferred from a name.
+//
+// It does nothing once the table is gone. creditGraph runs before the drop commits and sets an
+// actor only where none is kept, so a start interrupted between the two repeats it harmlessly.
+func MoveHumanWrites(ctx context.Context, pool *Pool, creditGraph func([]HumanWrite) error) error {
+	tx, err := pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", humanWritesLockKey); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: lock: %w", err)
+	}
+	var found bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('human_writes') IS NOT NULL`).Scan(&found); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE hypothesis_comments c SET actor_kind = 'user', actor_id = w.user_id
+FROM human_writes w WHERE w.kind = 'comment' AND w.subject = c.id AND c.actor_kind = 'unverified'`); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: comments: %w", err)
+	}
+	r, err := tx.Query(ctx, `SELECT user_id, kind, subject FROM human_writes WHERE kind IN ('hypothesis', 'link') ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: %w", err)
+	}
+	var writes []HumanWrite
+	for r.Next() {
+		var w HumanWrite
+		if err := r.Scan(&w.UserID, &w.Kind, &w.Subject); err != nil {
+			r.Close()
+			return fmt.Errorf("db.MoveHumanWrites: scan: %w", err)
+		}
+		writes = append(writes, w)
+	}
+	r.Close()
+	if err := r.Err(); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: %w", err)
+	}
+	if err := creditGraph(writes); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: graph: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DROP TABLE human_writes`); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: drop: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("db.MoveHumanWrites: commit: %w", err)
+	}
+	return nil
+}

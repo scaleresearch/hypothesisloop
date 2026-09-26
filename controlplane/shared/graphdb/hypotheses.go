@@ -428,6 +428,55 @@ ON CREATE SET r.agent_id = row.agent_id, r.author = row.author, r.created_at = r
 	return nil
 }
 
+// CreditUsers gives hypotheses and links written before actors were kept the signed-in user the
+// retired human_writes table holds for them (see db.MoveHumanWrites). A hypothesis takes its
+// links made at registration with it. Only a record with no actor is touched, so running it
+// again changes nothing.
+func (s *Store) CreditUsers(ctx context.Context, writes []db.HumanWrite) error {
+	var hypotheses []map[string]any
+	links := map[string][]map[string]any{}
+	for _, w := range writes {
+		switch w.Kind {
+		case "hypothesis":
+			hypotheses = append(hypotheses, map[string]any{"id": w.Subject, "user": w.UserID})
+		case "link":
+			parts := strings.Split(w.Subject, " ")
+			if len(parts) != 3 {
+				return fmt.Errorf("graphdb.CreditUsers: link %q is not \"<from> <type> <to>\"", w.Subject)
+			}
+			rel, ok := relTypes[domain.LinkType(parts[1])]
+			if !ok {
+				return fmt.Errorf("graphdb.CreditUsers: link %q has an unknown type", w.Subject)
+			}
+			links[rel] = append(links[rel], map[string]any{"from": parts[0], "to": parts[2], "user": w.UserID})
+		default:
+			return fmt.Errorf("graphdb.CreditUsers: write of unknown kind %q", w.Kind)
+		}
+	}
+	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		if _, err := collect(ctx, tx, `UNWIND $rows AS row
+MATCH (h:Hypothesis {id: row.id}) WHERE h.actor_kind IS NULL
+SET h.actor_kind = 'user', h.actor_id = row.user
+WITH h, row
+MATCH (h)-[r]->() WHERE r.actor_kind IS NULL AND r.created_at = h.created_at
+SET r.actor_kind = 'user', r.actor_id = row.user`, map[string]any{"rows": hypotheses}); err != nil {
+			return nil, err
+		}
+		for rel, rows := range links {
+			if _, err := collect(ctx, tx, `UNWIND $rows AS row
+MATCH (:Hypothesis {id: row.from})-[r:`+rel+`]->(t {id: row.to}) WHERE r.actor_kind IS NULL
+SET r.actor_kind = 'user', r.actor_id = row.user`, map[string]any{"rows": rows}); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("graphdb.CreditUsers: %w", err)
+	}
+	return nil
+}
+
 // ensureObjective creates the objective root of a platform experiment if it is not there yet. It
 // runs in its own transaction so two first registrations racing on the same root cannot fail a
 // registration: the loser's commit hits the uniqueness constraint, which means the root exists.
