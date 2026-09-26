@@ -112,7 +112,7 @@ func (e *Executor) GetLiveStorageCapacity(ctx context.Context) (available, total
 	if err != nil {
 		return 0, 0, err
 	}
-	total, free, err := scratchCapacityBytes(e.scratchDir)
+	total, free, err := storageCapacityBytes(e.storageDir)
 	if err != nil {
 		return 0, 0, err
 	}

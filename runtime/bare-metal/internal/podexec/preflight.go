@@ -38,7 +38,7 @@ func nvidiaCardsOnTheBus() (int, error) {
 
 // Preflight states what this node offers before the agent takes any work, one line a fact, and
 // fails on what makes every job fail: a control plane that does not answer from here. The engine
-// and the scratch directory were already required by New.
+// and its store were already required by New.
 func (e *Executor) Preflight(ctx context.Context, client *http.Client) ([]string, error) {
 	health := strings.TrimRight(e.apiURL, "/") + "/health"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, health, nil)
@@ -97,6 +97,7 @@ func (e *Executor) Preflight(ctx context.Context, client *http.Client) ([]string
 		lines = append(lines, hugepagesLine())
 	}
 
+	lines = append(lines, "job storage: measured on "+e.storageDir)
 	if e.storageQuotaEnforced {
 		lines = append(lines, "job storage: the engine holds each job to the storage it asked for")
 	} else {

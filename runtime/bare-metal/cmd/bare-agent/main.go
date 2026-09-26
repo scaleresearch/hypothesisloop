@@ -12,7 +12,8 @@
 //	API_URL               — base URL of the control-plane API
 //	                        (must also be reachable from *inside* a workload container)
 //	RUNTIME_TOKEN         — the cluster's runtime token
-//	SCRATCH_DIR           — filesystem this node's storage capacity is measured on (default /var/lib/hypothesisloop/scratch)
+//	SCRATCH_DIR           — a directory measured as this node's storage in place of the engine's store,
+//	                        for an engine whose store is not on this host (default: the engine's store)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
 //
 // bare-agent install, detach and uninstall (node.go) put the agent on a node as a systemd unit
@@ -120,16 +121,9 @@ func main() {
 }
 
 func newExecutor(apiURL string) (*podexec.Executor, error) {
-	scratchDir := os.Getenv("SCRATCH_DIR")
-	if scratchDir == "" {
-		scratchDir = "/var/lib/hypothesisloop/scratch"
-	}
-	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create scratch dir %s: %w", scratchDir, err)
-	}
 	return podexec.New(podexec.Config{
 		APIURL:     apiURL,
-		ScratchDir: scratchDir,
+		StorageDir: os.Getenv("SCRATCH_DIR"),
 		NodeLabels: parseNodeLabels(os.Getenv("NODE_LABELS")),
 		NodeName:   os.Getenv("NODE_NAME"),
 	})

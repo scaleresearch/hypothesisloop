@@ -44,9 +44,18 @@ func totalMemoryBytes() (int64, error) {
 	return 0, fmt.Errorf("podexec: MemTotal not found in /proc/meminfo")
 }
 
-// scratchCapacityBytes statfs's the configured scratch directory, which is what this node
-// reports as its storage.
-func scratchCapacityBytes(dir string) (total, available int64, err error) {
+// engineStore is the engine's store when the agent can measure it. A job's writes land there,
+// and the engine enforces a job's size there, so it is what this node reports as its storage.
+func engineStore(dir string) (string, error) {
+	if stat, err := os.Stat(dir); err != nil || !stat.IsDir() {
+		return "", fmt.Errorf("podexec: the engine's store %s is not a directory of this host, so the storage jobs write to cannot be measured; SCRATCH_DIR names a directory to measure in its place", dir)
+	}
+	return dir, nil
+}
+
+// storageCapacityBytes statfs's the directory this node's storage is measured on: the engine's
+// store, which is where a job's writes land (see Config.StorageDir).
+func storageCapacityBytes(dir string) (total, available int64, err error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(dir, &stat); err != nil {
 		return 0, 0, fmt.Errorf("podexec: statfs %s: %w", dir, err)

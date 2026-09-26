@@ -12,7 +12,7 @@ import (
 
 func preflightExecutor(apiURL string, devices ...acceleratorDevice) *Executor {
 	return &Executor{
-		apiURL: apiURL, engineName: "docker", nodeName: "node-1", clusterID: "0123", scratchDir: "/scratch",
+		apiURL: apiURL, engineName: "docker", nodeName: "node-1", clusterID: "0123", storageDir: "/var/lib/docker",
 		storageQuotaRefusal: "--storage-opt is supported only for overlay over xfs with 'pquota' mount option",
 		probe:               func(context.Context) ([]acceleratorDevice, error) { return devices, nil },
 	}

@@ -23,7 +23,7 @@ func newTestExecutor(t *testing.T) *Executor {
 	dir := t.TempDir()
 	e, err := New(Config{
 		APIURL:     "http://example.invalid:8083",
-		ScratchDir: dir,
+		StorageDir: dir,
 		NodeName:   "integration-test-node",
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestIntegrationCapacityReporting(t *testing.T) {
 	e := newTestExecutor(t)
 	ctx := context.Background()
 
-	if _, err := os.Stat(e.scratchDir); err != nil {
+	if _, err := os.Stat(e.storageDir); err != nil {
 		t.Fatalf("scratch dir missing: %v", err)
 	}
 

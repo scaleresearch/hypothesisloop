@@ -104,3 +104,15 @@ func TestAJobIsGivenItsStorageSizeInBytesAndOnlyWhereTheEngineEnforcesIt(t *test
 		}
 	}
 }
+
+// A node's storage is what its jobs can write, and they write to the engine's store. An engine
+// elsewhere has a store this host cannot measure, and saying so beats measuring another disk.
+func TestStorageIsMeasuredOnTheEnginesStoreOrNotAtAll(t *testing.T) {
+	store := t.TempDir()
+	if dir, err := engineStore(store); err != nil || dir != store {
+		t.Fatalf("a store on this host: dir = %q, err = %v", dir, err)
+	}
+	if _, err := engineStore(store + "/var/lib/containers/storage"); err == nil || !strings.Contains(err.Error(), "SCRATCH_DIR") {
+		t.Fatalf("a store that is not on this host: err = %v, want it to name the setting that replaces it", err)
+	}
+}

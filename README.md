@@ -459,9 +459,11 @@ started for the agent. The binary then installs itself. It asks for the runtime 
 standard input, without echo, so the token is in no shell history and no process's arguments
 (a script pipes it in). The node needs neither `hl` nor an API key. Before it changes anything
 it runs the agent's preflight and prints what the node offers: the engine, the accelerators
-under the names jobs ask for them by, the hugepages reserved on a Tenstorrent node, and whether
-the engine holds a job to its storage request (only the overlay driver on XFS mounted with
-project quotas does). It stops, with the node unchanged, when the platform does not answer
+under the names jobs ask for them by, the hugepages reserved on a Tenstorrent node, the
+engine's store, which is what the node reports as its storage, and whether the engine holds a
+job to its storage request. It asks the engine that by creating a container with a size, which
+it never starts and removes again; docker and podman take one only with the overlay driver on
+XFS mounted with project quotas. It stops, with the node unchanged, when the platform does not answer
 from the node, when the platform refuses the token, or when the host has NVIDIA cards the agent
 cannot read. Then it writes three files and starts the unit:
 
@@ -473,8 +475,7 @@ cannot read. Then it writes three files and starts the unit:
 
 On a node with podman and no docker it also enables podman's API socket (`podman.socket`),
 which is how the agent reaches that engine. Running the command of a newer image tag upgrades
-the agent in place; given no token it keeps the one installed. A machine image can carry the
-three files, with the unit enabled, instead of running the command at first boot.
+the agent in place; given no token it keeps the one installed.
 
 The agent runs as root. It starts containers through the engine's socket, and whoever can do
 that is root on the node whatever user it runs as, so a dedicated user would only look
@@ -490,8 +491,7 @@ sudo bare-agent uninstall   # removes the three files
 ```
 
 `detach` sends the cluster's jobs back to the queue and leaves the unit disabled. `uninstall`
-refuses a node that is still attached. It leaves `/var/lib/hypothesisloop` and the images jobs
-pulled. `hl cluster remove my-node` detaches from the other side: the agent reads that its
+refuses a node that is still attached. It leaves the images jobs pulled. `hl cluster remove my-node` detaches from the other side: the agent reads that its
 cluster is gone, stops its jobs, exits and stays stopped, also across a reboot.
 
 From a checkout, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent` (it

@@ -245,6 +245,6 @@ func uninstall(args []string) error {
 		return err
 	}
 	say("removed %s, %s and %s", hostinstall.UnitPath, hostinstall.EnvPath, hostinstall.BinaryPath)
-	say("left on this node: /var/lib/hypothesisloop, and the images its jobs pulled, which the engine's image prune removes")
+	say("left on this node: the images its jobs pulled, which the engine's image prune removes")
 	return nil
 }

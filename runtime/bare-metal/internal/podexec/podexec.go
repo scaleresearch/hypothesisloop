@@ -42,9 +42,10 @@ const (
 // implicit defaults.
 type Config struct {
 	APIURL string
-	// ScratchDir is the filesystem this node's Storage capacity is measured against
-	// (podman --storage-opt size=, statfs'd for total/available). Required.
-	ScratchDir string
+	// StorageDir is measured as this node's storage in place of the engine's store. It is for
+	// an engine whose store is not a directory of this host (a remote one), where the agent
+	// cannot measure what jobs write to. Empty on a node, which measures the engine's store.
+	StorageDir string
 	// NodeLabels are this node's static facts (zone, disk class, ...) merged with
 	// probe-derived accelerator labels in GetLiveAcceleratorCapacitySnapshot, the bare-node analogue
 	// of a single fleet.yaml node entry (different-backend.md §4.2).
@@ -55,7 +56,7 @@ type Config struct {
 
 type Executor struct {
 	apiURL     string
-	scratchDir string
+	storageDir string
 	nodeLabels map[string]string
 	// nodeName is this node's own identity, reported as the sole entry in every
 	// cluster->node->... map the Backend contract expects (a bare-node "cluster" is one node).
@@ -145,9 +146,6 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
-	if cfg.ScratchDir == "" {
-		return nil, fmt.Errorf("podexec: ScratchDir is required")
-	}
 	clusterID, err := readClusterID(machineIDPath)
 	if err != nil {
 		return nil, err
@@ -167,7 +165,19 @@ func New(cfg Config) (*Executor, error) {
 	for k, v := range cfg.NodeLabels {
 		labels[k] = v
 	}
-	if _, _, err := scratchCapacityBytes(cfg.ScratchDir); err != nil {
+	storageDir := cfg.StorageDir
+	if storageDir == "" {
+		infoCtx, infoCancel := context.WithTimeout(context.Background(), engineCallTimeout)
+		defer infoCancel()
+		info, err := docker.Info(infoCtx, client.InfoOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("podexec: read the engine's store: %w", err)
+		}
+		if storageDir, err = engineStore(info.Info.DockerRootDir); err != nil {
+			return nil, err
+		}
+	}
+	if _, _, err := storageCapacityBytes(storageDir); err != nil {
 		return nil, err
 	}
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*engineCallTimeout)
@@ -178,7 +188,7 @@ func New(cfg Config) (*Executor, error) {
 	}
 	return &Executor{
 		apiURL:               cfg.APIURL,
-		scratchDir:           cfg.ScratchDir,
+		storageDir:           storageDir,
 		nodeLabels:           labels,
 		nodeName:             nodeName,
 		clusterID:            clusterID,
