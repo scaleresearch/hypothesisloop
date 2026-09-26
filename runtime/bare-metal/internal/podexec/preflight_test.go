@@ -61,7 +61,7 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := strings.Join(lines, "\n")
-	for _, want := range []string{"accelerators: 2 x tenstorrent.com/chipArch=blackhole", "hugepages: 4 x 1 GiB reserved", "not enforced here, the engine refuses a size: --storage-opt is supported only", "container engine: docker"} {
+	for _, want := range []string{"accelerators: 2 x tenstorrent.com/chipArch=blackhole", "hugepages: 4 x 1 GiB reserved", "not enforced here: --storage-opt is supported only", "container engine: docker"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("preflight did not say %q:\n%s", want, said)
 		}
