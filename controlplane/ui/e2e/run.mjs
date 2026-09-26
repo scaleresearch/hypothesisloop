@@ -952,8 +952,8 @@ async function scenarios(browser) {
   const statistics = new URL(page.url())
   statistics.pathname = '/statistics'
   await page.goto(statistics.href)
-  await page.getByText('Jobs by status').waitFor()
-  assert.equal(await page.getByText('staff only').count(), 0)
+  await page.getByText('This page is for platform staff.').waitFor()
+  assert.equal(await page.getByText('Jobs by status').count(), 0, 'a customer is shown no statistics')
 
   section('github: what the real API says of an org with no account connected')
   const orgID = adaMe.orgs[0].id

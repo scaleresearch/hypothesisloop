@@ -184,7 +184,7 @@ async function main() {
       if (Date.now() - lastShot > 5 * 60 * 1000) { lastShot = Date.now(); await shot(page, `at-${Math.round((Date.now() - started) / 60000)}min`) }
       await sleep(10000)
     }
-    for (const path of ['/jobs', '/hypotheses', '/agents', '/cluster', '/statistics', '/platform-experiments']) {
+    for (const path of ['/jobs', '/hypotheses', '/cluster', '/platform-experiments']) {
       await page.goto(`${UI}${path}`)
       await page.waitForLoadState('networkidle')
       await shot(page, `end${path.replace('/', '-')}`)

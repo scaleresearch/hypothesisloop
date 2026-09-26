@@ -11,11 +11,9 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { LinkTr, Table, num, quiet } from '@/components/ui/table'
-import {
-  ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from 'recharts'
-import { chart, statusColor } from '@/lib/colors'
-import { evictionCode, evictionCodeLabel, evictionDetail, faultBreakdown } from '@/lib/eviction'
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts'
+import { statusColor } from '@/lib/colors'
+import { evictionCode, evictionCodeLabel, evictionDetail } from '@/lib/eviction'
 import { acceleratorLabel } from '@/lib/format'
 import { occupancy } from '@/lib/units'
 
@@ -127,7 +125,20 @@ function SchedulerQuality() {
 }
 
 export default function StatisticsPage() {
-  const { project, staff } = useTenant()
+  const { staff } = useTenant()
+  if (!staff) return (
+    <div>
+      <PageHeader title="Statistics" />
+      <EmptyState>
+        This page is for platform staff. Your jobs, by status and with the reasons any were evicted, are on the Jobs page.
+      </EmptyState>
+    </div>
+  )
+  return <StaffStatistics />
+}
+
+function StaffStatistics() {
+  const { project } = useTenant()
 
   // Counts come from the server's own aggregate, never from tallying fetched rows: list reads
   // are capped at one page, so a client-side tally would silently report the page's shape as
@@ -147,19 +158,9 @@ export default function StatisticsPage() {
 
   const byStatus = stats?.by_status ?? {}
   const total = stats?.total ?? 0
-  const running = byStatus.RUNNING ?? 0
   const completed = byStatus.COMPLETED ?? 0
   const failed = byStatus.FAILED ?? 0
   const evicted = byStatus.EVICTED ?? 0
-  const pending = (byStatus.SUBMITTED ?? 0) + (byStatus.QUEUED ?? 0)
-
-  // Eviction reasons arrive already grouped by code — a reason may carry a ': detail'
-  // explanation, and every distinct one would otherwise become its own category.
-  const evictionByReason = stats?.evictions_by_reason ?? {}
-
-  // Whose fault, folded from the same tally. This is the line that keeps an agent from being
-  // read as unreliable because a node broke, and a stage-cut job from reading as a failure.
-  const faultSummary = faultBreakdown(stats?.evictions_by_class ?? {})
 
   const tierTotal = stats?.by_capacity_tier ?? {}
   const tierRunning = stats?.running_by_capacity_tier ?? {}
@@ -171,31 +172,17 @@ export default function StatisticsPage() {
 
   const statusBreakdown = Object.entries(byStatus).sort((a, b) => b[1] - a[1])
 
-  const evictionChartData = Object.entries(evictionByReason)
-    .sort((a, b) => b[1] - a[1])
-    .map(([r, n]) => ({ reason: evictionCodeLabel(r), count: n }))
-
   return (
     <div>
-      <PageHeader title="Statistics" description="How the jobs of this project ended: by status, by capacity tier, and why any were evicted." />
+      <PageHeader title="Statistics" description={`How the jobs of ${project.name} ended, by status and by capacity tier, and how well the platform places and finishes work.`} />
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the job statistics of {project.name}: {error.message}</ErrorMessage>}
 
-      <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
-        <StatTile label="Total jobs" value={total} />
-        <StatTile label="Running" value={running} tone="success" />
-        <StatTile label="Pending" value={pending} tone="warning" sub="submitted + queued" />
-        <StatTile label="Completion rate" value={rate != null ? `${rate}%` : '—'} sub="of finished jobs" />
-        <StatTile label="Completed" value={completed} tone="accent" />
-        <StatTile label="Evicted" value={evicted} tone="purple" />
-        <StatTile label="Failed" value={failed} tone="danger" />
-      </div>
-
-      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
+      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3">
         {/* Job status breakdown as donut chart */}
         <Card>
-          <CardHeader><CardTitle>Jobs by status</CardTitle></CardHeader>
+          <CardHeader><CardTitle note={rate != null && `${rate}% of finished jobs completed`}>Jobs by status</CardTitle></CardHeader>
           <CardContent>
             {total === 0 ? (
               <EmptyState>No jobs yet.</EmptyState>
@@ -223,7 +210,7 @@ export default function StatisticsPage() {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   {statusBreakdown.map(([s, n]) => (
-                    <RowLink key={s} href="/jobs" className="px-1 py-0.5">
+                    <RowLink key={s} href={`/jobs?status=${s}`} className="px-1 py-0.5">
                       <Badge status={s} className="flex-none">{s}</Badge>
                       <span className="ml-auto font-mono text-2xs tabular-nums text-muted">
                         {n} · {Math.round(n / total * 100)}%
@@ -261,39 +248,6 @@ export default function StatisticsPage() {
             </Table>
           </CardContent>
         </Card>
-
-        {/* Eviction breakdown by reason */}
-        <Card>
-          <CardHeader><CardTitle>Why jobs were evicted</CardTitle></CardHeader>
-          <CardContent>
-            {faultSummary && (
-              <p className="mb-2 text-xs text-muted">{faultSummary}</p>
-            )}
-            {evictionChartData.length === 0 ? (
-              <EmptyState>No evictions recorded.</EmptyState>
-            ) : (
-              <div className="w-full" style={{ height: evictionChartData.length * 30 + 30 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={evictionChartData} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 4 }}>
-                    <CartesianGrid stroke={chart.grid} horizontal={false} />
-                    <XAxis type="number" tick={chart.tick} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <YAxis
-                      type="category"
-                      dataKey="reason"
-                      width={170}
-                      interval={0}
-                      tick={chart.tick}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip content={<ChartTooltip />} cursor={chart.tooltip.cursor} />
-                    <Bar dataKey="count" fill={statusColor('EVICTED')} radius={[0, 4, 4, 0]} barSize={14} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {/* Recent evictions — audit log */}
@@ -316,7 +270,7 @@ export default function StatisticsPage() {
                 {recentEvictions.map(e => (
                   <LinkTr key={e.id} href={`/jobs/${e.id}`}>
                     <td className={quiet}>{e.id.slice(0, 8)}…</td>
-                    <td className="whitespace-nowrap font-mono text-xs">{e.agent_id}</td>
+                    <td className="whitespace-nowrap text-xs" title={e.agent_id}>{e.agent_name}</td>
                     <td className="text-xs">
                       <PlatformExperimentName id={e.platform_experiment_id} />
                     </td>
@@ -334,7 +288,7 @@ export default function StatisticsPage() {
         </Card>
       )}
 
-      {staff && <SchedulerQuality />}
+      <SchedulerQuality />
     </div>
   )
 }
