@@ -89,6 +89,9 @@ const (
 type Installation struct {
 	ID           int64  `json:"installation_id"`
 	AccountLogin string `json:"account_login" doc:"The GitHub user or organisation the App is installed on. It is the owner part of every repository the installation covers."`
+	// Controlled says the person asked about controls that account: it is their own, or an
+	// organisation they are an admin of. Set by UserInstallations alone.
+	Controlled bool `json:"-"`
 }
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
@@ -172,10 +175,10 @@ func CloneURL(fullName string) string {
 }
 
 // UserInstallations returns the installations of the App that the person behind userCode
-// reaches on GitHub: those on their own account and on organisations they belong to. It is
-// GitHub's own answer to who may connect which installation. redirectURI is the one the code was
-// issued to. The person's token answers this one question and is revoked before anything is
-// returned.
+// reaches on GitHub, each marked with whether they control the account it is on. Reaching one
+// takes no more than being a collaborator on a single repository it covers, so only Controlled
+// says who may connect it. redirectURI is the one the code was issued to. The person's token
+// answers this one question and is revoked before anything is returned.
 func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) ([]Installation, error) {
 	userToken, err := c.exchangeCode(ctx, userCode, redirectURI)
 	if err != nil {
@@ -194,6 +197,10 @@ func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI st
 const pageSize = 100
 
 func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Installation, error) {
+	controlled, err := c.controlledAccounts(ctx, userToken)
+	if err != nil {
+		return nil, err
+	}
 	found := []Installation{}
 	for page := 1; ; page++ {
 		var out struct {
@@ -202,7 +209,9 @@ func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Insta
 				ID      int64 `json:"id"`
 				AppID   int64 `json:"app_id"`
 				Account struct {
+					ID    int64  `json:"id"`
 					Login string `json:"login"`
+					Type  string `json:"type"`
 				} `json:"account"`
 			} `json:"installations"`
 		}
@@ -216,13 +225,60 @@ func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Insta
 		for _, one := range out.Installations {
 			// A token of this App lists this App's installations only, and it is checked all the
 			// same: an installation of another App must never be connected.
-			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" {
+			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" || one.Account.ID <= 0 || one.Account.Type == "" {
 				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or has no account")
 			}
-			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login})
+			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login, Controlled: controlled[account{one.Account.Type, one.Account.ID}]})
 		}
 		if len(out.Installations) < pageSize || len(found) >= out.TotalCount {
 			return found, nil
+		}
+	}
+}
+
+// account is a GitHub account by its type, User or Organization, and its id, which unlike its
+// login is never another account's later.
+type account struct {
+	kind string
+	id   int64
+}
+
+// controlledAccounts returns the accounts the person behind userToken controls: their own, and
+// every organisation they are an active admin of. Both are what GitHub says of the token's
+// owner and need no permission of the App.
+func (c *Client) controlledAccounts(ctx context.Context, userToken string) (map[account]bool, error) {
+	var self struct {
+		ID int64 `json:"id"`
+	}
+	switch err := c.call(ctx, http.MethodGet, "/user", userToken, nil, &self); {
+	case errors.Is(err, errUnauthorized):
+		return nil, ErrCodeRejected
+	case err != nil:
+		return nil, err
+	}
+	if self.ID <= 0 {
+		return nil, fmt.Errorf("github: GET /user answered without the person's id")
+	}
+	controlled := map[account]bool{{"User", self.ID}: true}
+	for page := 1; ; page++ {
+		var memberships []struct {
+			State        string `json:"state"`
+			Role         string `json:"role"`
+			Organization struct {
+				ID int64 `json:"id"`
+			} `json:"organization"`
+		}
+		path := fmt.Sprintf("/user/memberships/orgs?state=active&per_page=%d&page=%d", pageSize, page)
+		if err := c.call(ctx, http.MethodGet, path, userToken, nil, &memberships); err != nil {
+			return nil, err
+		}
+		for _, one := range memberships {
+			if one.State == "active" && one.Role == "admin" && one.Organization.ID > 0 {
+				controlled[account{"Organization", one.Organization.ID}] = true
+			}
+		}
+		if len(memberships) < pageSize {
+			return controlled, nil
 		}
 	}
 }

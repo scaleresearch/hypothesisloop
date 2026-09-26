@@ -97,6 +97,7 @@ const (
 	ReasonAppNotInstalled            = "app_not_installed"
 	ReasonInstallationChoiceRequired = "installation_choice_required"
 	ReasonInstallationNotReachable   = "installation_not_reachable"
+	ReasonInstallationNotControlled  = "installation_not_controlled"
 	ReasonInstallationNotConnected   = "installation_not_connected"
 	ReasonInstallationGone           = "installation_gone"
 	ReasonPermissionNotGranted       = "permission_not_granted"
@@ -178,8 +179,10 @@ func (r *Repositories) app() (GitHubApp, error) {
 }
 
 // connect records an installation of the App as an org's. The proof is GitHub's: the person
-// behind code reaches the installation there. With no installation named, the only one they
-// reach is meant, and with several the answer lists them for the client to ask which.
+// behind code controls the account the installation is on, their own or an organisation they
+// are an admin of. Reaching it is not enough, since a collaborator on one repository reaches the
+// installation that covers it. With no installation named, the only one they control is meant,
+// and with several the answer lists them for the client to ask which.
 func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI string, installationID int64) (*domain.OrgGitHubInstallation, error) {
 	p, err := r.access.OrgAdmin(ctx, orgID)
 	if err != nil {
@@ -196,20 +199,29 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 	if err != nil {
 		return nil, err
 	}
+	notControlled := invalid(ReasonInstallationNotControlled, "an installation is connected by whoever controls the GitHub account it is on: that account itself, or an admin of the GitHub organisation. Your GitHub account reaches it and is neither, so ask an admin of that organisation to connect it")
+	controlled := []github.Installation{}
+	for _, one := range reached {
+		if one.Controlled {
+			controlled = append(controlled, one)
+		}
+	}
 	var chosen *github.Installation
 	switch {
 	case len(reached) == 0:
 		return nil, invalid(ReasonAppNotInstalled, "your GitHub account reaches no installation of the GitHub App: install it on a GitHub account, at install_url of GET /github/app, and connect again")
-	case installationID == 0 && len(reached) > 1:
+	case installationID == 0 && len(controlled) == 0:
+		return nil, notControlled
+	case installationID == 0 && len(controlled) > 1:
 		return nil, &choiceRequired{
 			refused: refused{
 				status: http.StatusConflict, Reason: ReasonInstallationChoiceRequired,
-				Message: "your GitHub account reaches several installations of the GitHub App: authorise again and send the installation_id of the one to connect",
+				Message: "your GitHub account controls several accounts the GitHub App is installed on: authorise again and send the installation_id of the one to connect",
 			},
-			Installations: reached,
+			Installations: controlled,
 		}
 	case installationID == 0:
-		chosen = &reached[0]
+		chosen = &controlled[0]
 	default:
 		for i := range reached {
 			if reached[i].ID == installationID {
@@ -218,6 +230,9 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 		}
 		if chosen == nil {
 			return nil, invalid(ReasonInstallationNotReachable, "your GitHub account does not reach that installation of the GitHub App")
+		}
+		if !chosen.Controlled {
+			return nil, notControlled
 		}
 	}
 	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, ConnectedActor: p.Actor()}
@@ -392,12 +407,14 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		Summary: "Connect a GitHub App installation to an org", Tags: []string{"github"},
 		Description: "For an owner of the org. From then on a platform experiment of the org may name any repository the installation covers, and the " +
 			"owner of the GitHub account decides that set on GitHub. code, from GitHub's authorisation of the App, must belong to a GitHub account that " +
-			"reaches the installation: GitHub is asked which installations it reaches, and the person's token is revoked before this call returns. " +
+			"controls the account the installation is on: that account itself, or an admin of the GitHub organisation. GitHub is asked which installations it reaches " +
+			"and which accounts it controls, and the person's token is revoked before this call returns. Reaching an installation, as a collaborator on one of its repositories does, connects nothing. " +
 			"redirect_uri is the one the code was issued to. Verify state before calling (see GET /github/app). " +
 			"installation_id may be left out when GitHub did not hand one back, as when the App was installed before: the one installation the " +
-			"person reaches is connected, and when they reach several the answer is 409 installation_choice_required with installations, a list of " +
+			"person controls is connected, and when they control several the answer is 409 installation_choice_required with installations, a list of " +
 			"{installation_id, account_login} to ask them about, after which they authorise again. Connecting one that is connected answers with it. " +
-			"422 invalid_request, code_rejected, app_not_installed (the person reaches none) or installation_not_reachable (not the one named). " +
+			"422 invalid_request, code_rejected, app_not_installed (the person reaches none), installation_not_reachable (not the one named) or " +
+			"installation_not_controlled (reached, and on an account that is not theirs to connect). " +
 			"503 github_not_configured.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`

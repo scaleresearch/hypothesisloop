@@ -97,9 +97,11 @@ const testRedirect = "http://localhost:3000/settings/github"
 
 // fakeApp is the GitHub App as the service sees it. Installation 100 is on the account Acme and
 // covers Acme/Model and acme/other; installation 200 is on rival and covers rival/secret. Each
-// code belongs to a person who reaches some of them.
+// code belongs to a person who reaches some of them, and controls the account of each one they
+// reach unless guests says they are only a collaborator on a repository there.
 type fakeApp struct {
 	reaches map[string][]github.Installation
+	guests  map[string]map[int64]bool
 	covers  map[int64][]github.Repository
 	asked   []asked
 	listed  []int64
@@ -120,7 +122,8 @@ var (
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{
-		reaches: map[string][]github.Installation{"code-acme": {acme}, "code-both": {acme, rival}, "code-none": {}},
+		reaches: map[string][]github.Installation{"code-acme": {acme}, "code-both": {acme, rival}, "code-none": {}, "code-guest": {acme}, "code-acme-admin-rival-guest": {acme, rival}},
+		guests:  map[string]map[int64]bool{"code-guest": {100: true}, "code-acme-admin-rival-guest": {200: true}},
 		covers: map[int64][]github.Repository{
 			100: {{FullName: "acme/other"}, {FullName: "Acme/Model", Private: true}},
 			200: {{FullName: "rival/secret", Private: true}},
@@ -142,7 +145,12 @@ func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) ([
 	if !ok {
 		return nil, github.ErrCodeRejected
 	}
-	return reached, nil
+	out := []github.Installation{}
+	for _, one := range reached {
+		one.Controlled = !a.guests[code][one.ID]
+		out = append(out, one)
+	}
+	return out, nil
 }
 
 func (a *fakeApp) Repositories(_ context.Context, installationID int64) ([]github.Repository, error) {
@@ -366,6 +374,14 @@ func TestConnectAsksWhichInstallationWhenThePersonReachesSeveral(t *testing.T) {
 	if len(w.installations.connected[w.orgA]) != 0 {
 		t.Fatal("an installation was connected though none was chosen")
 	}
+	// Only what the person controls is a choice: an admin of Acme who is a collaborator on one
+	// repository of rival is asked nothing, and cannot connect rival by naming it.
+	w.refused("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme-admin-rival-guest", 200), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
+	var connected domain.OrgGitHubInstallation
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-acme-admin-rival-guest", 0), http.StatusCreated, &connected)
+	if connected.InstallationID != 100 || len(w.installations.connected[w.orgA]) != 1 {
+		t.Fatalf("connected = %+v, want Acme's installation alone", connected)
+	}
 }
 
 func TestConnectRefusals(t *testing.T) {
@@ -379,6 +395,8 @@ func TestConnectRefusals(t *testing.T) {
 		"a person who reaches no installation":    {connectBody("code-none", 0), nil, 422, ReasonAppNotInstalled, 1},
 		"a person who reaches none, naming one":   {connectBody("code-none", 100), nil, 422, ReasonAppNotInstalled, 1},
 		"an installation the person cannot reach": {connectBody("code-acme", 200), nil, 422, ReasonInstallationNotReachable, 1},
+		"a collaborator on one repository":        {connectBody("code-guest", 0), nil, 422, ReasonInstallationNotControlled, 1},
+		"a collaborator naming the installation":  {connectBody("code-guest", 100), nil, 422, ReasonInstallationNotControlled, 1},
 		"an installation that does not exist":     {connectBody("code-both", 999), nil, 422, ReasonInstallationNotReachable, 1},
 		"a code github does not take":             {connectBody("code-made-up", 100), nil, 422, ReasonCodeRejected, 1},
 		"no code":                                 {connectBody("", 100), nil, 422, ReasonInvalidRequest, 0},

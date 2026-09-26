@@ -40,7 +40,9 @@ type fakeRepo struct {
 }
 
 type fakeInstallation struct {
-	account   string
+	account string
+	// owner is the user whose own account the installation is on, empty for an organisation's.
+	owner     string
 	suspended bool
 	repos     map[int64]bool
 }
@@ -66,8 +68,11 @@ type fakeGitHub struct {
 	codes   map[string]string
 	pushers map[string]map[int64]bool
 	readers map[string]map[int64]bool
-	// reaches holds the installations each user reaches, in the order GitHub lists them.
+	// reaches holds the installations each user reaches, in the order GitHub lists them, and
+	// roles the role each holds in the organisation an installation is on: admin or member. A
+	// user with no role there reaches it as a collaborator on a repository.
 	reaches map[string][]int64
+	roles   map[string]map[int64]string
 	// foreign makes the user's listing hold an installation of another App.
 	foreign bool
 
@@ -104,6 +109,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		installations: map[int64]*fakeInstallation{
 			100: {account: "Acme", repos: map[int64]bool{1: true, 2: true}},
 			200: {account: "rival", repos: map[int64]bool{3: true}},
+			300: {account: "carol", owner: "carol", repos: map[int64]bool{}},
 		},
 		repos: map[string]*fakeRepo{
 			"acme/model":    {id: 1, fullName: "Acme/Model", defaultBranch: "main", files: map[string]string{".hypothesisloop/experiment.yaml": "name: from the repo\n"}, directories: map[string]bool{".hypothesisloop": true}},
@@ -111,10 +117,11 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 			"rival/secret":  {id: 3, fullName: "rival/secret", defaultBranch: "main"},
 			"acme/unlisted": {id: 4, fullName: "acme/unlisted", defaultBranch: "main"},
 		},
-		codes:   map[string]string{"code-alice": "alice", "code-reader": "reader", "code-mallory": "mallory"},
+		codes:   map[string]string{"code-alice": "alice", "code-reader": "reader", "code-mallory": "mallory", "code-carol": "carol"},
 		pushers: map[string]map[int64]bool{"alice": {1: true, 2: true, 4: true}},
 		readers: map[string]map[int64]bool{"reader": {1: true}},
-		reaches: map[string][]int64{"alice": {100}, "reader": {100, 200}},
+		reaches: map[string][]int64{"alice": {100}, "reader": {100, 200}, "carol": {100, 300}},
+		roles:   map[string]map[int64]string{"alice": {100: "admin"}, "reader": {100: "admin"}, "carol": {100: "member"}},
 		tokens:  map[string]mintedToken{}, userTokens: map[string]string{}, collaborators: map[string]map[string]string{},
 		kinds: map[string]string{"link": "symlink", "vendored": "submodule"},
 	}
@@ -143,6 +150,20 @@ func (f *fakeGitHub) answer(w http.ResponseWriter, status int, body any) {
 
 // appAuthenticated checks an App JWT as GitHub does: signature, issuer, and a lifetime of at
 // most ten minutes that has begun and not ended.
+// userID is the id of a user's own account, and an organisation's is its installation's id, so
+// that an organisation and a user can hold one number as GitHub lets them.
+func userID(user string) int64 {
+	return map[string]int64{"alice": 100, "reader": 200, "mallory": 300, "carol": 400}[user]
+}
+
+func (f *fakeGitHub) accountOf(installationID int64) map[string]any {
+	installation := f.installations[installationID]
+	if installation.owner != "" {
+		return map[string]any{"id": userID(installation.owner), "login": installation.account, "type": "User"}
+	}
+	return map[string]any{"id": installationID, "login": installation.account, "type": "Organization"}
+}
+
 func (f *fakeGitHub) appAuthenticated(bearer string) bool {
 	parts := strings.Split(bearer, ".")
 	if len(parts) != 3 {
@@ -262,12 +283,32 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		all := []map[string]any{}
 		for _, id := range f.reaches[user] {
-			all = append(all, map[string]any{"id": id, "app_id": testAppID, "account": map[string]string{"login": f.installations[id].account}})
+			all = append(all, map[string]any{"id": id, "app_id": testAppID, "account": f.accountOf(id)})
 		}
 		if f.foreign {
-			all = append(all, map[string]any{"id": 900, "app_id": testAppID + 1, "account": map[string]string{"login": "elsewhere"}})
+			all = append(all, map[string]any{"id": 900, "app_id": testAppID + 1, "account": map[string]any{"id": 900, "login": "elsewhere", "type": "Organization"}})
 		}
 		f.answer(w, http.StatusOK, map[string]any{"total_count": len(all), "installations": paged(r, all)})
+	case r.URL.Path == "/user":
+		user, ok := f.userTokens[bearer]
+		if !ok {
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		f.answer(w, http.StatusOK, map[string]any{"id": userID(user), "login": user})
+	case r.URL.Path == "/user/memberships/orgs":
+		user, ok := f.userTokens[bearer]
+		if !ok {
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		all := []map[string]any{}
+		for _, id := range f.reaches[user] {
+			if role := f.roles[user][id]; role != "" {
+				all = append(all, map[string]any{"state": "active", "role": role, "organization": f.accountOf(id)})
+			}
+		}
+		f.answer(w, http.StatusOK, paged(r, all))
 	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodGet:
 		if !f.appAuthenticated(bearer) {
 			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
@@ -491,11 +532,19 @@ var ctx = context.Background()
 func TestUserInstallationsAreThoseThePersonReachesAndTheirTokenIsRevoked(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	found, err := client.UserInstallations(ctx, "code-reader", testRedirect)
-	want := []Installation{{ID: 100, AccountLogin: "Acme"}, {ID: 200, AccountLogin: "rival"}}
+	// reader is an admin of Acme, reaches rival as a collaborator on one repository, and has
+	// account id 200, the number rival the organisation has too.
+	want := []Installation{{ID: 100, AccountLogin: "Acme", Controlled: true}, {ID: 200, AccountLogin: "rival"}}
 	if err != nil || !slices.Equal(found, want) {
 		t.Fatalf("UserInstallations = %+v, %v, want %+v", found, err, want)
 	}
-	if len(f.revoked) != 1 || len(f.userTokens) != 0 || len(f.redirects) != 1 || f.redirects[0] != testRedirect {
+	// carol is a plain member of Acme and holds her own account.
+	found, err = client.UserInstallations(ctx, "code-carol", testRedirect)
+	want = []Installation{{ID: 100, AccountLogin: "Acme"}, {ID: 300, AccountLogin: "carol", Controlled: true}}
+	if err != nil || !slices.Equal(found, want) {
+		t.Fatalf("UserInstallations = %+v, %v, want %+v", found, err, want)
+	}
+	if len(f.revoked) != 2 || len(f.userTokens) != 0 || len(f.redirects) != 2 || f.redirects[0] != testRedirect {
 		t.Fatalf("revoked %v with %d user tokens left, redirects %v: want the person's token revoked and the redirect sent", f.revoked, len(f.userTokens), f.redirects)
 	}
 	if len(f.tokens) != 0 {
