@@ -135,7 +135,8 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 	// hosted agent whatever its role, and the coordinator.
 	if hosted || (len(signups) == 0 && coordinatorHosted) {
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND hosted`, platformExpID).Scan(&count); err != nil {
+		// A planner's machine is gone by the time anyone can join: it is no machine of the run.
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND hosted AND flavor <> '`+domain.PlannerFlavor+`'`, platformExpID).Scan(&count); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
 		}
 		if coordinatorHosted {

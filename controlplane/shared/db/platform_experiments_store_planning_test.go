@@ -158,3 +158,95 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		t.Fatalf("signup %+v, %v", signup, err)
 	}
 }
+
+func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	launcher := "launcher-" + uuid.New().String()[:8]
+	id, planner := createTestDraft(t, pool, launcher)
+
+	accepted := func(researchers int) (*domain.PlatformExperiment, []*domain.Agent, []domain.AgentSignup) {
+		t.Helper()
+		pe, err := pes.GetPlatformExperiment(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents = "accepted", "the brief", 6, researchers
+		pe.Metrics = []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}
+		pe.Stages = []domain.Stage{{LengthPct: 40, EvictPct: 50}, {LengthPct: 60}}
+		pe.EndsAt = time.Now().UTC().Add(4 * time.Hour)
+		pe.HypothesisSubmitPolicy, pe.JobSubmitPolicy, pe.DefaultQuotaTier = domain.SubmitterPolicyMixed, domain.SubmitterPolicyMixed, domain.QuotaTierGuaranteed
+		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
+		var agents []*domain.Agent
+		var signups []domain.AgentSignup
+		for i := 0; i < researchers; i++ {
+			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Researcher", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+			agents = append(agents, agent)
+			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
+		}
+		return pe, agents, signups
+	}
+
+	pe, agents, signups := accepted(2)
+	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
+		t.Fatalf("accepting before a proposal: got = %v, want ErrNothingProposed", err)
+	}
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
+	// 5, its coordinator is one, and the planner is none of them.
+	pe, agents, signups = accepted(5)
+	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrMaxHostedReached {
+		t.Fatalf("five researchers and a coordinator in five machines: got = %v, want ErrMaxHostedReached", err)
+	}
+	if got, _ := pes.GetPlatformExperiment(ctx, id); got.Status != domain.PlatformExpDraft || got.Name == "accepted" {
+		t.Fatalf("a refused accept left %+v", got)
+	}
+	if joined, _ := pes.ListSignups(ctx, id); len(joined) != 1 {
+		t.Fatalf("a refused accept left %d signups, want the planner's alone", len(joined))
+	}
+
+	pe, agents, signups = accepted(4)
+	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	got, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || got.Status != domain.PlatformExpOpen || got.Name != "accepted" || got.Description != "the brief" || got.BudgetAcceleratorHours != 6 ||
+		got.MaxAgents != 4 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Launcher != launcher ||
+		got.Goal != "a goal, in a sentence" {
+		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
+	}
+	if got.StartsAt.IsZero() || time.Since(got.StartsAt) > time.Minute {
+		t.Errorf("starts_at = %v, want now, so that the platform starts it if nobody does", got.StartsAt)
+	}
+	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
+		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)
+	}
+
+	// The launcher runs the coordinator and the researchers, and no longer the planner.
+	wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute)
+	if err != nil || len(wanted) != 4 {
+		t.Fatalf("the launcher is asked for %d agents, %v, want the 4 researchers", len(wanted), err)
+	}
+	coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
+	if err != nil || len(coordinators) != 1 || coordinators[0].PlatformExperimentID != id {
+		t.Fatalf("coordinators = %+v, %v", coordinators, err)
+	}
+
+	// Started, the budget is shared among the researchers: the planner's work is over.
+	started, quotas, err := pes.StartPlatformExperimentTx(ctx, id, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		var out []*domain.AgentQuota
+		for _, p := range participants {
+			if p.AgentID == planner {
+				t.Errorf("the planner takes a share of the run")
+			}
+			out = append(out, &domain.AgentQuota{ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: id, GuaranteedAcceleratorHours: 1, CreatedAt: time.Now().UTC()})
+		}
+		return out, nil
+	})
+	if err != nil || !started || len(quotas) != 4 {
+		t.Fatalf("start: started %v with %d quotas, %v, want the 4 researchers'", started, len(quotas), err)
+	}
+}

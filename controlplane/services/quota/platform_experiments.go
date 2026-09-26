@@ -34,6 +34,9 @@ type PlatformExperimentsStore interface {
 	// SetProposal stores a draft's proposal and until when it waits for a person; db.ErrNotDraft
 	// for anything but a draft.
 	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error
+	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
+	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
+	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.

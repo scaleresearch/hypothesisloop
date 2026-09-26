@@ -509,6 +509,8 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 		return false, nil, nil
 	}
 
+	// A draft's planner stays signed up, so that its jobs and its code keep their owner, and
+	// takes no share of the run: its work ended when the draft was accepted.
 	// Signups joined against the agents they name and their top-3 history, all on this
 	// transaction's own connection. The caller must not issue its own queries while this
 	// transaction is open: several concurrent starts would each hold a connection and wait for
@@ -518,7 +520,7 @@ SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHE
        COALESCE(a.kind, ''), s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
-WHERE s.platform_experiment_id = $1
+WHERE s.platform_experiment_id = $1 AND s.flavor <> '`+domain.PlannerFlavor+`'
 ORDER BY s.agent_id`, id)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)

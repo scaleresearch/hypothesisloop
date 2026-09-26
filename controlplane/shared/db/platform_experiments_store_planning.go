@@ -72,3 +72,61 @@ WHERE id = $1 AND status = 'draft'`, id, proposal, waitUntil)
 	}
 	return nil
 }
+
+// ErrNothingProposed is returned for accepting a draft whose planner has proposed nothing, or
+// whose proposal is being revised.
+var ErrNothingProposed = errors.New("nothing is proposed")
+
+// AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
+// researchers up, or does neither. pe carries what the proposal stated and what the person who
+// accepts stated; its start is now, on the database's clock, so the auto-start sweep starts it
+// if nobody does. The limits a signup holds are held here too (ErrMaxAgentsReached,
+// ErrMaxHostedReached).
+func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+	if pe.Coordinator == nil || !pe.CoordinatorHosted {
+		return errors.New("platform_experiments_store.AcceptDraft: an accepted draft is run by a coordinator the platform hosts")
+	}
+	metrics, err := json.Marshal(pe.Metrics)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal metrics: %w", err)
+	}
+	stages, err := json.Marshal(pe.Stages)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal stages: %w", err)
+	}
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var status string
+	var proposed bool
+	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
+		return ErrNotDraft
+	}
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: lock draft: %w", err)
+	}
+	if !proposed {
+		return ErrNothingProposed
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE platform_experiments
+SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
+    report_interval_seconds = $7, starts_at = now(), ends_at = $8, stages = $9, current_stage = 1,
+    hypothesis_submit_policy = $10, job_submit_policy = $11, default_quota_tier = $12, max_concurrent_accelerators = $13,
+    coordinator_hosted = true, coordinator_launcher = $14, coordinator_model = $15, updated_at = now()
+WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
+		pe.ReportIntervalSeconds, pe.EndsAt, stages, string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
+		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model); err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+	}
+	if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: commit: %w", err)
+	}
+	return nil
+}

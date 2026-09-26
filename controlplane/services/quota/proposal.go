@@ -155,6 +155,27 @@ func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id stri
 
 func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	access := doc.Access
+	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+		OperationID: "accept-draft", Method: "POST", Path: "/platform-experiments/{id}/accept",
+		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
+		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
+			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
+			"The platform hosts its coordinator and each researcher, and starts_at is now, so POST /platform-experiments/{id}/start starts it and the platform does if nobody calls. " +
+			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
+			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body AcceptRequest
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		pe, err := h.accept(ctx, in.ID, in.Body)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+	})
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "put-proposal", Method: "PUT", Path: "/platform-experiments/{id}/proposal",
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
@@ -204,6 +225,105 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
+}
+
+// AcceptRequest is what the person who accepts a draft states themselves: what the run costs,
+// how long it lasts and who runs it. The proposal only proposed them, since an agent wrote it.
+type AcceptRequest struct {
+	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run."`
+	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from now."`
+	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
+}
+
+func invalidTransition(format string, args ...any) error {
+	return &reasonError{status: http.StatusConflict, Reason: "invalid_transition", Message: fmt.Sprintf(format, args...)}
+}
+
+// accept makes the draft id the open platform experiment its proposal describes, at the cost
+// req states, with a hosted coordinator and its researchers, in one write.
+func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req AcceptRequest) (*domain.PlatformExperiment, error) {
+	pe, err := h.svc.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, h.refusal("read draft", err)
+	}
+	if pe == nil {
+		return nil, huma.Error404NotFound("platform experiment not found")
+	}
+	if pe.Status != domain.PlatformExpDraft {
+		return nil, invalidTransition("platform experiment %s is %s: only a draft is accepted", id, pe.Status)
+	}
+	if pe.ProposedAt == nil || len(pe.Proposal) == 0 {
+		return nil, invalidTransition("draft %s has no proposal to accept yet: its planner is still working", id)
+	}
+	var proposal Proposal
+	if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {
+		return nil, h.refusal("decode stored proposal", err)
+	}
+	// The check the proposal passed, again with the cost and the agents the person states.
+	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
+	experiment, err := h.checkProposal(proposal, pe.MaxHosted)
+	if err != nil {
+		return nil, err
+	}
+	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
+		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))
+	}
+	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
+		return nil, h.refusal("accept", err)
+	}
+
+	now := time.Now().UTC()
+	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
+	pe.Stages = experiment.Stages
+	if len(pe.Stages) == 0 {
+		pe.Stages = h.svc.cfg.DefaultStages
+	}
+	// checkProposal parsed both, so neither fails here.
+	pe.HypothesisSubmitPolicy, _ = domain.ParseSubmitterPolicy(experiment.HypothesisSubmitPolicy)
+	pe.JobSubmitPolicy, _ = domain.ParseSubmitterPolicy(experiment.JobSubmitPolicy)
+	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
+	if experiment.DefaultQuotaTier != "" {
+		pe.DefaultQuotaTier = domain.QuotaTier(experiment.DefaultQuotaTier)
+	}
+	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
+	pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
+	pe.MaxAgents = len(req.Agents)
+	pe.EndsAt = now.Add(time.Duration(req.DurationHours * float64(time.Hour)))
+	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
+
+	agents := make([]*domain.Agent, 0, len(req.Agents))
+	signups := make([]domain.AgentSignup, 0, len(req.Agents))
+	for i, asked := range req.Agents {
+		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
+		if err != nil {
+			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
+		}
+		agentID, err := domain.NewAgentID()
+		if err != nil {
+			return nil, h.refusal("accept", err)
+		}
+		agents = append(agents, &domain.Agent{ID: agentID, Name: fmt.Sprintf("Researcher %d", i+1), Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now})
+		signups = append(signups, domain.AgentSignup{
+			AgentID: agentID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher,
+			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters,
+		})
+	}
+	switch err := h.svc.store.AcceptDraft(ctx, pe, agents, signups); {
+	case errors.Is(err, db.ErrNotDraft):
+		return nil, invalidTransition("platform experiment %s is no longer a draft", id)
+	case errors.Is(err, db.ErrNothingProposed):
+		return nil, invalidTransition("draft %s has no proposal to accept: it is being revised", id)
+	case errors.Is(err, db.ErrMaxHostedReached):
+		return nil, refusedProposal("invalid_agents", "%s", maxHostedReached(pe.MaxHosted))
+	case err != nil:
+		return nil, h.refusal("accept", err)
+	}
+	h.logger.Info("draft accepted", zap.String("id", id), zap.Int("researchers", len(signups)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
+	accepted, err := h.svc.store.GetPlatformExperiment(ctx, id)
+	if err != nil || accepted == nil {
+		return nil, h.refusal("read accepted", errors.Join(err, errors.New("the platform experiment is gone")))
+	}
+	return accepted, nil
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {

@@ -177,6 +177,9 @@ type draftStore struct {
 	signups  map[string]domain.AgentSignup
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
+
+	acceptedAgents  []*domain.Agent
+	acceptedSignups []domain.AgentSignup
 }
 
 func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
@@ -318,5 +321,105 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	_, call = planningAPI(t, accepted, thePlanner)
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "not_a_draft" {
 		t.Errorf("proposing what is no draft: got = %d %v, want 409 not_a_draft", code, out)
+	}
+}
+
+func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+	for i, stored := range s.created {
+		if stored.ID != pe.ID {
+			continue
+		}
+		if stored.Status != domain.PlatformExpDraft {
+			return db.ErrNotDraft
+		}
+		if stored.ProposedAt == nil {
+			return db.ErrNothingProposed
+		}
+		accepted := *pe
+		accepted.Status, accepted.StartsAt = domain.PlatformExpOpen, time.Now().UTC()
+		s.created[i] = &accepted
+		s.acceptedAgents, s.acceptedSignups = create, signups
+		return nil
+	}
+	return db.ErrNotDraft
+}
+
+// A person accepts in one call, and what the run costs is what they state: the proposal's own
+// numbers were written with an agent's token.
+func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	_, call := planningAPI(t, store, planner)
+	before := time.Now()
+	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
+		"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{"flavor": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("accept: got = %d %v, want 200", code, out)
+	}
+	pe := store.created[0]
+	if pe.Status != domain.PlatformExpOpen || out["status"] != "open" || pe.Name != "Cosine or constant" || !strings.HasPrefix(pe.Description, "Train the small transformer") ||
+		len(pe.Metrics) != 1 || pe.Metrics[0].Key != "val_loss" || pe.ReportIntervalSeconds != 30 || len(pe.Stages) != 1 || pe.Goal != "g" {
+		t.Fatalf("accepted %+v, want the proposal's experiment", pe)
+	}
+	if pe.BudgetAcceleratorHours != 3 || pe.MaxAgents != 3 {
+		t.Errorf("budget %v for %d agents, want what the person stated (3 and 3), not the proposal's 6 and 2", pe.BudgetAcceleratorHours, pe.MaxAgents)
+	}
+	if length := pe.EndsAt.Sub(before); length < 2*time.Hour-time.Minute || length > 2*time.Hour+time.Minute {
+		t.Errorf("the run lasts %v, want 2h", length)
+	}
+	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
+		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
+	}
+	if len(store.acceptedAgents) != 3 || len(store.acceptedSignups) != 3 {
+		t.Fatalf("signed up %d agents with %d signups, want 3", len(store.acceptedAgents), len(store.acceptedSignups))
+	}
+	for i, signup := range store.acceptedSignups {
+		agent := store.acceptedAgents[i]
+		if agent.Name != "Researcher "+string(rune('1'+i)) || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" {
+			t.Errorf("researcher %d: %+v signed up as %+v", i, agent, signup)
+		}
+	}
+	if first := store.acceptedSignups[0]; first.Flavor != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].Flavor != domain.DefaultAgentFlavor {
+		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)
+	}
+
+	// Accepting is refused by state, so a second press and a lost answer do no harm.
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("accepting twice: got = %d %v, want 409 invalid_transition", code, out)
+	}
+
+	unproposed := draftWithPlanner()
+	_, call = planningAPI(t, unproposed, planner)
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("accepting before anything is proposed: got = %d %v, want 409 invalid_transition", code, out)
+	}
+
+	for name, c := range map[string]struct {
+		body   map[string]any
+		reason string
+	}{
+		"no budget":         {map[string]any{"budget_accelerator_hours": 0, "duration_hours": 2, "agents": []map[string]any{{}}}, "invalid_cost"},
+		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{}}, "invalid_agents"},
+		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
+	} {
+		store := draftWithPlanner()
+		_, propose := planningAPI(t, store, thePlanner)
+		propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+		_, call := planningAPI(t, store, planner)
+		if code, out := call("POST", "/platform-experiments/pe-draft/accept", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].Status != domain.PlatformExpDraft {
+			t.Errorf("%s: got = %d %v, want 422 %s and still a draft", name, code, out, c.reason)
+		}
+	}
+
+	// The planner proposes and a person accepts: its own token is of no kind that may.
+	store = draftWithPlanner()
+	_, propose = planningAPI(t, store, thePlanner)
+	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	if code, _ := propose("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusForbidden || store.created[0].Status != domain.PlatformExpDraft {
+		t.Errorf("the planner accepting its own proposal: got = %d, want 403", code)
 	}
 }
