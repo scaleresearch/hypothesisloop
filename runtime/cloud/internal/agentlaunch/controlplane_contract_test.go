@@ -125,11 +125,7 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnv := map[string]string{
-		"API_URL": "https://api.example.invalid", "AGENT_ID": "ag-one", "PLATFORM_EXPERIMENT_ID": "pe-1",
-		"AGENT_FLAVOR": "data-search", "AGENT_MODEL": "model-1", "AGENT_HYPERPARAMETERS": `{"batch_size":64}`,
-		"HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken,
-	}
+	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec.Image != "registry.example.invalid/agent:1" || !reflect.DeepEqual(spec.Env, wantEnv) || !reflect.DeepEqual(spec.Command, []string{"run-agent"}) {
 		t.Fatalf("spec = %+v\nwant env %v", spec, wantEnv)
 	}
@@ -259,10 +255,7 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEnv := map[string]string{
-		"API_URL": "https://api.example.invalid", "PLATFORM_EXPERIMENT_ID": "pe-1", "AGENT_FLAVOR": "coordinator", "AGENT_MODEL": "model-2",
-		"HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken,
-	}
+	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec := c.rented.Spec(coordinator); !reflect.DeepEqual(spec.Env, wantEnv) || strings.Contains(spec.Name, token) {
 		t.Fatalf("coordinator's env = %v, want %v", spec.Env, wantEnv)
 	}
