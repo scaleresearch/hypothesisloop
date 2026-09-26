@@ -396,6 +396,15 @@ ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DE
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS platform_experiment_id TEXT REFERENCES platform_experiments(id);
 
+-- Whose credential submitted the job and filed the finding, beside agent_id, which is whose job
+-- and finding they are. A row from before the credential was kept is 'unverified' with no id.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiments ALTER COLUMN actor_kind DROP DEFAULT;
+ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
+ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
+ALTER TABLE hypothesis_findings ALTER COLUMN actor_kind DROP DEFAULT;
+
 -- Whose credential wrote the comment, beside agent_id, which is whose comment it is. A row from
 -- before the credential was kept is 'unverified' with no id, and author holds the name it stated;
 -- no new row sets author.

@@ -17,12 +17,12 @@ type rowScanner interface {
 
 func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
-	var acceleratorType, capacityTier, status string
+	var acceleratorType, capacityTier, status, actorKind, actorID string
 	var evictionReason, notAdmittedReason *string
 	var jobSpec, resolvedJobSpec, triedClusters []byte
 
 	if err := row.Scan(
-		&exp.ID, &exp.ParentID, &exp.AgentID, &exp.PlatformExperimentID, &exp.ClusterName,
+		&exp.ID, &exp.ParentID, &exp.AgentID, &actorKind, &actorID, &exp.PlatformExperimentID, &exp.ClusterName,
 		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec, &resolvedJobSpec,
 		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
 		&acceleratorType, &exp.AcceleratorCount,
@@ -36,6 +36,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	); err != nil {
 		return nil, err
 	}
+	exp.Actor = domain.StoredActor(domain.ActorKind(actorKind), actorID, "", exp.AgentID)
 	if len(triedClusters) > 0 {
 		if err := json.Unmarshal(triedClusters, &exp.TriedClusters); err != nil {
 			return nil, fmt.Errorf("scan experiment: unmarshal tried_clusters: %w", err)

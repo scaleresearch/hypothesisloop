@@ -18,6 +18,9 @@ func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*
 	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, exps); err != nil {
 		return nil, fmt.Errorf("registry.List: %w", err)
 	}
+	if err := s.store.NameActors(ctx, jobActors(exps)); err != nil {
+		return nil, fmt.Errorf("registry.List: %w", err)
+	}
 	return exps, nil
 }
 
@@ -42,5 +45,16 @@ func (s *Service) GetLineage(ctx context.Context, id string) ([]*domain.Experime
 	if len(lineage) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, id)
 	}
+	if err := s.store.NameActors(ctx, jobActors(lineage)); err != nil {
+		return nil, fmt.Errorf("registry.GetLineage: %w", err)
+	}
 	return lineage, nil
+}
+
+func jobActors(jobs []*domain.Experiment) []*domain.Actor {
+	actors := make([]*domain.Actor, len(jobs))
+	for i, job := range jobs {
+		actors[i] = &job.Actor
+	}
+	return actors
 }

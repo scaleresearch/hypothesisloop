@@ -124,7 +124,7 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	if ok, err := exps.TransitionStatus(ctx, id, domain.StatusRunning, domain.StatusCompleted); err != nil || !ok {
 		t.Fatalf("TransitionStatus: got = %v, %v, want true", ok, err)
 	}
-	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, "it held"); err != nil {
+	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, domain.Actor{Kind: domain.ActorAgent, ID: agentID}, "it held"); err != nil {
 		t.Fatalf("CreateHypothesisFinding: %v", err)
 	}
 	done, err := exps.GetExperiment(ctx, id)
@@ -140,7 +140,7 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	if got, err := hyps.FindingSummary(ctx, id); err != nil || got != "it held" {
 		t.Errorf("FindingSummary: got = %q, %v, want %q", got, err, "it held")
 	}
-	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, "it held after all"); !errors.Is(err, ErrFindingExists) {
+	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, domain.Actor{Kind: domain.ActorAgent, ID: agentID}, "it held after all"); !errors.Is(err, ErrFindingExists) {
 		t.Errorf("a second finding on the job: err = %v, want ErrFindingExists", err)
 	}
 	if got, err := hyps.FindingSummary(ctx, id); err != nil || got != "it held" {
@@ -161,7 +161,7 @@ func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
 		t.Fatalf("point two jobs at one hypothesis: %v", err)
 	}
 	for _, id := range []string{first, second} {
-		if _, err := hyps.CreateHypothesisFinding(ctx, shared, peID, id, agentID, "summary of "+id); err != nil {
+		if _, err := hyps.CreateHypothesisFinding(ctx, shared, peID, id, agentID, domain.Actor{Kind: domain.ActorAgent, ID: agentID}, "summary of "+id); err != nil {
 			t.Fatalf("CreateHypothesisFinding: %v", err)
 		}
 	}
@@ -202,11 +202,11 @@ func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t 
 	seed("rejected-"+peID, agentID, peID, busy, domain.StatusRejected)
 	seed("only-rejected-"+peID, agentID, peID, refused, domain.StatusRejected)
 	seed("elsewhere-"+peID, otherAgent, otherPE, busy, domain.StatusCompleted)
-	finding, err := hyps.CreateHypothesisFinding(ctx, busy, peID, "done-1-"+peID, agentID, "it held")
+	finding, err := hyps.CreateHypothesisFinding(ctx, busy, peID, "done-1-"+peID, agentID, domain.Actor{Kind: domain.ActorAgent, ID: agentID}, "it held")
 	if err != nil {
 		t.Fatalf("CreateHypothesisFinding: %v", err)
 	}
-	if _, err := hyps.CreateHypothesisFinding(ctx, busy, otherPE, "elsewhere-"+peID, otherAgent, "elsewhere"); err != nil {
+	if _, err := hyps.CreateHypothesisFinding(ctx, busy, otherPE, "elsewhere-"+peID, otherAgent, domain.Actor{Kind: domain.ActorAgent, ID: otherAgent}, "elsewhere"); err != nil {
 		t.Fatalf("CreateHypothesisFinding: %v", err)
 	}
 	for _, c := range [][3]string{{busy, peID, agentID}, {discussed, peID, agentID}, {discussed, peID, agentID}, {busy, otherPE, otherAgent}} {

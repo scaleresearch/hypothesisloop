@@ -168,13 +168,15 @@ type GraphEdge struct {
 // services/scheduler.WriteExperimentSummary and the scheduler's summary gate. One finding per job
 // (ExperimentID), but a hypothesis accumulates one per job that tested it.
 type HypothesisFinding struct {
-	ID                   string    `json:"id"`
-	HypothesisID         string    `json:"hypothesis_id"`
-	PlatformExperimentID string    `json:"platform_experiment_id"`
-	ExperimentID         string    `json:"experiment_id"`
-	AgentID              string    `json:"agent_id"`
-	Summary              string    `json:"summary"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                   string `json:"id"`
+	HypothesisID         string `json:"hypothesis_id"`
+	PlatformExperimentID string `json:"platform_experiment_id"`
+	ExperimentID         string `json:"experiment_id"`
+	AgentID              string `json:"agent_id"`
+	// Actor is whose credential filed the finding. AgentID is the job's agent, whose finding it is.
+	Actor     Actor     `json:"actor"`
+	Summary   string    `json:"summary"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // HypothesisComment is a freeform, job-independent note on a hypothesis — amending, abandoning,

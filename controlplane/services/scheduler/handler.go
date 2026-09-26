@@ -65,6 +65,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
 		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
+			"metadata.agent_id is whose job it is and whose quota it spends. Who submitted it is the caller, answered as actor. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
@@ -79,10 +80,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := access.ActAs(ctx, meta.AgentID); err != nil {
 			return nil, err
 		}
+		caller, _ := auth.FromContext(ctx)
 		exp := domain.Experiment{
 			ID:                     req.ID,
 			ParentID:               meta.ParentID,
 			AgentID:                meta.AgentID,
+			Actor:                  caller.Actor(),
 			PlatformExperimentID:   meta.PlatformExperimentID,
 			CodeRef:                meta.CodeRef,
 			ConfigHash:             meta.ConfigHash,
@@ -102,6 +105,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.As(err, &admErr) {
 				return nil, &reasonError{status: admissionHTTPStatus(admErr.Reason), Reason: admErr.Reason, Message: admErr.Message}
 			}
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if err := h.svc.NameJobs(ctx, &exp); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
@@ -193,6 +199,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		exps, err := h.svc.store.ListExperiments(ctx, filter)
 		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if err := h.svc.NameJobs(ctx, exps...); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 		total, err := h.svc.store.CountExperiments(ctx, filter)
@@ -349,7 +358,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
-			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set.",
+			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
+			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -362,7 +372,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Body.Summary == "" {
 			return nil, huma.Error400BadRequest("summary is required")
 		}
-		hypothesis, err := h.svc.WriteExperimentSummary(ctx, in.ID, in.Body.Summary)
+		caller, _ := auth.FromContext(ctx)
+		hypothesis, err := h.svc.WriteExperimentSummary(ctx, in.ID, caller.Actor(), in.Body.Summary)
 		if err != nil {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
@@ -650,6 +661,9 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 			return nil, huma.Error500InternalServerError("workload creation failed and admission rollback failed: " + rollbackErr.Error())
 		}
 		return nil, huma.Error500InternalServerError("workload creation failed: " + err.Error())
+	}
+	if err := h.svc.NameJobs(ctx, exp); err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }

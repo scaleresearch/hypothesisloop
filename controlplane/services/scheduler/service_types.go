@@ -41,7 +41,9 @@ type Store interface {
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
 	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
 	// hypothesis the completed job tested (see domain.HypothesisFinding).
-	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error)
+	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error)
+	// NameActors sets on each actor the name it carries now.
+	NameActors(ctx context.Context, actors []*domain.Actor) error
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)

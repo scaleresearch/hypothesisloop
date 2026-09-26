@@ -113,3 +113,69 @@ VALUES ($1, $2, NULLIF($3, ''), $4, $5, 'unverified', 'old', now() + interval '1
 		t.Errorf("an old human comment: got actor %+v, want %+v", got, want)
 	}
 }
+
+func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	experiments, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
+	peID, agentID := "pe-"+uuid.New().String(), "agent-"+uuid.New().String()
+	createTestPE(t, pool, peID, 10)
+	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
+	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
+	person := domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
+
+	job := func(id string, actor domain.Actor) *domain.Experiment {
+		return &domain.Experiment{
+			ID: id, AgentID: agentID, Actor: actor, PlatformExperimentID: peID,
+			HypothesisID: "hyp-" + peID, Hypothesis: "h", Objective: "o",
+			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1,
+			EstimatedDurationHours: 1, EstimatedCostAccH: 1, Status: domain.StatusQueued,
+			Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1},
+			DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
+		}
+	}
+	byKey, old := "job-by-key-"+peID, "job-old-"+peID
+	t.Cleanup(func() {
+		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM hypothesis_findings WHERE platform_experiment_id = $1`, peID)
+		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)
+	})
+	if err := createExperiment(ctx, pool.pool, job("job-nobodys-"+peID, domain.Actor{})); err == nil {
+		t.Fatal("a job with no actor was stored")
+	}
+	for id, actor := range map[string]domain.Actor{byKey: key, old: person} {
+		if err := createExperiment(ctx, pool.pool, job(id, actor)); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	// A job from before the credential was kept.
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET actor_kind = 'unverified', actor_id = '' WHERE id = $1`, old); err != nil {
+		t.Fatalf("age a job: %v", err)
+	}
+	for id, want := range map[string]domain.Actor{byKey: key, old: {Kind: domain.ActorUnverified, Name: agentID}} {
+		got, err := experiments.GetExperiment(ctx, id)
+		if err != nil || got.AgentID != agentID || got.Actor != want {
+			t.Errorf("job %s: got = %+v by %+v, %v, want the agent's by %+v", id, got.AgentID, got.Actor, err, want)
+		}
+	}
+
+	filed, err := hyps.CreateHypothesisFinding(ctx, "hyp-"+peID, peID, byKey, agentID, person, "it held")
+	if err != nil || filed.AgentID != agentID || filed.Actor != person {
+		t.Fatalf("file a finding: got = %+v, %v, want the agent's by %+v", filed, err, person)
+	}
+	if _, err := pool.pool.Exec(ctx, `
+INSERT INTO hypothesis_findings (hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, summary, created_at)
+VALUES ($1, $2, $3, $4, 'unverified', 'an old one', now() - interval '1 hour')`, "hyp-"+peID, peID, old, agentID); err != nil {
+		t.Fatalf("insert an old finding: %v", err)
+	}
+	listed, err := hyps.ListFindingsByHypothesis(ctx, "hyp-"+peID, 50, 0)
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("findings: got = %d, %v, want 2", len(listed), err)
+	}
+	if want := (domain.Actor{Kind: domain.ActorUnverified, Name: agentID}); listed[0].Actor != want || listed[1].Actor != person {
+		t.Errorf("findings: got actors %+v then %+v, want %+v then %+v", listed[0].Actor, listed[1].Actor, want, person)
+	}
+	newest, err := hyps.NewestFindings(ctx, []string{"hyp-" + peID})
+	if err != nil || newest["hyp-"+peID] == nil || newest["hyp-"+peID].Actor != person {
+		t.Errorf("newest finding: got = %+v, %v, want the one by %+v", newest["hyp-"+peID], err, person)
+	}
+}

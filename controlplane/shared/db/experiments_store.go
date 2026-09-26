@@ -54,7 +54,7 @@ func qualifyColumns(cols, alias string) string {
 }
 
 const experimentStoredColumns = `
-	id, parent_id, agent_id, platform_experiment_id, cluster_name,
+	id, parent_id, agent_id, actor_kind, actor_id, platform_experiment_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec, resolved_job_spec,
 	hypothesis_id, hypothesis, objective, theory,
 	accelerator_type, accelerator_count,
@@ -79,6 +79,9 @@ func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Exp
 	if exp.Status == domain.StatusQueued && exp.NotAdmittedReason == "" {
 		exp.NotAdmittedReason = domain.NotAdmittedAwaitingAdmission
 	}
+	if exp.Actor.Kind == "" {
+		return fmt.Errorf("experiments_store.CreateExperiment: job %s names no actor: whose credential submits it is kept with it", exp.ID)
+	}
 	// ClusterName is deliberately left as-is (usually empty) here: it's assigned by the
 	// admission loop, capacity-aware, at the moment a specific cluster's room is actually
 	// claimed for this job — not guessed at submission time before any capacity is known.
@@ -93,7 +96,7 @@ INSERT INTO experiments (
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
 	data_access_key_id, data_secret_access_key, secret_env,
-	created_at, updated_at
+	created_at, updated_at, actor_kind, actor_id
 ) VALUES (
 	$1, $2, $3, $4, $5,
 	$6, $7, $8, $9,
@@ -103,7 +106,7 @@ INSERT INTO experiments (
 	$18, $19, $20, $21,
 	$22, NULLIF($23, ''),
 	$24, $25, $26,
-	$27, $28
+	$27, $28, $29, $30
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -132,7 +135,7 @@ INSERT INTO experiments (
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey, secretEnv,
-		exp.CreatedAt, exp.UpdatedAt,
+		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID,
 	)
 	if err != nil {
 		// The primary key is the only unique constraint here, so a unique violation means this

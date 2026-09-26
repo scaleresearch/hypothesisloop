@@ -214,14 +214,17 @@ func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
 type finishedJobStore struct {
 	poolOnlyStore
 	filed int
+	// filedBy is whose credential filed each finding.
+	filedBy []domain.Actor
 }
 
 func (*finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
 	return &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}, nil
 }
 
-func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _, _ string) (*domain.HypothesisFinding, error) {
+func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _ string, actor domain.Actor, _ string) (*domain.HypothesisFinding, error) {
 	s.filed++
+	s.filedBy = append(s.filedBy, actor)
 	return &domain.HypothesisFinding{}, nil
 }
 
@@ -240,7 +243,10 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 	} {
 		store := &finishedJobStore{}
 		s := &Service{store: store, hypotheses: oneHypothesis{h: &tc.h}}
-		got, err := s.WriteExperimentSummary(context.Background(), "job-1", "it held")
+		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
+		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {
+			t.Fatalf("%+v: the finding was filed by %+v, want the credential that sent it", tc.h, store.filedBy)
+		}
 		if err != nil || (got != nil) != tc.want || tc.want && *got != tc.h || store.filed != 1 {
 			t.Fatalf("%+v: got = (%+v, %v), filed %d, want it named: %v, filed 1", tc.h, got, err, store.filed, tc.want)
 		}
@@ -362,7 +368,7 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 
 type summarisedJobStore struct{ finishedJobStore }
 
-func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, experimentID, _, _ string) (*domain.HypothesisFinding, error) {
+func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, experimentID, _ string, _ domain.Actor, _ string) (*domain.HypothesisFinding, error) {
 	return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", db.ErrFindingExists, experimentID)
 }
 
@@ -370,7 +376,7 @@ func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, expe
 // reason to branch on and none of the store's text.
 func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
 	s := &Service{store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
-	_, err := s.WriteExperimentSummary(context.Background(), "job-1", "again")
+	_, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, "again")
 	refusal := admissionStatusError(err)
 	if refusal == nil || refusal.GetStatus() != http.StatusConflict {
 		t.Fatalf("a second summary: got = %v (%v), want a 409", refusal, err)

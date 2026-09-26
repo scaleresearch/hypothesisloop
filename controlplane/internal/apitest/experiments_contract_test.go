@@ -34,6 +34,13 @@ type filterSpyStore struct {
 	total      int
 }
 
+func (s *filterSpyStore) NameActors(_ context.Context, actors []*domain.Actor) error {
+	for _, a := range actors {
+		a.Name = a.ID
+	}
+	return nil
+}
+
 func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	s.gotList = f
 	return s.items, nil

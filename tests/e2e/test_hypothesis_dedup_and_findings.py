@@ -125,6 +125,8 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     code, human_job = api.submit_job_expect(pe_id, agent_b, hours=0.02, hyp_id=human["id"])
     assert code == 202, "a job against a human-owned hypothesis must be admitted"
     assert api.experiment(human_job)["agent_id"] == agent_b
+    # The job is the agent's and spends its quota. Who submitted it is the credential that did.
+    assert api.experiment(human_job)["actor"] == {"kind": "staff", "id": "", "name": "staff"}
 
     done = _completed(api, human_job, deadline)
     assert done["finished_at"] == done["updated_at"] and "summary" not in done, done
@@ -138,6 +140,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
         None,
     )
     assert finding_row is not None and finding_row.get("agent_id") == agent_b
+    assert finding_row["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "a finding names who filed it"
 
     quotas = api.platform_experiment_quotas(pe_id)
     assert len(quotas) == 2

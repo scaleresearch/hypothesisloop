@@ -137,7 +137,9 @@ func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment)
 // Returns the job's hypothesis when its verdict is the job's agent's to set (its own hypothesis,
 // or a human's), else nil: with the evidence in hand the agent sets an open verdict, or looks
 // again at one this finding may have changed.
-func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string) (*domain.Hypothesis, error) {
+//
+// The finding is the job's agent's. actor is whose credential files it, kept with it.
+func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor domain.Actor, summary string) (*domain.Hypothesis, error) {
 	exp, err := s.store.GetExperiment(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("summary: get experiment: %w", err)
@@ -158,7 +160,7 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string
 	if err != nil {
 		return nil, fmt.Errorf("summary: get hypothesis: %w", err)
 	}
-	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, summary); err != nil {
+	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, actor, summary); err != nil {
 		if errors.Is(err, db.ErrFindingExists) {
 			return nil, &AdmissionError{Reason: ReasonSummaryExists, Message: "this job already has a summary, and a filed summary is not replaced"}
 		}

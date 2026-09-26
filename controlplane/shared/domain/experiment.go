@@ -23,6 +23,9 @@ type Experiment struct {
 	ParentID             *string `json:"parent_id,omitempty"`
 	AgentID              string  `json:"agent_id"`
 	PlatformExperimentID string  `json:"platform_experiment_id"`
+	// Actor is whose credential submitted the job. AgentID is whose job it is and what it
+	// spends from, which is another fact: a person or an API key may submit an agent's job.
+	Actor Actor `json:"actor"`
 	// ProjectID is the platform experiment's project, read with the job and stored there only.
 	ProjectID string `json:"project_id"`
 	// OrgID is the org of that project, read with the job and stored there only. Admission

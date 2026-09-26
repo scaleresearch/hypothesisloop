@@ -17,7 +17,7 @@ import (
 func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string, acceleratorCount int, status domain.ExperimentStatus) {
 	t.Helper()
 	exp := &domain.Experiment{
-		ID: id, AgentID: agentID, PlatformExperimentID: peID,
+		ID: id, AgentID: agentID, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agentID}, PlatformExperimentID: peID,
 		HypothesisID: "cap-test-hypothesis-" + id, Hypothesis: "h", Objective: "o",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount,
 		EstimatedDurationHours: 1, EstimatedCostAccH: 1,

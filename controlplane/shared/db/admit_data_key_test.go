@@ -28,7 +28,7 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 	retries := 0
 	now := time.Now().UTC()
 	exp := &domain.Experiment{
-		ID: "datakey-exp-" + suffix, AgentID: agent, PlatformExperimentID: pe,
+		ID: "datakey-exp-" + suffix, AgentID: agent, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agent}, PlatformExperimentID: pe,
 		CodeRef: "repo@" + fortyHexChars(), ConfigHash: "cfg", DataRef: "none",
 		HypothesisID: "h", Hypothesis: "h", Objective: "o", AcceleratorType: "cpu",
 		EstimatedDurationHours: 1, Status: domain.StatusQueued, CreatedAt: now, UpdatedAt: now,

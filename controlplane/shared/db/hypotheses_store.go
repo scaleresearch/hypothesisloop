@@ -76,8 +76,9 @@ var ErrFindingExists = errors.New("the job already has a summary")
 
 // CreateHypothesisFinding records the agent's post-run write-up for a job, attached to the
 // hypothesis it tested. A job has one finding (UNIQUE on experiment_id in shared/db/schema.sql)
-// and it is never replaced: a second one is refused with ErrFindingExists.
-func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error) {
+// and it is never replaced: a second one is refused with ErrFindingExists. agentID is the job's
+// agent, whose finding it is, and actor whose credential files it.
+func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error) {
 	id, err := newHypothesisID()
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
@@ -88,13 +89,14 @@ func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesi
 		PlatformExperimentID: platformExperimentID,
 		ExperimentID:         experimentID,
 		AgentID:              agentID,
+		Actor:                actor,
 		Summary:              summary,
 		CreatedAt:            time.Now().UTC(),
 	}
 	const q = `
-INSERT INTO hypothesis_findings (id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, summary, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	if _, err := s.pool.pool.Exec(ctx, q, f.ID, f.HypothesisID, f.PlatformExperimentID, f.ExperimentID, f.AgentID, f.Summary, f.CreatedAt); err != nil {
+INSERT INTO hypothesis_findings (id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	if _, err := s.pool.pool.Exec(ctx, q, f.ID, f.HypothesisID, f.PlatformExperimentID, f.ExperimentID, f.AgentID, string(actor.Kind), actor.ID, f.Summary, f.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "hypothesis_findings_experiment_id_key" {
 			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", ErrFindingExists, experimentID)
@@ -135,7 +137,7 @@ func (s *HypothesesStore) FindingSummaries(ctx context.Context, experimentIDs []
 // NewestFindings returns the newest finding filed against each hypothesis in ids, in one query. A
 // hypothesis with no finding is absent.
 func (s *HypothesesStore) NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error) {
-	const q = `SELECT DISTINCT ON (hypothesis_id) id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, summary, created_at
+	const q = `SELECT DISTINCT ON (hypothesis_id) id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at
 FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, created_at DESC`
 	rows, err := s.pool.pool.Query(ctx, q, ids)
 	if err != nil {
@@ -145,9 +147,12 @@ FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, c
 	out := map[string]*domain.HypothesisFinding{}
 	for rows.Next() {
 		f := &domain.HypothesisFinding{}
-		if err := rows.Scan(&f.ID, &f.HypothesisID, &f.PlatformExperimentID, &f.ExperimentID, &f.AgentID, &f.Summary, &f.CreatedAt); err != nil {
+		var actorKind domain.ActorKind
+		var actorID string
+		if err := rows.Scan(&f.ID, &f.HypothesisID, &f.PlatformExperimentID, &f.ExperimentID, &f.AgentID, &actorKind, &actorID, &f.Summary, &f.CreatedAt); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.NewestFindings: scan: %w", err)
 		}
+		f.Actor = domain.StoredActor(actorKind, actorID, "", f.AgentID)
 		out[f.HypothesisID] = f
 	}
 	return out, rows.Err()
@@ -159,7 +164,7 @@ FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, c
 // here; CountFindingsByHypothesis reports how much of it a page left behind.
 func (s *HypothesesStore) ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
-	const q = `SELECT id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, summary, created_at
+	const q = `SELECT id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at
 FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
@@ -170,9 +175,12 @@ FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 	out := []*domain.HypothesisFinding{}
 	for rows.Next() {
 		f := &domain.HypothesisFinding{}
-		if err := rows.Scan(&f.ID, &f.HypothesisID, &f.PlatformExperimentID, &f.ExperimentID, &f.AgentID, &f.Summary, &f.CreatedAt); err != nil {
+		var actorKind domain.ActorKind
+		var actorID string
+		if err := rows.Scan(&f.ID, &f.HypothesisID, &f.PlatformExperimentID, &f.ExperimentID, &f.AgentID, &actorKind, &actorID, &f.Summary, &f.CreatedAt); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListFindingsByHypothesis: scan: %w", err)
 		}
+		f.Actor = domain.StoredActor(actorKind, actorID, "", f.AgentID)
 		out = append(out, f)
 	}
 	return out, rows.Err()

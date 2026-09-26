@@ -184,6 +184,13 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
     job_as_them = org.key.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, theirs.agent)
     job_as_them["metadata"]["hypothesis_id"] = mine.hypothesis_id
 
+    # The job is the agent's, and who submitted it is the key that did. So is the hypothesis.
+    key_id = org.key.get_json("/me")["key_id"]
+    submitted = org.key.experiment(mine.job_id)
+    assert submitted["agent_id"] == mine.agent and (submitted["actor"]["kind"], submitted["actor"]["id"]) == ("key", key_id), submitted
+    registered = org.key.hypothesis(mine.hypothesis_id)
+    assert registered["agent_id"] == mine.agent and (registered["actor"]["kind"], registered["actor"]["id"]) == ("key", key_id), registered
+
     # Everything in the platform experiment is the agent's to read.
     _assert_each(mine.token, "an agent", [
         ("GET", f"/experiments/{theirs.job_id}", None, 200),

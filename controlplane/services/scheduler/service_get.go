@@ -20,6 +20,9 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if exp == nil {
 		return nil, nil
 	}
+	if err := s.NameJobs(ctx, exp); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
+	}
 	if exp.Summary, err = s.store.FindingSummary(ctx, id); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
@@ -69,4 +72,16 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 		}
 	}
 	return nil
+}
+
+// NameJobs names the actor of each job that is about to be answered.
+func (s *Service) NameJobs(ctx context.Context, jobs ...*domain.Experiment) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	actors := make([]*domain.Actor, len(jobs))
+	for i, job := range jobs {
+		actors[i] = &job.Actor
+	}
+	return s.store.NameActors(ctx, actors)
 }

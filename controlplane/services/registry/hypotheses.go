@@ -341,6 +341,16 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 			out = append(out, e)
 		}
 	}
+	var actors []*domain.Actor
+	for _, e := range out {
+		actors = append(actors, hypothesisActors(e.Hypothesis)...)
+		if e.Finding != nil {
+			actors = append(actors, &e.Finding.Actor)
+		}
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
 	return out, nil
 }
 
@@ -423,6 +433,13 @@ func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID strin
 	}
 	total, err := s.store.CountFindingsByHypothesis(ctx, hypothesisID)
 	if err != nil {
+		return nil, 0, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
+	}
+	actors := make([]*domain.Actor, len(fs))
+	for i, f := range fs {
+		actors[i] = &f.Actor
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
 		return nil, 0, fmt.Errorf("registry.ListHypothesisFindings: %w", err)
 	}
 	return fs, total, nil
