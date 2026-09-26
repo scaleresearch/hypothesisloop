@@ -1,0 +1,39 @@
+# The experiment of test_real_providers.py, the same text as mlp/experiment.yaml in the sandbox
+# repository. The test states it because the repository's own experiment file is another one.
+name: tiny-mlp-two-moons
+description: |
+  A deliberately tiny experiment that checks the platform end to end. Keep it short and cheap.
+
+  TASK. `train.py` trains a small numpy MLP on a synthetic two-moons classification set and
+  reports `val_accuracy` (maximize, the ranking metric) and `train_loss`. One run takes about
+  90 seconds of training on a rented machine. Find the setting of LR and HIDDEN (both read from
+  the job's env) that gives the highest val_accuracy.
+
+  RULES, which outrank everything else you were told:
+    - Run at most TWO jobs in total, one at a time. Each agent picks a different idea: one varies
+      LR (try 0.3), the other varies HIDDEN (try 64). Do not run a grid.
+    - Submit `mlp/job.yaml` unedited with `hl job submit`, changing only env through
+      `--env LR=... --env HIDDEN=...`. Leave the image, command, resources and accelerator_type
+      as the file has them. Do not change train.py unless a job fails because of it.
+    - Register one hypothesis per job before submitting it, in two sentences.
+    - Pass your prediction as `--theory "..."` on submit.
+    - While your job runs there is nothing to do: end your turn. Its end reaches you as a
+      message. Do not poll, sleep or block on it.
+    - When your job has finished, file its summary with `hl job summary` (that is the finding;
+      do not repeat it as a comment), commit a short `notes/<your agent id>.md` with the numbers
+      to your branch and push it. One run with no control run is inconclusive: set that verdict,
+      then stop working: reply with one line.
+
+  COORDINATOR. Once every agent has one finished job with a finding, or after 40 minutes,
+  whichever comes first, write the summary (which setting won, with the numbers) and close the
+  platform experiment. Add no agents.
+report_interval_seconds: 10
+metrics:
+  - key: val_accuracy
+    direction: maximize
+    role: ranking
+  - key: train_loss
+    direction: minimize
+    role: attribute
+hypothesis_submit_policy: agent_only
+job_submit_policy: agent_only

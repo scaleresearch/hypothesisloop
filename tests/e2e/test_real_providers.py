@@ -11,7 +11,7 @@ environment says where it runs:
                                       used here only to make the org and connect the repository
     HL_E2E_GITHUB_INSTALLATION        the installation of the platform's GitHub App that covers
     HL_E2E_GITHUB_REPO                the repository, which must hold .hypothesisloop/experiment.yaml,
-                                      .hypothesisloop/job.yaml and a workload that reports val_accuracy
+                                      mlp/job.yaml and a workload that reports val_accuracy
     HOSTED_SANDBOX_PROVIDER           fly or e2b, as the stack's launcher is configured
     FLY_APP, FLY_API_TOKEN            for fly
     E2B_API_KEY                       for e2b
@@ -24,9 +24,11 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 import requests
+import yaml
 
 from support import admin, vendors
 from support.api import API
@@ -82,10 +84,12 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     credit = vendors.job_credit()
     deadline = Deadline.in_seconds(50 * MINUTE)
 
-    # The experiment's brief, metrics and job spec come from the repository. What it may spend
-    # and that the platform runs its coordinator are the caller's to say.
+    # The repository's own experiment file is its CPU experiment, so this one states its brief
+    # and metrics, which point at mlp/job.yaml there, and takes the rest from the file.
+    stated = yaml.safe_load((Path(__file__).parent / "real_providers_experiment.yaml").read_text())
     created = org.post("/platform-experiments", {
         "project_id": org.project_id, "from_repo": True, "repository": os.environ["HL_E2E_GITHUB_REPO"],
+        "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
         "coordinator_hosted": True, "ends_at": "2099-01-01T00:00:00Z",
     })
