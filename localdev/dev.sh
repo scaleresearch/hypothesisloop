@@ -51,7 +51,8 @@ stop() {
     # next dev serves from a child of the process started here.
     pkill -TERM -P "${pid}" 2>/dev/null || true
     kill "${pid}" 2>/dev/null || true
-    for _ in $(seq 1 25); do
+    # cloud-agent asks again for the destroys a vendor refused before it ends, for up to 20 s.
+    for _ in $(seq 1 125); do
       kill -0 "${pid}" 2>/dev/null || break
       sleep 0.2
     done

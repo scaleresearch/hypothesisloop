@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
@@ -62,6 +63,12 @@ type Executor struct {
 	shapes       []Shape
 	provider     provider.Provider
 	pass         *view
+	// undestroyed is the instances a destroy failed for since the process started, by id with
+	// their names. It is only what Leave asks for again: each pass finds them anew in the
+	// vendor's list, and a process that starts without it loses nothing. The executor of every
+	// pass shares it.
+	undestroyed   map[string]string
+	undestroyedMu *sync.Mutex
 }
 
 var (
@@ -92,6 +99,7 @@ func New(cfg Config) (*Executor, error) {
 		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
 		provider:     provider.Bounded(cfg.Provider),
+		undestroyed:  map[string]string{}, undestroyedMu: &sync.Mutex{},
 	}, nil
 }
 

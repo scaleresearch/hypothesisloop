@@ -113,11 +113,46 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 }
 
 func (e *Executor) destroy(ctx context.Context, v *view, i instance) error {
-	if err := e.provider.Destroy(ctx, i.ID); err != nil {
+	err := e.provider.Destroy(ctx, i.ID)
+	e.undestroyedMu.Lock()
+	if err != nil {
+		e.undestroyed[i.ID] = i.Name
+	} else {
+		delete(e.undestroyed, i.ID)
+	}
+	e.undestroyedMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("cloudexec: destroy instance %s: %w", i.Name, err)
 	}
 	v.remove(i.ID)
 	return nil
+}
+
+// Leave is what the process does last, after its loop has ended. Every later pass would have
+// asked again for a destroy that failed, and there is no later pass, so Leave asks for each of
+// them until it is done or ctx ends. It then says by name what is still rented under this
+// namespace: jobs that run on, which the next start of this runtime finds in the vendor's list
+// and takes up, and anything it could not destroy, which is the error it returns and is paid for
+// until somebody starts this runtime again or destroys it at the vendor.
+func (e *Executor) Leave(ctx context.Context) error {
+	e.undestroyedMu.Lock()
+	defer e.undestroyedMu.Unlock()
+	var errs []error
+	for id, name := range e.undestroyed {
+		if err := e.provider.Destroy(ctx, id); err != nil {
+			errs = append(errs, fmt.Errorf("instance %s (%s) is still rented and should be destroyed: %w", name, id, err))
+			continue
+		}
+		delete(e.undestroyed, id)
+	}
+	listed, err := e.provider.List(ctx, e.prefix)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("cloudexec: what is still rented could not be listed: %w", err))...)
+	}
+	for _, i := range listed {
+		log.Printf("cloudexec: leaving instance %s (%s) rented, %s", i.Name, i.ID, i.State)
+	}
+	return errors.Join(errs...)
 }
 
 // ListManagedJobs returns the experiments with an instance whose command has not ended. An

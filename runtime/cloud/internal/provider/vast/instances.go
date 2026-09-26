@@ -119,17 +119,37 @@ func stateOf(actualStatus *string) (state provider.State, known bool) {
 	return provider.StateStarting, false
 }
 
+// maxDestroyWait is the longest wait between two tries of a destroy the API refused as one call
+// too many.
+const maxDestroyWait = 15 * time.Second
+
 func isGone(err error) bool {
 	var failure *statusError
 	return errors.As(err, &failure) && failure.Status == http.StatusNotFound && failure.Code == "no_such_instance"
 }
 
+// Destroy asks again when the API answers that the account called too often, which it does for
+// a burst of a few calls: an instance left rented for a pass is paid for, and after the last
+// pass of a process nobody asks again. It waits longer each time and gives up when ctx ends,
+// with the vendor's refusal as the error.
 func (p *Provider) Destroy(ctx context.Context, id string) error {
 	var destroyed struct {
 		Success bool   `json:"success"`
 		Message string `json:"msg"`
 	}
-	_, err := p.call(ctx, http.MethodDelete, "/api/v0/instances/"+url.PathEscape(id)+"/", struct{}{}, &destroyed)
+	var err error
+	for wait := p.poll; ; wait = min(2*wait, maxDestroyWait) {
+		_, err = p.call(ctx, http.MethodDelete, "/api/v0/instances/"+url.PathEscape(id)+"/", struct{}{}, &destroyed)
+		var failure *statusError
+		if !errors.As(err, &failure) || failure.Status != http.StatusTooManyRequests {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("vast: instance %s is still rented, the API refused every destroy as one call too many until time ran out: %w", id, err)
+		case <-time.After(wait):
+		}
+	}
 	if isGone(err) {
 		return nil
 	}

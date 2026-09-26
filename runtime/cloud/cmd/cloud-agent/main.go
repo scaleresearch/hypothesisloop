@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -54,4 +55,15 @@ func main() {
 		Log:               log,
 	}
 	a.Run(ctx)
+
+	leaving, cancelLeaving := context.WithTimeout(context.Background(), leaveLimit)
+	defer cancelLeaving()
+	if err := exec.Leave(leaving); err != nil {
+		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
+		os.Exit(1)
+	}
 }
+
+// leaveLimit bounds what the process still does for its rentals after it was told to end, under
+// the grace a supervisor gives a process before it kills it.
+const leaveLimit = 20 * time.Second
