@@ -14,6 +14,8 @@ Environment variables injected by the scheduler (see tests/workloads/generic/tra
 identical contract, this workload is a drop-in for the same HYPOTHESISLOOP_* env vars):
   HYPOTHESISLOOP_EXPERIMENT_ID, HYPOTHESISLOOP_AGENT_ID, HYPOTHESISLOOP_PROJECT_ID
   HYPOTHESISLOOP_API_URL
+  HYPOTHESISLOOP_DURATION_SECONDS - keep repeating the matmul sweep for this long (default 0:
+                                    one sweep), for runs that must hold a device a while
 
 Metric contract: this workload pushes its real measurements under their own names, in their
 own units — nothing is normalized or rescaled. A platform experiment's MetricDefinition.Key
@@ -56,6 +58,7 @@ DEVICE_ID = 0
 MATMUL_SIZES = [256, 512, 1024, 2048, 4096]
 WARMUP_ITERS = 2
 TIMED_ITERS = 10
+DURATION = float(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "0"))
 
 
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
@@ -85,9 +88,15 @@ def main() -> None:
 
     device = ttnn.open_device(device_id=DEVICE_ID)
     running_max_tflops = 0.0
+    started = time.monotonic()
     try:
         total = len(MATMUL_SIZES)
-        for step, n in enumerate(MATMUL_SIZES):
+        step = -1
+        while True:
+            step += 1
+            if step >= total and time.monotonic() - started >= DURATION:
+                break
+            n = MATMUL_SIZES[step % total]
             a = ttnn.rand([n, n], device=device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
             b = ttnn.rand([n, n], device=device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
 
@@ -106,13 +115,18 @@ def main() -> None:
             latency_ms = dt * 1000.0
             running_max_tflops = max(running_max_tflops, tflops)
 
-            fraction = (step + 1) / total
+            if DURATION > 0:
+                fraction = min(1.0, (time.monotonic() - started) / DURATION)
+            else:
+                fraction = (step + 1) / total
             print(f"  [{step}] n={n:5d}  latency={latency_ms:8.3f} ms  tflops={tflops:7.3f}  "
                   f"(running_max={running_max_tflops:7.3f})")
 
             post_metric(fraction, running_max_tflops, "tflops_measured")
             post_metric(fraction, tflops, "tflops_step")
             post_metric(fraction, latency_ms, "latency_ms")
+            if DURATION > 0:
+                time.sleep(1)
     finally:
         ttnn.close_device(device)
 
