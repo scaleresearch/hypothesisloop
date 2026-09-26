@@ -98,8 +98,9 @@ func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 Live accelerators per cluster, one line per type: available, total and acch_per_hour, what an
 hour on one of them costs in accelerator hours. accelerator_type is the exact string a job spec
 takes; a type with none available queues and never errors. A line with job_image is of a
-cluster that runs every job in that one image: a job meant for it leaves job.image out. A line
-without it is of a cluster that runs a job in the image the job names.
+cluster that runs a job that names no image, in that one. With only_job_image it runs no other
+image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
+runs only jobs that name their image.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -114,6 +115,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		Clusters []struct {
 			Name         string            `json:"cluster_name"`
 			JobImage     string            `json:"job_image"`
+			JobImageDef  bool              `json:"job_image_default"`
 			Accelerators []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
 	}
@@ -129,6 +131,9 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			prefix := []string{"cluster", cl.Name}
 			if cl.JobImage != "" {
 				prefix = append(prefix, "job_image", cl.JobImage)
+			}
+			if cl.JobImage != "" && !cl.JobImageDef {
+				prefix = append(prefix, "only_job_image", "true")
 			}
 			if err := printPrefixed(stdout, a, prefix...); err != nil {
 				return fail(stderr, err)

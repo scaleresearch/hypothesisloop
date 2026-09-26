@@ -53,7 +53,7 @@ type Store interface {
 	// the cluster's own (db.ErrClusterIDChanged).
 	BindReportedID(ctx context.Context, name, reportedID string) error
 	// RecordJobImage keeps the one image the cluster's runtime says every job there runs in.
-	RecordJobImage(ctx context.Context, name, image string) error
+	RecordJobImage(ctx context.Context, name, image string, isDefault bool) error
 	// RemoveCluster ends a cluster and returns its jobs to the queue (db.ClustersStore).
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 }
@@ -340,7 +340,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if len(report.JobImage) > domain.MaxJobImageLength {
 			return nil, huma.Error400BadRequest("job_image is longer than " + strconv.Itoa(domain.MaxJobImageLength) + " characters")
 		}
-		if err := h.store.RecordJobImage(ctx, clusterName, report.JobImage); err != nil {
+		if err := h.store.RecordJobImage(ctx, clusterName, report.JobImage, report.JobImageDefault); err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 
@@ -566,6 +566,10 @@ type capacityReport struct {
 	// Placement reads it: a job naming no image goes only where one is fixed, and a job naming
 	// one only where that image runs.
 	JobImage string `json:"job_image,omitempty"`
+	// JobImageDefault says the runtime also runs a job in the image the job names, so JobImage
+	// is only where a job that names none runs (agentexec.Executor.JobImageIsDefault). Absent
+	// (false) is the safe reading: a runtime that has not said so gets no job naming another image.
+	JobImageDefault bool `json:"job_image_default,omitempty"`
 	// AutoscalerEnabled is whether this cluster sits behind a native autoscaler (cluster-autoscaler
 	// / Karpenter) that reacts to Pending pods. Operator-set on the agent deployment
 	// (AUTOSCALER_ENABLED), fail-closed: absent (false) means the scheduler never speculatively

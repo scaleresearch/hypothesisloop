@@ -127,11 +127,15 @@ type Cluster struct {
 	Shared     bool   `json:"shared"`
 	Priority   int    `json:"priority"`
 	ReportedID string `json:"cluster_id,omitempty"`
-	// JobImage is the one image every job on the cluster runs in, as its runtime reports it.
-	// Empty for a cluster that runs each job in the image the job names.
-	JobImage     string    `json:"job_image,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	DisabledOrgs []string  `json:"-"`
+	// JobImage is the image a job that names none runs in on the cluster, as its runtime reports
+	// it. Empty for a cluster that runs only jobs that name their image.
+	JobImage string `json:"job_image,omitempty"`
+	// JobImageDefault says the cluster's runtime runs a job in whatever image the job names, so
+	// JobImage is only where a job that names none runs. False with a JobImage is a runtime that
+	// boots one fixed image and can run no other, as one that rents machines does.
+	JobImageDefault bool      `json:"job_image_default,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	DisabledOrgs    []string  `json:"-"`
 }
 
 // The priorities a cluster holds. DefaultClusterPriority is the one a cluster is registered with.
@@ -183,14 +187,14 @@ func (c Cluster) HostsJob(orgID, image string) bool {
 	return c.Hosts(orgID) && c.Runs(image)
 }
 
-// Runs reports whether a job naming image can run on the cluster. A cluster with one fixed image
-// runs the jobs that name none and the ones that name exactly it. Every other cluster runs each
-// job in its own image, so there a job must name one.
+// Runs reports whether a job naming image can run on the cluster. A job that names none runs
+// where the cluster has an image for it. A job that names one runs where the runtime starts the
+// image a job names: everywhere but on a cluster with one fixed image, which runs that image only.
 func (c Cluster) Runs(image string) bool {
-	if c.JobImage == "" {
-		return image != ""
+	if image == "" {
+		return c.JobImage != ""
 	}
-	return image == "" || image == c.JobImage
+	return c.JobImage == "" || c.JobImageDefault || image == c.JobImage
 }
 
 // OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform

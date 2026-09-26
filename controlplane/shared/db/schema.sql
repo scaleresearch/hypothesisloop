@@ -960,9 +960,12 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT fa
 -- reported_id is the identity the cluster's runtime states about itself, bound to the name on
 -- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
--- job_image is the one image every job on the cluster runs in, as its runtime last reported it.
--- Empty for a cluster that runs each job in the image the job names. Placement reads it.
+-- job_image is the image a job that names none runs in on the cluster, as its runtime last
+-- reported it. Empty for a cluster that runs only jobs that name their image. Placement reads it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image TEXT NOT NULL DEFAULT '';
+-- job_image_default says the runtime runs a job in whatever image it names, so job_image is only
+-- where a job that names none runs. False with a job_image is a runtime that can run no other.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image_default BOOLEAN NOT NULL DEFAULT false;
 -- priority orders the clusters a job may be placed on, higher first. The org that registered a
 -- cluster sets 1 to 1000 on it. A shared cluster is the platform's and holds 0, so every org's
 -- own compute is tried before it.

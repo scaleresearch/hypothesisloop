@@ -66,8 +66,8 @@ type Config struct {
 type Executor struct {
 	apiURL     string
 	storageDir string
-	// jobImage is reported to the control plane, which then places here the jobs that name no
-	// image, or name this one.
+	// jobImage is reported to the control plane, which then also places here the jobs that
+	// name no image.
 	jobImage string
 	// clusterName scopes everything this executor lists, stops and removes (LabelCluster).
 	clusterName string

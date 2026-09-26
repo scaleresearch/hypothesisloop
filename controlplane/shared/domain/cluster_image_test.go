@@ -5,6 +5,8 @@ import "testing"
 func TestAClusterRunsTheJobsItsImageRuleAdmits(t *testing.T) {
 	const fixed = "registry.test/platform-job:7"
 	rented, k8s := Cluster{OrgID: "org-a", JobImage: fixed}, Cluster{OrgID: "org-a"}
+	// A customer's own machine pulls any image; its job image is where a job that names none runs.
+	own := Cluster{OrgID: "org-a", JobImage: fixed, JobImageDefault: true}
 	for _, c := range []struct {
 		name    string
 		cluster Cluster
@@ -17,6 +19,9 @@ func TestAClusterRunsTheJobsItsImageRuleAdmits(t *testing.T) {
 		{"a fixed image does not run another tag of itself", rented, "registry.test/platform-job:8", false},
 		{"no fixed image runs the image named", k8s, "registry.test/mine:1", true},
 		{"no fixed image has nothing to run a job with none in", k8s, "", false},
+		{"a default image runs a job that names none", own, "", true},
+		{"a default image runs a job that names it", own, fixed, true},
+		{"a default image still runs a job that names another", own, "registry.test/mine:1", true},
 	} {
 		if got := c.cluster.Runs(c.image); got != c.want {
 			t.Errorf("%s: Runs(%q) = %v, want %v", c.name, c.image, got, c.want)

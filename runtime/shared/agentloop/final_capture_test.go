@@ -44,6 +44,7 @@ func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { r
 
 func (e *captureExecutor) SupportsMultiNodeJobs() bool { return true }
 func (e *captureExecutor) JobImage() string            { return e.jobImage }
+func (e *captureExecutor) JobImageIsDefault() bool     { return false }
 
 // The same set as ListManagedJobs here: these tests never exercise the delete-and-recreate window
 // the two lists exist to differ across, and leaving it on the embedded nil Executor made every

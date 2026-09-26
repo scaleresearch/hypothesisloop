@@ -12,8 +12,8 @@
 //	API_URL               — base URL of the control-plane API
 //	                        (must also be reachable from *inside* a workload container)
 //	RUNTIME_TOKEN         — the cluster's runtime token
-//	JOB_IMAGE             — the image a job that names none runs in; set, the node takes those jobs
-//	                        and the ones that name this image, and no job that names another
+//	JOB_IMAGE             — the image a job that names none runs in; set, the node also takes
+//	                        those jobs
 //	SCRATCH_DIR           — a directory measured as this node's storage in place of the engine's store,
 //	                        for an engine whose store is not on this host (default: the engine's store)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)

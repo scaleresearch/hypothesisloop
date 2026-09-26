@@ -436,8 +436,8 @@ a PriorityClass among them. Chart values (`runtime/k8s/infra/chart/values.yaml`)
 - `nodeAgent.nodeSelector` (default empty): the node labels the node-agent DaemonSet is limited
   to, for a cluster where only some nodes run jobs.
 - `jobImage` (default empty): the image a job that names none runs in, which every node must
-  pull. Set, the cluster takes those jobs and the ones that name this image, and no job that
-  names another. A bare-metal node takes the same as `--job-image` on `bare-agent install`.
+  pull. Set, the cluster also takes the jobs that name no image; it keeps taking every job that
+  names its own. A bare-metal node takes the same as `--job-image` on `bare-agent install`.
 - `detachOnUninstall` (default `true`): see below.
 
 To detach the cluster, `make cluster-agent-down` (`helm uninstall hypothesisloop-cluster-agent

@@ -43,7 +43,10 @@ func (s *reconcileStore) ListRecentlyUndesiredWorkloads(_ context.Context, clust
 	return s.undesired[cluster], nil
 }
 
-func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string) error {
+func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string, isDefault bool) error {
+	if isDefault {
+		image += " (default)"
+	}
 	s.jobImages = append(s.jobImages, name+"="+image)
 	return nil
 }
@@ -261,9 +264,15 @@ func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
 	if rec := w.reconcile(t, "of-a", idleReport("id-of-a")); rec.Code != http.StatusOK {
 		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
 	}
-	if want := []string{"of-a=registry.test/platform-job:7", "of-a="}; !slices.Equal(w.store.jobImages, want) {
+	// A runtime that runs any image says its job image is only a default.
+	report["job_image_default"] = true
+	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusOK {
+		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	if want := []string{"of-a=registry.test/platform-job:7", "of-a=", "of-a=registry.test/platform-job:7 (default)"}; !slices.Equal(w.store.jobImages, want) {
 		t.Fatalf("recorded %v, want %v", w.store.jobImages, want)
 	}
+	w.store.jobImages = w.store.jobImages[:2]
 	written := w.metricsWrites.Load()
 	report["job_image"] = strings.Repeat("i", domain.MaxJobImageLength+1)
 	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusBadRequest || len(w.store.jobImages) != 2 || w.metricsWrites.Load() != written {

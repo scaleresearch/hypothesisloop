@@ -169,3 +169,6 @@ func (e *Executor) SupportsMultiNodeJobs() bool { return false }
 // JobImage is the image every instance boots, which carries the wrapper a job's command runs
 // under.
 func (e *Executor) JobImage() string { return e.jobImage }
+
+// JobImageIsDefault is false: every instance boots the job image and no other (buildSpec).
+func (e *Executor) JobImageIsDefault() bool { return false }

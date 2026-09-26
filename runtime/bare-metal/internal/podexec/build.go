@@ -302,3 +302,6 @@ func (e *Executor) SupportsMultiNodeJobs() bool { return false }
 
 // JobImage is the image a job that names none runs in here, when the node was given one.
 func (e *Executor) JobImage() string { return e.jobImage }
+
+// JobImageIsDefault is true: a container runs in the image its job names, whatever it is.
+func (e *Executor) JobImageIsDefault() bool { return true }

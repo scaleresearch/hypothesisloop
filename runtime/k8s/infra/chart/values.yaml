@@ -16,8 +16,7 @@ metricsURL: ""
 # to Pending pods. See autoscaler.md.
 autoscalerEnabled: "false"
 # The image a job that names none runs in, which every node must be able to pull. Set, the
-# cluster takes those jobs and the ones that name this image, and no job that names another.
-# Empty, it takes the jobs that name their image.
+# cluster also takes the jobs that name no image. Either way it takes every job that names its own.
 jobImage: ""
 # helm uninstall removes the cluster from the control plane and stops its jobs before the
 # release goes. false leaves the cluster registered, for a release that is coming back.

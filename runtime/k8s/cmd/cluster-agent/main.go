@@ -10,8 +10,8 @@
 //
 //	CLUSTER_NAME        — this cluster's stable identity
 //	API_URL             — base URL of the control-plane API
-//	JOB_IMAGE           — the image a job that names none runs in; set, the cluster takes those
-//	                      jobs and the ones that name this image, and no job that names another
+//	JOB_IMAGE           — the image a job that names none runs in; set, the cluster also takes
+//	                      those jobs
 package main
 
 import (
