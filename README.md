@@ -431,9 +431,7 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agen
 Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
 which only the local cluster pulls. A cluster that holds the runtime's objects from before the
 chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
-`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first. A
-`hypothesisloop-jobs` namespace an earlier agent created is taken over by `make
-cluster-agent-up`; the helm command refuses it, so delete it first.
+`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
