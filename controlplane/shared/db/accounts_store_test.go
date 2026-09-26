@@ -16,7 +16,7 @@ import (
 func newTestUserHome(t *testing.T, accounts *AccountsStore) (userID, orgID string) {
 	t.Helper()
 	userID = "user-" + uuid.New().String()
-	_, orgIDs, err := accounts.EnsureUserHome(context.Background(), userID, "home of "+userID)
+	_, orgIDs, err := accounts.EnsureUserHome(context.Background(), userID, "name of "+userID, "home of "+userID)
 	if err != nil {
 		t.Fatalf("ensure user home: got = %v, want = nil", err)
 	}
@@ -49,11 +49,11 @@ func TestFirstRequestCreatesAUsersHomeOnce(t *testing.T) {
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 
-	user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "another name")
+	user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "name of "+userID, "another name")
 	if err != nil {
 		t.Fatalf("second request: got = %v, want = nil", err)
 	}
-	if user.Staff || !slices.Equal(orgIDs, []string{orgID}) {
+	if user.Name != "name of "+userID || user.Staff || !slices.Equal(orgIDs, []string{orgID}) {
 		t.Fatalf("second request: got staff=%v orgs=%v, want the same single org %s", user.Staff, orgIDs, orgID)
 	}
 	orgs, err := accounts.ListUserOrgs(ctx, userID)
@@ -61,6 +61,57 @@ func TestFirstRequestCreatesAUsersHomeOnce(t *testing.T) {
 		t.Fatalf("user orgs: got = %+v, %v, want one owned org keeping its first name", orgs, err)
 	}
 	defaultProjectOf(t, accounts, orgID)
+}
+
+func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	userID, orgID := newTestUserHome(t, accounts)
+
+	for _, step := range []struct{ stated, want string }{
+		{"Ada Lovelace", "Ada Lovelace"},
+		{"", "Ada Lovelace"},
+		{"Ada King", "Ada King"},
+	} {
+		user, _, err := accounts.EnsureUserHome(ctx, userID, step.stated, "ignored")
+		if err != nil || user.Name != step.want {
+			t.Fatalf("user after the provider states %q: got = %+v, %v, want name %q", step.stated, user, err, step.want)
+		}
+		var stored string
+		if err := pool.pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, userID).Scan(&stored); err != nil || stored != step.want {
+			t.Fatalf("stored name after the provider states %q: got = %q, %v, want = %q", step.stated, stored, err, step.want)
+		}
+	}
+
+	members, _, err := accounts.ListOrgMembers(ctx, orgID, 20, 0)
+	if err != nil || len(members) != 1 || members[0].Name != "Ada King" {
+		t.Fatalf("members: got = %+v, %v, want the owner under their name", members, err)
+	}
+	key := &domain.APIKey{ID: "key-" + uuid.New().String(), OrgID: orgID, CreatedBy: userID, Name: "laptop"}
+	if err := accounts.CreateAPIKey(ctx, key, "hash-"+key.ID); err != nil || key.CreatedByName != "Ada King" {
+		t.Fatalf("created key: got = %+v, %v, want its creator's name", key, err)
+	}
+	if read, err := accounts.GetAPIKey(ctx, key.ID); err != nil || read.CreatedByName != "Ada King" {
+		t.Fatalf("read key: got = %+v, %v, want its creator's name", read, err)
+	}
+	invite := &domain.OrgInvite{ID: "inv-" + uuid.New().String(), OrgID: orgID, Role: domain.OrgRoleMember, CreatedBy: userID, ExpiresAt: time.Now().Add(time.Hour)}
+	if err := accounts.CreateOrgInvite(ctx, invite, "hash-"+invite.ID); err != nil || invite.CreatedByName != "Ada King" {
+		t.Fatalf("created invite: got = %+v, %v, want its creator's name", invite, err)
+	}
+	if read, err := accounts.GetOrgInvite(ctx, invite.ID); err != nil || read.CreatedByName != "Ada King" || read.AcceptedByName != "" {
+		t.Fatalf("read invite: got = %+v, %v, want its creator's name and nobody's as the one who accepted", read, err)
+	}
+	for by, want := range map[string]string{userID: "Ada King", key.ID: "laptop", "operator": ""} {
+		installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: int64(len(by)), AccountLogin: "acme-" + want, ConnectedBy: by}
+		if err := accounts.ConnectGitHubInstallation(ctx, installation); err != nil || installation.ConnectedByName != want {
+			t.Fatalf("installation connected by %s: got = %+v, %v, want name %q", by, installation, err, want)
+		}
+		read, err := accounts.GitHubInstallationOfAccount(ctx, orgID, installation.AccountLogin)
+		if err != nil || read == nil || read.ConnectedByName != want {
+			t.Fatalf("read installation connected by %s: got = %+v, %v, want name %q", by, read, err, want)
+		}
+	}
 }
 
 func TestConcurrentFirstRequestsEndWithOneOrg(t *testing.T) {
@@ -76,7 +127,7 @@ func TestConcurrentFirstRequestsEndWithOneOrg(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, results[i], errs[i] = accounts.EnsureUserHome(context.Background(), userID, "racing")
+			_, results[i], errs[i] = accounts.EnsureUserHome(context.Background(), userID, "", "racing")
 		}()
 	}
 	wg.Wait()
@@ -172,7 +223,7 @@ func TestMembershipIsPerOrg(t *testing.T) {
 	if role, _, _ := accounts.OrgRole(ctx, orgID, owner); role != domain.OrgRoleOwner {
 		t.Fatalf("role of the creator: got = %q, want owner", role)
 	}
-	_, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "ignored")
+	_, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "", "ignored")
 	if err != nil || !slices.Equal(orgIDs, []string{guestOrg, orgID}) {
 		t.Fatalf("orgs of a user in two: got = %v, %v, want home first then the joined one", orgIDs, err)
 	}

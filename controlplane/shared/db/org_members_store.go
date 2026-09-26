@@ -30,7 +30,7 @@ func (s *AccountsStore) ListOrgMembers(ctx context.Context, orgID string, limit,
 		return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: count: %w", err)
 	}
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT org_id, user_id, role, created_at FROM org_members WHERE org_id = $1
+SELECT org_id, user_id, `+userName("user_id")+`, role, created_at FROM org_members WHERE org_id = $1
 ORDER BY created_at, user_id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: %w", err)
@@ -39,7 +39,7 @@ ORDER BY created_at, user_id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	out := []*domain.OrgMember{}
 	for rows.Next() {
 		m := &domain.OrgMember{}
-		if err := rows.Scan(&m.OrgID, &m.UserID, &m.Role, &m.JoinedAt); err != nil {
+		if err := rows.Scan(&m.OrgID, &m.UserID, &m.Name, &m.Role, &m.JoinedAt); err != nil {
 			return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: scan: %w", err)
 		}
 		out = append(out, m)
@@ -126,11 +126,11 @@ func wrapUnlessRefusal(op string, err error) error {
 	return fmt.Errorf("accounts_store.%s: %w", op, err)
 }
 
-const orgInviteColumns = `id, org_id, role, created_by, created_at, expires_at, COALESCE(accepted_by, ''), accepted_at, revoked_at`
+var orgInviteColumns = `id, org_id, role, created_by, ` + userName("created_by") + `, created_at, expires_at, COALESCE(accepted_by, ''), ` + userName("accepted_by") + `, accepted_at, revoked_at`
 
 func scanOrgInvite(row rowScanner) (*domain.OrgInvite, error) {
 	i := &domain.OrgInvite{}
-	if err := row.Scan(&i.ID, &i.OrgID, &i.Role, &i.CreatedBy, &i.CreatedAt, &i.ExpiresAt, &i.AcceptedBy, &i.AcceptedAt, &i.RevokedAt); err != nil {
+	if err := row.Scan(&i.ID, &i.OrgID, &i.Role, &i.CreatedBy, &i.CreatedByName, &i.CreatedAt, &i.ExpiresAt, &i.AcceptedBy, &i.AcceptedByName, &i.AcceptedAt, &i.RevokedAt); err != nil {
 		return nil, err
 	}
 	return i, nil
@@ -144,7 +144,7 @@ func (s *AccountsStore) CreateOrgInvite(ctx context.Context, invite *domain.OrgI
 	}
 	err := s.pool.pool.QueryRow(ctx, `
 INSERT INTO org_invites (id, org_id, role, token_hash, created_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING created_at`, invite.ID, invite.OrgID, string(invite.Role), tokenHash, invite.CreatedBy, invite.ExpiresAt).Scan(&invite.CreatedAt)
+RETURNING created_at, `+userName("created_by"), invite.ID, invite.OrgID, string(invite.Role), tokenHash, invite.CreatedBy, invite.ExpiresAt).Scan(&invite.CreatedAt, &invite.CreatedByName)
 	if err != nil {
 		return fmt.Errorf("accounts_store.CreateOrgInvite: %w", err)
 	}

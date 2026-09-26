@@ -7,8 +7,11 @@ import (
 )
 
 // User is a person known to the identity provider. ID is the provider's subject.
+// User is a person. Name is the display name their identity provider last stated, empty when it
+// has stated none.
 type User struct {
 	ID        string    `json:"id"`
+	Name      string    `json:"name"`
 	Staff     bool      `json:"staff"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -31,11 +34,12 @@ type Org struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// OrgMember is one person of an org. The platform holds no name and no email for them: the
-// identity provider does.
+// OrgMember is one person of an org. Name is the person's display name, empty when their
+// identity provider has stated none.
 type OrgMember struct {
 	OrgID    string    `json:"org_id"`
 	UserID   string    `json:"user_id"`
+	Name     string    `json:"name"`
 	Role     OrgRole   `json:"role"`
 	JoinedAt time.Time `json:"joined_at"`
 }
@@ -47,15 +51,19 @@ const InviteLifetime = 7 * 24 * time.Hour
 // once at creation and only its hash is stored. It works once, until ExpiresAt, and while not
 // revoked. CreatedBy is the person answerable for it.
 type OrgInvite struct {
-	ID         string     `json:"id"`
-	OrgID      string     `json:"org_id"`
-	Role       OrgRole    `json:"role"`
-	CreatedBy  string     `json:"created_by"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  time.Time  `json:"expires_at"`
-	AcceptedBy string     `json:"accepted_by,omitempty"`
-	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	ID        string  `json:"id"`
+	OrgID     string  `json:"org_id"`
+	Role      OrgRole `json:"role"`
+	CreatedBy string  `json:"created_by"`
+	// CreatedByName and AcceptedByName are the display names of those two people, empty when
+	// their identity provider has stated none.
+	CreatedByName  string     `json:"created_by_name"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	AcceptedBy     string     `json:"accepted_by,omitempty"`
+	AcceptedByName string     `json:"accepted_by_name,omitempty"`
+	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 
 // Project groups an org's platform experiments.
@@ -69,11 +77,12 @@ type Project struct {
 // OrgGitHubInstallation is an installation of the platform's GitHub App that an org connected.
 // AccountLogin is the GitHub account it is on, the owner part of every repository it covers.
 type OrgGitHubInstallation struct {
-	OrgID          string    `json:"org_id"`
-	InstallationID int64     `json:"installation_id"`
-	AccountLogin   string    `json:"account_login"`
-	ConnectedBy    string    `json:"connected_by" doc:"The user who connected it."`
-	ConnectedAt    time.Time `json:"connected_at"`
+	OrgID           string    `json:"org_id"`
+	InstallationID  int64     `json:"installation_id"`
+	AccountLogin    string    `json:"account_login"`
+	ConnectedBy     string    `json:"connected_by" doc:"The user who connected it, or the API key it was connected with."`
+	ConnectedByName string    `json:"connected_by_name" doc:"The name of that user or key, empty when it has none."`
+	ConnectedAt     time.Time `json:"connected_at"`
 }
 
 // DefaultOrgName is the org a person starts with at their first sign-in, and DefaultProjectName
@@ -91,6 +100,9 @@ type APIKey struct {
 	OrgID     string `json:"org_id"`
 	ProjectID string `json:"project_id,omitempty"`
 	CreatedBy string `json:"created_by"`
+	// CreatedByName is the display name of the person who created the key, empty when their
+	// identity provider has stated none.
+	CreatedByName string `json:"created_by_name"`
 	// MintedBy is the key this one was created with, empty when a person created it.
 	MintedBy  string    `json:"minted_by,omitempty"`
 	Name      string    `json:"name"`
@@ -106,17 +118,36 @@ type APIKey struct {
 // Cluster is a runtime's registered name and the org that added it. Shared is the platform's
 // decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
 // states about itself, empty until its first report. DisabledOrgs are the orgs that turned the
-// cluster off for their own jobs.
+// cluster off for their own jobs. Priority orders the clusters a job may be placed on, higher
+// first: its org sets ClusterPriorityMin to ClusterPriorityMax, and a shared cluster holds
+// SharedClusterPriority, below every org's own.
 type Cluster struct {
 	Name       string `json:"name"`
 	OrgID      string `json:"org_id"`
 	Shared     bool   `json:"shared"`
+	Priority   int    `json:"priority"`
 	ReportedID string `json:"cluster_id,omitempty"`
 	// JobImage is the one image every job on the cluster runs in, as its runtime reports it.
 	// Empty for a cluster that runs each job in the image the job names.
 	JobImage     string    `json:"job_image,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	DisabledOrgs []string  `json:"-"`
+}
+
+// The priorities a cluster holds. DefaultClusterPriority is the one a cluster is registered with.
+const (
+	SharedClusterPriority  = 0
+	ClusterPriorityMin     = 1
+	ClusterPriorityMax     = 1000
+	DefaultClusterPriority = 100
+)
+
+// ValidateClusterPriority refuses a priority an org cannot give a cluster it registered.
+func ValidateClusterPriority(priority int) error {
+	if priority < ClusterPriorityMin || priority > ClusterPriorityMax {
+		return fmt.Errorf("priority must be %d to %d", ClusterPriorityMin, ClusterPriorityMax)
+	}
+	return nil
 }
 
 // MaxJobImageLength bounds the image a runtime reports for its cluster.

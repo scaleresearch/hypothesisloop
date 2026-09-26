@@ -40,7 +40,7 @@ func unauthenticated(format string, args ...any) *Error {
 // Directory is what the authenticator reads to learn whether the thing a token names still
 // stands. *db.Store with *db.AccountsStore and *db.ClustersStore satisfy it together.
 type Directory interface {
-	EnsureUserHome(ctx context.Context, userID, orgName string) (*domain.User, []string, error)
+	EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error)
 	APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error)
 	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
@@ -218,12 +218,13 @@ func (a *Authenticator) user(ctx context.Context, token string) (Principal, erro
 	if err != nil {
 		return Principal{}, unauthenticated("%s", err)
 	}
-	name := claims.displayName()
-	user, orgIDs, err := a.directory.EnsureUserHome(ctx, claims.Subject, domain.DefaultOrgName)
+	// The name is the person's own claim and is kept to show beside what they do, so it is held
+	// to what a name may be.
+	user, orgIDs, err := a.directory.EnsureUserHome(ctx, claims.Subject, domain.NameFrom(claims.displayName()), domain.DefaultOrgName)
 	if err != nil {
 		return Principal{}, err
 	}
-	p := Principal{Kind: KindUser, UserID: user.ID, Name: name, OrgIDs: orgIDs}
+	p := Principal{Kind: KindUser, UserID: user.ID, Name: user.Name, OrgIDs: orgIDs}
 	if user.Staff {
 		p.Kind = KindStaff
 	}

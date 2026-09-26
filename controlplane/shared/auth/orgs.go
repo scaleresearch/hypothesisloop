@@ -342,19 +342,6 @@ func (a *Access) ClusterUse(ctx context.Context, orgID, name string) (Principal,
 	return p, cluster, nil
 }
 
-// Actor names the account behind a decision that is recorded with its author: the person, the
-// API key, or staff acting with no person signed in.
-func (p Principal) Actor() string {
-	switch {
-	case p.UserID != "":
-		return p.UserID
-	case p.KeyID != "":
-		return p.KeyID
-	default:
-		return string(p.Kind)
-	}
-}
-
 // PlacementOrg resolves the org whose clusters a caller reads the capacity of. What an org can
 // be placed on is that org's to know, so a caller who reaches several orgs reads one at a time.
 //

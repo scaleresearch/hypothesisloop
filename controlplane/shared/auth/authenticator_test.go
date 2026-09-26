@@ -30,11 +30,12 @@ type fakeDirectory struct {
 	clusters    map[string]string
 	staff       map[string]bool
 	homes       map[string][]string
+	names       map[string]string
 	homeCreated []string
 	fail        error
 }
 
-func (d *fakeDirectory) EnsureUserHome(_ context.Context, userID, orgName string) (*domain.User, []string, error) {
+func (d *fakeDirectory) EnsureUserHome(_ context.Context, userID, name, orgName string) (*domain.User, []string, error) {
 	if d.fail != nil {
 		return nil, nil, d.fail
 	}
@@ -42,7 +43,10 @@ func (d *fakeDirectory) EnsureUserHome(_ context.Context, userID, orgName string
 		d.homes[userID] = []string{"org-of-" + userID}
 		d.homeCreated = append(d.homeCreated, orgName)
 	}
-	return &domain.User{ID: userID, Staff: d.staff[userID]}, d.homes[userID], nil
+	if name != "" {
+		d.names[userID] = name
+	}
+	return &domain.User{ID: userID, Name: d.names[userID], Staff: d.staff[userID]}, d.homes[userID], nil
 }
 
 func (d *fakeDirectory) APIKeyByHash(_ context.Context, hash string) (*domain.APIKey, error) {
@@ -93,6 +97,7 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 		clusters: map[string]string{"cluster-a": "org-a"},
 		staff:    map[string]bool{},
 		homes:    map[string][]string{},
+		names:    map[string]string{},
 	}
 	cfg := config.AuthConfig{SigningSecret: testSecret}
 	if len(signers) > 0 {
@@ -280,8 +285,14 @@ func TestAUsersFirstRequestMakesTheirHomeAndLaterOnesReuseIt(t *testing.T) {
 	loud["email"] = "eve@example.invalid"
 	loud["user_name"] = "eve-on-github"
 	for i, claims := range []map[string]any{nameless, loud} {
-		if _, err := a.Authenticate(ctx, ec.token(t, claims)); err != nil {
+		p, err := a.Authenticate(ctx, ec.token(t, claims))
+		if err != nil {
 			t.Fatalf("first request of %v: %v", claims["sub"], err)
+		}
+		// The name kept for a person is their claim held to what a name may be, and it is the
+		// one the principal carries.
+		if p.Name != directory.names[p.UserID] || (p.Name != "" && (len(p.Name) != domain.MaxNameLength || !strings.HasPrefix(p.Name, "Evexxx"))) {
+			t.Fatalf("name of %v: got = %q, kept %q, want the claim cleaned and cut to %d bytes", claims["sub"], p.Name, directory.names[p.UserID], domain.MaxNameLength)
 		}
 		if got := directory.homeCreated[i+1]; got != domain.DefaultOrgName {
 			t.Fatalf("home org of %v: got = %q, want = %q", claims["sub"], got, domain.DefaultOrgName)
@@ -307,6 +318,27 @@ func TestAUsersFirstRequestMakesTheirHomeAndLaterOnesReuseIt(t *testing.T) {
 		change(claims)
 		p, err := a.Authenticate(ctx, ec.token(t, claims))
 		assertRefused(t, name, p, err)
+	}
+}
+
+func TestAnActorIsTheCredentialAndNothingARequestSays(t *testing.T) {
+	for name, tc := range map[string]struct {
+		p    Principal
+		want domain.Actor
+	}{
+		"a signed-in person":  {Principal{Kind: KindUser, UserID: "u-1", Name: "Ada"}, domain.Actor{Kind: domain.ActorUser, ID: "u-1", Name: "Ada"}},
+		"staff who signed in": {Principal{Kind: KindStaff, UserID: "u-2", Name: "Grace"}, domain.Actor{Kind: domain.ActorUser, ID: "u-2", Name: "Grace"}},
+		"an api key":          {Principal{Kind: KindKey, KeyID: "key-1"}, domain.Actor{Kind: domain.ActorKey, ID: "key-1"}},
+		"an agent":            {Principal{Kind: KindAgent, AgentID: "agent-1", PlatformExperimentID: "pe-1"}, domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}},
+		"an agent's job":      {Principal{Kind: KindJob, AgentID: "agent-1", ExperimentID: "exp-1"}, domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}},
+		"a coordinator":       {Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}, domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1"}},
+		"a staff token":       {Principal{Kind: KindStaff}, domain.Actor{Kind: domain.ActorStaff}},
+		"a runtime":           {Principal{Kind: KindRuntime, ClusterName: "c"}, domain.Actor{}},
+		"a launcher":          {Principal{Kind: KindLauncher, LauncherName: "l"}, domain.Actor{}},
+	} {
+		if got := tc.p.Actor(); got != tc.want {
+			t.Errorf("%s: got = %+v, want = %+v", name, got, tc.want)
+		}
 	}
 }
 

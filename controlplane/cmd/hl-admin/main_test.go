@@ -85,7 +85,7 @@ type fakeHomes struct {
 	projects []*domain.Project
 }
 
-func (f fakeHomes) EnsureUserHome(_ context.Context, userID, _ string) (*domain.User, []string, error) {
+func (f fakeHomes) EnsureUserHome(_ context.Context, userID, _, _ string) (*domain.User, []string, error) {
 	return &domain.User{ID: userID}, f.orgIDs, nil
 }
 

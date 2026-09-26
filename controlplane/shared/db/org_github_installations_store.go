@@ -14,6 +14,11 @@ import (
 // ErrGitHubInstallationNotFound reports an installation the org has not connected.
 var ErrGitHubInstallationNotFound = errors.New("the org has not connected that GitHub installation")
 
+// connectedByName is the SQL of the name of who connected an installation: the user, or the API
+// key it was connected with.
+const connectedByName = `COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''),
+                (SELECT named.name FROM api_keys named WHERE named.id = connected_by), '')`
+
 // ConnectGitHubInstallation records an installation as connected to an org. One that is already
 // connected keeps who connected it and when, and takes the account's name as it stands now.
 func (s *AccountsStore) ConnectGitHubInstallation(ctx context.Context, in *domain.OrgGitHubInstallation) error {
@@ -21,7 +26,7 @@ func (s *AccountsStore) ConnectGitHubInstallation(ctx context.Context, in *domai
 INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login
-RETURNING connected_by, connected_at`, in.OrgID, in.InstallationID, in.AccountLogin, in.ConnectedBy).Scan(&in.ConnectedBy, &in.ConnectedAt)
+RETURNING connected_by, `+connectedByName+`, connected_at`, in.OrgID, in.InstallationID, in.AccountLogin, in.ConnectedBy).Scan(&in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 		return ErrOrgNotFound
@@ -35,7 +40,7 @@ RETURNING connected_by, connected_at`, in.OrgID, in.InstallationID, in.AccountLo
 // ListGitHubInstallations returns the installations an org connected, oldest first.
 func (s *AccountsStore) ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT org_id, installation_id, account_login, connected_by, connected_at
+SELECT org_id, installation_id, account_login, connected_by, `+connectedByName+`, connected_at
 FROM org_github_installations WHERE org_id = $1
 ORDER BY connected_at, installation_id`, orgID)
 	if err != nil {
@@ -45,7 +50,7 @@ ORDER BY connected_at, installation_id`, orgID)
 	out := []*domain.OrgGitHubInstallation{}
 	for rows.Next() {
 		in := &domain.OrgGitHubInstallation{}
-		if err := rows.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedAt); err != nil {
+		if err := rows.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt); err != nil {
 			return nil, fmt.Errorf("accounts_store.ListGitHubInstallations: scan: %w", err)
 		}
 		out = append(out, in)
@@ -58,10 +63,10 @@ ORDER BY connected_at, installation_id`, orgID)
 func (s *AccountsStore) GitHubInstallationOfAccount(ctx context.Context, orgID, accountLogin string) (*domain.OrgGitHubInstallation, error) {
 	in := &domain.OrgGitHubInstallation{}
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT org_id, installation_id, account_login, connected_by, connected_at
+SELECT org_id, installation_id, account_login, connected_by, `+connectedByName+`, connected_at
 FROM org_github_installations WHERE org_id = $1 AND lower(account_login) = lower($2)
 ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin).
-		Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedAt)
+		Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

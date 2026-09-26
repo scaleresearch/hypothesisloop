@@ -873,13 +873,15 @@ CREATE TRIGGER pe_cuts_notify AFTER INSERT ON platform_experiment_cuts
 -- Tenancy
 -- ---------------------------------------------------------------------------
 
--- id is the identity provider's subject. No email and no name: the provider owns those and the
--- JWT carries them on every request, so a copy here would be a second home for the same fact.
+-- id is the identity provider's subject. name is the display name the provider last stated for
+-- the person, kept so that what they did reads by name to others and after they are gone; it is
+-- empty until the provider states one. No email: the provider owns it and nothing here shows it.
 CREATE TABLE IF NOT EXISTS users (
     id         TEXT        PRIMARY KEY,
     staff      BOOLEAN     NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS orgs (
     id         TEXT        PRIMARY KEY,

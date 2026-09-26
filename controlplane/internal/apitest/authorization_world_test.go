@@ -82,8 +82,8 @@ func (w *world) placed(prefix, id string) *domain.Tenancy {
 	return w.tenancy(at[0], at[1])
 }
 
-func (w *world) EnsureUserHome(_ context.Context, userID, _ string) (*domain.User, []string, error) {
-	return &domain.User{ID: userID}, []string{"org-a"}, nil
+func (w *world) EnsureUserHome(_ context.Context, userID, name, _ string) (*domain.User, []string, error) {
+	return &domain.User{ID: userID, Name: name}, []string{"org-a"}, nil
 }
 
 func (w *world) APIKeyByHash(_ context.Context, hash string) (*domain.APIKey, error) {

@@ -30,7 +30,7 @@ type Principal struct {
 	Kind Kind
 
 	UserID string
-	// Name is the person's display name as the identity provider states it on this request.
+	// Name is the person's display name, the one their identity provider last stated.
 	Name string
 	// KeyID names the API key a key principal presented.
 	KeyID string
@@ -59,6 +59,27 @@ func (p Principal) Scope() domain.TenantScope {
 		return domain.AllTenants
 	}
 	return domain.TenantScope{OrgIDs: p.OrgIDs, ProjectID: p.ProjectID, PlatformExperimentID: p.PlatformExperimentID}
+}
+
+// Actor is whose credential this is, as a record of what it did names it. It is the only place
+// an actor is made, so no record names one a request merely claimed. Staff who signed in are the
+// person they are; a job is the agent it runs for. A runtime and a launcher author no record and
+// have none.
+func (p Principal) Actor() domain.Actor {
+	switch {
+	case p.UserID != "":
+		return domain.Actor{Kind: domain.ActorUser, ID: p.UserID, Name: p.Name}
+	case p.Kind == KindKey:
+		return domain.Actor{Kind: domain.ActorKey, ID: p.KeyID}
+	case p.Kind == KindAgent, p.Kind == KindJob:
+		return domain.Actor{Kind: domain.ActorAgent, ID: p.AgentID}
+	case p.Kind == KindCoordinator:
+		return domain.Actor{Kind: domain.ActorCoordinator, ID: p.PlatformExperimentID}
+	case p.Kind == KindStaff:
+		return domain.Actor{Kind: domain.ActorStaff}
+	default:
+		return domain.Actor{}
+	}
 }
 
 type principalKey struct{}

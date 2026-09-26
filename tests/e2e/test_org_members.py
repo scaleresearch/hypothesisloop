@@ -23,6 +23,7 @@ pytestmark = pytest.mark.parallel
 @dataclass
 class Person:
     subject: str
+    name: str
     # The person in their own home org.
     home: API
 
@@ -33,13 +34,15 @@ class Person:
 
 def _person(api: API, run_id: str, label: str) -> Person:
     subject = f"members-{label}-{uuid.uuid4().hex[:10]}-{run_id}"
-    token = signin.jwt(subject, f"{label.title()} {run_id}")
+    name = f"{label.title()} {run_id}"
+    token = signin.jwt(subject, name)
     me = requests.get(f"{api.base_url}/me", headers={"Authorization": f"Bearer {token}"}, timeout=30)
     assert me.status_code == 200, f"first request of {label}: {me.status_code} {me.text}"
     home = me.json()
     assert len(home["orgs"]) == 1 and home["orgs"][0]["role"] == "owner", f"a new person's home: {home}"
     assert home["orgs"][0]["name"] == "Default org" and home["projects"][0]["name"] == "Default project", f"a new person's home: {home}"
-    return Person(subject, api.as_caller(token, home["orgs"][0]["id"], home["projects"][0]["id"]))
+    assert home["name"] == name, f"a person is called what their sign-in states: {home}"
+    return Person(subject, name, api.as_caller(token, home["orgs"][0]["id"], home["projects"][0]["id"]))
 
 
 def _call(api: API, method: str, path: str, body: dict | None = None) -> requests.Response:
@@ -92,6 +95,7 @@ def test_an_invite_brings_a_person_into_the_org_once(api: API, run_id: str):
     listed = _call(owner.home, "GET", f"/orgs/{org}/invites")
     assert listed.status_code == 200 and listed.headers["X-Total-Count"] == "1"
     assert [i["id"] for i in listed.json()] == [created["id"]] and "token" not in listed.text, f"pending invites: {listed.text}"
+    assert created["created_by_name"] == owner.name and listed.json()[0]["created_by_name"] == owner.name, "an invite names who made it"
     assert [i["id"] for i in _lines(owner.home.hl("org", "invites", "list"))] == [created["id"]]
 
     _refused(owner.home, "POST", "/invites/accept", {"token": created["token"]}, 409, "already_member")
@@ -104,7 +108,11 @@ def test_an_invite_brings_a_person_into_the_org_once(api: API, run_id: str):
     assert _call(owner.home, "GET", f"/orgs/{org}/invites").json() == [], "an accepted invite is no longer pending"
 
     assert _members(owner.home, org) == {owner.subject: "owner", guest.subject: "member"}
-    assert {m["user_id"] for m in _lines(owner.home.hl("org", "members", "list"))} == {owner.subject, guest.subject}
+    listed_members = _lines(owner.home.hl("org", "members", "list"))
+    assert {m["user_id"]: m["name"] for m in listed_members} == {owner.subject: owner.name, guest.subject: guest.name}, \
+        "each member is listed under their name, to every member"
+    assert {m["user_id"]: m["name"] for m in _call(guest.in_org(org, owner.home.project_id), "GET", f"/orgs/{org}/members").json()} == {
+        owner.subject: owner.name, guest.subject: guest.name}
     roles = {o["id"]: o["role"] for o in guest.home.get_json("/me")["orgs"]}
     assert roles == {guest.home.org_id: "owner", org: "member"}, f"the orgs of the one who joined: {roles}"
     assert late.subject not in _members(owner.home, org)

@@ -561,7 +561,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if err != nil {
 				return nil, err
 			}
-			cluster, err := h.clusters.SetClusterEnabled(ctx, in.Name, in.ID, caller.Actor(), use.enabled)
+			by := caller.Actor()
+			if by.ID == "" {
+				by.ID = string(by.Kind)
+			}
+			cluster, err := h.clusters.SetClusterEnabled(ctx, in.Name, in.ID, by.ID, use.enabled)
 			if err != nil {
 				return nil, err
 			}

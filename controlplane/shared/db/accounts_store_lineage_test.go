@@ -198,7 +198,7 @@ func TestStaffIsAFlagOnAUserThatExists(t *testing.T) {
 		if err := accounts.SetUserStaff(ctx, userID, want); err != nil {
 			t.Fatalf("set staff = %v: got = %v, want = nil", want, err)
 		}
-		user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "ignored")
+		user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "", "ignored")
 		if err != nil || user.Staff != want || len(orgIDs) != 1 {
 			t.Fatalf("user after staff = %v: got = %+v in %v, %v, want the flag set and one org as before", want, user, orgIDs, err)
 		}

@@ -158,6 +158,7 @@ def test_a_revoked_key_stops_at_once_with_every_key_minted_from_it(orgs):
     a, b = orgs
     root_id = a.api.get_json("/me")["key_id"]
     parent = _key(a.api, a.org_id, f"parent-{a.marker}")
+    assert parent["created_by"] == a.subject and parent["created_by_name"] == f"Org a {a.marker}", f"a key names the person behind it: {parent}"
     parent_api = a.api.as_caller(parent["token"], a.org_id, a.project_id)
     child = _key(parent_api, a.org_id, f"child-{a.marker}", a.project_id)
     child_api = a.api.as_caller(child["token"], a.org_id, a.project_id)

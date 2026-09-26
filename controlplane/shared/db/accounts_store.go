@@ -47,13 +47,25 @@ func newAccountID(prefix string) (string, error) {
 }
 
 // EnsureUserHome returns the user and the orgs they belong to, creating the user with a home org
-// and its default project on their first request. The common case, a user who exists, is one
-// read. A first request inserts the user and the org in one transaction keyed off the users
-// insert, so two concurrent first requests make one org.
-func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, orgName string) (*domain.User, []string, error) {
+// and its default project on their first request. The common case, a user who exists under the
+// name stated, is one read. A first request inserts the user and the org in one transaction
+// keyed off the users insert, so two concurrent first requests make one org.
+//
+// name is what the identity provider states the person is called now. It replaces the name kept
+// when it differs, and an empty one, a provider that states none, leaves the kept name alone.
+func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error) {
 	user, orgIDs, err := readUserHome(ctx, s.pool.pool, userID)
-	if err != nil || user != nil {
-		return user, orgIDs, err
+	if err != nil {
+		return nil, nil, err
+	}
+	if user != nil {
+		if name != "" && name != user.Name {
+			if _, err := s.pool.pool.Exec(ctx, `UPDATE users SET name = $2 WHERE id = $1`, userID, name); err != nil {
+				return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: rename user: %w", err)
+			}
+			user.Name = name
+		}
+		return user, orgIDs, nil
 	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -61,7 +73,7 @@ func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, orgName stri
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	tag, err := tx.Exec(ctx, `INSERT INTO users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`, userID)
+	tag, err := tx.Exec(ctx, `INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, userID, name)
 	if err != nil {
 		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: insert user: %w", err)
 	}
@@ -79,6 +91,12 @@ func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, orgName stri
 	return user, orgIDs, nil
 }
 
+// userName is the SQL of the display name of the user whose id the expression idExpr yields,
+// empty when there is no such user or they carry no name.
+func userName(idExpr string) string {
+	return `COALESCE((SELECT named.name FROM users named WHERE named.id = ` + idExpr + `), '')`
+}
+
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
@@ -88,10 +106,10 @@ func readUserHome(ctx context.Context, q rowQuerier, userID string) (*domain.Use
 	user := &domain.User{ID: userID}
 	var orgIDs []string
 	err := q.QueryRow(ctx, `
-SELECT u.staff, u.created_at,
+SELECT u.name, u.staff, u.created_at,
        COALESCE(array_agg(m.org_id ORDER BY m.created_at, m.org_id) FILTER (WHERE m.org_id IS NOT NULL), '{}')
 FROM users u LEFT JOIN org_members m ON m.user_id = u.id
-WHERE u.id = $1 GROUP BY u.id`, userID).Scan(&user.Staff, &user.CreatedAt, &orgIDs)
+WHERE u.id = $1 GROUP BY u.id`, userID).Scan(&user.Name, &user.Staff, &user.CreatedAt, &orgIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}
@@ -366,8 +384,8 @@ SELECT id, org_id, name, created_at FROM projects WHERE org_id = ANY($1) ORDER B
 // key or of any key it descends from, and orphaned says its creator could no longer create it.
 // Deciding it at the read leaves no moment in which a key minted beside a revocation, or kept
 // past its creator's demotion or removal, is live.
-const apiKeySelect = `
-SELECT k.id, k.org_id, COALESCE(k.project_id, ''), k.created_by, COALESCE(k.minted_by, ''), k.name, k.created_at,
+var apiKeySelect = `
+SELECT k.id, k.org_id, COALESCE(k.project_id, ''), k.created_by, ` + userName("k.created_by") + `, COALESCE(k.minted_by, ''), k.name, k.created_at,
        (WITH RECURSIVE ancestry AS (
             SELECT k.minted_by AS parent, k.revoked_at
             UNION ALL
@@ -385,7 +403,7 @@ const apiKeyHeldBy = `(EXISTS (SELECT 1 FROM users u WHERE u.id = k.created_by A
 
 func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
-	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt, &k.Orphaned); err != nil {
+	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.CreatedByName, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt, &k.Orphaned); err != nil {
 		return nil, err
 	}
 	return k, nil
@@ -415,7 +433,7 @@ SELECT k.id, k.key_hash, k.org_id, k.project_id, k.created_by, k.minted_by, k.na
 FROM (SELECT $1::text AS id, $2::text AS key_hash, $3::text AS org_id, $4::text AS project_id,
              $5::text AS created_by, $6::text AS minted_by, $7::text AS name) k
 WHERE `+apiKeyHeldBy+`
-RETURNING created_at`, key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt)
+RETURNING created_at, `+userName("created_by"), key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt, &key.CreatedByName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrAPIKeyCreatorLacksOrg
 	}
