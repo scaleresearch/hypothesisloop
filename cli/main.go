@@ -139,8 +139,10 @@ const usage = `usage: hl <command> ...
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
-An ID is positional; --id ID works too. --agent and --platform-experiment default to $AGENT_ID
-and $PLATFORM_EXPERIMENT_ID, except where --agent filters a list. --org defaults to $HL_ORG and
+An ID is positional; --id ID works too. --agent and --platform-experiment default to the agent
+and the platform experiment an agent's token names, and for another token to $AGENT_ID and
+$PLATFORM_EXPERIMENT_ID, which an agent's shell does not set. Where --agent filters a list it
+has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
 
