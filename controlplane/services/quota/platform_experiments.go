@@ -179,7 +179,9 @@ type CreatePlatformExperimentRequest struct {
 	// coordinator run, empty for the platform's own. Both are fixed at creation, and the image
 	// is not read from the experiment file.
 	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it."`
-	AgentImage string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
+	// RepositoryAccount is the connected GitHub account a new repository is created on.
+	RepositoryAccount string `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
+	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator

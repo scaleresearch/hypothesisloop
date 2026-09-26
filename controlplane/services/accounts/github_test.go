@@ -784,18 +784,29 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
 	bare := newGitHubWorld(t, false)
-	if named, err := bare.svc.Create(ctx, bare.projectA, "sweep-1a2b3c4d", ""); named != "" || err != nil {
+	if named, err := bare.svc.Create(ctx, bare.projectA, "", "sweep-1a2b3c4d", ""); named != "" || err != nil {
 		t.Fatalf("on a deployment with no GitHub App: Create = %q, %v, want none made and no refusal", named, err)
 	}
 	w := newGitHubWorld(t, true)
-	if named, err := w.svc.Create(ctx, w.projectA, "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
+	if named, err := w.svc.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
 		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
 	}
 	w.connect(w.orgA, acme)
 	w.connect(w.orgB, rival)
-	named, err := w.svc.Create(ctx, w.projectA, "sweep-1a2b3c4d", "")
+	named, err := w.svc.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "")
 	if err != nil || named != "Acme/sweep-1a2b3c4d" || len(w.app.created) != 1 || w.app.created[0] != "100 sweep-1a2b3c4d" {
 		t.Fatalf("Create = %q, %v (created %v), want it made through the org's own installation", named, err, w.app.created)
+	}
+	// With two accounts connected the request says which, and nothing is made on a guess.
+	w.connect(w.orgA, rival)
+	if named, err := w.svc.Create(ctx, w.projectA, "", "ambiguous", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
+		t.Fatalf("with two accounts and none named: Create = %q, %v, want 422 repository_account_required listing them", named, err)
+	}
+	if named, err := w.svc.Create(ctx, w.projectA, "RIVAL", "on-rival", ""); err != nil || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
+		t.Fatalf("naming the account: Create = %q, %v (created %v), want it made through that account's installation", named, err, w.app.created)
+	}
+	if named, err := w.svc.Create(ctx, w.projectA, "elsewhere", "nowhere", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonInstallationNotConnected || len(w.app.created) != 2 {
+		t.Fatalf("naming an account the org did not connect: Create = %q, %v, want 422 installation_not_connected", named, err)
 	}
 	for name, tc := range map[string]struct {
 		project   string
@@ -809,7 +820,7 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
 	} {
 		w.app.createErr = tc.createErr
-		if named, err := w.svc.Create(ctx, tc.project, "another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
+		if named, err := w.svc.Create(ctx, tc.project, "acme", "another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
 			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 		}
 	}

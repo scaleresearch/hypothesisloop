@@ -22,9 +22,10 @@ type Repositories interface {
 	// ExperimentBase returns the repository's experiment file.
 	ExperimentBase(ctx context.Context, projectID, repository string) ([]byte, error)
 	// Create makes a private repository of that name for a platform experiment that names none,
-	// on the GitHub account the org of the project connected, and returns it. It returns nothing
-	// on a deployment with no GitHub App, where a platform experiment needs no repository.
-	Create(ctx context.Context, projectID, name, description string) (string, error)
+	// on the GitHub account named or the only one the org of the project connected, and returns
+	// it. It returns nothing on a deployment with no GitHub App, where a platform experiment
+	// needs no repository.
+	Create(ctx context.Context, projectID, account, name, description string) (string, error)
 }
 
 // RepositoryName is the name of the repository the platform creates for a platform experiment:
@@ -49,18 +50,32 @@ func RepositoryName(pe *domain.PlatformExperiment) string {
 	return name + "-" + strings.TrimPrefix(pe.ID, "pe-")
 }
 
-// provideRepository gives a platform experiment that names no repository one the platform
-// creates for it.
-func (h *PlatformExperimentsHandler) provideRepository(ctx context.Context, pe *domain.PlatformExperiment) error {
-	if pe.Repository != "" {
+// provideRepository gives a platform experiment the repository the request named, or with none
+// named one the platform creates for it, on account when the request says which.
+func (h *PlatformExperimentsHandler) provideRepository(named, account string) func(context.Context, *domain.PlatformExperiment) error {
+	return func(ctx context.Context, pe *domain.PlatformExperiment) error {
+		if named == "" {
+			created, err := h.repos.Create(ctx, pe.ProjectID, account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name)
+			if err != nil {
+				return err
+			}
+			named = created
+		}
+		pe.Repository, pe.RepositoryURL = named, domain.RepositoryURL(named)
 		return nil
 	}
-	created, err := h.repos.Create(ctx, pe.ProjectID, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name)
-	if err != nil {
-		return err
+}
+
+// repositoryOf checks what a request says of its repository: the one it names must be reachable
+// and is returned as GitHub names it, and an account is said only for one to be created.
+func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
+	if repository == "" {
+		return "", nil
 	}
-	pe.Repository, pe.RepositoryURL = created, domain.RepositoryURL(created)
-	return nil
+	if account != "" {
+		return "", &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_request", Message: "repository_account says where a new repository is created and repository names an existing one: state one of them"}
+	}
+	return h.repos.Reachable(ctx, projectID, repository)
 }
 
 // statedByTheRequest are the fields a create without from_repo must carry, though the schema

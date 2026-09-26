@@ -172,8 +172,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
 			"It is not read from the file, and is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, " +
-			"A platform experiment keeps its code in a repository: left out, the platform creates a private one with one commit on the GitHub account the org connected first, named from the experiment and its id, " +
+			"A platform experiment keeps its code in a repository: left out, the platform creates a private one with one commit on the GitHub account the org connected, named from the experiment and its id, " +
 			"stores it as if the request had named it and answers with it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
+			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
 			"422 github_not_connected when the org has connected no GitHub account, 422 repository_not_created when the installation has not granted the App the creation of repositories " +
 			"(its owner grants it, or the request names a repository), 409 repository_not_created when the name is taken. Nothing is created without its repository. " +
 			"Only a deployment with no GitHub App has platform experiments without one: there agents start in an empty directory and the platform keeps the code each pushes, one git bundle per commit, which is what a job's code_ref then names. With repository, " +
@@ -195,13 +196,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
 		}
-		if in.Body.Repository != "" {
-			named, err := peh.repos.Reachable(ctx, in.Body.ProjectID, in.Body.Repository)
-			if err != nil {
-				return nil, err
-			}
-			in.Body.Repository = named
+		named, err := peh.repositoryOf(ctx, in.Body.ProjectID, in.Body.Repository, in.Body.RepositoryAccount)
+		if err != nil {
+			return nil, err
 		}
+		in.Body.Repository = named
 		// Never the experiment file's to state, so it is held before the repository is read.
 		if err := in.Body.checkLength(); err != nil {
 			return nil, err
@@ -243,7 +242,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			by := caller.Actor()
 			hosting.createdBy = &by
 		}
-		hosting.prepare = peh.provideRepository
+		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
 		pe, err := peh.svc.Create(ctx, hosting)
 		var refused *reasonError
 		if errors.As(err, &refused) {

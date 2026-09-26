@@ -39,7 +39,7 @@ func (f *rosterStore) ExperimentBase(context.Context, string, string) ([]byte, e
 	return nil, nil
 }
 
-func (f *rosterStore) Create(context.Context, string, string, string) (string, error) {
+func (f *rosterStore) Create(context.Context, string, string, string, string) (string, error) {
 	return "", nil
 }
 

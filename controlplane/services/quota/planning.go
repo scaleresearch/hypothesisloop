@@ -147,14 +147,15 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
-			"422 github_not_connected and 422 or 409 repository_not_created as on POST /platform-experiments, and no repository on a deployment with no GitHub App. " +
+			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and 422 or 409 repository_not_created as on POST /platform-experiments, and no repository on a deployment with no GitHub App. " +
 			"503 launcher_not_registered when the deployment has no launcher to run the planner. " +
 			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			ProjectID  string `json:"project_id"`
-			Goal       string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
-			Repository string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
+			ProjectID         string `json:"project_id"`
+			Goal              string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
+			Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
+			RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
 		}
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if in.Body.ProjectID == "" {
@@ -163,19 +164,12 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
 		}
-		named := in.Body.Repository
-		if named != "" {
-			reachable, err := h.repos.Reachable(ctx, in.Body.ProjectID, named)
-			if err != nil {
-				return nil, err
-			}
-			named = reachable
+		named, err := h.repositoryOf(ctx, in.Body.ProjectID, in.Body.Repository, in.Body.RepositoryAccount)
+		if err != nil {
+			return nil, err
 		}
 		caller, _ := auth.FromContext(ctx)
-		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, func(ctx context.Context, pe *domain.PlatformExperiment) error {
-			pe.Repository, pe.RepositoryURL = named, domain.RepositoryURL(named)
-			return h.provideRepository(ctx, pe)
-		})
+		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, h.provideRepository(named, in.Body.RepositoryAccount))
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, huma.Error422UnprocessableEntity(err.Error())
 		}

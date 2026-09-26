@@ -107,6 +107,7 @@ const (
 	ReasonNoRepository               = "no_repository"
 	ReasonGitHubNotConnected         = "github_not_connected"
 	ReasonRepositoryNotCreated       = "repository_not_created"
+	ReasonRepositoryAccountRequired  = "repository_account_required"
 	ReasonNoExperimentFile           = "no_experiment_file"
 	ReasonRunOver                    = "run_over"
 	ReasonForbidden                  = "forbidden"
@@ -158,7 +159,7 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 	case errors.Is(err, github.ErrCodeRejected):
 		return invalid(ReasonCodeRejected, "GitHub did not accept the code: it works once, for ten minutes, and with the redirect_uri it was issued to, so authorise again and send the new one")
 	case errors.Is(err, errNotConnected):
-		return &refused{status: gone, Reason: ReasonInstallationNotConnected, Message: "the org has connected no GitHub installation on the account that owns that repository: an owner of the org connects it with POST /orgs/{id}/github-installations"}
+		return &refused{status: gone, Reason: ReasonInstallationNotConnected, Message: "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org connects it with POST /orgs/{id}/github-installations"}
 	case errors.Is(err, github.ErrRepositoryNotInstalled):
 		return &refused{status: gone, Reason: ReasonRepositoryNotReachable, Message: "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub"}
 	case errors.Is(err, github.ErrInstallationGone):
@@ -330,11 +331,12 @@ func (r *Repositories) Reachable(ctx context.Context, projectID, repository stri
 	return token.Repository, nil
 }
 
-// Create makes a private repository for a platform experiment that names none, on the GitHub
-// account the org of the project connected first, and returns it as GitHub names it. On a
-// deployment that has no GitHub App it makes none and returns nothing: there a platform
-// experiment needs no repository. A refusal is returned as the API answers it.
-func (r *Repositories) Create(ctx context.Context, projectID, name, description string) (string, error) {
+// Create makes a private repository for a platform experiment that names none and returns it as
+// GitHub names it. It is made on the GitHub account named, one the org of the project connected,
+// or with none named on the only one it connected: with several, which one is the request's to
+// say. On a deployment that has no GitHub App it makes none and returns nothing: there a
+// platform experiment needs no repository. A refusal is returned as the API answers it.
+func (r *Repositories) Create(ctx context.Context, projectID, account, name, description string) (string, error) {
 	const op = "create-repository"
 	if r.github == nil {
 		return "", nil
@@ -353,7 +355,21 @@ func (r *Repositories) Create(ctx context.Context, projectID, name, description 
 	if len(installations) == 0 {
 		return "", r.refusal(op, errNoInstallation, http.StatusUnprocessableEntity)
 	}
-	created, err := r.github.CreateRepository(ctx, installations[0].InstallationID, name, description)
+	var chosen *domain.OrgGitHubInstallation
+	logins := []string{}
+	for _, one := range installations {
+		logins = append(logins, one.AccountLogin)
+		if strings.EqualFold(one.AccountLogin, account) || (account == "" && len(installations) == 1) {
+			chosen = one
+		}
+	}
+	switch {
+	case chosen == nil && account == "":
+		return "", invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
+	case chosen == nil:
+		return "", r.refusal(op, errNotConnected, http.StatusUnprocessableEntity)
+	}
+	created, err := r.github.CreateRepository(ctx, chosen.InstallationID, name, description)
 	if err != nil {
 		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
 	}

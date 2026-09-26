@@ -11,4 +11,6 @@ func (noRepositories) ExperimentBase(context.Context, string, string) ([]byte, e
 	panic("the handler reached GitHub")
 }
 
-func (noRepositories) Create(context.Context, string, string, string) (string, error) { return "", nil }
+func (noRepositories) Create(context.Context, string, string, string, string) (string, error) {
+	return "", nil
+}

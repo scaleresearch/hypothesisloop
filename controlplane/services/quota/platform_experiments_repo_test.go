@@ -83,7 +83,10 @@ type fakeRepositories struct {
 	notCreated error
 }
 
-func (f *fakeRepositories) Create(_ context.Context, projectID, name, _ string) (string, error) {
+func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string) (string, error) {
+	if account != "" {
+		return account + "/" + name, nil
+	}
 	if f.org == "" {
 		return "", nil
 	}
@@ -296,6 +299,17 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	}
 	if len(store.created) != 2 || len(repos.created) != 1 {
 		t.Fatalf("created %d with %d repositories, want nothing more stored or made", len(store.created), len(repos.created))
+	}
+	// The account a new repository goes to is the request's to say, and never beside a repository.
+	repos.notCreated = nil
+	onAccount := whole()
+	onAccount["repository_account"] = "second-account"
+	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusCreated || !strings.HasPrefix(store.created[2].Repository, "second-account/") {
+		t.Errorf("naming the account: got = %d %s, want the repository made there", rec.Code, rec.Body)
+	}
+	onAccount["repository"] = "acme/model"
+	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_request") || len(store.created) != 3 {
+		t.Errorf("an account beside a repository: got = %d %s, want 422 invalid_request", rec.Code, rec.Body)
 	}
 }
 
