@@ -66,8 +66,6 @@ const RUN_BY_HINTS: Record<RunBy, string> = {
   platform: 'The platform runs a coordinator and this many researcher agents on machines of its own, and the experiment starts as soon as they have joined. How many it runs for one experiment is the platform\'s limit, and it says so when it is passed.',
 }
 
-// What the API asks of an experiment whose agents and coordinator the platform runs.
-const HOSTED_NEEDS_REPOSITORY = 'Hosted agents and the coordinator work in the experiment\'s repository. Choose one under Essentials first.'
 
 const POLICY_OPTIONS: Array<{ value: SubmitterPolicy; label: string }> = [
   { value: 'mixed', label: 'Anyone' },
@@ -395,7 +393,6 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
   const ladderError = stagesError(form.stages)
   const hosted = !isEdit && form.run_by === 'platform'
   const maxAgents = hosted && !maxAgentsStated ? form.researchers : form.max_agents
-  const hostedError = hosted && !form.repository ? HOSTED_NEEDS_REPOSITORY : null
 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
@@ -416,7 +413,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     // Both steps are validated here, not just the visible one — a bad ladder on step 2 must not
     // be submittable just because step 1 passed. Tab navigation itself is never gated — only
     // submit is, so the user is free to jump between tabs while filling the form out of order.
-    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError) ?? hostedError
+    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError)
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
@@ -480,7 +477,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                   <>
                     <FormField
                       label="Repository"
-                      hint="The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Fixed once created."
+                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, agents start in an empty workspace and the platform keeps the code each job ran. Fixed once created."
                     >
                       <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} />
                     </FormField>
@@ -568,7 +565,6 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                     </div>
                   </FieldGroup>
                 )}
-                {hostedError && <InlineError>{hostedError}</InlineError>}
                 <div className="grid grid-cols-2 gap-3.5">
                   <FormField
                     label="Accelerator budget — AccH (GPU-hours) *"
@@ -658,7 +654,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
               ) : (
                 <>
                   <Button type="button" onClick={() => { setError(null); setStep(1) }}>Back</Button>
-                  <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError) || !!hostedError}>
+                  <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError)}>
                     {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save Changes' : hosted ? 'Create and run' : 'Create Experiment'}
                   </Button>
                 </>

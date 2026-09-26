@@ -126,13 +126,17 @@ describe('a new platform experiment with hosted agents', () => {
     expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new')
   })
 
-  it('cannot be asked for without a repository, and says what is missing', async () => {
+  // Hosting needed a repository, so a person with an idea and no repository could not start.
+  it('is created with no repository when none is chosen', async () => {
     show()
     await essentials()
     await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
-    expect(screen.getByText(/Hosted agents and the coordinator work in the experiment's repository\. Choose one under Essentials first\./)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Create and run' })).toHaveProperty('disabled', true)
-    expect(createPlatformExperiment).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Create and run' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    const sent = vi.mocked(createPlatformExperiment).mock.calls[0][1]
+    expect(sent).toMatchObject({ name: 'Run', coordinator_hosted: true })
+    expect(sent.repository).toBeUndefined()
+    expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(2)
   })
 
   it('does not use the start time, and says so', async () => {

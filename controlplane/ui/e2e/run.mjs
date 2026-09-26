@@ -499,15 +499,23 @@ async function scenarios(browser) {
   const agentRows = page.locator('table', { hasText: 'Run by' }).locator('tbody tr')
   assert.equal(await agentRows.count(), 2)
 
-  section('the platform hosts no agent in an experiment without a repository')
-  // This is also why the run rents nothing: none of its experiments names a repository.
-  const hostedAdd = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === `${API}/platform-experiments/${experimentID}/agents`)
+  section('a hosted agent the platform refuses is not listed, and the page says why')
+  // An experiment needs no repository to have its agents hosted, so the real API would take
+  // this one and a launcher would rent for it. The refusal is stood in for: what a deployment
+  // with no launcher registered answers. Nothing reaches the API.
+  const refusedHosting = { reason: 'launcher_not_registered', message: 'no launcher named main is registered: nothing can be hosted until hl-admin launcher add main' }
+  const hostedAddURL = `${API}/platform-experiments/${experimentID}/agents`
+  const refuseHosted = route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, headers: { 'access-control-allow-origin': UI }, json: refusedHosting })
+    : route.fallback()
+  await page.route(hostedAddURL, refuseHosted)
+  const hostedAdd = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === hostedAddURL)
   await page.getByRole('button', { name: 'The platform' }).click()
   await page.getByRole('button', { name: 'Add agent' }).click()
-  assert.equal((await hostedAdd).status(), 409)
-  assert.equal((await (await hostedAdd).json()).reason, 'no_repository')
-  const hostedRefusal = page.locator('.error-banner', { hasText: 'the platform experiment names no repository' })
+  assert.deepEqual((await hostedAdd).request().postDataJSON().hosted, true, 'the agent was asked for hosted')
+  const hostedRefusal = page.locator('.error-banner', { hasText: 'no launcher named main is registered' })
   await hostedRefusal.waitFor()
+  await page.unroute(hostedAddURL, refuseHosted)
   assert.equal(await agentRows.count(), 2, 'the refused agent is not listed')
   await shot(page, 'hosted-agent-refused', hostedRefusal)
 
@@ -594,8 +602,8 @@ async function scenarios(browser) {
   await shot(page, 'home-experiment-started')
 
   section('home: Create and run composes create, one call an agent, and start, and nothing is rented')
-  // The stack has no GitHub account connected, and an agent the platform really hosts would
-  // need a launcher that rents. So the repository list is stood in for, and each write goes to
+  // The stack has no GitHub account connected, and an agent the platform really hosts has a
+  // launcher rent for it. So the repository list is stood in for, and each write goes to
   // the real API with what would rent taken out of it: the repository and the hosted coordinator
   // from the create, and hosted from each agent, which then joins as one its operator runs. What
   // the page sent is asserted as sent, and what exists afterwards is asserted from the real API.
@@ -624,7 +632,13 @@ async function scenarios(browser) {
       const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
       return route.continue({ postData: JSON.stringify(rest) })
     }
-    if (path.endsWith('/agents') && standInAgents) return route.continue({ postData: JSON.stringify({ ...body, hosted: false }) })
+    if (path.endsWith('/agents')) {
+      // Never hosted for real: joined as one its operator runs, or refused as a deployment
+      // with no launcher registered refuses it.
+      return standInAgents
+        ? route.continue({ postData: JSON.stringify({ ...body, hosted: false }) })
+        : route.fulfill({ status: 503, headers: runCors, json: { reason: 'launcher_not_registered', message: 'no launcher named main is registered' } })
+    }
     return route.continue()
   })
 
@@ -638,8 +652,7 @@ async function scenarios(browser) {
     await dialog.getByRole('button', { name: 'Add', exact: true }).click()
     await dialog.getByRole('button', { name: 'Next: competition settings' }).click()
     await dialog.getByRole('button', { name: 'Hosted agents' }).click()
-    await dialog.getByText('Choose one under Essentials first.').waitFor()
-    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isDisabled(), 'hosted agents cannot be asked for without a repository')
+    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isEnabled(), 'hosted agents need no repository')
     await dialog.getByRole('tab', { name: '1. Essentials' }).click()
     assert.ok(await dialog.getByLabel('Starts at').isDisabled(), 'the start time is not used when the form starts the experiment')
     await dialog.getByLabel('Repository').click()
@@ -669,11 +682,11 @@ async function scenarios(browser) {
   await shot(page, 'home-create-and-run')
 
   section('home: a run the API stops part way opens the experiment and says which step failed')
-  // Unchanged, a hosted agent is refused by the real API: the experiment names no repository.
+  // The first hosted agent is refused, as by a deployment with no launcher registered.
   standInAgents = false
   const stoppedID = await createAndRunFromHome(`ui-e2e-stopped-${run}`, 2)
   const stoppedBanner = page.locator('.error-banner', { hasText: 'it is not running as asked: adding hosted agent 1 of 2 failed.' })
-  await stoppedBanner.getByText('the platform experiment names no repository').waitFor()
+  await stoppedBanner.getByText('no launcher named main is registered').waitFor()
   assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments', `/platform-experiments/${stoppedID}/agents`], 'nothing is called after the refusal, and nothing again')
   const stoppedExperiment = await (await api(await tokenOf(ada), `/platform-experiments/${stoppedID}`)).json()
   assert.equal(stoppedExperiment.status, 'open', 'the experiment exists and was not started')
