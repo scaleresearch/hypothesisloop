@@ -343,3 +343,53 @@ func (b TemplateBuilder) Build(image string, cores, memoryMiB int64) error {
 		time.Sleep(b.pollEvery)
 	}
 }
+
+// TemplateOf names one template: an image at a size.
+type TemplateOf struct {
+	Image     string
+	Cores     int64
+	MemoryMiB int64
+}
+
+// ConformanceTemplate is the template the adapter's conformance tests start their sandboxes
+// from. It belongs to no publish, so Prune always keeps it.
+var ConformanceTemplate = TemplateOf{Image: "alpine/curl:8.14.1", Cores: 1, MemoryMiB: 1024}
+
+// Prune deletes every template built here other than the ones of keep and the conformance
+// tests'. Each image tag gets a template of its own, so without this every publish leaves one
+// behind. A template under a name this builder does not give is left alone.
+func (b TemplateBuilder) Prune(keep []TemplateOf) error {
+	b = b.withDefaults()
+	if b.APIKey == "" {
+		return fmt.Errorf("E2B_API_KEY must hold the team API key")
+	}
+	if len(keep) == 0 {
+		return fmt.Errorf("no template to keep was named, and the one agents start from is never deleted")
+	}
+	kept := map[string]bool{}
+	for _, t := range append([]TemplateOf{ConformanceTemplate}, keep...) {
+		kept[templateName(t.Image, size{CPUs: t.Cores, MemoryMB: t.MemoryMiB})] = true
+	}
+	var templates []struct {
+		TemplateID string   `json:"templateID"`
+		Aliases    []string `json:"aliases"`
+	}
+	if err := b.e2b(http.MethodGet, "/templates", nil, &templates); err != nil {
+		return err
+	}
+	for _, t := range templates {
+		ours, keeping := false, false
+		for _, alias := range t.Aliases {
+			ours = ours || strings.HasPrefix(alias, templatePrefix)
+			keeping = keeping || kept[alias]
+		}
+		if !ours || keeping {
+			continue
+		}
+		if err := b.e2b(http.MethodDelete, "/templates/"+url.PathEscape(t.TemplateID), nil, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(b.Out, "e2b-template: deleted %s (template %s)\n", strings.Join(t.Aliases, ", "), t.TemplateID)
+	}
+	return nil
+}

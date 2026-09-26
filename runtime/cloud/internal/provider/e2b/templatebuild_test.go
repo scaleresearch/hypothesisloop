@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -193,5 +194,53 @@ func TestAFailedBuildAndAnImageWithoutAmd64AreErrors(t *testing.T) {
 	b.APIKey = ""
 	if err := b.Build(host+"/job:ok", 1, 512); err == nil || !strings.Contains(err.Error(), "E2B_API_KEY") {
 		t.Errorf("no API key: err = %v", err)
+	}
+}
+
+func TestPruneDeletesTheTemplatesOfOtherTagsAndNothingElse(t *testing.T) {
+	deployed := TemplateOf{Image: "registry.example/agent:2", Cores: 2, MemoryMiB: 4096}
+	name := func(of TemplateOf) string {
+		return templateName(of.Image, size{CPUs: of.Cores, MemoryMB: of.MemoryMiB})
+	}
+	listed := fmt.Sprintf(`[{"templateID":"deployed","aliases":[%q]},{"templateID":"old","aliases":[%q]},
+		{"templateID":"other-size","aliases":[%q]},{"templateID":"conformance","aliases":[%q]},{"templateID":"by-hand","aliases":["notebook"]}]`,
+		name(deployed), name(TemplateOf{Image: "registry.example/agent:1", Cores: 2, MemoryMiB: 4096}),
+		name(TemplateOf{Image: deployed.Image, Cores: 1, MemoryMiB: 4096}), name(ConformanceTemplate))
+	var deleted []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "made-up-e2b-key" {
+			t.Errorf("%s %s came without the key", r.Method, r.URL.Path)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/templates":
+			io.WriteString(w, listed)
+		case r.Method == http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	b := TemplateBuilder{APIKey: "made-up-e2b-key", Out: io.Discard, e2bURL: server.URL, client: server.Client()}
+	if err := b.Prune([]TemplateOf{deployed}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/templates/old", "/templates/other-size"}; !reflect.DeepEqual(deleted, want) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+	if err := b.Prune(nil); err == nil || !strings.Contains(err.Error(), "no template to keep") {
+		t.Errorf("nothing to keep: err = %v", err)
+	}
+	if len(deleted) != 2 {
+		t.Errorf("a prune that names nothing to keep deleted: %v", deleted)
+	}
+}
+
+func TestTheConformanceTemplateIsTheOneItsTestsStartFrom(t *testing.T) {
+	spec := conformanceOptions().Template
+	if got, want := templateName(spec.Image, sizeOf(spec)),
+		templateName(ConformanceTemplate.Image, size{CPUs: ConformanceTemplate.Cores, MemoryMB: ConformanceTemplate.MemoryMiB}); got != want {
+		t.Errorf("the conformance tests start from %s and Prune keeps %s", got, want)
 	}
 }

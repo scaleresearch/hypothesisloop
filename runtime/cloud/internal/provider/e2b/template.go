@@ -31,5 +31,9 @@ func sizeOf(spec provider.Spec) size {
 // neither slashes nor colons.
 func templateName(image string, s size) string {
 	digest := sha256.Sum256([]byte(image))
-	return fmt.Sprintf("hl-%s-%dc-%dm", hex.EncodeToString(digest[:10]), s.CPUs, s.MemoryMB)
+	return fmt.Sprintf("%s%s-%dc-%dm", templatePrefix, hex.EncodeToString(digest[:10]), s.CPUs, s.MemoryMB)
 }
+
+// templatePrefix starts the name of every template built here, which is how Prune tells them
+// from a template the team made some other way.
+const templatePrefix = "hl-"
