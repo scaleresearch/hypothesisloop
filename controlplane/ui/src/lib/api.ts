@@ -33,7 +33,6 @@ import type {
   GitHubApp,
   GitHubInstallation,
   GitHubRepository,
-  SubmitterPolicy,
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
@@ -450,8 +449,6 @@ export interface CreatePlatformExperimentRequest {
   report_interval_seconds?: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
   stages?: Stage[]
-  hypothesis_submit_policy?: SubmitterPolicy
-  job_submit_policy?: SubmitterPolicy
   /** Omitted, the experiment starts when it is started. */
   starts_at?: string
   /** How long it lasts: this or duration_hours, one of the two. */
@@ -491,8 +488,6 @@ export interface ExperimentFile {
   metrics?: MetricDefinition[]
   report_interval_seconds?: number
   stages?: Stage[]
-  hypothesis_submit_policy?: SubmitterPolicy
-  job_submit_policy?: SubmitterPolicy
 }
 
 /** The reason the API gives for a repository that brings no experiment file. */
@@ -592,7 +587,7 @@ export function fetchResourceCapacity(orgID: string): Promise<ResourceCapacity> 
 /** The fields of a platform experiment that can change after it is created. */
 export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
   'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'max_concurrent_accelerators' | 'metrics' |
-  'report_interval_seconds' | 'starts_at' | 'ends_at' | 'hypothesis_submit_policy' | 'job_submit_policy'>>
+  'report_interval_seconds' | 'starts_at' | 'ends_at'>>
 
 /** Changes the fields the patch names and no others. */
 export function updatePlatformExperiment(id: string, patch: PlatformExperimentPatch): Promise<PlatformExperiment> {

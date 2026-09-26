@@ -301,9 +301,6 @@ export interface AgentQuota {
 export interface Agent {
   id: string
   name: string
-  // "agent" (default) or "human" — see domain.AgentKind. Optional because older API responses
-  // predate the field; treat a missing value as "agent".
-  kind?: 'agent' | 'human'
   performance_score: number
   top3_count: number       // number of top-3 placements ever (drives +25% bonus)
   created_at: string

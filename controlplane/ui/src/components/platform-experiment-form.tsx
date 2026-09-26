@@ -12,7 +12,7 @@ import { createAndRun } from '@/lib/run-experiment'
 import type { RunFailure } from '@/lib/run-experiment'
 import { useTenant } from '@/lib/tenant'
 import { COMMON_ML_METRICS, PlatformExperimentStatus } from '@/types'
-import type { MetricDefinition, PlatformExperiment, SubmitterPolicy } from '@/types'
+import type { MetricDefinition, PlatformExperiment } from '@/types'
 import { RepositorySelect } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -49,8 +49,6 @@ interface FormState {
   // Empty is the platform's default.
   report_interval_seconds: string
   stages: StageDraft[]
-  hypothesis_submit_policy: SubmitterPolicy
-  job_submit_policy: SubmitterPolicy
   repository: string
   agent_image: string
   run_by: RunBy
@@ -69,26 +67,6 @@ const RUN_BY_OPTIONS: Array<{ value: RunBy; label: string }> = [
 const RUN_BY_HINTS: Record<RunBy, string> = {
   operator: 'The experiment is created and nothing else. You add agents on its page, run by you or by the platform, and it starts at its start time or when you start it.',
   platform: 'The platform runs a coordinator and this many researcher agents on machines of its own, and the experiment starts as soon as they have joined. How many it runs for one experiment is the platform\'s limit, and it says so when it is passed.',
-}
-
-
-const POLICY_OPTIONS: Array<{ value: SubmitterPolicy; label: string }> = [
-  { value: 'mixed', label: 'Anyone' },
-  { value: 'human_only', label: 'Humans' },
-  { value: 'agent_only', label: 'Agents' },
-]
-
-const POLICY_HINTS: Record<'hypothesis' | 'job', Record<SubmitterPolicy, string>> = {
-  hypothesis: {
-    mixed: 'Both humans and agents may propose hypotheses.',
-    human_only: 'Only human participants may propose hypotheses. An agent that tries is rejected with a clear error naming this policy.',
-    agent_only: 'Only agents may propose hypotheses — human-submitted ideas are rejected.',
-  },
-  job: {
-    mixed: 'Both humans and agents may submit jobs.',
-    human_only: 'Only human participants may submit jobs. An agent that fires one off — even accidentally, e.g. a leftover automation — is rejected with an error naming this policy, before anything runs or is billed.',
-    agent_only: 'Only agents may submit jobs — a human cannot run one directly.',
-  },
 }
 
 // StageDraft holds what's typed, not what's parsed. A number-typed field cannot represent a
@@ -347,8 +325,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
-    hypothesis_submit_policy: initial?.hypothesis_submit_policy ?? 'mixed',
-    job_submit_policy: initial?.job_submit_policy ?? 'mixed',
     repository: initial?.repository ?? '',
     agent_image: initial?.agent_image ?? '',
     run_by: 'operator',
@@ -367,7 +343,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   // the cap follows their number until the person states one.
   const [maxAgentsStated, setMaxAgentsStated] = useState(false)
 
-  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy | RunBy) {
+  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | RunBy) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
@@ -387,8 +363,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         metrics: file.metrics?.length ? file.metrics : f.metrics,
         report_interval_seconds: file.report_interval_seconds ? String(file.report_interval_seconds) : f.report_interval_seconds,
         stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
-        hypothesis_submit_policy: file.hypothesis_submit_policy || f.hypothesis_submit_policy,
-        job_submit_policy: file.job_submit_policy || f.job_submit_policy,
       })
       setFromFile({ repository, state: 'filled' })
     } catch (err: unknown) {
@@ -423,8 +397,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (form.report_interval_seconds.trim() !== '' && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
     if (form.starts_at && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
     if (form.ends_at !== opened.ends_at) patch.ends_at = new Date(form.ends_at).toISOString()
-    if (form.hypothesis_submit_policy !== opened.hypothesis_submit_policy) patch.hypothesis_submit_policy = form.hypothesis_submit_policy
-    if (form.job_submit_policy !== opened.job_submit_policy) patch.job_submit_policy = form.job_submit_policy
     return patch
   }
 
@@ -457,8 +429,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
         ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),
-        hypothesis_submit_policy: form.hypothesis_submit_policy,
-        job_submit_policy: form.job_submit_policy,
         stages: toStages(form.stages),
         ...(form.repository ? { repository: form.repository } : {}),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
@@ -642,32 +612,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                     </FormField>
                   </div>
                 </Disclosure>
-
-                <div className="grid grid-cols-2 gap-3.5">
-                  <FieldGroup label="Who can submit hypotheses?" hint={POLICY_HINTS.hypothesis[form.hypothesis_submit_policy]}>
-                    <Segmented
-                      label="Who can submit hypotheses?"
-                      options={POLICY_OPTIONS}
-                      value={form.hypothesis_submit_policy}
-                      disabled={lockedWhileRunning}
-                      onChange={v => set('hypothesis_submit_policy', v)}
-                    />
-                  </FieldGroup>
-                  <FieldGroup label="Who can submit jobs?" hint={POLICY_HINTS.job[form.job_submit_policy]}>
-                    <Segmented
-                      label="Who can submit jobs?"
-                      options={POLICY_OPTIONS}
-                      value={form.job_submit_policy}
-                      disabled={lockedWhileRunning}
-                      onChange={v => set('job_submit_policy', v)}
-                    />
-                  </FieldGroup>
-                </div>
-                {lockedWhileRunning && (
-                  <p className="-mt-2 text-2xs leading-normal text-subtle">
-                    Locked once running — who may submit has already shaped who signed up.
-                  </p>
-                )}
 
               </>
             )}

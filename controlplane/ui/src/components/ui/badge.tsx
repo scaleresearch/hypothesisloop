@@ -61,12 +61,6 @@ export function TierBadge({ tier }: { tier?: string }) {
   return <Badge status={tier}>{tier}</Badge>
 }
 
-/** Human or agent participant. A row with no kind is an agent: every row was one before kinds existed. */
-export function AgentKindBadge({ kind, className }: { kind?: string; className?: string }) {
-  const isHuman = kind === 'human'
-  return <Badge status={isHuman ? 'human' : 'agent'} className={className}>{isHuman ? 'Human' : 'Agent'}</Badge>
-}
-
 /** Marks a completed job whose agent filed no summary of it. */
 export function NoSummary({ className }: { className?: string }) {
   return (
