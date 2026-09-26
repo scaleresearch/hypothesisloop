@@ -543,7 +543,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                                   {best.best.toFixed(4)}
                                 </TextLink>
                               ) : best ? best.best.toFixed(4) : '—'}
-                              {jobRows.find(job => job.id === best?.experiment_id)?.summary_due && <div><NoSummary /></div>}
+                              {best?.summary_due && <div><NoSummary /></div>}
                             </td>
                           )
                         }) : <td className={num}>—</td>}

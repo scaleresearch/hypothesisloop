@@ -42,6 +42,8 @@ type PlatformExperimentsStore interface {
 	Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
+	// DescribeJobs sets on each job its agent's name and whether its summary is due.
+	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
 	// Decline stores why a draft's planner proposes nothing and until when the draft waits for

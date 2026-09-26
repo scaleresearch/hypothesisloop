@@ -541,7 +541,7 @@ export interface PlatformExperimentResults {
   metrics: { metric: string; direction: 'maximize' | 'minimize'; standings: AgentStanding[] }[]
   bests: {
     metric: string
-    agents: { agent_id: string; best: number; experiment_id?: string }[]
+    agents: { agent_id: string; best: number; experiment_id?: string; summary_due: boolean }[]
     non_raw_basis_agents?: string[]
   }[]
 }

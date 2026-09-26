@@ -44,6 +44,8 @@ type AgentBest struct {
 	AgentID      string  `json:"agent_id"`
 	Best         float64 `json:"best"`
 	ExperimentID string  `json:"experiment_id,omitempty"`
+	// SummaryDue says that job completed and no summary was filed for it.
+	SummaryDue bool `json:"summary_due"`
 }
 
 // MetricBests is what every agent measured on one declared metric, whatever the metric's role or
@@ -114,6 +116,29 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 			Standings:         eligible,
 			NonRawBasisAgents: nonRawAgents,
 		})
+	}
+	// One read for every best job, whatever the number of metrics and agents.
+	jobs := map[string]*domain.Experiment{}
+	for _, bests := range out.Bests {
+		for _, best := range bests.Agents {
+			if best.ExperimentID != "" {
+				jobs[best.ExperimentID] = &domain.Experiment{ID: best.ExperimentID}
+			}
+		}
+	}
+	described := make([]*domain.Experiment, 0, len(jobs))
+	for _, job := range jobs {
+		described = append(described, job)
+	}
+	if err := s.store.DescribeJobs(ctx, described); err != nil {
+		return nil, fmt.Errorf("results: %w", err)
+	}
+	for _, bests := range out.Bests {
+		for i, best := range bests.Agents {
+			if job := jobs[best.ExperimentID]; job != nil {
+				bests.Agents[i].SummaryDue = job.SummaryDue
+			}
+		}
 	}
 	return out, nil
 }
