@@ -2,15 +2,17 @@
 
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
-import { fetchMe, fetchPlatformExperiment } from '@/lib/api'
-import { ExampleContext, isExample } from '@/lib/example'
-import { useExampleParam, useProjectParam } from '@/lib/query-state'
+import { fetchMe } from '@/lib/api'
+import { usePathname } from 'next/navigation'
+import { useDropProject, useProjectParam } from '@/lib/query-state'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { ExampleBanner } from '@/components/example-banner'
 import { Nav } from '@/components/nav'
 import { CommandPalette } from '@/components/command-palette'
 import { Button } from '@/components/ui/button'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
+
+// The pages that open one record by its id.
+const RECORD_PAGE = /^\/(platform-experiments|jobs|hypotheses)\/[^/]+$/
 
 function Standalone({ children }: { children: ReactNode }) {
   return <main className="mx-auto mt-20 grid w-full max-w-xl content-start gap-4 px-8">{children}</main>
@@ -25,8 +27,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   // that ended, reaches a page that is already open.
   const { data: me, error } = useSWR('me', fetchMe, { refreshInterval: 30_000 })
   const [projectID, selectProject] = useProjectParam()
-  const exampleID = useExampleParam()
-  const { data: examplePE } = useSWR(exampleID ? ['pe', exampleID] : null, () => fetchPlatformExperiment(exampleID))
+  // A record is reached by its id whatever project the link named, and one of a shared platform
+  // experiment is read from any project. So a project the caller does not reach is dropped
+  // from the address of a record, which then opens in their own or says it is not found.
+  const foreignRecord = RECORD_PAGE.test(usePathname()) && me !== undefined && resolveTenant(me, projectID).state === 'unavailable'
+  useDropProject(foreignRecord)
 
   if (error && !me) {
     return (
@@ -37,7 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   if (!me) return <Standalone><Loading text="Loading your account…" /></Standalone>
 
-  const resolution = resolveTenant(me, projectID)
+  const resolution = resolveTenant(me, foreignRecord ? '' : projectID)
   if (resolution.state === 'none') {
     return (
       <Standalone>
@@ -64,12 +69,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Keyed by project, so a switch remounts the page: a token on show, a half-filled form or an
   // open palette belongs to the project it was opened in.
   const { project } = resolution.tenant
-  // Read only until the experiment is known to be the caller's own, so no control that writes
-  // shows while it loads.
-  const example = exampleID && (!examplePE || isExample(me, examplePE)) ? { id: exampleID, pe: examplePE } : null
   return (
     <TenantContext.Provider value={resolution.tenant}>
-      <ExampleContext.Provider value={example}>
       <Nav />
       <main key={project.id} className="max-w-[1220px] flex-1 overflow-auto px-8 py-7">
         {error && (
@@ -77,11 +78,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
           </ErrorMessage>
         )}
-        <ExampleBanner />
         {children}
       </main>
       <CommandPalette key={`palette-${project.id}`} />
-      </ExampleContext.Provider>
     </TenantContext.Provider>
   )
 }

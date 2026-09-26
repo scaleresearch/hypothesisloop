@@ -8,11 +8,11 @@ import { useTenant } from '@/lib/tenant'
 import { AppShell } from '@/components/app-shell'
 import type { Me } from '@/types'
 
-const navigation = vi.hoisted(() => ({ push: vi.fn(), search: '' }))
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '', pathname: '/jobs/j1' }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: navigation.push }),
-  usePathname: () => '/jobs/j1',
+  useRouter: () => navigation,
+  usePathname: () => navigation.pathname,
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
 vi.mock('@/lib/api', () => ({ fetchMe: vi.fn() }))
@@ -67,6 +67,7 @@ function show(search = '') {
 }
 
 beforeEach(() => {
+  navigation.pathname = '/jobs/j1'
   vi.mocked(fetchMe).mockResolvedValue(me)
 })
 
@@ -93,12 +94,31 @@ describe('the signed-in shell', () => {
   })
 
   it('says so when the URL names a project that is gone or out of reach, and offers the way home', async () => {
+    navigation.pathname = '/jobs'
     show('project=prj_deleted')
     expect(await screen.findByText(/is not available to you/)).toBeTruthy()
     expect(screen.getByText('prj_deleted')).toBeTruthy()
     expect(screen.queryByText(/page of/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Go to Ada / default' }))
     expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/jobs?project=prj_a1')
+  })
+
+  it('opens a record in the caller\'s own project when its link names one they do not reach', async () => {
+    // A link to a record of a shared platform experiment, copied by someone of the org that owns it.
+    for (const pathname of ['/platform-experiments/pe-x', '/jobs/j1', '/hypotheses/hyp-1']) {
+      navigation.pathname = pathname
+      const view = show('project=prj_of_another_org&tab=logs')
+      expect(await screen.findByText('page of Ada / default')).toBeTruthy()
+      expect(screen.queryByText(/is not available to you/)).toBeNull()
+      expect(navigation.replace).toHaveBeenLastCalledWith(`${pathname}?tab=logs`)
+      view.unmount()
+    }
+  })
+
+  it('leaves the address of a record alone when it names a project of the caller\'s', async () => {
+    show('project=prj_a2')
+    expect(await screen.findByText('page of Ada / vision')).toBeTruthy()
+    expect(navigation.replace).not.toHaveBeenCalled()
   })
 
   it('drops what a page and the palette held when the project changes', async () => {
