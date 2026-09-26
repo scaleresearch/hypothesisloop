@@ -36,6 +36,10 @@ const controls = {
   'CSS variable, use a token class or lib/colors': /var\(--(?!font-)/,
 }
 
+const nativeSelect = {
+  'native select, use Select or SearchableSelect': /<select[\s>]|\bSelect as \w+\b.*@headlessui/,
+}
+
 describe('UI conventions', () => {
   const files = sources(SRC)
 
@@ -45,5 +49,9 @@ describe('UI conventions', () => {
 
   it('styles controls only in components/ui', () => {
     expect(offences(files.filter(f => !f.startsWith(UI) && !THEME.includes(f)), controls)).toEqual([])
+  })
+
+  it('has no native select, the shared components included', () => {
+    expect(offences(files, nativeSelect)).toEqual([])
   })
 })

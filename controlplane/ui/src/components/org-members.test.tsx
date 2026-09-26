@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { choose } from '@/test-select'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -82,49 +83,49 @@ describe('an owner', () => {
     show()
     const own = await row('u1')
     expect(own.getByText('you')).toBeTruthy()
-    expect(own.getByLabelText('Role of u1')).toHaveProperty('value', 'owner')
+    expect(own.getByLabelText('Role of u1')).toHaveProperty('textContent', 'owner')
     expect(own.getByRole('button', { name: 'Leave' })).toBeTruthy()
     const other = await row('u2')
     expect(other.queryByText('you')).toBeNull()
-    expect(other.getByLabelText('Role of u2')).toHaveProperty('value', 'member')
+    expect(other.getByLabelText('Role of u2')).toHaveProperty('textContent', 'member')
     expect(other.getByRole('button', { name: 'Remove' })).toBeTruthy()
   })
 
   it('changes a role after being asked, and reads the list again', async () => {
     show()
-    await userEvent.selectOptions((await row('u2')).getByLabelText('Role of u2'), 'owner')
+    await choose((await row('u2')).getByLabelText('Role of u2'), 'owner')
     expect(setOrgMemberRole).not.toHaveBeenCalled()
     expect(within(screen.getByRole('dialog')).getByText('Make u2 an owner of Lab?')).toBeTruthy()
     await confirm('Make owner')
     expect(setOrgMemberRole).toHaveBeenCalledExactlyOnceWith('org_a', 'u2', 'owner')
-    await waitFor(() => expect(screen.getByLabelText('Role of u2')).toHaveProperty('value', 'owner'))
+    await waitFor(() => expect(screen.getByLabelText('Role of u2')).toHaveProperty('textContent', 'owner'))
     expect(fetchMe).not.toHaveBeenCalled()
   })
 
   it('leaves a role as it was when the answer is no', async () => {
     show()
-    await userEvent.selectOptions((await row('u2')).getByLabelText('Role of u2'), 'owner')
+    await choose((await row('u2')).getByLabelText('Role of u2'), 'owner')
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(setOrgMemberRole).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Role of u2')).toHaveProperty('value', 'member')
+    expect(screen.getByLabelText('Role of u2')).toHaveProperty('textContent', 'member')
   })
 
   it('is told in the API\'s words that the last owner cannot be demoted', async () => {
     vi.mocked(setOrgMemberRole).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
-    await userEvent.selectOptions((await row('u1')).getByLabelText('Role of u1'), 'member')
+    await choose((await row('u1')).getByLabelText('Role of u1'), 'member')
     expect(within(screen.getByRole('dialog')).getByText('Make yourself a member of Lab?')).toBeTruthy()
     await confirm('Make member')
     expect(await screen.findByText(LAST_OWNER)).toBeTruthy()
-    expect(screen.getByLabelText('Role of u1')).toHaveProperty('value', 'owner')
+    expect(screen.getByLabelText('Role of u1')).toHaveProperty('textContent', 'owner')
     expect(fetchMe).not.toHaveBeenCalled()
   })
 
   it('reads the account again after demoting themselves, which is where the page takes their role from', async () => {
     members = [...members, { org_id: 'org_a', user_id: 'u3', role: 'owner', joined_at: at }]
     show()
-    await userEvent.selectOptions((await row('u1')).getByLabelText('Role of u1'), 'member')
+    await choose((await row('u1')).getByLabelText('Role of u1'), 'member')
     await confirm('Make member')
     await waitFor(() => expect(fetchMe).toHaveBeenCalledTimes(1))
     expect(setOrgMemberRole).toHaveBeenCalledExactlyOnceWith('org_a', 'u1', 'member')
@@ -166,7 +167,7 @@ describe('inviting', () => {
 
   it('invites with the role that was picked', async () => {
     show()
-    await userEvent.selectOptions(await screen.findByLabelText('Role of the invited person'), 'owner')
+    await choose(await screen.findByLabelText('Role of the invited person'), 'Invite as owner')
     await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }))
     expect(createOrgInvite).toHaveBeenCalledExactlyOnceWith('org_a', 'owner')
     expect(await screen.findByText(/joins Lab as an owner/)).toBeTruthy()

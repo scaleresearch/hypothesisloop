@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import { choose } from '@/test-select'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -26,22 +27,20 @@ describe('a form field', () => {
     expect(screen.getByRole('alert').textContent).toBe('already taken')
   })
 
-  it('names a textarea and a native select the same way', async () => {
-    render(
-      <>
-        <FormField label="Description"><Textarea /></FormField>
+  it('names a textarea and a select the same way', async () => {
+    function Direction() {
+      const [value, setValue] = useState('maximize')
+      return (
         <FormField label="Direction">
-          <Select defaultValue="maximize">
-            <option value="maximize">maximize</option>
-            <option value="minimize">minimize</option>
-          </Select>
+          <Select value={value} onChange={setValue} options={[{ value: 'maximize', label: 'maximize' }, { value: 'minimize', label: 'minimize' }]} />
         </FormField>
-      </>,
-    )
+      )
+    }
+    render(<><FormField label="Description"><Textarea /></FormField><Direction /></>)
     await userEvent.type(screen.getByLabelText('Description'), 'two\nlines')
     expect(screen.getByLabelText('Description')).toHaveProperty('value', 'two\nlines')
-    await userEvent.selectOptions(screen.getByLabelText('Direction'), 'minimize')
-    expect(screen.getByLabelText('Direction')).toHaveProperty('value', 'minimize')
+    await choose(screen.getByLabelText('Direction'), 'minimize')
+    expect(screen.getByLabelText('Direction')).toHaveProperty('textContent', 'minimize')
   })
 })
 

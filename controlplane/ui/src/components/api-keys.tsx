@@ -68,10 +68,16 @@ export function APIKeys() {
           value={name}
           onChange={e => setName(e.target.value)}
         />
-        <Select fieldSize="sm" aria-label="Key reach" value={scope} onChange={e => setScope(e.target.value)}>
-          <option value={WHOLE_ORG}>Whole organization</option>
-          {projects.map(p => <option key={p.id} value={p.id}>Project {p.name} only</option>)}
-        </Select>
+        <Select
+          fieldSize="sm"
+          aria-label="Key reach"
+          value={scope}
+          onChange={setScope}
+          options={[
+            { value: WHOLE_ORG, label: 'Whole organization' },
+            ...projects.map(p => ({ value: p.id, label: `Project ${p.name} only` })),
+          ]}
+        />
         <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
           {busy ? 'Creating…' : 'Create API key'}
         </Button>

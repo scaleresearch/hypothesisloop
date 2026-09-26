@@ -18,6 +18,11 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 
 const ROLES: OrgRole[] = ['owner', 'member']
 
+const INVITE_ROLES: { value: OrgRole; label: string }[] = [
+  { value: 'member', label: 'Invite as member' },
+  { value: 'owner', label: 'Invite as owner' },
+]
+
 // What is about to be done to a member, held while the question is on screen.
 type Change =
   | { kind: 'role'; member: OrgMember; role: OrgRole }
@@ -77,10 +82,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
     <div className="grid gap-3 border-t pt-3">
       <Eyebrow>Invites</Eyebrow>
       <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
-        <Select fieldSize="sm" aria-label="Role of the invited person" value={role} onChange={e => setRole(e.target.value as OrgRole)}>
-          <option value="member">Invite as member</option>
-          <option value="owner">Invite as owner</option>
-        </Select>
+        <Select fieldSize="sm" aria-label="Role of the invited person" value={role} onChange={setRole} options={INVITE_ROLES} />
         <Button size="sm" variant="primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create invite link'}</Button>
       </form>
 
@@ -204,10 +206,9 @@ export function OrgMembers() {
                           fieldSize="sm"
                           aria-label={`Role of ${member.user_id}`}
                           value={member.role}
-                          onChange={e => setChange({ kind: 'role', member, role: e.target.value as OrgRole })}
-                        >
-                          {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
-                        </Select>
+                          onChange={role => setChange({ kind: 'role', member, role })}
+                          options={ROLES.map(role => ({ value: role, label: role }))}
+                        />
                       )
                       : member.role}
                   </td>

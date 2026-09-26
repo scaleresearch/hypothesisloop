@@ -386,6 +386,11 @@ function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s
   )
 }
 
+const DIRECTION_OPTIONS: { value: 'maximize' | 'minimize'; label: string }[] = [
+  { value: 'maximize', label: '↑ max' },
+  { value: 'minimize', label: '↓ min' },
+]
+
 function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onChange: (m: MetricDefinition[]) => void }) {
   const [customKey, setCustomKey] = useState('')
   const [customDir, setCustomDir] = useState<'maximize' | 'minimize'>('maximize')
@@ -427,12 +432,16 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
   return (
     <div>
       <div className="mb-2 flex gap-1.5">
-        <Select className="min-w-0 flex-1" value={selectedPreset} onChange={e => setSelectedPreset(e.target.value)}>
-          <option value="">— pick a common metric —</option>
-          {COMMON_ML_METRICS.filter(m => m.key !== 'custom').map(m => (
-            <option key={m.key} value={m.key}>{m.label} ({m.direction === 'maximize' ? '↑ max' : '↓ min'})</option>
-          ))}
-        </Select>
+        <Select
+          aria-label="Common metric"
+          className="min-w-0 flex-1"
+          placeholder="Pick a common metric"
+          value={selectedPreset}
+          onChange={setSelectedPreset}
+          options={COMMON_ML_METRICS.filter(m => m.key !== 'custom').map(m => ({
+            value: m.key, label: `${m.label} (${m.direction === 'maximize' ? '↑ max' : '↓ min'})`,
+          }))}
+        />
         <Button type="button" variant="primary" size="sm" onClick={addPreset}>Add</Button>
       </div>
 
@@ -443,10 +452,7 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
           value={customKey}
           onChange={e => setCustomKey(e.target.value)}
         />
-        <Select value={customDir} onChange={e => setCustomDir(e.target.value as 'maximize' | 'minimize')}>
-          <option value="maximize">↑ max</option>
-          <option value="minimize">↓ min</option>
-        </Select>
+        <Select aria-label="Direction of the custom metric" value={customDir} onChange={setCustomDir} options={DIRECTION_OPTIONS} />
         <Button type="button" size="sm" onClick={addCustom}>Add Custom</Button>
       </div>
 
@@ -804,9 +810,7 @@ function PlatformExperimentsPageContent() {
           placeholder="Search name or description…"
         />
 
-        <Select fieldSize="sm" mono aria-label="Sort" value={sort} onChange={e => { setSort(e.target.value); setPage(0) }}>
-          {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>Sort: {o.label}</option>)}
-        </Select>
+        <Select fieldSize="sm" aria-label="Sort" prefix="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
       </div>
 
       {isLoading && <Loading />}

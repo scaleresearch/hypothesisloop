@@ -24,6 +24,7 @@ export function AgentSelect({ value, onChange }: { value: string; onChange: (id:
       value={value}
       onChange={onChange}
       onSearch={setQ}
+      mono
       allLabel="All agents"
       options={listed.map(a => ({ value: a.id, label: a.name === a.id ? a.id : `${a.name} (${a.id})` }))}
       hint={more > 0 ? `${more} more, type to search` : undefined}

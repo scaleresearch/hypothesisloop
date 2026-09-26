@@ -97,7 +97,6 @@ function section(title) {
   console.log(`\n== ${title}`)
 }
 
-// Clicks the one sign-in button and follows the redirects back into the app.
 // A confirmation is a dialog on the page; `button` is the one that goes ahead.
 async function confirmWith(page, button) {
   const question = page.getByRole('dialog')
@@ -105,6 +104,13 @@ async function confirmWith(page, button) {
   await question.waitFor({ state: 'detached' })
 }
 
+// Picks an option of a Select: its field is a button that opens a listbox.
+async function choose(page, field, option) {
+  await field.click()
+  await page.getByRole('option', { name: option, exact: true }).click()
+}
+
+// Clicks the GitHub sign-in button and follows the redirects back into the app.
 async function signIn(page, user, landing = '**/') {
   await configure({ nextUser: user })
   await page.getByRole('button', { name: 'Continue with GitHub' }).click()
@@ -247,7 +253,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Create the first platform experiment' }).click()
   const experimentName = `ui-e2e-${run}`
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(experimentName)
-  await page.locator('select', { hasText: 'pick a common metric' }).selectOption({ index: 1 })
+  await choose(page, page.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
   await page.getByRole('button', { name: 'Add', exact: true }).click()
   await shot(page, 'create-platform-experiment')
   await page.getByRole('button', { name: 'Next: competition settings' }).click()
@@ -826,14 +832,14 @@ async function scenarios(browser) {
   await page.reload()
   const roleChange = () => page.waitForResponse(r => r.request().method() === 'PATCH' && r.url() === `${API}/orgs/${labOrg}/members/${danID}`)
   let changed = roleChange()
-  await page.getByLabel(`Role of ${danID}`).selectOption('owner')
+  await choose(page, page.getByLabel(`Role of ${danID}`), 'owner')
   await confirmWith(page, 'Make owner')
   assert.equal((await changed).status(), 200)
   await shot(page, 'members-as-owner', page.getByLabel(`Role of ${danID}`))
   await danPage.reload()
   await danPage.getByRole('button', { name: 'Create invite link' }).waitFor()
   changed = roleChange()
-  await page.getByLabel(`Role of ${danID}`).selectOption('member')
+  await choose(page, page.getByLabel(`Role of ${danID}`), 'member')
   await confirmWith(page, 'Make member')
   assert.equal((await changed).status(), 200)
 

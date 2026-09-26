@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { choose } from '@/test-select'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -106,7 +107,7 @@ describe('creating an API key', () => {
 
   it('binds a key to one project when asked', async () => {
     show()
-    await userEvent.selectOptions(screen.getByLabelText('Key reach'), 'prj_2')
+    await choose(screen.getByLabelText('Key reach'), 'Project vision only')
     await create('vision-bot')
     expect(createAPIKey).toHaveBeenCalledExactlyOnceWith('org_a', 'vision-bot', 'prj_2')
     const row = (await screen.findByRole('cell', { name: 'vision-bot' })).closest('tr')!
