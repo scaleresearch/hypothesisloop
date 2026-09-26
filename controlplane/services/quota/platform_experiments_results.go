@@ -201,9 +201,9 @@ func (s *PlatformExperimentsService) eligibleStandings(ctx context.Context, pe *
 		if ineligible[st.AgentID] {
 			continue
 		}
-		st.Rank = len(eligible) + 1
 		eligible = append(eligible, st)
 	}
+	assignRanks(eligible)
 	return eligible, nil
 }
 
@@ -259,8 +259,18 @@ func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.Platfo
 		}
 		return standings[i].AgentID < standings[j].AgentID
 	})
+	assignRanks(standings)
+	return standings, nil
+}
+
+// assignRanks numbers standings that are sorted best-first. Agents with the same best share a
+// rank and the next one counts everyone ahead of it (1, 1, 3): the order between equals is by
+// agent id, which says nothing about who did better.
+func assignRanks(standings []AgentStanding) {
 	for i := range standings {
 		standings[i].Rank = i + 1
+		if i > 0 && standings[i].Best == standings[i-1].Best {
+			standings[i].Rank = standings[i-1].Rank
+		}
 	}
-	return standings, nil
 }

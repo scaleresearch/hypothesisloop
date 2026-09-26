@@ -92,8 +92,9 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
     standings = ranked["standings"]
     assert standings, "no agent was ranked on val_accuracy even with no constraint declared"
 
-    ranks = [s["rank"] for s in standings]
-    assert ranks == list(range(1, len(standings) + 1))
+    # Equal bests share a rank and the next agent counts everyone ahead of it.
+    bests = [s["best"] for s in standings]
+    assert [s["rank"] for s in standings] == [bests.index(best) + 1 for best in bests], standings
     assert all(standings[i]["best"] >= standings[i + 1]["best"] for i in range(len(standings) - 1))
 
     assert sorted(s["agent_id"] for s in standings) == sorted(agents)
