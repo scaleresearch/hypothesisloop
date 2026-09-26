@@ -3,9 +3,16 @@ import { Check, ChevronsUpDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { FieldSize } from '@/components/ui/field'
 
-/** The floating list every dropdown opens: Select and SearchableSelect. */
-export const panelClass =
-  'z-50 max-h-64 min-w-[var(--button-width,var(--input-width))] overflow-y-auto rounded border border-border-strong bg-surface-raised p-1 shadow-lg focus:outline-none'
+/**
+ * The floating list every dropdown opens, at least as wide as its field. Headless UI measures the
+ * field into --button-width for a listbox and --input-width for a combobox.
+ */
+export function panelClass(field: 'button' | 'input') {
+  return clsx(
+    'z-50 max-h-64 overflow-y-auto rounded border border-border-strong bg-surface-raised p-1 shadow-lg focus:outline-none',
+    field === 'button' ? 'min-w-[var(--button-width)]' : 'min-w-[var(--input-width)]',
+  )
+}
 
 /** One row of the list. Headless UI marks the row under the pointer or the arrow keys with data-focus. */
 export function optionClass(size: FieldSize = 'default', mono?: boolean) {
@@ -18,10 +25,11 @@ export function optionClass(size: FieldSize = 'default', mono?: boolean) {
 }
 
 /** A row's text, and the mark of the row that is the current value. */
-export function OptionLabel({ children }: { children: ReactNode }) {
+export function OptionLabel({ children, badge }: { children: ReactNode; badge?: string }) {
   return (
     <>
       <span className="min-w-0 flex-1 truncate group-data-[selected]:font-semibold">{children}</span>
+      {badge && <span className="flex-none rounded-full border px-1.5 font-sans text-2xs text-muted">{badge}</span>}
       <Check aria-hidden="true" size={14} strokeWidth={2.5} className="invisible flex-none text-accent group-data-[selected]:visible" />
     </>
   )

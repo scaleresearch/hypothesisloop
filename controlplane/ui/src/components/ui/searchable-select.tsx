@@ -4,11 +4,14 @@ import { useEffect, useState } from 'react'
 import { Combobox, ComboboxButton, ComboboxInput, ComboboxOptions, ComboboxOption } from '@headlessui/react'
 import { clsx } from 'clsx'
 import { fieldClass } from '@/components/ui/field'
+import type { FieldSize } from '@/components/ui/field'
 import { OptionLabel, OptionNote, OptionsIcon, optionClass, panelClass } from '@/components/ui/option'
 
 interface SearchableSelectOption {
   value: string
   label: string
+  /** A word beside the label that sets the option apart: "private". */
+  badge?: string
 }
 
 interface SearchableSelectProps {
@@ -27,13 +30,15 @@ interface SearchableSelectProps {
   hint?: string
   /** For a list of ids. */
   mono?: boolean
+  /** `sm`, the size of a filter row, unless told otherwise. */
+  fieldSize?: FieldSize
 }
 
 /**
  * The Select for a list long enough that typing beats scrolling. Options are shown in the order
  * passed in, so the caller decides the sort.
  */
-export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, hideAllOption, onSearch, hint, mono }: SearchableSelectProps) {
+export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, hideAllOption, onSearch, hint, mono, fieldSize = 'sm' }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
   useEffect(() => {
     if (!onSearch) return
@@ -64,7 +69,7 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
             onClick={e => {
               if (!open) e.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
             }}
-            className={clsx(fieldClass('sm', mono), 'w-full truncate pr-7 data-[open]:border-accent')}
+            className={clsx(fieldClass(fieldSize, mono), 'w-full truncate pr-7 data-[open]:border-accent')}
             placeholder={placeholder ?? allLabel}
             displayValue={() => selected?.label ?? value}
             onChange={e => setQuery(e.target.value)}
@@ -72,15 +77,15 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
           <ComboboxButton aria-label="Show options" className="absolute inset-y-0 right-0 flex items-center px-2">
             <OptionsIcon />
           </ComboboxButton>
-          <ComboboxOptions anchor={{ to: 'bottom start', gap: 4, padding: 8 }} className={panelClass}>
+          <ComboboxOptions anchor={{ to: 'bottom start', gap: 4, padding: 8 }} className={panelClass('input')}>
             {!hideAllOption && (
-              <ComboboxOption value="" className={optionClass('sm', mono)}>
+              <ComboboxOption value="" className={optionClass(fieldSize, mono)}>
                 <OptionLabel>{allLabel}</OptionLabel>
               </ComboboxOption>
             )}
             {filtered.length === 0 ? <OptionNote>No matches</OptionNote> : filtered.map(o => (
-              <ComboboxOption key={o.value} value={o.value} className={optionClass('sm', mono)}>
-                <OptionLabel>{o.label}</OptionLabel>
+              <ComboboxOption key={o.value} value={o.value} className={optionClass(fieldSize, mono)}>
+                <OptionLabel badge={o.badge}>{o.label}</OptionLabel>
               </ComboboxOption>
             ))}
             {hint && <OptionNote>{hint}</OptionNote>}

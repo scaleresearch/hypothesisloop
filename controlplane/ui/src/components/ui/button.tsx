@@ -14,7 +14,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean
 }
 
-const base = 'inline-flex items-center justify-center gap-1.5 font-semibold transition-colors disabled:cursor-default disabled:opacity-50'
+const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-semibold transition-colors disabled:cursor-default disabled:opacity-50'
 
 const boxed = 'rounded border shadow-sm active:translate-y-px disabled:shadow-none'
 
