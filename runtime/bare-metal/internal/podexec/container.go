@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 	"strings"
 
@@ -29,9 +30,12 @@ func (c containerInfo) name() string {
 	return ""
 }
 
-// listManagedContainers returns every container (any state) carrying LabelManagedBy —
+// listManagedContainers returns every container (any state) this cluster's agent started —
 // including stopped ones, since a stopped container is itself the "gone" record (see
-// different-backend.md §4.6) until it's pruned by reapTerminal.
+// different-backend.md §4.6) until it's pruned by reapTerminal. Everything this package lists,
+// counts, stops or removes comes from here, so the agents of two clusters on one engine never
+// touch each other's jobs. A container that carries no cluster at all was started before
+// containers were scoped: it is nobody's to stop on a guess, so it is left alone and named once.
 func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, error) {
 	summaries, err := e.docker.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
@@ -42,6 +46,14 @@ func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, 
 	}
 	out := make([]containerInfo, 0, len(summaries.Items))
 	for _, s := range summaries.Items {
+		cluster, scoped := s.Labels[LabelCluster]
+		if !scoped {
+			e.reportUnscoped(s.ID, trimSlashPrefix(s.Names))
+			continue
+		}
+		if cluster != e.clusterName {
+			continue
+		}
 		out = append(out, containerInfo{
 			ID:     s.ID,
 			Names:  trimSlashPrefix(s.Names),
@@ -50,6 +62,19 @@ func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, 
 		})
 	}
 	return out, nil
+}
+
+func (e *Executor) reportUnscoped(id string, names []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.unscoped[id] {
+		return
+	}
+	if e.unscoped == nil {
+		e.unscoped = map[string]bool{}
+	}
+	e.unscoped[id] = true
+	log.Printf("podexec: container %v (%s) was started by an agent from before containers named their cluster: this agent does not manage, count or stop it; remove it by hand once its job is no longer wanted", names, id)
 }
 
 // trimSlashPrefix strips the leading "/" the engine API prefixes container names with.

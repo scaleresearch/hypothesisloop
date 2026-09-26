@@ -81,10 +81,8 @@ func TestStorageIsEnforcedOnlyWhenTheEngineTakesAContainerWithASize(t *testing.T
 	}
 }
 
-// podman reads no binary suffix in a size and refused every job given "128Mi", so a job's size
-// goes to the engine in bytes, and only where the engine was found to take one.
-func TestAJobIsGivenItsStorageSizeInBytesAndOnlyWhereTheEngineEnforcesIt(t *testing.T) {
-	exp := &domain.Experiment{
+func sizedExperiment() *domain.Experiment {
+	return &domain.Experiment{
 		Data: testDataAccess(), Token: "test-job-token",
 		ID: "sized", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: domain.CapacityGuaranteed,
@@ -93,6 +91,12 @@ func TestAJobIsGivenItsStorageSizeInBytesAndOnlyWhereTheEngineEnforcesIt(t *test
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		},
 	}
+}
+
+// podman reads no binary suffix in a size and refused every job given "128Mi", so a job's size
+// goes to the engine in bytes, and only where the engine was found to take one.
+func TestAJobIsGivenItsStorageSizeInBytesAndOnlyWhereTheEngineEnforcesIt(t *testing.T) {
+	exp := sizedExperiment()
 	for enforced, want := range map[bool]string{true: "134217728", false: ""} {
 		e := &Executor{apiURL: "http://example.invalid:8083", storageQuotaEnforced: enforced}
 		cs, err := e.BuildContainerSpec(exp, Placement{})

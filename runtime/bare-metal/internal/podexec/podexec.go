@@ -31,6 +31,10 @@ const (
 	LabelAttempt         = workloadkeys.Attempt
 	LabelCheckpointGrace = workloadkeys.CheckpointGraceSeconds
 
+	// LabelCluster names the cluster whose agent started a container. An engine can serve the
+	// agents of several clusters, and each manages the containers carrying its own name only.
+	LabelCluster = "hypothesisloop.io/cluster"
+
 	ManagedByValue = workloadkeys.ManagedByValue
 
 	// containerNamePrefix keeps this runtime's containers trivially greppable/distinguishable
@@ -42,6 +46,8 @@ const (
 // implicit defaults.
 type Config struct {
 	APIURL string
+	// ClusterName is the cluster this node is, stamped on every container it starts.
+	ClusterName string
 	// StorageDir is measured as this node's storage in place of the engine's store. It is for
 	// an engine whose store is not a directory of this host (a remote one), where the agent
 	// cannot measure what jobs write to. Empty on a node, which measures the engine's store.
@@ -57,7 +63,9 @@ type Config struct {
 type Executor struct {
 	apiURL     string
 	storageDir string
-	nodeLabels map[string]string
+	// clusterName scopes everything this executor lists, stops and removes (LabelCluster).
+	clusterName string
+	nodeLabels  map[string]string
 	// nodeName is this node's own identity, reported as the sole entry in every
 	// cluster->node->... map the Backend contract expects (a bare-node "cluster" is one node).
 	nodeName string
@@ -79,7 +87,9 @@ type Executor struct {
 	storageQuotaRefusal  string
 	probe                func(context.Context) ([]acceleratorDevice, error)
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// unscoped is the containers already reported as started before containers were scoped.
+	unscoped map[string]bool
 	inFlight map[string]operation
 	workers  sync.WaitGroup
 }
@@ -146,6 +156,9 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("podexec: APIURL is required")
 	}
+	if cfg.ClusterName == "" {
+		return nil, fmt.Errorf("podexec: ClusterName is required")
+	}
 	clusterID, err := readClusterID(machineIDPath)
 	if err != nil {
 		return nil, err
@@ -188,6 +201,7 @@ func New(cfg Config) (*Executor, error) {
 	}
 	return &Executor{
 		apiURL:               cfg.APIURL,
+		clusterName:          cfg.ClusterName,
 		storageDir:           storageDir,
 		nodeLabels:           labels,
 		nodeName:             nodeName,

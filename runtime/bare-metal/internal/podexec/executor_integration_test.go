@@ -22,9 +22,10 @@ func newTestExecutor(t *testing.T) *Executor {
 	t.Helper()
 	dir := t.TempDir()
 	e, err := New(Config{
-		APIURL:     "http://example.invalid:8083",
-		StorageDir: dir,
-		NodeName:   "integration-test-node",
+		APIURL:      "http://example.invalid:8083",
+		ClusterName: "integration-test-" + t.Name(),
+		StorageDir:  dir,
+		NodeName:    "integration-test-node",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

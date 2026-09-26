@@ -97,7 +97,7 @@ func install(args []string) error {
 	}
 
 	err = hostinstall.Install(host, binary, settings, func() (string, error) {
-		executor, err := newExecutor(settings.APIURL)
+		executor, err := newExecutor(settings.ClusterName, settings.APIURL)
 		if err != nil {
 			return "", err
 		}
@@ -217,7 +217,7 @@ func detach(args []string) error {
 	}
 	// With the unit stopped this process is the node's only agent, and the loop that keeps a
 	// node in step is what stops everything a removed cluster's node still runs.
-	executor, err := newExecutor(settings.APIURL)
+	executor, err := newExecutor(settings.ClusterName, settings.APIURL)
 	if err != nil {
 		return err
 	}

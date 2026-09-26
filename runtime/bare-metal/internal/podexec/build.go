@@ -217,6 +217,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		ReadOnlyMounts: readOnlyMounts,
 		Labels: map[string]string{
 			LabelManagedBy:       ManagedByValue,
+			LabelCluster:         e.clusterName,
 			LabelExperimentID:    exp.ID,
 			LabelAgentID:         exp.AgentID,
 			LabelCapacityTier:    string(exp.CapacityTier),

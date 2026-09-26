@@ -64,7 +64,7 @@ func main() {
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
-	exec, err := newExecutor(apiURL)
+	exec, err := newExecutor(clusterName, apiURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
 		os.Exit(1)
@@ -120,12 +120,13 @@ func main() {
 	}
 }
 
-func newExecutor(apiURL string) (*podexec.Executor, error) {
+func newExecutor(clusterName, apiURL string) (*podexec.Executor, error) {
 	return podexec.New(podexec.Config{
-		APIURL:     apiURL,
-		StorageDir: os.Getenv("SCRATCH_DIR"),
-		NodeLabels: parseNodeLabels(os.Getenv("NODE_LABELS")),
-		NodeName:   os.Getenv("NODE_NAME"),
+		ClusterName: clusterName,
+		APIURL:      apiURL,
+		StorageDir:  os.Getenv("SCRATCH_DIR"),
+		NodeLabels:  parseNodeLabels(os.Getenv("NODE_LABELS")),
+		NodeName:    os.Getenv("NODE_NAME"),
 	})
 }
 
