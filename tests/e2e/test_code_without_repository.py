@@ -45,6 +45,8 @@ def _hl_clone(agent: API, ref: str, into: Path, **env: str) -> subprocess.Comple
 
 @pytest.mark.parallel
 def test_code_pushed_to_the_platform_is_what_a_job_carries_and_what_another_agent_checks_out(api: API, run_id: str, tmp_path: Path):
+    if api.get("/github/app").status_code != 503:
+        pytest.skip("this stack has a GitHub App, so every platform experiment has a repository and the platform stores no code: run on a stack with no App")
     pe_id = api.create_platform_experiment(f"no-repository-{run_id}", 1.0, 3)
     other_pe = api.create_platform_experiment(f"no-repository-other-{run_id}", 1.0, 3)
     try:
