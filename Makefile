@@ -75,9 +75,38 @@ controlplane-up: registry-up render-settings images
 	bash -c '. localdev/lib/auth.sh && lib_register_local_clusters'
 
 # The control plane and the UI as host processes against the compose datastores: starts in
-# seconds, and a code change needs no image build. Runtimes still pull images (make reload).
+# seconds, and a code change needs no image build. Every process runs detached with its log in
+# localdev/.run, so the target returns and one process can be restarted alone. Runtimes on the
+# local cluster still pull images (make reload).
 dev: render-settings
-	bash localdev/dev.sh
+	bash localdev/dev.sh up
+
+# After a Go change: rebuilds and restarts the API and metrics-service, with the settings as they
+# were last rendered. The UI (live reload), the tunnels and the runtime processes keep running.
+dev-api:
+	bash localdev/dev.sh api
+
+dev-status:
+	@bash localdev/dev.sh status
+
+dev-down:
+	bash localdev/dev.sh down
+
+# Cloudflare quick tunnels to this machine's API, metrics-service and object store, which is how
+# a hosted agent and a rented instance reach them. They keep running across restarts of the dev
+# stack, and their addresses change only when they are started again.
+tunnels:
+	bash localdev/local-tunnels/tunnels.sh up
+
+tunnels-down:
+	bash localdev/local-tunnels/tunnels.sh down
+
+# make dev, plus agent-launcher (Fly.io) and cloud-agent (vast.ai) as host processes, with the
+# settings naming the running tunnels and the images `make -C infra publish` pushed. Needs
+# `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
+# machines, which cost money.
+dev-hosted: render-settings
+	bash localdev/dev.sh hosted
 
 # Every request to the control plane carries a token. These two print the ones local work needs,
 # derived from auth.signing_secret in the settings file (localdev/lib/auth.sh).

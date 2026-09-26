@@ -10,7 +10,7 @@
 # Services to expose are read from tunnels.conf (name + local port, one per line).
 set -euo pipefail
 
-ACTION="${1:?usage: tunnels.sh up|down|status}"
+ACTION="${1:?usage: tunnels.sh up|down|status|addresses}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_FILE="${TUNNELS_CONF:-$SCRIPT_DIR/tunnels.conf}"
 BASE_PATH="${TUNNELS_BASE_PATH:-$HOME/.hypothesisloop-tunnels}"
@@ -68,8 +68,39 @@ up() {
   done < <(read_services)
 
   echo "tunnels: waiting for URLs..."
-  sleep 8
+  for _ in $(seq 1 120); do
+    if addresses >/dev/null 2>&1; then
+      status
+      return
+    fi
+    sleep 0.5
+  done
   status
+  echo "tunnels: not every tunnel got a URL within a minute" >&2
+  exit 1
+}
+
+# The URL cloudflared printed for one running tunnel, or nothing.
+url_of() {
+  local name="$1" pid_file="$PID_DIR/$1.pid"
+  if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/$name.log" 2>/dev/null | head -1 || true
+  fi
+}
+
+# One line per service, "<name> <url>", read from the running tunnels: what `make dev-hosted`
+# renders into the settings. Fails when a tunnel is down or has no URL yet, so a caller never
+# takes an address nothing answers at.
+addresses() {
+  local name port url
+  while read -r name port; do
+    url="$(url_of "$name")"
+    if [[ -z "$url" ]]; then
+      echo "tunnels: $name has no running tunnel; run make tunnels" >&2
+      return 1
+    fi
+    echo "$name $url"
+  done < <(read_services)
 }
 
 status() {
@@ -81,7 +112,7 @@ status() {
     if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
       any=1
       local url
-      url="$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$log_file" 2>/dev/null | head -1 || true)"
+      url="$(url_of "$name")"
       echo "  $name (:$port) -> ${url:-<not ready yet, check $log_file>}"
     else
       echo "  $name (:$port) -> not running"
@@ -94,5 +125,6 @@ case "$ACTION" in
   up) up ;;
   down) down ;;
   status) status ;;
-  *) echo "usage: tunnels.sh up|down|status" >&2; exit 1 ;;
+  addresses) addresses ;;
+  *) echo "usage: tunnels.sh up|down|status|addresses" >&2; exit 1 ;;
 esac
