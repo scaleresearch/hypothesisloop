@@ -49,7 +49,8 @@ What you produce, in this order:
      whole cores. Its cost and the budget are then CPU core-hours: 4 cores for an hour cost
      4. A job may leave out `memory`, `storage` and `max_retries`. Register one hypothesis on
      `root` that
-     states the baseline, then submit the seed code as a job against it:
+     states the baseline, then submit the seed code as a job against it with
+     `hl job submit FILE --hypothesis ID --theory "..."`, the committed file unedited:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
@@ -75,7 +76,9 @@ What you produce, in this order:
      plainly splits into more directions, and give each a flavor that fits its direction.
      `report_interval_seconds` is how often your harness really reports.
 
-Then write the proposal file and send it with `hl platform-experiments propose`. Its
+Then write the proposal file, in the shape `hl platform-experiments propose` shows above, and
+send it once it is finished: the first one that passes the checks is stored and ends your work,
+so never send one to learn the shape. Its
 `metric_reason` and `measurement` are read by the person in place of your code: plain words, no
 jargon they did not use. Put in `questions` whatever the sentence left open and you had to
 decide (the dataset, the hardware, what counts as good enough), in `risks` what could make the

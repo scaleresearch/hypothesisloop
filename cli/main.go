@@ -722,14 +722,37 @@ A coordinator's token changes the description only.`, stderr)
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--pe PE] [FILE|-]
 
-For the planner of a draft. FILE is YAML: experiment (shaped like .hypothesisloop/experiment.yaml:
-name, description, metrics, report_interval_seconds, optionally stages and the policies), and
-beside it budget_accelerator_hours, duration_hours, agents (a list, one entry per researcher,
-each with optional flavor, model, hyperparameters), baseline_job_id, metric_reason, measurement, and
-the lists out_of_scope, risks, questions.
+For the planner of a draft. FILE is YAML of this shape, with every field shown required unless
+it says optional:
 
-The proposal is checked before it is stored. A refusal names what to fix: fix it and propose
-again. Each proposal replaces the one before. Once stored the draft waits for a person.`, stderr)
+  experiment:
+    name: short title
+    description: |
+      the brief, the only thing researchers read. It holds a BASELINE block that names
+      baseline_job_id and that job's code_ref, or the proposal is refused.
+    report_interval_seconds: 30        # how often the harness really reports
+    metrics:
+      - key: val_accuracy              # one metric ranks: role ranking is the default
+        direction: maximize            # or minimize
+      - key: exact_match               # optional gate
+        direction: maximize
+        role: constraint
+        bound: 1                       # a value the baseline holds
+  budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
+  duration_hours: 4
+  agents:                              # one entry per researcher
+    - flavor: hyperparameter-search    # optional, as are model and hyperparameters
+    - {}
+  baseline_job_id: job-...             # your COMPLETED job with its summary filed
+  metric_reason: why this metric is the goal, in plain words
+  measurement: how it is measured, in plain words
+  out_of_scope: [optional sentences]
+  risks: [optional sentences]
+  questions: [optional sentences]
+
+The proposal is checked before it is stored, and a refusal names what to fix. One that passes is
+stored at once, replaces the one before, releases your machine and is what the person is asked
+to accept: send only the finished proposal, never one written to try the checks.`, stderr)
 	pe := fs.String("pe", "", "the draft (default $"+platformExperimentEnv+")")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
