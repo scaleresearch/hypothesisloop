@@ -943,6 +943,108 @@ func TestOnlyStaffShareAClusterAndOnlyUnderItsOwnOrg(t *testing.T) {
 	}
 }
 
+// An org decides which of the clusters open to it its jobs use, its own or a shared one, and
+// decides it for itself alone.
+func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
+	w := newWorld(t)
+	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
+	enabled := func(caller, orgID string) map[string]bool {
+		t.Helper()
+		var listed struct {
+			Clusters []ListedCluster `json:"clusters"`
+		}
+		w.ok(caller, "GET", "/orgs/"+orgID+"/clusters", nil, http.StatusOK, &listed)
+		out := map[string]bool{}
+		for _, c := range listed.Clusters {
+			out[c.Name] = c.Enabled
+		}
+		return out
+	}
+	if got := enabled("member", w.orgA); len(got) != 1 || !got[w.clusterA] {
+		t.Fatalf("clusters of org a before anything is turned off: got = %v, want its one cluster enabled", got)
+	}
+
+	// Org b turns the shared cluster of org a off, twice. It is told neither whose it is nor the
+	// key of its settings.
+	for range 2 {
+		var view ClusterView
+		rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters/"+w.clusterA+"/disable", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("disable a shared cluster: got = %d %s, want = 200", rec.Code, rec.Body)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+			t.Fatal(err)
+		}
+		if view.Name != w.clusterA || view.Enabled || !view.Shared || view.OrgID != "" || view.ClusterID != "" {
+			t.Fatalf("the disabled shared cluster: got = %+v, want it off and its owner and settings key left out", view)
+		}
+		if strings.Contains(rec.Body.String(), w.orgA) || strings.Contains(rec.Body.String(), "id-of-a") {
+			t.Fatalf("org b is shown the owner or the settings key of the cluster it turned off: %s", rec.Body)
+		}
+	}
+	if got := w.store.disabledBy; len(got) != 1 || got[0] != "u-other" {
+		t.Fatalf("who turned the cluster off: got = %v, want the one person, once", got)
+	}
+	if got := enabled("outsider", w.orgB); got[w.clusterA] || !got[w.clusterB] || len(got) != 2 {
+		t.Fatalf("clusters of org b: got = %v, want the shared one listed and off and its own on", got)
+	}
+	if got := enabled("member", w.orgA); !got[w.clusterA] {
+		t.Fatalf("clusters of org a after org b turned the shared one off: got = %v, want it still on", got)
+	}
+
+	// An org turns its own cluster off too, with an API key of the whole org, and on again.
+	var own ClusterView
+	w.ok("org-key", "POST", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/disable", nil, http.StatusOK, &own)
+	if own.Enabled || own.OrgID != w.orgA || own.ClusterID != "id-of-a" {
+		t.Fatalf("an org's own cluster turned off: got = %+v, want it off, with its owner and settings key", own)
+	}
+	if got := w.store.disabledBy; len(got) != 2 || got[1] != "k-org" {
+		t.Fatalf("who turned the cluster off: got = %v, want the key named second", got)
+	}
+	for range 2 {
+		w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/enable", nil, http.StatusOK, &own)
+		if !own.Enabled {
+			t.Fatalf("an org's own cluster turned on again: got = %+v, want it on", own)
+		}
+	}
+	if got := enabled("outsider", w.orgB); got[w.clusterA] {
+		t.Fatalf("clusters of org b after org a turned its own on: got = %v, want the shared one still off for org b", got)
+	}
+	w.ok("staff", "POST", "/orgs/"+w.orgB+"/clusters/"+w.clusterA+"/enable", nil, http.StatusOK, &own)
+	if got := enabled("outsider", w.orgB); !got[w.clusterA] {
+		t.Fatalf("clusters of org b after staff turned the shared one on for it: got = %v", got)
+	}
+}
+
+func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
+	w := newWorld(t)
+	for _, verb := range []string{"disable", "enable"} {
+		for name, tc := range map[string]struct {
+			caller, org, cluster string
+			want                 int
+		}{
+			"a member":                                  {"member", w.orgA, w.clusterA, http.StatusForbidden},
+			"a key bound to one project":                {"project-key", w.orgA, w.clusterA, http.StatusForbidden},
+			"a person of another org":                   {"outsider", w.orgA, w.clusterA, http.StatusNotFound},
+			"an owner, of another org's cluster":        {"owner", w.orgA, w.clusterB, http.StatusNotFound},
+			"an owner, under an org that is not theirs": {"owner", w.orgB, w.clusterB, http.StatusNotFound},
+			"an owner, of a name nobody registered":     {"owner", w.orgA, "never-registered", http.StatusNotFound},
+			"staff, of a cluster the org cannot use":    {"staff", w.orgA, w.clusterB, http.StatusNotFound},
+			"staff, under an org that does not exist":   {"staff", "org-missing", w.clusterA, http.StatusNotFound},
+		} {
+			if rec := w.call(tc.caller, "POST", "/orgs/"+tc.org+"/clusters/"+tc.cluster+"/"+verb, nil); rec.Code != tc.want {
+				t.Errorf("%s, %s: got = %d %s, want = %d", name, verb, rec.Code, rec.Body, tc.want)
+			}
+		}
+	}
+	for name, c := range w.store.clusters {
+		if len(c.DisabledOrgs) != 0 {
+			t.Errorf("a refused request turned %s off for %v", name, c.DisabledOrgs)
+		}
+	}
+}
+
 func TestLineageFollowsMintedByThroughAnyDepth(t *testing.T) {
 	keys := []*domain.APIKey{
 		{ID: "root"}, {ID: "child", MintedBy: "root"}, {ID: "grandchild", MintedBy: "child"},

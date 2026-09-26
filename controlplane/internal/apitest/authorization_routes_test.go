@@ -319,6 +319,8 @@ var routes = []route{
 	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgRead(people, http.StatusForbidden, reached)},
 	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"shared":true}`, rule: staffOnly},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "POST", path: "/orgs/{id}/clusters/{name}/disable", request: "/orgs/<org>/clusters/<cluster>/disable", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "POST", path: "/orgs/{id}/clusters/{name}/enable", request: "/orgs/<org>/clusters/<cluster>/enable", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}/identity", request: "/orgs/<org>/clusters/<cluster>/identity", rule: orgLevel(people, http.StatusForbidden, reached)},
 
 	// ---- runtimes and launchers ----
@@ -410,6 +412,13 @@ var cases = []struct {
 	{"a member creating a key of one project", member, "POST", "/orgs/org-a/api-keys", `{"name":"n","project_id":"prj-a1"}`, reached},
 	{"a member creating a key of the whole org", member, "POST", "/orgs/org-a/api-keys", `{"name":"n"}`, 403},
 	{"a member writing a cluster's settings", member, "PUT", "/clusters/cluster-a/settings", `{}`, 403},
+	{"a member turning a cluster off for the org's jobs", member, "POST", "/orgs/org-a/clusters/cluster-a/disable", "", 403},
+	{"a project key turning a cluster on for the org's jobs", "project key", "POST", "/orgs/org-a/clusters/cluster-a/enable", "", 403},
+	{"an owner turning off a cluster of another org that is not shared", "user", "POST", "/orgs/org-a/clusters/cluster-b/disable", "", 404},
+	{"an owner turning off a cluster under an org that is not theirs", "user", "POST", "/orgs/org-b/clusters/cluster-b/disable", "", 404},
+	{"an owner turning on a cluster nobody registered", "user", "POST", "/orgs/org-a/clusters/cluster-none/enable", "", 404},
+	{"staff turning a cluster off for an org's jobs", "staff", "POST", "/orgs/org-a/clusters/cluster-a/disable", "", reached},
+	{"staff turning off a cluster the org cannot use", "staff", "POST", "/orgs/org-a/clusters/cluster-b/disable", "", 404},
 	{"a member placing a job on a cluster by hand", member, "POST", "/experiments/job-own/admit", `{"cluster_name":"cluster-a"}`, 403},
 	{"an API key accepting an invite", "org key", "POST", "/invites/accept", `{"token":"hli_t"}`, 403},
 

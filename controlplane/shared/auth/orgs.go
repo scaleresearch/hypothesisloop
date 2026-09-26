@@ -27,6 +27,9 @@ import (
 //     staff share it.
 //   - A caller sees the clusters its jobs can be placed on: its orgs' own and the shared ones.
 //     Of a cluster another org owns it sees the name and whether it is connected.
+//   - Which of those clusters an org's jobs use is the org's own: its administrators turn any of
+//     them off and on for its jobs, a shared one of another org included. That decides nothing
+//     for any other org.
 
 // Account returns the principal when it is one that holds an account.
 func (a *Access) Account(ctx context.Context) (Principal, error) {
@@ -319,6 +322,37 @@ func (a *Access) ClusterOf(ctx context.Context, orgID, name string) (*domain.Clu
 		return nil, NotFound("cluster")
 	}
 	return cluster, nil
+}
+
+// ClusterUse admits the principal to decide whether the jobs of orgID use a cluster, and returns
+// both: an administrator of the org, for a cluster open to it, its own or a shared one. Any
+// other cluster is not found under this org.
+func (a *Access) ClusterUse(ctx context.Context, orgID, name string) (Principal, *domain.Cluster, error) {
+	p, err := a.OrgAdmin(ctx, orgID)
+	if err != nil {
+		return p, nil, err
+	}
+	cluster, err := a.placement.GetCluster(ctx, name)
+	if err != nil {
+		return p, nil, err
+	}
+	if cluster == nil || !cluster.OpenTo(orgID) {
+		return p, nil, NotFound("cluster")
+	}
+	return p, cluster, nil
+}
+
+// Actor names the account behind a decision that is recorded with its author: the person, the
+// API key, or staff acting with no person signed in.
+func (p Principal) Actor() string {
+	switch {
+	case p.UserID != "":
+		return p.UserID
+	case p.KeyID != "":
+		return p.KeyID
+	default:
+		return string(p.Kind)
+	}
 }
 
 // PlacementOrg resolves the org whose clusters a caller reads the capacity of. What an org can

@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -25,6 +26,7 @@ type memStore struct {
 	keys       map[string]*domain.APIKey
 	hashes     map[string]string // key id -> hash
 	clusters   map[string]*domain.Cluster
+	disabledBy []string
 	joined     map[string]map[string]time.Time // org -> user -> when
 	invites    map[string]*domain.OrgInvite
 	inviteIDs  map[string]string // token hash -> invite id
@@ -277,7 +279,7 @@ func (s *memStore) GetCluster(_ context.Context, name string) (*domain.Cluster, 
 func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.Cluster, error) {
 	out := []*domain.Cluster{}
 	for _, c := range s.clusters {
-		if c.Hosts(orgID) {
+		if c.OpenTo(orgID) {
 			copied := *c
 			out = append(out, &copied)
 		}
@@ -312,6 +314,23 @@ func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool)
 	}
 	out := *c
 	return &out, requeued, nil
+}
+
+func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {
+	c, ok := s.clusters[name]
+	if !ok || !c.OpenTo(orgID) {
+		return nil, db.ErrClusterNotFound
+	}
+	off := slices.Contains(c.DisabledOrgs, orgID)
+	switch {
+	case enabled && off:
+		c.DisabledOrgs = slices.DeleteFunc(c.DisabledOrgs, func(o string) bool { return o == orgID })
+	case !enabled && !off:
+		c.DisabledOrgs = append(c.DisabledOrgs, orgID)
+		s.disabledBy = append(s.disabledBy, by)
+	}
+	out := *c
+	return &out, nil
 }
 
 func (s *memStore) RemoveCluster(_ context.Context, name string) ([]string, error) {

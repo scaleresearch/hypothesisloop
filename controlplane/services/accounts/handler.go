@@ -51,6 +51,7 @@ type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
 	SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error)
+	SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error)
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
@@ -125,18 +126,30 @@ type CreatedAPIKey struct {
 	Token string `json:"token" doc:"The secret. Returned by this call only: the platform stores its hash."`
 }
 
-// ClusterView is a registered cluster as the API shows it. ClusterID is the identity its runtime
-// reported, the key of its settings, absent until its agent first connects.
+// ClusterView is a registered cluster as the API shows it to one org. ClusterID is the identity
+// its runtime reported, the key of its settings, absent until its agent first connects.
 type ClusterView struct {
 	Name      string    `json:"name"`
 	OrgID     string    `json:"org_id,omitempty"`
 	Shared    bool      `json:"shared" doc:"The platform places every org's jobs on a shared cluster. Staff decide it."`
+	Enabled   bool      `json:"enabled" doc:"Whether the jobs of the org in the path are placed on the cluster. True until an owner of that org turns the cluster off, which no other org sees or is bound by."`
 	ClusterID string    `json:"cluster_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func viewOf(c *domain.Cluster) ClusterView {
-	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
+// viewOf shows a cluster as orgID has it.
+func viewOf(c *domain.Cluster, orgID string) ClusterView {
+	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
+}
+
+// viewFor shows a cluster as orgID has it to one caller. A cluster the caller does not know keeps
+// its owner and the identity its settings are kept under to itself.
+func viewFor(c *domain.Cluster, orgID string, caller auth.Principal) ClusterView {
+	view := viewOf(c, orgID)
+	if !caller.KnowsCluster(*c) {
+		view.OrgID, view.ClusterID = "", ""
+	}
+	return view
 }
 
 // RegisteredCluster is a cluster with everything its agents are started with.
@@ -149,22 +162,17 @@ type RegisteredCluster struct {
 	ImageTag     string `json:"image_tag" doc:"The tag of the agents' images."`
 }
 
-// ListedCluster is a cluster an org's jobs can be placed on and whether its agent is connected
-// right now.
+// ListedCluster is a cluster an org can use, whether the org has it on for its jobs, and whether
+// its agent is connected right now.
 type ListedCluster struct {
 	ClusterView
 	Owned     bool `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id and cluster_id are left out."`
 	Connected bool `json:"connected"`
 }
 
-// listed shows a cluster to a caller listing the clusters of orgID. A cluster the caller does not
-// know keeps its owner and the identity its settings are kept under to itself.
+// listed shows a cluster to a caller listing the clusters of orgID.
 func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected bool) ListedCluster {
-	out := ListedCluster{ClusterView: viewOf(c), Owned: c.OrgID == orgID, Connected: connected}
-	if !caller.KnowsCluster(*c) {
-		out.OrgID, out.ClusterID = "", ""
-	}
-	return out
+	return ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected}
 }
 
 // WithdrawnCluster is a cluster after it stopped taking jobs it held, with the jobs that went
@@ -487,7 +495,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
-			ClusterView: viewOf(cluster), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
+			ClusterView: viewOf(cluster, in.ID), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
 			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
 		}}, nil
 	})
@@ -495,8 +503,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
 		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
-		Description: "The clusters the org registered and the ones the platform shares with every org, by name, with whether an agent is connected right now. " +
-			"The org may change only the ones it owns.",
+		Description: "The clusters the org registered and the ones the platform shares with every org, by name, with whether an agent is connected right now " +
+			"and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {
@@ -528,6 +536,39 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return out, nil
 	})
 
+	for _, use := range []struct {
+		verb, summary, description string
+		enabled                    bool
+	}{
+		{"disable", "Turn a cluster off for an org's jobs",
+			"From here on no job of the org is placed on the cluster, by the scheduler or by hand, and the capacity the org reads leaves it out. " +
+				"The org's jobs already placed there are not touched: they run to their end. A queued job of an org that turned off every cluster " +
+				"it could use waits with not_admitted_reason clusters_disabled. ", false},
+		{"enable", "Turn a cluster on again for an org's jobs",
+			"The org's jobs are placed on the cluster again, which is how every cluster starts. ", true},
+	} {
+		route(doc, h, huma.Operation{
+			OperationID: use.verb + "-cluster", Method: "POST", Path: "/orgs/{id}/clusters/{name}/" + use.verb,
+			Summary: use.summary, Tags: []string{"clusters"},
+			Description: use.description +
+				"The cluster is any the org can use, its own or one the platform shares, and the decision is the org's alone: it changes nothing for another org. " +
+				"An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found.",
+		}, func(ctx context.Context, in *struct {
+			ID   string `path:"id"`
+			Name string `path:"name"`
+		}) (*struct{ Body ClusterView }, error) {
+			caller, _, err := h.access.ClusterUse(ctx, in.ID, in.Name)
+			if err != nil {
+				return nil, err
+			}
+			cluster, err := h.clusters.SetClusterEnabled(ctx, in.Name, in.ID, caller.Actor(), use.enabled)
+			if err != nil {
+				return nil, err
+			}
+			return &struct{ Body ClusterView }{Body: viewFor(cluster, in.ID, caller)}, nil
+		})
+	}
+
 	route(doc, h, huma.Operation{
 		OperationID: "share-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
 		Summary: "Share a cluster with every org, or stop sharing it", Tags: []string{"clusters"},
@@ -551,7 +592,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster), Requeued: orEmpty(requeued)}}, nil
+		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster, in.ID), Requeued: orEmpty(requeued)}}, nil
 	})
 
 	route(doc, h, huma.Operation{
@@ -572,7 +613,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster), Requeued: orEmpty(requeued)}}, nil
+		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster, in.ID), Requeued: orEmpty(requeued)}}, nil
 	})
 
 	route(doc, h, huma.Operation{
@@ -592,7 +633,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body ClusterView }{Body: viewOf(cluster)}, nil
+		return &struct{ Body ClusterView }{Body: viewOf(cluster, in.ID)}, nil
 	})
 }
 
