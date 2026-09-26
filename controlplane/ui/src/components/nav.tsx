@@ -1,5 +1,6 @@
 'use client'
 
+import { clustersInUse } from '@/lib/clusters'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { clsx } from 'clsx'
@@ -52,15 +53,12 @@ function SystemStatus() {
       <StatusLine tone={error ? 'danger' : 'idle'} label={error ? 'Cluster status unknown' : 'Checking clusters…'} sub={error?.message} />
     )
   }
-  const clusters = data.filter(c => c.owned)
-  const connected = clusters.filter(c => c.connected).length
-  const allUp = clusters.length > 0 && connected === clusters.length
-  const someUp = connected > 0
-  // An org with no cluster of its own is not degraded: its jobs run on the shared ones.
-  const tone = clusters.length === 0 ? 'idle' : allUp ? 'success' : someUp ? 'warning' : 'danger'
-  const label = clusters.length === 0 ? 'No clusters of your own' : allUp ? 'All systems nominal' : someUp ? 'Degraded' : 'Offline'
+  // What the org's jobs can run on: its own clusters and the platform's it uses.
+  const { used, online, whose } = clustersInUse(data)
+  const tone = used === 0 ? 'idle' : online === used ? 'success' : online > 0 ? 'warning' : 'danger'
+  const label = used === 0 ? 'No cluster in use' : online === used ? 'All systems nominal' : online > 0 ? 'Degraded' : 'Offline'
 
-  return <StatusLine tone={tone} label={label} sub={`${connected}/${clusters.length} clusters online`} />
+  return <StatusLine tone={tone} label={label} sub={`${online}/${used} clusters online${whose ? ` · ${whose}` : ''}`} />
 }
 
 function Account() {

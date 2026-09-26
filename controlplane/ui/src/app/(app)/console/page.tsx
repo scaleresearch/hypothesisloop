@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
+import { clustersInUse } from '@/lib/clusters'
 import { fetchOrgClusters, fetchExperimentStats, fetchAgentsPage, fetchPlatformExperimentsPage } from '@/lib/api'
 import { useProjectRouter } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
@@ -27,8 +28,7 @@ function LiveStrip() {
   const { data: stats, error: statsError } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
   const { data: agents, error: agentsError } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
 
-  const own = clusters?.filter(c => c.owned)
-  const connected = own?.filter(c => c.connected).length
+  const inUse = clusters && clustersInUse(clusters)
 
   // A count that failed to load says so, and one still loading has no colour to mislead with.
   function item(label: string, error: Error | undefined, value: string | undefined, color: string) {
@@ -37,7 +37,10 @@ function LiveStrip() {
     return { label, value, color, title: undefined }
   }
   const items = [
-    item('Own clusters online', clustersError, own && `${connected}/${own.length}`, connected === own?.length ? semantic.success : semantic.warning),
+    // What jobs can run on, the platform's clusters with the org's own: a person with none of
+    // their own is not without compute.
+    item(inUse?.whose ? `Clusters online (${inUse.whose})` : 'Clusters online', clustersError, inUse && `${inUse.online}/${inUse.used}`,
+      inUse && inUse.used > 0 && inUse.online === inUse.used ? semantic.success : semantic.warning),
     // A status no job holds is absent from the answer.
     item('Jobs running', statsError, stats && String(stats.by_status?.RUNNING ?? 0), semantic.success),
     item('Registered agents', agentsError, agents && String(agents.total), semantic.accent),
