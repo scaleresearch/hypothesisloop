@@ -187,22 +187,12 @@ export interface MetricDefinition {
   bound?: number
 }
 
-// SubmitterPolicy restricts who may submit a hypothesis or a job: a real person, an autonomous
-// agent, or both. Empty/absent means 'mixed' — every platform experiment created before this
-// field existed keeps accepting both, unchanged.
-export type SubmitterPolicy = 'mixed' | 'human_only' | 'agent_only'
-
 export interface PlatformExperiment {
   id: string
   project_id: string
   name: string
   description?: string
   budget_accelerator_hours: number
-  // Who may submit a hypothesis / a job in this platform experiment. Independent settings — an
-  // operator may want humans-only ideation with any agent free to run jobs against it, or the
-  // reverse. Locked once the experiment is running (see the create/edit form).
-  hypothesis_submit_policy?: SubmitterPolicy
-  job_submit_policy?: SubmitterPolicy
   max_agents: number
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
@@ -411,7 +401,7 @@ interface HypothesisGraphEdge {
 // metric with the summary filed for that job. Each is absent when there is none.
 export interface HypothesisGraphNode extends HypothesisListItem {
   finding?: HypothesisFinding
-  best_job?: { id: string; metric: JobMetric; summary?: string }
+  best_job?: { id: string; metric: JobMetric; summary?: string; summary_due: boolean }
 }
 
 // GET /hypotheses/graph: one platform experiment's whole graph. `root` is the objective's id,

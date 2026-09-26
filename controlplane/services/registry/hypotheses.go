@@ -279,6 +279,8 @@ type BestJob struct {
 	Metric *domain.JobMetric `json:"metric"`
 	// Summary is the write-up filed for this job, absent when none was.
 	Summary string `json:"summary,omitempty"`
+	// SummaryDue says the job completed and no summary was filed for it.
+	SummaryDue bool `json:"summary_due"`
 }
 
 // maxFindings bounds how many hypotheses Findings reads.
@@ -359,18 +361,23 @@ func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinitio
 		best[job.HypothesisID] = job
 	}
 	bestIDs := make([]string, 0, len(best))
+	bestJobs := make([]*domain.Experiment, 0, len(best))
 	for _, job := range best {
 		bestIDs = append(bestIDs, job.ID)
+		bestJobs = append(bestJobs, job)
 	}
 	summaries, err := s.store.FindingSummaries(ctx, bestIDs)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.store.DescribeJobs(ctx, bestJobs); err != nil {
 		return nil, err
 	}
 	out := make(map[string]Evidence, len(ids))
 	for _, id := range ids {
 		e := Evidence{Finding: newest[id]}
 		if job := best[id]; job != nil {
-			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric, Summary: summaries[job.ID]}
+			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric, Summary: summaries[job.ID], SummaryDue: job.SummaryDue}
 		}
 		out[id] = e
 	}

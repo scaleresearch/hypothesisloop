@@ -228,11 +228,6 @@ export function fetchExperimentsPage(params: ExperimentsParams): Promise<Page<Ex
   return apiFetchPage<Experiment>(withQuery('/experiments', params))
 }
 
-// The ids of the completed jobs no summary was filed for, at most the 50 newest.
-export function fetchUnsummarizedJobIDs(params: Pick<ExperimentsParams, 'project_id' | 'agent_id' | 'platform_experiment_id'>): Promise<Set<string>> {
-  return fetchExperimentsPage({ ...params, needs_summary: true, limit: 50 }).then(p => new Set(p.items.map(j => j.id)))
-}
-
 export function fetchExperiments(params: ExperimentsParams): Promise<Experiment[]> {
   return fetchExperimentsPage(params).then(p => p.items)
 }
@@ -326,8 +321,9 @@ export function fetchHypothesisStats(platformExperimentID: string): Promise<Hypo
 // testing it that did best on the ranking metric.
 export interface HypothesisEvidence extends Hypothesis {
   finding?: HypothesisFinding
-  // summary is the write-up filed for that job, absent when none was.
-  best_job?: { id: string; metric: JobMetric; summary?: string }
+  // summary is the write-up filed for that job, absent when none was. summary_due says the job
+  // completed and none was filed.
+  best_job?: { id: string; metric: JobMetric; summary?: string; summary_due: boolean }
 }
 
 // Drawn from the 200 newest hypotheses.

@@ -509,7 +509,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Get one platform experiment's whole hypothesis graph", Tags: []string{"hypotheses"},
 		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
 			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. " +
-			"A node also carries finding, the newest one filed against it, and best_job {id, metric, summary}, the job testing it with the " +
+			"A node also carries finding, the newest one filed against it, and best_job {id, metric, summary, summary_due}, the job testing it with the " +
 			"best raw value on the first ranking metric and the summary filed for that job; each is absent when there is none. Unpaged, " +
 			"for drawing the graph.",
 	}, func(ctx context.Context, in *struct {
@@ -605,7 +605,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "platform-experiment-findings", Method: "GET", Path: "/platform-experiments/{id}/findings",
 		Summary: "What a platform experiment has found", Tags: []string{"hypotheses"},
 		Description: "Among its 200 newest hypotheses, each one that holds a verdict, a finding or a job with a " +
-			"metric, whatever its status, with finding, the newest one filed against it, and best_job {id, metric, summary}, " +
+			"metric, whatever its status, with finding, the newest one filed against it, and best_job {id, metric, summary, summary_due}, " +
 			"the job testing it with the best raw value on the first ranking metric and the summary filed for that job, if any. A finding whose created_at is " +
 			"later than status_changed_at was filed after the verdict.",
 	}, func(ctx context.Context, in *struct {
