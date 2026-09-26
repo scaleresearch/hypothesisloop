@@ -569,7 +569,8 @@ def test_a_launcher_is_answered_while_it_is_registered_and_refused_when_its_pass
     try:
         as_launcher = api.as_caller(token)
         # No agent is given to it: an empty list, on which a launcher destroys what it holds.
-        assert as_launcher.post_json(f"/internal/launchers/{name}/reconcile", api.launcher_question()) == {"instances": [], "ending": []}
+        desired = as_launcher.post_json(f"/internal/launchers/{name}/reconcile", api.launcher_question())
+        assert (desired["instances"], desired["ending"]) == ([], []), desired
 
         # Ten new machines an answer, a minute between two creates: no pass ends inside any boot
         # limit a deployment would set, and the refusal says the arithmetic.

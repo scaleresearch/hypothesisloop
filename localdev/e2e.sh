@@ -83,6 +83,21 @@ kubectl config view --minify --flatten --context "${context}" > "${kubeconfig}"
 export KUBECONFIG="${kubeconfig}"
 
 bash localdev/k3s-macos/dev-nodes-up.sh
+# A node that just joined is in the control plane's catalog only once the cluster's agent has
+# reported it. A test that started before that read a catalog short of the nodes kubectl lists.
+kubectl -n hypothesisloop rollout status daemonset/hypothesisloop-node-agent --timeout=180s
+installed="$(kubectl get nodes -o json | python3 -c 'import json, sys; print(sum(int(n["status"]["allocatable"].get("nvidia.com/gpu", 0)) for n in json.load(sys.stdin)["items"]))')"
+reported=""
+for _ in $(seq 1 60); do
+  reported="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/resource-catalog/capacity" |
+    python3 -c 'import json, sys; print(sum(a["total"] for c in json.load(sys.stdin)["clusters"] if c["cluster_name"] == "local" for a in c["accelerators"] or []))')"
+  [[ "${reported}" == "${installed}" ]] && break
+  sleep 2
+done
+if [[ "${reported}" != "${installed}" ]]; then
+  echo "e2e: the nodes of ${context} hold ${installed} accelerators and the control plane's catalog reports ${reported} for cluster local after two minutes" >&2
+  exit 1
+fi
 
 # The tests that work on a real repository run when .env names the sandbox and the stack has the
 # GitHub App that reaches it. They skip themselves otherwise.
