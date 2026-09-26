@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -22,11 +23,15 @@ type config struct {
 	Namespace string `yaml:"namespace"`
 	// The loop intervals and how much of a job's output a status push relays. Each pass costs
 	// calls to the vendor's API, so these are the operator's to set against its rate limit.
-	ReconcileIntervalSeconds int            `yaml:"reconcile_interval_seconds"`
-	StatusIntervalSeconds    int            `yaml:"status_interval_seconds"`
-	LogTailLines             int            `yaml:"log_tail_lines"`
-	Provider                 providerConfig `yaml:"provider"`
-	Shapes                   []shapeConfig  `yaml:"shapes"`
+	ReconcileIntervalSeconds int `yaml:"reconcile_interval_seconds"`
+	StatusIntervalSeconds    int `yaml:"status_interval_seconds"`
+	LogTailLines             int `yaml:"log_tail_lines"`
+	// How long a job may wait for a machine to rent, and a rented one to start, before the job
+	// is given up here and the machine destroyed.
+	OfferWaitSeconds int            `yaml:"offer_wait_seconds"`
+	StartupSeconds   int            `yaml:"startup_seconds"`
+	Provider         providerConfig `yaml:"provider"`
+	Shapes           []shapeConfig  `yaml:"shapes"`
 
 	shapes []cloudexec.Shape
 }
@@ -57,6 +62,9 @@ func loadConfig(path string) (*config, error) {
 	if cfg.ClusterName == "" || cfg.Provider.Name == "" || cfg.Provider.AccountID == "" {
 		return nil, fmt.Errorf("config: cluster_name, provider.name and provider.account_id are required")
 	}
+	if cfg.OfferWaitSeconds <= 0 || cfg.StartupSeconds <= 0 {
+		return nil, fmt.Errorf("config: offer_wait_seconds and startup_seconds must be positive")
+	}
 	if cfg.ReconcileIntervalSeconds <= 0 || cfg.StatusIntervalSeconds <= 0 {
 		return nil, fmt.Errorf("config: reconcile_interval_seconds and status_interval_seconds must be positive")
 	}
@@ -81,6 +89,8 @@ func (cfg *config) executor(rented provider.Provider) cloudexec.Config {
 		APIURL:       cfg.APIURL,
 		JobImage:     cfg.JobImage,
 		LogTailLines: cfg.LogTailLines,
+		OfferWait:    time.Duration(cfg.OfferWaitSeconds) * time.Second,
+		Startup:      time.Duration(cfg.StartupSeconds) * time.Second,
 		Shapes:       cfg.shapes,
 		Provider:     rented,
 	}

@@ -54,7 +54,7 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 	p.created++
 	id := fmt.Sprintf("fake-%04d", p.created)
 	p.instances[id] = &instance{
-		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
+		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now()},
 		spec:     spec,
 	}
 	return id, nil

@@ -70,8 +70,8 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	if phase, attempt := status(t, e, "exp-1"); phase != workload.JobPhasePending || attempt != 2 {
 		t.Fatalf("status = %v attempt %d, want the new attempt's", phase, attempt)
 	}
-	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 2); err != nil || reason != "" || message != "" {
-		t.Fatalf("detail = %q %q, %v", reason, message, err)
+	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 2); err != nil || reason != domain.PhaseReasonInstanceStarting {
+		t.Fatalf("detail = %q %q, %v, want the new attempt's starting instance and nothing of the old one's exit", reason, message, err)
 	}
 }
 

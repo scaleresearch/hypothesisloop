@@ -1,10 +1,12 @@
 package cloudexec
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -71,6 +73,9 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		return fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
 	id, err := e.provider.Create(ctx, spec)
+	if errors.Is(err, provider.ErrNoOffer) {
+		return e.withoutOffer(exp, shape)
+	}
 	if err != nil {
 		return fmt.Errorf("cloudexec: create instance %s: %w", spec.Name, err)
 	}
@@ -79,6 +84,24 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
 	})
 	return nil
+}
+
+// withoutOffer is what a job is told when there is no machine to rent for it: that it waits,
+// and once it has waited OfferWait since its admission, that this cluster cannot run it.
+func (e *Executor) withoutOffer(exp *domain.Experiment, shape Shape) error {
+	if exp.SubmittedAt == nil {
+		return fmt.Errorf("cloudexec: experiment %s is placed here with no admission time", exp.ID)
+	}
+	what := fmt.Sprintf("no machine to rent for shape %s (%s) within the provider's configured filters", shape.Name, cmp.Or(shape.AcceleratorType, "no accelerator"))
+	if time.Since(*exp.SubmittedAt) >= e.offerWait {
+		return &agentexec.Unrunnable{Reason: domain.PhaseReasonNoOffer, Why: fmt.Sprintf("%s in %s of asking", what, e.offerWait)}
+	}
+	return &agentexec.Waiting{Reason: domain.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job fails as no_offer if none comes within %s of its admission", what, e.offerWait)}
+}
+
+// overdue says i was rented longer ago than Startup and has not started its command.
+func (e *Executor) overdue(i instance) bool {
+	return i.State == provider.StateStarting && !i.StartedAt.IsZero() && time.Since(i.StartedAt) > e.startup
 }
 
 // DeleteWorkload ends experimentID's instances. The control plane's grant is acted on as it is
@@ -191,6 +214,10 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 // WorkloadMatchesDesired is true when every live instance of exp is its workload: of its current
 // attempt and in the slot it is pinned to. Both are in the name, which is all an instance can be
 // compared on. A requeue changes the first, a readmission the second.
+//
+// An instance that has not started within Startup does not match either: the pass destroys it
+// and the next rents another, until the control plane's own deadline for a job that is not
+// running requeues or ends the job.
 func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -202,6 +229,10 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 			continue
 		}
 		if !workloadOf(exp, i) {
+			return false, nil
+		}
+		if e.overdue(i) {
+			log.Printf("cloudexec: instance %s has not started in %s and is replaced", i.Name, e.startup)
 			return false, nil
 		}
 		matches = true

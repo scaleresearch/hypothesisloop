@@ -36,6 +36,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -95,6 +96,10 @@ type Spec struct {
 	MemoryBytes      int64
 	DiskBytes        int64
 }
+
+// ErrNoOffer is a Create that rented nothing because the vendor has no machine for the spec
+// right now. Nothing is left behind, and a later Create may find one.
+var ErrNoOffer = errors.New("no offer matches")
 
 type Instance struct {
 	ID        string

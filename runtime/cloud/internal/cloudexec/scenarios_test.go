@@ -3,12 +3,16 @@ package cloudexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
@@ -44,6 +48,17 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	}
 	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
 		t.Fatalf("available = %v, want the booting instance's slot taken", available)
+	}
+	if reason, message, _, _, _, _ := e.PollPhaseDetail(ctx, "exp-1", 0); reason != domain.PhaseReasonInstanceStarting || message == "" {
+		t.Fatalf("a starting instance reads as %q %q, want it to say what the job waits for", reason, message)
+	}
+
+	// Past the startup bound it is no longer the workload wanted: the pass destroys it and the
+	// next rents another, so nothing rented and not running is kept.
+	overdue := *e
+	overdue.startup = time.Nanosecond
+	if matches, err := overdue.WorkloadMatchesDesired(ctx, exp); err != nil || matches {
+		t.Fatalf("an instance starting past the bound: matches %v, %v, want it replaced", matches, err)
 	}
 
 	// stuck_pending is an infrastructure fault, so its delete carries no grant.
@@ -139,6 +154,27 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseGone || len(p.Names()) != 0 {
 		t.Fatalf("phase %v, rented %v", phase, p.Names())
 	}
+
+	// With no machine to rent the job waits and says so, and past the bound it is one this
+	// cluster cannot run, under the reason the control plane ends it for.
+	p.Fail = func(method, _ string) error {
+		if method == "Create" {
+			return fmt.Errorf("vendor: %w", provider.ErrNoOffer)
+		}
+		return nil
+	}
+	admitted := time.Now()
+	exp.SubmittedAt = &admitted
+	var waiting *agentexec.Waiting
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || waiting.Reason != domain.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
+		t.Fatalf("no offer yet: err = %v, want the job waiting for one for its shape", err)
+	}
+	admitted = time.Now().Add(-time.Hour)
+	var unrunnable *agentexec.Unrunnable
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonNoOffer {
+		t.Fatalf("no offer past the bound: err = %v, want no_offer", err)
+	}
+
 	p.Fail = nil
 	mustCreate(t, e, exp)
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {

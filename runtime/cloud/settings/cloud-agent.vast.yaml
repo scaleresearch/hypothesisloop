@@ -22,6 +22,12 @@ reconcile_interval_seconds: 10
 # hold: 30 for these six, 60 for twenty.
 status_interval_seconds: 30
 log_tail_lines: 100
+# How long a job may wait for a machine to rent before it fails here as no_offer, and how long
+# a rented machine may take to start the job before it is destroyed and another rented. Both
+# are kept under the control plane's stuck-pending timeout (300 seconds unless the cluster sets
+# its own), which requeues a job that is not running by then, so that the job reads why.
+offer_wait_seconds: 180
+startup_seconds: 240
 
 provider:
   name: vast

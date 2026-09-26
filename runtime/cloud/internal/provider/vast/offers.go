@@ -89,7 +89,7 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 		return nil, err
 	}
 	if len(found.Offers) == 0 {
-		return nil, fmt.Errorf("vast: no offer matches %q within the configured filters", spec.Name)
+		return nil, fmt.Errorf("vast: %w %q within the configured filters", provider.ErrNoOffer, spec.Name)
 	}
 	chosen := cheapestPerMachine(found.Offers, offerCandidates)
 	p.shuffle(chosen)

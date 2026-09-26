@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -41,7 +42,7 @@ func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 }
 
 func testConfig(p provider.Provider) Config {
-	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, LogTailLines: 100, Shapes: testShapes, Provider: p}
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, LogTailLines: 100, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p}
 }
 
 type goldenAnswer struct {

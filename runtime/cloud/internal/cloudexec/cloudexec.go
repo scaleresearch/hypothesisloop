@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
@@ -50,6 +51,12 @@ type Config struct {
 	LogTailLines int
 	Shapes       []Shape
 	Provider     provider.Provider
+	// OfferWait is how long a job may wait from its admission for a machine to rent before it is
+	// reported as one this cluster cannot run.
+	OfferWait time.Duration
+	// Startup is how long a rented instance may take to start its command. Past it the instance
+	// is destroyed and another rented, so nothing rented and not running is paid for longer.
+	Startup time.Duration
 }
 
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
@@ -62,6 +69,8 @@ type Executor struct {
 	logTailLines int
 	shapes       []Shape
 	provider     provider.Provider
+	offerWait    time.Duration
+	startup      time.Duration
 	pass         *view
 	// undestroyed is the instances a destroy failed for since the process started, by id with
 	// their names. It is only what Leave asks for again: each pass finds them anew in the
@@ -99,6 +108,8 @@ func New(cfg Config) (*Executor, error) {
 		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
 		provider:     provider.Bounded(cfg.Provider),
+		offerWait:    cfg.OfferWait,
+		startup:      cfg.Startup,
 		undestroyed:  map[string]string{}, undestroyedMu: &sync.Mutex{},
 	}, nil
 }
@@ -116,6 +127,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.LogTailLines <= 0 {
 		return fmt.Errorf("cloudexec: LogTailLines must be positive")
+	}
+	if cfg.OfferWait <= 0 || cfg.Startup <= 0 {
+		return fmt.Errorf("cloudexec: OfferWait and Startup must be positive")
 	}
 	if len(cfg.Shapes) == 0 {
 		return fmt.Errorf("cloudexec: at least one shape is required")

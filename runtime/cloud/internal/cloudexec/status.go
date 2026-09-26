@@ -39,8 +39,11 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, att
 		return "", "", 0, 0, "", err
 	}
 	i, ok := v.newest(experimentID)
-	if !ok || (attempt != workload.AttemptUnknown && i.attempt != attempt) || i.State == provider.StateStarting {
+	if !ok || (attempt != workload.AttemptUnknown && i.attempt != attempt) {
 		return "", "", 0, 0, "", nil
+	}
+	if i.State == provider.StateStarting {
+		return domain.PhaseReasonInstanceStarting, fmt.Sprintf("a machine is rented and has not started the job yet; it is replaced by another if it has not within %s", e.startup), 0, 0, "", nil
 	}
 	if i.State != provider.StateExited {
 		return "", "", 0, 1, "", nil
