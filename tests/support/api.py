@@ -417,7 +417,7 @@ class API:
         (a reason); with neither given the test's own reason is sent."""
         if status in ("confirmed", "refuted") and not evidence:
             evidence = {"despite": self.NO_EVIDENCE}
-        return self.post(f"/hypotheses/{hyp_id}/status", {"agent_id": agent_id, "status": status, **evidence})
+        return self.post(f"/hypotheses/{hyp_id}/status", {"status": status, **evidence} | ({"agent_id": agent_id} if agent_id else {}))
 
     # ---- jobs / experiments ---------------------------------------------------------------------
 

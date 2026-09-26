@@ -27,6 +27,10 @@ type Hypothesis struct {
 	CreatedAt            time.Time        `json:"created_at"`
 	// StatusChangedAt is when Status last moved; nil while it still holds its initial value.
 	StatusChangedAt *time.Time `json:"status_changed_at"`
+	// StatusActor is whose credential last moved Status, nil while it still holds its initial
+	// value. The verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and
+	// this says who gave it: the agent itself, or the person or API key acting for it.
+	StatusActor *Actor `json:"status_actor"`
 }
 
 // HypothesisSource records who put a row in the pool. A human watching a run adds an idea from

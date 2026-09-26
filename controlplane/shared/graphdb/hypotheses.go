@@ -192,10 +192,10 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 }
 
 // UpdateStatus sets a hypothesis's status on behalf of callerAgentID, at watch stream position
-// stamp.Position: the owning agent's verdict on its own claim, or anyone's on a human-submitted
-// one. announce is true when the caller emits hypothesis.status: the status changed, or it already
+// stamp.Position: the owning agent's verdict on its own claim, or anyone's on one no agent owns.
+// actor is whose credential gives the verdict, kept with the status it set. announce is true when the caller emits hypothesis.status: the status changed, or it already
 // held that value and the event of the write that set it was never sent (see restamp).
-func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (h *domain.Hypothesis, announce bool, err error) {
+func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (h *domain.Hypothesis, announce bool, err error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		h, err := getHypothesis(ctx, tx, id)
@@ -215,8 +215,10 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, stat
 		if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at, h.status_changed_xid = $position RETURN h`,
-			map[string]any{"id": id, "status": string(status), "at": at, "position": stamp.Position})
+		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at, h.status_changed_xid = $position,
+  h.status_actor_kind = $actor_kind, h.status_actor_id = $actor_id RETURN h`,
+			map[string]any{"id": id, "status": string(status), "at": at, "position": stamp.Position,
+				"actor_kind": string(actor.Kind), "actor_id": actor.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -664,6 +666,12 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 	if v, ok := p["status_changed_at"]; ok && v != nil {
 		changed := d.time(v)
 		h.StatusChangedAt = &changed
+		// A verdict from before its giver was kept names nobody but the agent it had to be given as.
+		by := domain.StoredActor(domain.ActorUnverified, "", "", h.AgentID)
+		if kind, ok := p["status_actor_kind"]; ok && kind != nil {
+			by = domain.StoredActor(domain.ActorKind(d.str(kind)), d.str(p["status_actor_id"]), "", h.AgentID)
+		}
+		h.StatusActor = &by
 	}
 	if d.err != nil {
 		return nil, fmt.Errorf("hypothesis %v: %w", p["id"], d.err)

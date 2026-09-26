@@ -163,7 +163,7 @@ func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
-	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", domain.HypothesisRefuted, stampAt(1)); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
 		t.Fatal(err)
 	}
 	child := NewHypothesis{AgentID: "agent-1", PlatformExperimentID: pe,
@@ -462,6 +462,19 @@ CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at, created_
 	if err != nil {
 		t.Fatalf("write old rows: %v", err)
 	}
+	if _, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (a:Hypothesis {id: $pe + '-agent'}) SET a.status = 'refuted', a.status_changed_at = $at, a.status_changed_xid = 2`,
+			map[string]any{"pe": pe, "at": now()})
+	}); err != nil {
+		t.Fatalf("write an old verdict: %v", err)
+	}
+	ruled, err := s.GetHypothesis(ctx, pe+"-agent")
+	if err != nil || ruled.StatusActor == nil || *ruled.StatusActor != (domain.Actor{Kind: domain.ActorUnverified, Name: "agent-1"}) {
+		t.Errorf("an old verdict: got = %+v, %v, want an unverified status actor named by the owning agent", ruled, err)
+	}
+	if never, err := s.GetHypothesis(ctx, pe+"-person"); err != nil || never.StatusActor != nil {
+		t.Errorf("a hypothesis never ruled on: got status actor %+v, %v, want none", never.StatusActor, err)
+	}
 	want := map[string]domain.Actor{
 		pe + "-agent":  {Kind: domain.ActorUnverified, Name: "agent-1"},
 		pe + "-person": {Kind: domain.ActorUnverified, Name: "Grace"},
@@ -506,25 +519,50 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 	ctx := context.Background()
 	h := register(t, s, pe, "agent-1", "a", onRoot(pe))
 
-	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", agentActor("agent-2"), domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("non-owner: got = %v, want %v", err, ErrNotOwner)
 	}
-	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown: got = %v, want %v", err, ErrNotFound)
 	}
-	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted, stampAt(1))
+	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1))
 	if err != nil || !changed || got.Status != domain.HypothesisRefuted || got.StatusChangedAt == nil {
 		t.Fatalf("owner: got = (%+v, %v, %v), want refuted with status_changed_at", got, changed, err)
 	}
-	if _, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisRefuted, stampAt(1)); err != nil || changed {
-		t.Errorf("same status again: got = (%v, %v), want (false, nil)", changed, err)
+	if h.StatusActor != nil || got.StatusActor == nil || *got.StatusActor != agentActor("agent-1") {
+		t.Fatalf("who gave the verdict: got = %+v before and %+v after, want nobody and then agent-1", h.StatusActor, got.StatusActor)
+	}
+	// Saying again what it already is changes nothing, whoever says it.
+	again, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisRefuted, stampAt(1))
+	if err != nil || changed || *again.StatusActor != agentActor("agent-1") {
+		t.Errorf("same status again: got = (%+v, %v, %v), want it unchanged and still agent-1's verdict", again.StatusActor, changed, err)
+	}
+	// A person rules for the owning agent: the verdict is the agent's and the person gave it.
+	reopened, _, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisInconclusive, stampAt(1))
+	if err != nil || reopened.AgentID != "agent-1" || *reopened.StatusActor != userActor("user-ada") {
+		t.Errorf("a person ruling for the agent: got = %+v, %v, want agent-1's hypothesis with user-ada as status actor", reopened, err)
+	}
+	if read, err := s.GetHypothesis(ctx, h.ID); err != nil || read.StatusActor == nil || *read.StatusActor != userActor("user-ada") || read.Actor != agentActor("agent-1") {
+		t.Errorf("read back: got = %+v, %v, want registered by agent-1 and ruled by user-ada", read, err)
+	}
+	// Nobody owns this one, so anyone settles it, naming no agent.
+	unowned, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "nobody's", Links: onRoot(pe)})
+	if err != nil {
+		t.Fatalf("Register unowned: %v", err)
+	}
+	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
+	if settled, _, err := s.UpdateStatus(ctx, unowned.ID, "", key, domain.HypothesisInconclusive, stampAt(1)); err != nil || *settled.StatusActor != key {
+		t.Errorf("settling an unowned hypothesis as nobody: got = %+v, %v, want key-1 as status actor", settled, err)
+	}
+	if _, _, err := s.UpdateStatus(ctx, h.ID, "", key, domain.HypothesisOpen, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+		t.Errorf("settling an agent's hypothesis as nobody: got = %v, want %v", err, ErrNotOwner)
 	}
 
 	register(t, s, pe, "agent-1", "b", onRoot(pe))
 	stats, err := s.HypothesisStats(ctx, ListFilter{PlatformExperimentID: pe})
-	if err != nil || stats.Total != 2 || len(stats.ByStatus) != 2 ||
-		stats.ByStatus[domain.HypothesisRefuted] != 1 || stats.ByStatus[domain.HypothesisOpen] != 1 {
-		t.Errorf("HypothesisStats: got = (%+v, %v), want total 2 with 1 refuted and 1 open", stats, err)
+	if err != nil || stats.Total != 3 || len(stats.ByStatus) != 2 ||
+		stats.ByStatus[domain.HypothesisInconclusive] != 2 || stats.ByStatus[domain.HypothesisOpen] != 1 {
+		t.Errorf("HypothesisStats: got = (%+v, %v), want total 3 with 2 inconclusive and 1 open", stats, err)
 	}
 }
 
@@ -738,7 +776,7 @@ func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.
 	if _, err := s.AddLink(ctx, b.ID, "agent-2", agentActor("agent-2"), domain.LinkSpec{Type: domain.LinkContradicts, To: a.ID}, stampAt(12)); err != nil {
 		t.Fatalf("AddLink: got = %v, want nil", err)
 	}
-	if _, _, err := s.UpdateStatus(ctx, a.ID, "agent-1", domain.HypothesisConfirmed, stampAt(13)); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stampAt(13)); err != nil {
 		t.Fatalf("UpdateStatus: got = %v, want nil", err)
 	}
 
@@ -793,7 +831,7 @@ func TestRepeatingAWriteWhoseTransactionAbortedAnnouncesItAgain(t *testing.T) {
 	if err != nil || !announce {
 		t.Fatalf("Register: got = (announce=%v, %v), want (true, nil)", announce, err)
 	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisConfirmed, stamp(20)); err != nil || !announce {
+	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(20)); err != nil || !announce {
 		t.Fatalf("UpdateStatus: got = (announce=%v, %v), want (true, nil)", announce, err)
 	}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(20)); err != nil || !result.Announce {
@@ -804,7 +842,7 @@ func TestRepeatingAWriteWhoseTransactionAbortedAnnouncesItAgain(t *testing.T) {
 	if _, _, existed, announce, err := s.Register(ctx, n); err != nil || !existed || !announce {
 		t.Errorf("Register again after an abort: got = (existed=%v, announce=%v, %v), want (true, true, nil)", existed, announce, err)
 	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisConfirmed, stamp(21)); err != nil || !announce {
+	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(21)); err != nil || !announce {
 		t.Errorf("UpdateStatus again after an abort: got = (announce=%v, %v), want (true, nil)", announce, err)
 	}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(21)); err != nil || result.Created || !result.Announce {
@@ -824,7 +862,7 @@ func TestRepeatingAWriteWhoseTransactionAbortedAnnouncesItAgain(t *testing.T) {
 	if _, _, _, announce, err := s.Register(ctx, n); err != nil || announce {
 		t.Errorf("Register again after a commit: got = (announce=%v, %v), want (false, nil)", announce, err)
 	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", domain.HypothesisConfirmed, stamp(22)); err != nil || announce {
+	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(22)); err != nil || announce {
 		t.Errorf("UpdateStatus again after a commit: got = (announce=%v, %v), want (false, nil)", announce, err)
 	}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(22)); err != nil || result.Announce {

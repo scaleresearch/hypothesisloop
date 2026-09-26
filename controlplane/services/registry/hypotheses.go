@@ -97,7 +97,10 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 
 // hypothesisActors and linkActors are the actors a hypothesis and its links carry, for naming.
 func hypothesisActors(h *domain.Hypothesis) []*domain.Actor {
-	return []*domain.Actor{&h.Actor}
+	if h.StatusActor == nil {
+		return []*domain.Actor{&h.Actor}
+	}
+	return []*domain.Actor{&h.Actor, h.StatusActor}
 }
 
 func linkActors(links []domain.Link) []*domain.Actor {
@@ -359,12 +362,14 @@ func (s *Service) addActivity(ctx context.Context, items []*domain.HypothesisLis
 }
 
 // SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID: the owning agent's
-// own verdict on its own claim, or any agent's verdict on an unowned human row (see
-// domain.HypothesisStatus). Ownership is checked in the same graph transaction as the write.
+// own verdict on its own claim, or anyone's on a hypothesis no agent owns, for which
+// callerAgentID may be empty (see domain.HypothesisStatus). Ownership is checked in the same
+// graph transaction as the write. actor is the credential giving the verdict, kept on the
+// hypothesis as its status_actor.
 //
 // A confirmed or refuted verdict is given only with the evidence for it (see supported), and
-// what it rests on is kept as a comment of the agent's on the hypothesis, written by actor, the
-// credential that gave the verdict.
+// what it rests on is kept as a comment on the hypothesis, the agent's when one is named and
+// written by actor.
 func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, verdict Verdict) (*domain.Hypothesis, error) {
 	status := verdict.Status
 	if !domain.ValidHypothesisStatus(status) {
@@ -386,7 +391,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	var announced bool
 	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
 		var err error
-		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, status, stamp)
+		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, actor, status, stamp)
 		if err != nil || !announced {
 			return nil, err
 		}

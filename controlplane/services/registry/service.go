@@ -47,7 +47,7 @@ type Store interface {
 type Graph interface {
 	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, error)
 	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp db.Stamp) (*graphdb.LinkResult, error)
-	UpdateStatus(ctx context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
+	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)

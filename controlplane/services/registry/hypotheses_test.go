@@ -158,7 +158,7 @@ func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothe
 	return g.rows[id], nil
 }
 
-func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error) {
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error) {
 	h, ok := g.rows[id]
 	if !ok {
 		return nil, false, graphdb.ErrNotFound
@@ -171,7 +171,7 @@ func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, st
 		return h, announce, err
 	}
 	at := g.tick()
-	h.Status, h.StatusChangedAt = status, &at
+	h.Status, h.StatusChangedAt, h.StatusActor = status, &at, &actor
 	g.stamp(id, "status"+id, stamp.Position)
 	return h, true, nil
 }

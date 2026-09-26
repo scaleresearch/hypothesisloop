@@ -78,6 +78,9 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 		if len(store.comments) != 1 || !strings.Contains(store.comments[0], "against control job-control") {
 			t.Fatalf("the basis of the verdict was noted as %v", store.comments)
 		}
+		if settled.StatusActor == nil || *settled.StatusActor != (domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}) {
+			t.Fatalf("who gave the verdict: got = %+v, want agent-1 by name", settled.StatusActor)
+		}
 	}
 }
 
@@ -89,11 +92,20 @@ func TestAVerdictWithoutTheEvidenceStandsOnAStatedReasonWhichIsKept(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
+	// A person rules for the agent: the verdict and its basis are the agent's, and both name the person.
+	store.actorNames = map[string]string{"user-ada": "Ada Lovelace"}
+	settled, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", adaActor, Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(store.comments) != 1 || !strings.Contains(store.comments[0], enoughSaid) {
 		t.Fatalf("the reason was noted as %v", store.comments)
+	}
+	if want := (domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}); settled.AgentID != "agent-1" || settled.StatusActor == nil || *settled.StatusActor != want {
+		t.Fatalf("who gave the verdict: got = %+v on %s's hypothesis, want %+v on agent-1's", settled.StatusActor, settled.AgentID, want)
+	}
+	if len(store.commentActors) != 1 || store.commentActors[0] != adaActor {
+		t.Fatalf("who wrote the basis: got = %+v, want %+v", store.commentActors, adaActor)
 	}
 }
 

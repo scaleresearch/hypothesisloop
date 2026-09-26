@@ -216,16 +216,56 @@ func TestRegisteringAnExistingClaimLeavesWhoRegisteredIt(t *testing.T) {
 	}
 }
 
-func TestAnAgentTokenSettlesAsItselfOnly(t *testing.T) {
-	f := newRegistryAs(t, agentOne)
-	status := func(id, agent string) int {
-		return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(id)+"/status", map[string]any{"agent_id": agent, "status": "confirmed", "despite": enoughSaid}).Code
-	}
-	if got := status(f.rivals.ID, "agent-2"); got != http.StatusForbidden {
-		t.Errorf("settling a rival's hypothesis as the rival: got = %d, want = 403", got)
-	}
-	if got := status(f.own.ID, "agent-1"); got != http.StatusOK {
-		t.Errorf("settling its own: got = %d, want = 200", got)
+// A verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and who gave it is
+// the credential that sent it.
+func TestAVerdictIsGivenByTheCredentialThatSentIt(t *testing.T) {
+	adaNamed := domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}
+	agent := domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}
+	for name, tc := range map[string]struct {
+		caller auth.Principal
+		on     func(f *registryAs) string
+		fields map[string]any
+		want   int
+		actor  domain.Actor
+	}{
+		"an agent on its own, named":              {agentOne, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, agent},
+		"an agent on its own, naming nobody":      {agentOne, func(f *registryAs) string { return f.own.ID }, nil, 200, agent},
+		"an agent on a rival's, as the rival":     {agentOne, func(f *registryAs) string { return f.rivals.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"an agent on a rival's, as itself":        {agentOne, func(f *registryAs) string { return f.rivals.ID }, nil, 403, domain.Actor{}},
+		"an agent on one nobody owns":             {agentOne, func(f *registryAs) string { return f.unowned.ID }, nil, 200, agent},
+		"a person for the owning agent":           {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, adaNamed},
+		"a person for an agent that does not own": {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"a person naming nobody on an agent's":    {ada, func(f *registryAs) string { return f.own.ID }, nil, 403, domain.Actor{}},
+		"a person on one nobody owns":             {ada, func(f *registryAs) string { return f.unowned.ID }, nil, 200, adaNamed},
+		"a person stating who they are":           {ada, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"author": "Mallory"}, 422, domain.Actor{}},
+		"a key for the owning agent":              {keyOne, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"a staff token on one nobody owns":        {staffToken, func(f *registryAs) string { return f.unowned.ID }, nil, 200, domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
+	} {
+		f := newRegistryAs(t, tc.caller)
+		f.store.actorNames = map[string]string{"user-ada": "Ada Lovelace", "key-1": "laptop"}
+		id := tc.on(f)
+		before := *f.graph.rows[id]
+		rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(id)+"/status", with(map[string]any{"status": "refuted", "despite": enoughSaid}, tc.fields))
+		if rec.Code != tc.want {
+			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
+			continue
+		}
+		if tc.want != http.StatusOK {
+			if after := f.graph.rows[id]; after.Status != before.Status || after.StatusActor != nil || len(f.store.comments) != 0 {
+				t.Errorf("%s: a refused verdict left the hypothesis %s by %+v with notes %v", name, after.Status, after.StatusActor, f.store.comments)
+			}
+			continue
+		}
+		var got domain.Hypothesis
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s: %v in %s", name, err, rec.Body)
+		}
+		if got.Status != domain.HypothesisRefuted || got.StatusActor == nil || *got.StatusActor != tc.actor || got.AgentID != before.AgentID {
+			t.Errorf("%s: got = %s, want refuted by %+v and still %q's", name, rec.Body, tc.actor, before.AgentID)
+		}
+		if len(f.store.commentActors) != 1 || f.store.commentActors[0].Kind != tc.actor.Kind || f.store.commentActors[0].ID != tc.actor.ID {
+			t.Errorf("%s: the basis was written by %+v, want the one who gave the verdict", name, f.store.commentActors)
+		}
 	}
 }
 

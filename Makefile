@@ -1,3 +1,4 @@
+.PHONY: $(addprefix locked-,images ui-image tt-hardware-image sparse-sdpa-workload-image)
 .PHONY: dev reset build test agent-test lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
@@ -71,7 +72,14 @@ registry-up:
 # image store and the dev registry (localdev/prune-images.py says what counts as in use). Each
 # target that builds ends here. TAGS names tags to keep besides those.
 prune-images:
-	python3 localdev/prune-images.py $(TAGS)
+	python3 localdev/images-lock.py python3 localdev/prune-images.py $(TAGS)
+
+# A build's tag is not in use until it is pushed and installed, so a prune running beside it
+# would take it away. Every target that builds therefore runs its recipe (locked-<target>) under
+# the one lock the prune takes too (localdev/images-lock.py).
+BUILDS := images ui-image tt-hardware-image sparse-sdpa-workload-image
+$(BUILDS):
+	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
 # compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
 # a PEM does not survive being a make variable.
@@ -256,7 +264,7 @@ tt-dev-nodes-up:
 # Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the box-a
 # k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
-tt-hardware-image: check-tag
+locked-tt-hardware-image: check-tag
 	podman build --platform $(IMAGE_PLATFORM) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
 	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
@@ -323,7 +331,7 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
 # The dev registry is started only when it is the one pushed to.
-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
+locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	go mod vendor
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
@@ -356,7 +364,7 @@ UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABA
 check-ui-build-args:
 	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make ui-image: $(arg) is required (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
 
-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
+locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	podman build --platform $(IMAGE_PLATFORM) $(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)="$($(arg))") \
 		-f controlplane/build/Dockerfile.ui -t "$(REGISTRY)/hypothesisloop-ui:$(TAG)" controlplane/ui
 	podman tag "$(REGISTRY)/hypothesisloop-ui:$(TAG)" "$(REGISTRY)/hypothesisloop-ui:latest"
@@ -386,7 +394,7 @@ experimentator-image: experimentator-base-image
 # sparse_sdpa test-utils baked in -- see agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload)
 # so every job an agent submits starts instantly with zero per-job setup. Run this once before
 # starting a sparse-sdpa platform experiment, same as experimentator-image.
-sparse-sdpa-workload-image: check-tag registry-up
+locked-sparse-sdpa-workload-image: check-tag registry-up
 	podman build -f agents/coordinator/experiments/sparse-sdpa/seed/Dockerfile.workload \
 		-t $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) agents/coordinator/experiments/sparse-sdpa/seed/
 	podman tag $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:$(TAG) $(REGISTRY)/hypothesisloop-sparse-sdpa-workload:latest

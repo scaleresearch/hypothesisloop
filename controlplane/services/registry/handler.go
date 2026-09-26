@@ -730,21 +730,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"jobs of its own besides it. Without that the answer is 409 with what is missing, " +
 			"unless despite carries a sentence of why the verdict holds anyway. What a verdict " +
 			"rests on is kept as a comment on the hypothesis. " +
-			"Only the registering agent_id may set it; anyone else gets 403. A " +
-			"human-submitted row has no registering agent, so any agent may settle it — an idea " +
-			"nobody owns would otherwise sit open forever however much evidence it collected.",
+			"Only the agent whose hypothesis it is may set it; anyone else gets 403. A " +
+			"hypothesis no agent owns may be settled by anyone who reaches it — an idea " +
+			"nobody owns would otherwise sit open forever however much evidence it collected. " +
+			"agent_id says as which agent the verdict is given: an agent token's is its own, named or not, and any other caller names " +
+			"the owning agent to rule for it. Who gave it is the caller, answered as status_actor.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			AgentID string                  `json:"agent_id"`
+			AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns."`
 			Status  domain.HypothesisStatus `json:"status"`
 			Against string                  `json:"against,omitempty" doc:"The control job a confirmed or refuted verdict compares with."`
 			Despite string                  `json:"despite,omitempty" doc:"Why a confirmed or refuted verdict holds without a repeated run and a control."`
 		}
 	}) (*struct{ Body *domain.Hypothesis }, error) {
-		if in.Body.AgentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required")
-		}
 		if !domain.ValidHypothesisStatus(in.Body.Status) {
 			return nil, huma.Error400BadRequest("status must be one of: open, confirmed, refuted, inconclusive")
 		}
