@@ -13,8 +13,7 @@ const shots = join(here, 'screenshots')
 const UI = 'http://localhost:3000'
 const API = 'http://localhost:8081'
 const IDP = 'http://127.0.0.1:54399'
-// No API and no hl-admin command adds a person to an org yet, so the member scenario writes the
-// membership row itself, in the local stack's database.
+// The member scenario writes its membership row itself, in the local stack's database.
 const POSTGRES_CONTAINER = 'controlplane-postgres-1'
 const run = randomUUID().slice(0, 8)
 
@@ -25,6 +24,7 @@ const person = first => ({ id: randomUUID(), name: `UI E2E ${first} ${run}` })
 const ada = person('Ada')
 const bob = person('Bob')
 const eve = person('Eve')
+const dan = person('Dan')
 
 async function configure(settings) {
   const res = await fetch(`${IDP}/test/configure`, { method: 'POST', body: JSON.stringify(settings) })
@@ -704,7 +704,7 @@ async function scenarios(browser) {
   await page.getByLabel('Cluster name').fill('half-typed')
   await shot(page, 'token-on-show-before-switch', page.getByTestId('secret').first())
   await selectInNav(page, 'Organization', `${ada.name} Second`)
-  await page.getByText(`${ada.name} Second: its name, projects, API keys and clusters.`).waitFor()
+  await page.getByText(`${ada.name} Second: its name, projects, members, API keys and clusters.`).waitFor()
   assert.equal(await page.getByTestId('secret').count(), 0, 'the other org\'s key and start command are gone')
   assert.ok(!(await page.content()).includes(shownKey), 'the other org\'s API key is nowhere on the page')
   assert.equal(await page.getByLabel('Cluster name').inputValue(), '', 'the half-typed cluster name is gone')
@@ -751,6 +751,99 @@ async function scenarios(browser) {
   await shot(otherPage, 'foreign-project-in-url')
   await otherPage.getByRole('button', { name: /^Go to / }).click()
   await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+
+  section('members: the last owner cannot leave, and an invite link is shown once')
+  const labOrg = adaMe.orgs[0].id
+  const labProject = adaMe.projects[0].id
+  const pendingInvites = async () => (await api(await tokenOf(ada), `/orgs/${labOrg}/invites`)).json()
+  await page.goto(`${UI}/settings?project=${labProject}`)
+  const adaRow = page.getByRole('row', { name: new RegExp(adaMe.user_id) })
+  await adaRow.getByText('you', { exact: true }).waitFor()
+  await page.getByText('No pending invites.').waitFor()
+  await adaRow.getByRole('button', { name: 'Leave' }).click()
+  await confirmWith(page, 'Leave')
+  await page.locator('.error-banner', { hasText: 'an org keeps at least one owner' }).waitFor()
+  await shot(page, 'members-last-owner-refused', adaRow)
+
+  await page.getByRole('button', { name: 'Create invite link' }).click()
+  const revokedLink = await page.getByTestId('secret').innerText()
+  assert.ok(revokedLink.startsWith(`${UI}/invite#hli_`), 'the link is this site\'s invite page with the token in the fragment')
+  secrets.add(revokedLink.split('#')[1])
+  await page.getByRole('button', { name: 'Copy', exact: true }).click()
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), revokedLink)
+  await shot(page, 'invite-link-created', page.getByTestId('secret'))
+  await page.getByRole('button', { name: 'I have sent it' }).click()
+  await page.reload()
+  const [revokedInvite] = await pendingInvites()
+  const inviteRow = page.getByRole('row', { name: new RegExp(revokedInvite.id) })
+  await inviteRow.waitFor()
+  assert.ok(!(await page.content()).includes(revokedLink.split('#')[1]), 'the token is not on the page after a reload')
+
+  section('members: a revoked invite is refused')
+  await inviteRow.getByRole('button', { name: 'Revoke' }).click()
+  await confirmWith(page, 'Revoke')
+  await page.getByText('No pending invites.').waitFor()
+  await otherPage.goto(revokedLink)
+  await otherPage.getByRole('button', { name: 'Accept invite' }).click()
+  await otherPage.locator('.error-banner', { hasText: 'This invite was revoked.' }).waitFor()
+  assert.equal(otherPage.url(), `${UI}/invite`, 'the token is out of the address')
+  await shot(otherPage, 'invite-revoked')
+
+  section('members: a signed-out person opens the link, signs in, accepts and lands in the org')
+  await page.getByRole('button', { name: 'Create invite link' }).click()
+  const inviteAddress = await page.getByTestId('secret').innerText()
+  secrets.add(inviteAddress.split('#')[1])
+  const invited = await newContext(browser)
+  const danPage = await invited.newPage()
+  await danPage.goto(inviteAddress)
+  await danPage.getByRole('button', { name: 'Sign in to accept' }).click()
+  await danPage.waitForURL(`${UI}/login?next=%2Finvite`)
+  await signIn(danPage, dan, `${UI}/invite`)
+  await shot(danPage, 'invite-offered')
+  await danPage.getByRole('button', { name: 'Accept invite' }).click()
+  await danPage.waitForURL(`${UI}/?project=${labProject}`)
+  const danID = (await (await api(await tokenOf(dan), '/me')).json()).user_id
+  assert.match(danID, /^[\w-]+$/)
+  assert.deepEqual(await pendingInvites(), [], 'an accepted invite is no longer pending')
+
+  await otherPage.goto(inviteAddress)
+  await otherPage.getByRole('button', { name: 'Accept invite' }).click()
+  await otherPage.locator('.error-banner', { hasText: 'This invite was already accepted' }).waitFor()
+  await shot(otherPage, 'invite-already-used')
+  await otherPage.goto(`${UI}/invite`)
+  await otherPage.locator('.error-banner', { hasText: 'This page holds no invite.' }).waitFor()
+
+  section('members: a member reads the list, and the owner changes a role and removes them')
+  await danPage.goto(`${UI}/settings?project=${labProject}`)
+  const danOwnRow = danPage.getByRole('row', { name: new RegExp(danID) })
+  await danOwnRow.getByRole('cell', { name: 'member', exact: true }).waitFor()
+  await danOwnRow.getByRole('button', { name: 'Leave' }).waitFor()
+  assert.equal(await danPage.getByRole('button', { name: 'Create invite link' }).count(), 0)
+  assert.equal(await danPage.getByRole('button', { name: 'Remove' }).count(), 0)
+  assert.equal(await danPage.getByLabel(/^Role of /).count(), 0)
+  await shot(danPage, 'members-as-member', danOwnRow)
+
+  await page.reload()
+  const roleChange = () => page.waitForResponse(r => r.request().method() === 'PATCH' && r.url() === `${API}/orgs/${labOrg}/members/${danID}`)
+  let changed = roleChange()
+  await page.getByLabel(`Role of ${danID}`).selectOption('owner')
+  await confirmWith(page, 'Make owner')
+  assert.equal((await changed).status(), 200)
+  await shot(page, 'members-as-owner', page.getByLabel(`Role of ${danID}`))
+  await danPage.reload()
+  await danPage.getByRole('button', { name: 'Create invite link' }).waitFor()
+  changed = roleChange()
+  await page.getByLabel(`Role of ${danID}`).selectOption('member')
+  await confirmWith(page, 'Make member')
+  assert.equal((await changed).status(), 200)
+
+  const danRow = page.getByRole('row', { name: new RegExp(danID) })
+  await danRow.getByRole('button', { name: 'Remove' }).click()
+  await confirmWith(page, 'Remove')
+  await danRow.waitFor({ state: 'detached' })
+  await danPage.reload()
+  await danPage.getByText('is not available to you').waitFor()
+  await invited.close()
 
   section('a member of an org sees its work and can change nothing about the org')
   const bobID = (await (await api(await tokenOf(bob), '/me')).json()).user_id
