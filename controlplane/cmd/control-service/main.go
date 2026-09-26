@@ -125,9 +125,9 @@ func main() {
 	}
 	gate := apiGate{authenticator: authenticator, access: auth.NewAccess(directory)}
 
-	// A deployment with no GitHub App runs with no client for it: attaching a repository and
-	// minting a git credential answer that there is none.
-	var githubApp accounts.GitHub
+	// A deployment with no GitHub App runs with no client for it: connecting GitHub and minting a
+	// git credential answer that there is none.
+	var githubApp accounts.GitHubApp
 	if pcfg.GitHub.Configured() {
 		client, err := github.New(pcfg.GitHub)
 		if err != nil {
@@ -135,7 +135,7 @@ func main() {
 		}
 		githubApp = client
 	}
-	repos := accounts.NewRepos(db.NewAccountsStore(pool), githubApp, gate.access, logger)
+	repos := accounts.NewRepositories(db.NewAccountsStore(pool), db.NewPlatformExperimentsStore(pool), githubApp, gate.access, logger)
 
 	apiServer := newAPIServer(runCtx, gate, repos, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
@@ -166,7 +166,7 @@ type apiGate struct {
 	access        *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -239,6 +239,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	launcherapi.RegisterHuma(launcherDoc, launcherapi.NewHandler(store, launcherapi.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Agents.APIURL, SigningSecret: pcfg.Auth.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
+		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 	}, logger))
 	launcherDoc.MountExplore(launcherRouter)
@@ -251,12 +252,13 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
+	quota.RegisterSessionsHuma(doc, dataStore, logger)
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
 	}
 	accounts.RegisterHuma(doc, accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Runtimes.APIURL, MetricsURL: pcfg.Runtimes.MetricsURL},
 		accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger))
-	accounts.RegisterReposHuma(doc, repos)
+	accounts.RegisterRepositoriesHuma(doc, repos)
 	scheduler.RegisterHuma(doc, schedulerHandler)
 	registry.RegisterHuma(doc, registryHandler)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so

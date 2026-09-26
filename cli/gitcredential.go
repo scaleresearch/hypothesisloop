@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 	"time"
 
@@ -13,12 +12,12 @@ import (
 
 const gitCredentialHelp = `usage: hl git-credential get|store|erase
 
-git's credential helper for the repository attached to your project. git runs it, not you:
+git's credential helper for the repository your platform experiment names. git runs it, not you:
 
   git config --global credential.https://github.com.helper '!hl git-credential'
   git config --global credential.https://github.com.useHttpPath true
 
-On get it sends the platform the address git asked about. For the project's repository, and its
+On get it sends the platform the address git asked about. For the experiment's repository, and its
 Git LFS address, the platform mints a token for that call, good for about an hour and for the one
 repository, and this hands it to git. Nothing is stored, so store and erase do nothing. For any
 other host or repository the platform mints nothing, this prints nothing and git carries on
@@ -67,8 +66,8 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 		Password  string    `json:"password"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	query := url.Values{"protocol": {asked["protocol"]}, "host": {asked["host"]}, "path": {asked["path"]}}
-	if err := c.Do("GET", "/git-credential?"+query.Encode(), nil, &credential); err != nil {
+	address := map[string]string{"protocol": asked["protocol"], "host": asked["host"], "path": asked["path"]}
+	if err := c.Do("POST", "/git-credentials", address, &credential); err != nil {
 		return fail(stderr, err)
 	}
 	if credential.Username == "" || credential.Password == "" {

@@ -55,6 +55,43 @@ type AgentInstance struct {
 	// Launch identifies what Restarts were spent under: the image and the launcher's own launch
 	// inputs. A machine asked for under another starts with none spent.
 	Launch string `json:"-"`
+	// State is what the machine is now: "requested" while its launcher has not listed the one
+	// asked for, "starting" and "running" as the launcher last reported it, "stopped" once no
+	// further machine is asked for. It is worked out from the fields around it when written.
+	State string `json:"state" enum:"requested,starting,running,stopped"`
+	// Reported is the state the launcher last reported of the machine asked for under Name.
+	Reported string `json:"-"`
+	// ProgressAt is when the platform last saw the machine's command make progress.
+	ProgressAt *time.Time `json:"progress_at,omitempty"`
+	// EndReason is why the last machine that ended was given up on: "exited" (its command
+	// ended), "gone" (its provider no longer lists it), "never_seen" (no machine came to be),
+	// "still_starting" (it did not come up in time) or "silent" (it ran and made no progress).
+	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent"`
+}
+
+const (
+	InstanceRequested = "requested"
+	InstanceStarting  = "starting"
+	InstanceRunning   = "running"
+	InstanceStopped   = "stopped"
+)
+
+// Shown is the instance's State.
+func (i AgentInstance) Shown() string {
+	switch {
+	case i.Stopped:
+		return InstanceStopped
+	case i.Name == "" || i.Reported == "":
+		return InstanceRequested
+	}
+	return i.Reported
+}
+
+func (i AgentInstance) MarshalJSON() ([]byte, error) {
+	type fields AgentInstance
+	out := fields(i)
+	out.State = i.Shown()
+	return json.Marshal(out)
 }
 
 // HostedCoordinator is the coordinator the platform runs for one platform experiment: one more
@@ -85,6 +122,17 @@ const CoordinatorFlavor = "coordinator"
 // MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
 // again. The next exit stops the agent.
 const MaxAgentInstanceRestarts = 3
+
+// AgentProgressIntervalSeconds is how often a healthy agent's harness prints its progress
+// marker (agents/experimentator, progress.py), and MinAgentProgressLimitSeconds the shortest
+// silence the platform may be configured to give up on.
+const (
+	AgentProgressIntervalSeconds = 15
+	MinAgentProgressLimitSeconds = 8 * AgentProgressIntervalSeconds
+)
+
+// MaxAgentSessionBytes bounds the session snapshot an agent or a coordinator stores.
+const MaxAgentSessionBytes = 32 << 20
 
 // MaxAgentInstanceLogBytes bounds the log tail kept of an exited machine.
 const MaxAgentInstanceLogBytes = 4 << 10

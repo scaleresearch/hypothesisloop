@@ -24,8 +24,12 @@ type Store struct {
 	Listed   []string
 	WindDown time.Duration
 
-	clock   time.Duration
-	askedAt map[string]time.Duration
+	// ProgressWrites counts the times a progress marker was written down.
+	ProgressWrites int
+
+	clock    time.Duration
+	askedAt  map[string]time.Duration
+	progress map[string]string
 }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -94,7 +98,8 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	if instance.Launch != launch {
 		instance.Restarts, instance.Stopped = 0, false
 	}
-	instance.Name, instance.Launch, instance.SeenAt = name, launch, nil
+	instance.Name, instance.Launch, instance.SeenAt, instance.Reported, instance.ProgressAt = name, launch, nil, "", nil
+	delete(s.progress, platformExpID+"/"+agentID)
 	if s.askedAt == nil {
 		s.askedAt = map[string]time.Duration{}
 	}
@@ -102,20 +107,33 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	return nil
 }
 
-func (s *Store) SeeInstance(_ context.Context, platformExpID, agentID, name string) error {
+func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
 		return err
 	}
-	if instance := s.Find(platformExpID, agentID); name != "" && instance.Name == name && instance.SeenAt == nil {
-		at := epoch.Add(s.clock)
+	instance := s.Find(platformExpID, agentID)
+	if name == "" || instance.Name != name {
+		return nil
+	}
+	at := epoch.Add(s.clock)
+	if instance.SeenAt == nil {
 		instance.SeenAt = &at
+	}
+	instance.Reported = state
+	key := platformExpID + "/" + agentID
+	if progress != nil && *progress != s.progress[key] && (instance.ProgressAt == nil || at.Sub(*instance.ProgressAt) >= progressLimit/4) {
+		if s.progress == nil {
+			s.progress = map[string]string{}
+		}
+		s.progress[key], instance.ProgressAt = *progress, &at
+		s.ProgressWrites++
 	}
 	return nil
 }
 
-func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, bootLimit time.Duration, maxRestarts int) (domain.AgentInstance, bool, error) {
+func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (domain.AgentInstance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
@@ -133,14 +151,20 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	case db.InstanceGone:
 		due = instance.SeenAt != nil
 	case db.InstanceNeverSeen:
-		due = instance.SeenAt == nil && s.clock-s.askedAt[platformExpID+"/"+agentID] >= bootLimit
+		due = instance.SeenAt == nil && s.clock-s.askedAt[platformExpID+"/"+agentID] >= limit
 	case db.InstanceStillStarting:
-		due = instance.SeenAt != nil && now.Sub(*instance.SeenAt) >= bootLimit
+		due = instance.SeenAt != nil && now.Sub(*instance.SeenAt) >= limit
+	case db.InstanceSilent:
+		since := instance.SeenAt
+		if instance.ProgressAt != nil {
+			since = instance.ProgressAt
+		}
+		due = instance.Reported == domain.InstanceRunning && since != nil && now.Sub(*since) >= limit
 	}
 	if !due {
 		return domain.AgentInstance{}, false, nil
 	}
-	instance.Name, instance.ExitedAt, instance.ExitLog = "", &now, exitLog
+	instance.Name, instance.ExitedAt, instance.ExitLog, instance.EndReason, instance.Reported = "", &now, exitLog, string(how), ""
 	if instance.Restarts >= maxRestarts {
 		instance.Stopped = true
 	} else {

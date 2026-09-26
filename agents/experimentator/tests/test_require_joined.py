@@ -18,7 +18,7 @@ class FakePlatform(BaseHTTPRequestHandler):
     calls: list = []
     tokens: set = set()
     status_for_strangers = 401
-    code_repo_url = "https://github.com/acme/model.git"
+    repository_url = "https://github.com/acme/model.git"
 
     def _reply(self, status, body):
         self.send_response(status)
@@ -36,8 +36,8 @@ class FakePlatform(BaseHTTPRequestHandler):
             return
         if self.path == "/platform-experiments/pe-1":
             body = {"id": "pe-1", "status": "running"}
-            if FakePlatform.code_repo_url:
-                body["code_repo_url"] = FakePlatform.code_repo_url
+            if FakePlatform.repository_url:
+                body["repository_url"] = FakePlatform.repository_url
             return self._reply(200, body)
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
@@ -56,7 +56,7 @@ class PlatformCase(unittest.TestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
         FakePlatform.status_for_strangers = 401
-        FakePlatform.code_repo_url = "https://github.com/acme/model.git"
+        FakePlatform.repository_url = "https://github.com/acme/model.git"
         self.server = HTTPServer(("127.0.0.1", 0), FakePlatform)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -137,11 +137,11 @@ class StartupTest(PlatformCase):
         ])
         self.assertIn("clone https://github.com/acme/model.git", setup.system_prompt)
 
-    def test_prepare_stops_when_the_project_has_no_repository(self):
-        FakePlatform.code_repo_url = ""
+    def test_prepare_stops_when_the_platform_experiment_names_no_repository(self):
+        FakePlatform.repository_url = ""
         with self.assertRaises(SystemExit) as ctx:
             self.prepare()
-        self.assertIn("no repository attached", str(ctx.exception))
+        self.assertIn("names no repository", str(ctx.exception))
 
     def test_the_repository_address_is_the_platforms_and_never_the_environments(self):
         setup = self.prepare(CODE_REPO_URL="git://example.invalid/other", GIT_TOKEN="a-token")

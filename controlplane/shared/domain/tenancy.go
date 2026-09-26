@@ -65,14 +65,14 @@ type Project struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ProjectRepo is the GitHub repository attached to a project, which its agents and jobs clone.
-// RepositoryID is GitHub's own id and survives a rename. Repo is owner/name.
-type ProjectRepo struct {
-	ProjectID      string    `json:"project_id"`
+// OrgGitHubInstallation is an installation of the platform's GitHub App that an org connected.
+// AccountLogin is the GitHub account it is on, the owner part of every repository it covers.
+type OrgGitHubInstallation struct {
+	OrgID          string    `json:"org_id"`
 	InstallationID int64     `json:"installation_id"`
-	RepositoryID   int64     `json:"repository_id"`
-	Repo           string    `json:"repo"`
-	AttachedAt     time.Time `json:"attached_at"`
+	AccountLogin   string    `json:"account_login"`
+	ConnectedBy    string    `json:"connected_by" doc:"The user who connected it."`
+	ConnectedAt    time.Time `json:"connected_at"`
 }
 
 // DefaultProjectName is the project every org starts with.

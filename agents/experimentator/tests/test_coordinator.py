@@ -73,7 +73,7 @@ class StartupTest(PlatformCase):
             self.assertNotIn("hls_coordinator", str(refused.exception))
 
     def test_a_project_without_a_repository_fails_startup(self):
-        FakePlatform.joined, FakePlatform.code_repo_url = {"agents"}, ""
+        FakePlatform.joined, FakePlatform.repository_url = {"agents"}, ""
         with self.assertRaises(SystemExit) as refused:
             self.prepare()
         self.assertIn("no repository", str(refused.exception))

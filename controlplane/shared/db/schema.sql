@@ -469,6 +469,13 @@ UPDATE experiment_signups SET instance_asked_at = now() WHERE instance_name <> '
 -- by a fault of the platform's is started again once the fault is fixed.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_seen_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_launch  TEXT NOT NULL DEFAULT '';
+-- What the launcher last reported of the machine asked for: its state, the progress marker its
+-- command last printed, and when that marker was last seen to change, on this database's clock.
+-- end_reason is why the last machine that ended was given up on.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress_at TIMESTAMPTZ;
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_end_reason TEXT NOT NULL DEFAULT '';
 
 -- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
 DO $$ BEGIN
@@ -1013,6 +1020,10 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_e
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_exit_log  TEXT        NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_seen_at   TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_launch    TEXT        NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress_at TIMESTAMPTZ;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_end_reason TEXT NOT NULL DEFAULT '';
 -- How many machines the platform may run for this platform experiment, its coordinator included.
 -- Fixed at creation from config agents.max_hosted_per_platform_experiment.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_hosted INTEGER NOT NULL DEFAULT 0;
@@ -1029,18 +1040,25 @@ CREATE TABLE IF NOT EXISTS launchers (
 CREATE INDEX IF NOT EXISTS idx_platform_experiments_coordinator_launcher ON platform_experiments(coordinator_launcher) WHERE coordinator_hosted;
 UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 
--- The GitHub repository a project's agents and jobs clone, reached through an installation of
--- the platform's GitHub App. Only what names it is kept: every token is minted when asked for
--- and stored nowhere. repository_id is GitHub's own and survives a rename; repo is owner/name as
--- GitHub stated it when the repository was attached.
-CREATE TABLE IF NOT EXISTS project_repos (
-    project_id      TEXT        PRIMARY KEY REFERENCES projects(id),
+-- A project once held one repository. The repository is the platform experiment's now.
+DROP TABLE IF EXISTS project_repos;
+
+-- An installation of the platform's GitHub App that an org connected: a GitHub account, with the
+-- repositories its owner chose on GitHub. Only what names it is kept: every token is minted when
+-- asked for and stored nowhere. account_login is the owner part of every repository it covers.
+CREATE TABLE IF NOT EXISTS org_github_installations (
+    org_id          TEXT        NOT NULL REFERENCES orgs(id),
     installation_id BIGINT      NOT NULL,
-    repository_id   BIGINT      NOT NULL,
-    repo            TEXT        NOT NULL,
-    attached_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    account_login   TEXT        NOT NULL,
+    connected_by    TEXT        NOT NULL,
+    connected_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, installation_id)
 );
--- The default branch is GitHub's to state and is read there when it is needed.
-ALTER TABLE project_repos DROP COLUMN IF EXISTS default_branch;
+-- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
+-- and coordinator run. An empty image is the platform's own (config agents.image). Both are
+-- fixed at creation.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository  TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS agent_image TEXT NOT NULL DEFAULT '';
+
 
 COMMIT;

@@ -38,7 +38,7 @@ type launcherStore = launchertest.Store
 
 const testBootLimit = 5 * time.Minute
 
-var testSettings = Settings{Image: testImage, APIURL: testAPIURL, SigningSecret: testSecret, BootLimit: testBootLimit, MaxNewPerAnswer: 50}
+var testSettings = Settings{Image: testImage, APIURL: testAPIURL, SigningSecret: testSecret, BootLimit: testBootLimit, ProgressLimit: 4 * testBootLimit, MaxNewPerAnswer: 50}
 
 func hosted(pe, agent string) domain.AgentSignup {
 	return domain.AgentSignup{
@@ -601,13 +601,14 @@ func oneAgentAndACoordinator() *launcherStore {
 
 func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
 	for name, build := range map[string]func(){
-		"no store":       func() { NewHandler(nil, testSettings, zap.NewNop()) },
-		"no logger":      func() { NewHandler(&launcherStore{}, testSettings, nil) },
-		"no image":       func() { c := testSettings; c.Image = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no api url":     func() { c := testSettings; c.APIURL = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no secret":      func() { c := testSettings; c.SigningSecret = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no boot limit":  func() { c := testSettings; c.BootLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
-		"no answer size": func() { c := testSettings; c.MaxNewPerAnswer = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no store":          func() { NewHandler(nil, testSettings, zap.NewNop()) },
+		"no logger":         func() { NewHandler(&launcherStore{}, testSettings, nil) },
+		"no image":          func() { c := testSettings; c.Image = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no api url":        func() { c := testSettings; c.APIURL = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no secret":         func() { c := testSettings; c.SigningSecret = ""; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no boot limit":     func() { c := testSettings; c.BootLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no progress limit": func() { c := testSettings; c.ProgressLimit = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
+		"no answer size":    func() { c := testSettings; c.MaxNewPerAnswer = 0; NewHandler(&launcherStore{}, c, zap.NewNop()) },
 	} {
 		func() {
 			defer func() {
@@ -909,5 +910,138 @@ func TestTheTokenMintedForAMachineIsTakenOutOfItsExitLog(t *testing.T) {
 		if !strings.Contains(kept, "HL_TOKEN=<HL_TOKEN>") || !strings.HasSuffix(kept, "Traceback") {
 			t.Fatalf("%q: stored %q, want the token named and the rest kept", agent, kept)
 		}
+	}
+}
+
+// A platform experiment that names its own image has its agents and its coordinator boot it, and
+// every other one boots the platform's. Restarts are spent per image: a machine stopped under
+// the platform's image says nothing about one that boots another.
+func TestAPlatformExperimentsOwnImageIsWhatItsAgentsAndCoordinatorBoot(t *testing.T) {
+	const own = "registry.example.invalid/team/agent:7"
+	withImage := hostedCoordinator("pe-own")
+	withImage.AgentImage = own
+	store := &launcherStore{
+		ByLauncher: map[string][]db.LauncherAgent{"main": {
+			{AgentSignup: hosted("pe-own", "ag-1"), AgentImage: own},
+			{AgentSignup: hosted("pe-plain", "ag-2")},
+		}},
+		Coordinators: []db.LauncherCoordinator{withImage, hostedCoordinator("pe-plain")},
+	}
+	answer := mustReconcile(t, store, observed())
+	if len(answer.Instances) != 4 {
+		t.Fatalf("instances = %+v, want two agents and two coordinators", answer.Instances)
+	}
+	images := map[string]string{}
+	for _, instance := range answer.Instances {
+		images[instance.Env["PLATFORM_EXPERIMENT_ID"]+"/"+instance.Env["AGENT_FLAVOR"]] = instance.Image
+	}
+	want := map[string]string{"pe-own/data-search": own, "pe-own/coordinator": own, "pe-plain/data-search": testImage, "pe-plain/coordinator": testImage}
+	if !maps.Equal(images, want) {
+		t.Fatalf("images = %v, want %v", images, want)
+	}
+	if store.Find("pe-own", "ag-1").Launch == store.Find("pe-plain", "ag-2").Launch {
+		t.Fatal("two images share one launch, so restarts spent under one would count against the other")
+	}
+	if store.Find("pe-own", "ag-1").Launch != launchOf(own, testDigest) || store.Find("pe-own", "").Launch != launchOf(own, testDigest) {
+		t.Fatal("the launch recorded for the experiment's machines is not that of its own image")
+	}
+}
+
+func marker(m string) *string { return &m }
+
+func TestARunningMachineThatReportsNoProgressForTheLimitIsEndedAndReplaced(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	running := func(agentProgress, coordinatorProgress *string) Observed {
+		return observed(ObservedInstance{Name: agent, State: "running", Progress: agentProgress},
+			ObservedInstance{Name: coordinator, State: "running", Progress: coordinatorProgress})
+	}
+	limit := testSettings.ProgressLimit
+
+	// Both work. The coordinator keeps printing, the agent's marker stands still from here on.
+	mustReconcile(t, store, running(marker("1"), marker("1")))
+	for step := 2; step <= 5; step++ {
+		store.Advance(limit / 4)
+		answer := mustReconcile(t, store, running(marker("1"), marker(fmt.Sprint(step))))
+		if step < 5 && (answer.Instances[0].Name != agent || answer.Instances[1].Name != coordinator) {
+			t.Fatalf("%s after the agent's last progress: %+v, want both kept", time.Duration(step-1)*limit/4, answer.Instances)
+		}
+		if step == 5 && (answer.Instances[0].Name == agent || answer.Instances[1].Name != coordinator) {
+			t.Fatalf("a whole limit after the agent's last progress: %+v, want the agent under a new name and the coordinator kept", answer.Instances)
+		}
+	}
+	recorded := store.Find("pe-1", "ag-1")
+	if recorded.Restarts != 1 || recorded.EndReason != "silent" || !strings.Contains(recorded.ExitLog, "reported no progress for "+limit.String()) {
+		t.Fatalf("recorded %+v", recorded)
+	}
+	if kept := store.Find("pe-1", ""); kept.Restarts != 0 || kept.ProgressAt == nil {
+		t.Fatalf("the coordinator, which made progress: %+v", kept)
+	}
+}
+
+func TestAMachineThatNeverPrintsAMarkerIsSilentFromItsFirstSight(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	quiet := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running", Progress: marker("")},
+		ObservedInstance{Name: first.Instances[1].Name, State: "running", Progress: marker("")})
+	mustReconcile(t, store, quiet)
+	store.Advance(testSettings.ProgressLimit - time.Second)
+	if answer := mustReconcile(t, store, quiet); answer.Instances[0].Name != first.Instances[0].Name {
+		t.Fatal("ended inside the limit")
+	}
+	store.Advance(time.Second)
+	answer := mustReconcile(t, store, quiet)
+	if answer.Instances[0].Name == first.Instances[0].Name || answer.Instances[1].Name == first.Instances[1].Name {
+		t.Fatalf("at the limit: %+v, want both replaced", answer.Instances)
+	}
+}
+
+// A provider whose output cannot be read for a while must not cost every agent a restart.
+func TestAReportWithoutAReadableMarkerEndsNothing(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	unread := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running"}, ObservedInstance{Name: first.Instances[1].Name, State: "running"})
+	mustReconcile(t, store, unread)
+	store.Advance(100 * testSettings.ProgressLimit)
+	answer := mustReconcile(t, store, unread)
+	if answer.Instances[0].Name != first.Instances[0].Name || store.Find("pe-1", "ag-1").Restarts != 0 {
+		t.Fatalf("a machine whose marker could not be read was ended: %+v", store.Find("pe-1", "ag-1"))
+	}
+	// Read again and still where it was before the outage: now it is silent.
+	stuck := unread
+	stuck.Instances = []ObservedInstance{{Name: first.Instances[0].Name, State: "running", Progress: marker("")}, unread.Instances[1]}
+	if answer := mustReconcile(t, store, stuck); answer.Instances[0].Name == first.Instances[0].Name {
+		t.Fatal("a machine read again and silent for a hundred limits was kept")
+	}
+}
+
+func TestProgressIsWrittenDownAFewTimesALimitHoweverOftenItIsReported(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	name := mustReconcile(t, store, observed()).Instances[0].Name
+	const reports = 200
+	for i := range reports {
+		store.Advance(2 * testSettings.ProgressLimit / reports)
+		mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "running", Progress: marker(fmt.Sprint(i))}))
+	}
+	if store.ProgressWrites < 8 || store.ProgressWrites > 9 {
+		t.Fatalf("%d reports over two limits wrote progress %d times, want four a limit", reports, store.ProgressWrites)
+	}
+	if store.Find("pe-1", "ag-1").Restarts != 0 {
+		t.Fatal("an agent that kept making progress was ended")
+	}
+}
+
+func TestProgressOfAnInstanceThatIsNotRunningAndALauncherTooSlowForTheProgressLimitAreRefused(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	body := observed(ObservedInstance{Name: "pe1-ag1-000000000000", State: "starting", Progress: marker("1")})
+	if code, raw := reconcileUnder(t, store, testSettings, body); code != http.StatusBadRequest {
+		t.Fatalf("progress of a starting instance: %d %s, want 400", code, raw)
+	}
+	cfg := testSettings
+	cfg.MaxNewPerAnswer, cfg.BootLimit, cfg.ProgressLimit = 10, time.Hour, 49*time.Second
+	code, raw := reconcileUnder(t, store, cfg, observed())
+	if code != http.StatusConflict || !strings.Contains(string(raw), "agents.progress_limit_seconds 49s") {
+		t.Fatalf("2 x (10 x 1s + 15s) = 50s against a progress limit of 49s: %d %s", code, raw)
 	}
 }

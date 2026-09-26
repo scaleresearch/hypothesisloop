@@ -12,8 +12,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,6 +40,7 @@ type fakeRepo struct {
 }
 
 type fakeInstallation struct {
+	account   string
 	suspended bool
 	repos     map[int64]bool
 }
@@ -62,6 +66,10 @@ type fakeGitHub struct {
 	codes   map[string]string
 	pushers map[string]map[int64]bool
 	readers map[string]map[int64]bool
+	// reaches holds the installations each user reaches, in the order GitHub lists them.
+	reaches map[string][]int64
+	// foreign makes the user's listing hold an installation of another App.
+	foreign bool
 
 	tokens     map[string]mintedToken
 	userTokens map[string]string
@@ -91,8 +99,8 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 	f := &fakeGitHub{
 		t: t, key: &key.PublicKey, now: time.Now,
 		installations: map[int64]*fakeInstallation{
-			100: {repos: map[int64]bool{1: true, 2: true}},
-			200: {repos: map[int64]bool{3: true}},
+			100: {account: "Acme", repos: map[int64]bool{1: true, 2: true}},
+			200: {account: "rival", repos: map[int64]bool{3: true}},
 		},
 		repos: map[string]*fakeRepo{
 			"acme/model":    {id: 1, fullName: "Acme/Model", defaultBranch: "main", files: map[string]string{".hypothesisloop/experiment.yaml": "name: from the repo\n"}, directories: map[string]bool{".hypothesisloop": true}},
@@ -103,6 +111,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		codes:   map[string]string{"code-alice": "alice", "code-reader": "reader", "code-mallory": "mallory"},
 		pushers: map[string]map[int64]bool{"alice": {1: true, 2: true, 4: true}},
 		readers: map[string]map[int64]bool{"reader": {1: true}},
+		reaches: map[string][]int64{"alice": {100}, "reader": {100, 200}},
 		tokens:  map[string]mintedToken{}, userTokens: map[string]string{},
 		kinds: map[string]string{"link": "symlink", "vendored": "submodule"},
 	}
@@ -242,23 +251,48 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case len(segments) == 4 && segments[0] == "app" && segments[1] == "installations" && segments[3] == "access_tokens" && r.Method == http.MethodPost:
 		f.mint(w, r, bearer, segments[2])
-	case len(segments) == 4 && segments[0] == "repos" && segments[3] == "installation":
+	case r.URL.Path == "/user/installations":
+		user, ok := f.userTokens[bearer]
+		if !ok {
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		all := []map[string]any{}
+		for _, id := range f.reaches[user] {
+			all = append(all, map[string]any{"id": id, "app_id": testAppID, "account": map[string]string{"login": f.installations[id].account}})
+		}
+		if f.foreign {
+			all = append(all, map[string]any{"id": 900, "app_id": testAppID + 1, "account": map[string]string{"login": "elsewhere"}})
+		}
+		f.answer(w, http.StatusOK, map[string]any{"total_count": len(all), "installations": paged(r, all)})
+	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodGet:
 		if !f.appAuthenticated(bearer) {
 			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
 			return
 		}
-		repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
-		for id, installation := range f.installations {
-			if repo != nil && installation.repos[repo.id] {
-				body := map[string]any{"id": id, "suspended_at": nil}
-				if installation.suspended {
-					body["suspended_at"] = "2026-01-01T00:00:00Z"
-				}
-				f.answer(w, http.StatusOK, body)
-				return
-			}
+		id, _ := strconv.ParseInt(segments[2], 10, 64)
+		installation, ok := f.installations[id]
+		if !ok {
+			f.refuse(w, http.StatusNotFound, "Not Found")
+			return
 		}
-		f.refuse(w, http.StatusNotFound, "Not Found")
+		body := map[string]any{"id": id, "suspended_at": nil, "account": map[string]string{"login": installation.account}}
+		if installation.suspended {
+			body["suspended_at"] = "2026-01-01T00:00:00Z"
+		}
+		f.answer(w, http.StatusOK, body)
+	case r.URL.Path == "/installation/repositories":
+		token, ok := f.tokens[bearer]
+		if !ok {
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		sort.Slice(token.repos, func(i, j int) bool { return token.repos[i] < token.repos[j] })
+		all := []map[string]any{}
+		for _, id := range token.repos {
+			all = append(all, map[string]any{"id": id, "full_name": f.repoByID(id).fullName, "private": id != 2})
+		}
+		f.answer(w, http.StatusOK, map[string]any{"total_count": len(all), "repositories": paged(r, all)})
 	case len(segments) == 3 && segments[0] == "repos":
 		repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
 		if _, isUser := f.userTokens[bearer]; !isUser {
@@ -284,9 +318,8 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			"id": repo.id, "full_name": repo.fullName, "default_branch": repo.defaultBranch, "private": true,
 			"permissions": map[string]bool{"pull": true, "push": push},
 		})
-	case len(segments) >= 4 && segments[0] == "repositories" && segments[2] == "contents":
-		id, _ := strconv.ParseInt(segments[1], 10, 64)
-		repo := f.repoByID(id)
+	case len(segments) >= 5 && segments[0] == "repos" && segments[3] == "contents":
+		repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
 		if repo == nil {
 			f.refuse(w, http.StatusNotFound, "Not Found")
 			return
@@ -295,7 +328,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.refuse(w, http.StatusNotFound, "Not Found")
 			return
 		}
-		path := strings.Join(segments[3:], "/")
+		path := strings.Join(segments[4:], "/")
 		if repo.directories[path] {
 			f.answer(w, http.StatusOK, []map[string]string{{"type": "file", "name": "experiment.yaml"}})
 			return
@@ -334,35 +367,58 @@ func (f *fakeGitHub) mint(w http.ResponseWriter, r *http.Request, bearer, instal
 		return
 	}
 	var body struct {
-		RepositoryIDs []int64           `json:"repository_ids"`
-		Permissions   map[string]string `json:"permissions"`
+		Repositories []string          `json:"repositories"`
+		Permissions  map[string]string `json:"permissions"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.RepositoryIDs) == 0 {
-		f.t.Errorf("a token was asked for without naming its repository: %v", err)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		f.refuse(w, http.StatusBadRequest, "bad body")
 		return
+	}
+	// Only a token that reads names and nothing else may reach a whole installation.
+	if len(body.Repositories) == 0 && !maps.Equal(body.Permissions, map[string]string{"metadata": "read"}) {
+		f.t.Errorf("a token for a whole installation was asked with %v", body.Permissions)
 	}
 	if f.ungranted {
 		f.refuse(w, http.StatusUnprocessableEntity, "The permissions requested are not granted to this installation.")
 		return
 	}
 	repositories := []map[string]any{}
-	for _, repoID := range body.RepositoryIDs {
-		if !installation.repos[repoID] {
+	var ids []int64
+	if len(body.Repositories) == 0 {
+		for id := range installation.repos {
+			ids = append(ids, id)
+		}
+	}
+	// As GitHub does, a repository is named without its owner, who is the installation's account.
+	for _, name := range body.Repositories {
+		repo := f.repos[strings.ToLower(installation.account+"/"+name)]
+		if repo == nil || !installation.repos[repo.id] {
 			f.refuse(w, http.StatusUnprocessableEntity, "There is at least one repository that does not exist or is not accessible to the parent installation.")
 			return
 		}
-		repositories = append(repositories, map[string]any{"id": repoID, "full_name": f.repoByID(repoID).fullName})
+		ids = append(ids, repo.id)
+		repositories = append(repositories, map[string]any{"id": repo.id, "full_name": repo.fullName})
 	}
 	if f.widen {
 		repositories = append(repositories, map[string]any{"id": 999})
 	}
 	f.sequence++
 	token := fmt.Sprintf("ghs_installation_%d", f.sequence)
-	f.tokens[token] = mintedToken{installation: id, repos: body.RepositoryIDs, permissions: body.Permissions}
+	f.tokens[token] = mintedToken{installation: id, repos: ids, permissions: body.Permissions}
 	f.answer(w, http.StatusCreated, map[string]any{
 		"token": token, "expires_at": f.now().Add(time.Hour).UTC().Format(time.RFC3339), "repositories": repositories,
 	})
+}
+
+// paged is one page of all, as GitHub cuts a listing by per_page and page.
+func paged(r *http.Request, all []map[string]any) []map[string]any {
+	size, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if size <= 0 || page <= 0 {
+		return all
+	}
+	start := min((page-1)*size, len(all))
+	return all[start:min(start+size, len(all))]
 }
 
 func (f *fakeGitHub) lastToken() mintedToken {
@@ -371,92 +427,130 @@ func (f *fakeGitHub) lastToken() mintedToken {
 
 var ctx = context.Background()
 
-func TestRepositoryIsVerifiedThreeWaysAndReturnedAsGitHubStatesIt(t *testing.T) {
+func TestUserInstallationsAreThoseThePersonReachesAndTheirTokenIsRevoked(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	repo, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect)
-	if err != nil {
-		t.Fatalf("Repository: %v", err)
-	}
-	if repo.ID != 1 || repo.FullName != "Acme/Model" || repo.InstallationID != 100 {
-		t.Fatalf("repository = %+v, want id 1 in GitHub's own casing under the installation GitHub names", repo)
+	found, err := client.UserInstallations(ctx, "code-reader", testRedirect)
+	want := []Installation{{ID: 100, AccountLogin: "Acme"}, {ID: 200, AccountLogin: "rival"}}
+	if err != nil || !slices.Equal(found, want) {
+		t.Fatalf("UserInstallations = %+v, %v, want %+v", found, err, want)
 	}
 	if len(f.revoked) != 1 || len(f.userTokens) != 0 || len(f.redirects) != 1 || f.redirects[0] != testRedirect {
 		t.Fatalf("revoked %v with %d user tokens left, redirects %v: want the person's token revoked and the redirect sent", f.revoked, len(f.userTokens), f.redirects)
 	}
-	minted := f.lastToken()
-	if len(minted.repos) != 1 || minted.repos[0] != 1 || minted.permissions["contents"] != "read" || minted.permissions["metadata"] != "read" || len(minted.permissions) != 2 {
-		t.Fatalf("the token used to look the repository up = %+v, want read on repository 1 alone", minted)
+	if len(f.tokens) != 0 {
+		t.Fatalf("an installation token was minted to answer who reaches what: %+v", f.tokens)
 	}
-	if _, used := f.codes["code-alice"]; used {
-		t.Fatal("the authorisation code was not exchanged")
+	// A person who reaches none is answered with none, which is no failure.
+	if found, err := client.UserInstallations(ctx, "code-mallory", testRedirect); err != nil || len(found) != 0 || found == nil {
+		t.Fatalf("a person with no installation: %+v, %v, want an empty list", found, err)
 	}
 }
 
-// The caller names a repository and nothing else: the installation is GitHub's to state.
-func TestRepositoryRefusesWhatTheCallerCannotProve(t *testing.T) {
-	cases := map[string]struct {
-		repo, code string
-		want       error
-		codeKept   bool
-	}{
-		"a repository of another account's installation": {"rival/secret", "code-alice", ErrRepositoryNotInstalled, false},
-		"a repository the App was not installed on":      {"acme/unlisted", "code-alice", ErrRepositoryNotInstalled, false},
-		"a repository that does not exist":               {"acme/nothing", "code-alice", ErrRepositoryNotInstalled, false},
-		"a person who can only read it":                  {"acme/model", "code-reader", ErrUserCannotPush, false},
-		"a person who cannot see it":                     {"acme/model", "code-mallory", ErrRepositoryNotInstalled, false},
-		"a code github never issued":                     {"acme/model", "code-made-up", ErrCodeRejected, false},
-		"no code":                                        {"acme/model", "", ErrCodeRejected, false},
-		// A malformed name is refused before the code is spent, so the person need not authorise again.
-		"a name that is no repository": {"acme/model/../../app", "code-alice", ErrInvalidRepository, true},
-		"an address for a name":        {"https://github.com/acme/model", "code-alice", ErrInvalidRepository, true},
+func TestUserInstallationsAreReadToTheLastPage(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	for id := int64(1000); id < 1250; id++ {
+		f.installations[id] = &fakeInstallation{account: fmt.Sprintf("org-%d", id)}
+		f.reaches["alice"] = append(f.reaches["alice"], id)
 	}
-	for name, tc := range cases {
+	found, err := client.UserInstallations(ctx, "code-alice", testRedirect)
+	if err != nil || len(found) != 251 || found[250].ID != 1249 {
+		t.Fatalf("UserInstallations = %d of them, %v, want all 251 over three pages", len(found), err)
+	}
+}
+
+func TestUserInstallationsRefusals(t *testing.T) {
+	for name, tc := range map[string]struct {
+		arrange        func(*fakeGitHub)
+		code, redirect string
+		want           error
+	}{
+		"a code github never issued":            {func(*fakeGitHub) {}, "code-made-up", testRedirect, ErrCodeRejected},
+		"no code":                               {func(*fakeGitHub) {}, "", testRedirect, ErrCodeRejected},
+		"a redirect the code was not issued to": {func(*fakeGitHub) {}, "code-alice", "https://evil.example/callback", ErrCodeRejected},
+		"an installation of another App":        {func(f *fakeGitHub) { f.foreign = true }, "code-alice", testRedirect, nil},
+		"github rate limits":                    {func(f *fakeGitHub) { f.rateLimit = http.StatusForbidden }, "code-alice", testRedirect, ErrRateLimited},
+	} {
 		t.Run(name, func(t *testing.T) {
 			f, client := newFakeGitHub(t)
-			repo, err := client.Repository(ctx, tc.repo, tc.code, testRedirect)
-			if !errors.Is(err, tc.want) || repo != nil {
-				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
+			tc.arrange(f)
+			found, err := client.UserInstallations(ctx, tc.code, tc.redirect)
+			if err == nil || found != nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("UserInstallations = %+v, %v, want %v", found, err, tc.want)
 			}
-			if len(f.tokens) != 0 {
-				t.Fatalf("an installation token was minted for a refused attach: %+v", f.tokens)
-			}
-			if len(f.userTokens) != 0 {
-				t.Fatalf("a refused attach left the person's token alive: %v", f.userTokens)
-			}
-			if _, kept := f.codes["code-alice"]; tc.codeKept && !kept {
-				t.Fatal("the code was spent on a name that cannot be a repository")
+			if f.rateLimit == 0 && len(f.userTokens) != 0 {
+				t.Fatalf("the person's token outlived the refusal: %v", f.userTokens)
 			}
 		})
 	}
 }
 
-// Two installations of the App: each repository is attached under the one GitHub names for it.
-func TestRepositoryIsFoundUnderWhicheverInstallationCoversIt(t *testing.T) {
-	f, client := newFakeGitHub(t)
-	f.pushers["alice"][3] = true
-	repo, err := client.Repository(ctx, "rival/secret", "code-alice", testRedirect)
-	if err != nil || repo.ID != 3 || repo.InstallationID != 200 {
-		t.Fatalf("Repository = %+v, %v, want repository 3 under installation 200", repo, err)
+func TestACodeWorksOnce(t *testing.T) {
+	_, client := newFakeGitHub(t)
+	if _, err := client.UserInstallations(ctx, "code-alice", testRedirect); err != nil {
+		t.Fatal(err)
 	}
-	if minted := f.lastToken(); len(minted.repos) != 1 || minted.repos[0] != 3 {
-		t.Fatalf("the token minted = %+v, want repository 3 alone", minted)
+	if _, err := client.UserInstallations(ctx, "code-alice", testRedirect); !errors.Is(err, ErrCodeRejected) {
+		t.Fatalf("the same code a second time: got = %v, want %v", err, ErrCodeRejected)
 	}
 }
 
-func TestACodeWorksOnce(t *testing.T) {
-	_, client := newFakeGitHub(t)
-	if _, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect); err != nil {
-		t.Fatal(err)
+// A person's token that cannot be revoked would outlive the one question it was issued for.
+func TestAConnectFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		f, client := newFakeGitHub(t)
+		f.revokeStatus = status
+		if found, err := client.UserInstallations(ctx, "code-alice", testRedirect); err == nil || found != nil {
+			t.Errorf("revocation answered %d: UserInstallations = %+v, %v, want a failure", status, found, err)
+		}
 	}
-	if _, err := client.Repository(ctx, "acme/other", "code-alice", testRedirect); !errors.Is(err, ErrCodeRejected) {
-		t.Fatalf("a second attach on one code: got = %v, want %v", err, ErrCodeRejected)
+}
+
+func TestInstallationIsReadAsTheApp(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	found, err := client.Installation(ctx, 200)
+	if err != nil || *found != (Installation{ID: 200, AccountLogin: "rival"}) {
+		t.Fatalf("Installation = %+v, %v", found, err)
+	}
+	if _, err := client.Installation(ctx, 999); !errors.Is(err, ErrInstallationGone) {
+		t.Fatalf("an installation that is not the App's: got = %v, want %v", err, ErrInstallationGone)
+	}
+	f.installations[200].suspended = true
+	if _, err := client.Installation(ctx, 200); !errors.Is(err, ErrInstallationGone) {
+		t.Fatalf("a suspended installation: got = %v, want %v", err, ErrInstallationGone)
+	}
+	client.key, _ = rsa.GenerateKey(rand.Reader, 2048)
+	if _, err := client.Installation(ctx, 100); !errors.Is(err, ErrAppCredentials) {
+		t.Fatalf("with a key GitHub does not know: got = %v, want %v", err, ErrAppCredentials)
+	}
+}
+
+func TestRepositoriesListsWhatAnInstallationCoversToTheLastPage(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	found, err := client.Repositories(ctx, 100)
+	want := []Repository{{FullName: "Acme/Model", Private: true}, {FullName: "acme/other"}}
+	if err != nil || !slices.Equal(found, want) {
+		t.Fatalf("Repositories = %+v, %v, want %+v", found, err, want)
+	}
+	if minted := f.lastToken(); !maps.Equal(minted.permissions, map[string]string{"metadata": "read"}) {
+		t.Fatalf("the listing was read with %+v, want a token that reads names alone", minted.permissions)
+	}
+	for id := int64(1000); id < 1230; id++ {
+		name := fmt.Sprintf("acme/r%d", id)
+		f.repos[name] = &fakeRepo{id: id, fullName: name}
+		f.installations[100].repos[id] = true
+	}
+	if found, err := client.Repositories(ctx, 100); err != nil || len(found) != 232 {
+		t.Fatalf("Repositories = %d of them, %v, want all 232 over three pages", len(found), err)
+	}
+	if found, err := client.Repositories(ctx, 999); !errors.Is(err, ErrInstallationGone) || found != nil {
+		t.Fatalf("an installation that is gone: %+v, %v, want %v", found, err, ErrInstallationGone)
 	}
 }
 
 func TestTokenIsLimitedToOneRepositoryAndTheAccessAsked(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	for _, access := range []Access{Read, Write} {
-		token, err := client.Token(ctx, 100, 2, access)
+		token, err := client.Token(ctx, 100, "acme/other", access)
 		if err != nil {
 			t.Fatalf("Token(%s): %v", access, err)
 		}
@@ -468,15 +562,15 @@ func TestTokenIsLimitedToOneRepositoryAndTheAccessAsked(t *testing.T) {
 			t.Fatalf("expires in %s, want GitHub's hour", until)
 		}
 	}
-	if _, err := client.Token(ctx, 100, 2, "admin"); err == nil {
+	if _, err := client.Token(ctx, 100, "acme/other", "admin"); err == nil {
 		t.Fatal("Token minted an access that is neither read nor write")
 	}
 }
 
-// Two projects share installation 100. The token of one must not read the other's repository.
+// Two platform experiments share installation 100. The token of one must not read the other's repository.
 func TestATokenOfOneRepositoryDoesNotReachItsSiblingOnTheSameInstallation(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	token, err := client.Token(ctx, 100, 1, Write)
+	token, err := client.Token(ctx, 100, "acme/model", Write)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,21 +588,28 @@ func TestTokenRefusals(t *testing.T) {
 	cases := map[string]struct {
 		arrange      func(*fakeGitHub, *Client)
 		installation int64
-		repo         int64
+		repo         string
 		want         error
 	}{
-		"the installation was removed":                     {func(f *fakeGitHub, _ *Client) { delete(f.installations, 100) }, 100, 1, ErrInstallationGone},
-		"the installation was suspended":                   {func(f *fakeGitHub, _ *Client) { f.installations[100].suspended = true }, 100, 1, ErrInstallationGone},
-		"the repository was taken out of the installation": {func(f *fakeGitHub, _ *Client) { delete(f.installations[100].repos, 1) }, 100, 1, ErrRepositoryNotInstalled},
-		"a repository of another installation":             {func(*fakeGitHub, *Client) {}, 100, 3, ErrRepositoryNotInstalled},
+		"the installation was removed":                     {func(f *fakeGitHub, _ *Client) { delete(f.installations, 100) }, 100, "acme/model", ErrInstallationGone},
+		"the installation was suspended":                   {func(f *fakeGitHub, _ *Client) { f.installations[100].suspended = true }, 100, "acme/model", ErrInstallationGone},
+		"the repository was taken out of the installation": {func(f *fakeGitHub, _ *Client) { delete(f.installations[100].repos, 1) }, 100, "acme/model", ErrRepositoryNotInstalled},
+		"a repository of another installation":             {func(*fakeGitHub, *Client) {}, 100, "rival/secret", ErrRepositoryNotInstalled},
+		// An installation names its repositories without their owner. Another account's
+		// installation holding a repository of the same name must not answer for this one.
+		"a namesake under another account's installation": {func(f *fakeGitHub, _ *Client) {
+			f.repos["rival/model"] = &fakeRepo{id: 7, fullName: "rival/model"}
+			f.installations[200].repos[7] = true
+		}, 200, "acme/model", ErrRepositoryNotInstalled},
+		"a name that is no repository": {func(*fakeGitHub, *Client) {}, 100, "acme/model/../other", ErrInvalidRepository},
 		"the App's key was rotated out": {func(_ *fakeGitHub, c *Client) {
 			c.key, _ = rsa.GenerateKey(rand.Reader, 2048)
-		}, 100, 1, ErrAppCredentials},
+		}, 100, "acme/model", ErrAppCredentials},
 		"a clock so far behind that the JWT has expired": {func(_ *fakeGitHub, c *Client) {
 			c.now = func() time.Time { return time.Now().Add(-time.Hour) }
-		}, 100, 1, ErrAppCredentials},
-		"the primary rate limit":   {func(f *fakeGitHub, _ *Client) { f.rateLimit = http.StatusForbidden }, 100, 1, ErrRateLimited},
-		"the secondary rate limit": {func(f *fakeGitHub, _ *Client) { f.rateLimit = http.StatusTooManyRequests }, 100, 1, ErrRateLimited},
+		}, 100, "acme/model", ErrAppCredentials},
+		"the primary rate limit":   {func(f *fakeGitHub, _ *Client) { f.rateLimit = http.StatusForbidden }, 100, "acme/model", ErrRateLimited},
+		"the secondary rate limit": {func(f *fakeGitHub, _ *Client) { f.rateLimit = http.StatusTooManyRequests }, 100, "acme/model", ErrRateLimited},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -526,7 +627,7 @@ func TestTokenRefusals(t *testing.T) {
 func TestTheAppJWTToleratesAClockThatRunsAhead(t *testing.T) {
 	_, client := newFakeGitHub(t)
 	client.now = func() time.Time { return time.Now().Add(45 * time.Second) }
-	if _, err := client.Token(ctx, 100, 1, Read); err != nil {
+	if _, err := client.Token(ctx, 100, "acme/model", Read); err != nil {
 		t.Fatalf("Token with the clock 45s ahead: %v", err)
 	}
 }
@@ -534,7 +635,7 @@ func TestTheAppJWTToleratesAClockThatRunsAhead(t *testing.T) {
 func TestATokenThatReachesFurtherThanAskedIsNotHandedOn(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	f.widen = true
-	token, err := client.Token(ctx, 100, 1, Read)
+	token, err := client.Token(ctx, 100, "acme/model", Read)
 	if err == nil || token != nil {
 		t.Fatalf("Token = %+v, %v, want a refusal of a token that names two repositories", token, err)
 	}
@@ -542,18 +643,18 @@ func TestATokenThatReachesFurtherThanAskedIsNotHandedOn(t *testing.T) {
 
 func TestFile(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	readToken, err := client.Token(ctx, 100, 1, Read)
+	readToken, err := client.Token(ctx, 100, "acme/model", Read)
 	if err != nil || readToken.Repository != "Acme/Model" {
 		t.Fatalf("Token = %+v, %v, want it to name the repository as GitHub does", readToken, err)
 	}
-	data, err := client.File(ctx, readToken, 1, "main", ".hypothesisloop/experiment.yaml")
+	data, err := client.File(ctx, readToken, "main", ".hypothesisloop/experiment.yaml")
 	if err != nil || string(data) != "name: from the repo\n" {
 		t.Fatalf("File = %q, %v", data, err)
 	}
 	if minted := f.lastToken(); minted.permissions["contents"] != "read" || len(minted.repos) != 1 || minted.repos[0] != 1 {
 		t.Fatalf("the file was read with %+v, want read on repository 1", minted)
 	}
-	if data, err := client.File(ctx, readToken, 1, "", ".hypothesisloop/experiment.yaml"); err != nil || string(data) != "name: from the repo\n" {
+	if data, err := client.File(ctx, readToken, "", ".hypothesisloop/experiment.yaml"); err != nil || string(data) != "name: from the repo\n" {
 		t.Fatalf("File at the default branch = %q, %v", data, err)
 	}
 	for name, tc := range map[string]struct {
@@ -566,13 +667,13 @@ func TestFile(t *testing.T) {
 		"a symlink":                             {"main", "link", ErrNotAFile},
 		"a submodule":                           {"main", "vendored", ErrNotAFile},
 	} {
-		if _, err := client.File(ctx, readToken, 1, tc.ref, tc.path); !errors.Is(err, tc.want) {
+		if _, err := client.File(ctx, readToken, tc.ref, tc.path); !errors.Is(err, tc.want) {
 			t.Errorf("%s: got = %v, want %v", name, err, tc.want)
 		}
 	}
 	for _, path := range []string{"../other", "a//b", "/etc/passwd", "a/./b", ""} {
 		before := len(f.calls)
-		if _, err := client.File(ctx, readToken, 1, "main", path); err == nil {
+		if _, err := client.File(ctx, readToken, "main", path); err == nil {
 			t.Errorf("File(%q) was read", path)
 		}
 		for _, call := range f.calls[before:] {
@@ -584,12 +685,12 @@ func TestFile(t *testing.T) {
 	// A file up to the limit is read whole, though base64 makes its answer a third larger.
 	for _, size := range []int{0, 750 << 10, 900 << 10, MaxFileBytes} {
 		f.repos["acme/model"].files["sized"] = strings.Repeat("y", size)
-		if data, err := client.File(ctx, readToken, 1, "main", "sized"); err != nil || len(data) != size {
+		if data, err := client.File(ctx, readToken, "main", "sized"); err != nil || len(data) != size {
 			t.Errorf("a file of %d bytes: read %d, %v", size, len(data), err)
 		}
 	}
 	f.repos["acme/model"].files["big"] = strings.Repeat("x", MaxFileBytes+1)
-	if _, err := client.File(ctx, readToken, 1, "main", "big"); !errors.Is(err, ErrFileTooLarge) {
+	if _, err := client.File(ctx, readToken, "main", "big"); !errors.Is(err, ErrFileTooLarge) {
 		t.Errorf("a file over the limit: got = %v, want %v", err, ErrFileTooLarge)
 	}
 }
@@ -618,17 +719,21 @@ func TestNoErrorHoldsASecret(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			readToken, err := client.Token(ctx, 100, 1, Read)
+			readToken, err := client.Token(ctx, 100, "acme/model", Read)
 			if err != nil {
 				t.Fatal(err)
 			}
 			arrange(f, client)
 			var failures []error
-			_, err = client.Repository(ctx, "acme/model", "code-alice", testRedirect)
+			_, err = client.UserInstallations(ctx, "code-alice", testRedirect)
 			failures = append(failures, err)
-			_, err = client.Token(ctx, 100, 1, Write)
+			_, err = client.Installation(ctx, 100)
 			failures = append(failures, err)
-			_, err = client.File(ctx, readToken, 1, "main", ".hypothesisloop/experiment.yaml")
+			_, err = client.Repositories(ctx, 100)
+			failures = append(failures, err)
+			_, err = client.Token(ctx, 100, "acme/model", Write)
+			failures = append(failures, err)
+			_, err = client.File(ctx, readToken, "main", ".hypothesisloop/experiment.yaml")
 			failures = append(failures, err)
 			secrets := []string{testClientSecret, "code-alice", "ghs_", "ghu_", jwt[:40], "PRIVATE KEY", "Bearer", "Basic"}
 			for _, failure := range failures {
@@ -687,61 +792,19 @@ func TestAppAddresses(t *testing.T) {
 	}
 }
 
-func TestAttachProofRefusals(t *testing.T) {
-	for name, tc := range map[string]struct {
-		arrange  func(*fakeGitHub)
-		redirect string
-		want     error
-	}{
-		"an organisation whose single sign-on blocks the token": {func(f *fakeGitHub) { f.saml = true }, testRedirect, ErrUserBlocked},
-		"a redirect the code was not issued to":                 {func(*fakeGitHub) {}, "https://evil.example/callback", ErrCodeRejected},
-		"an installation that has not granted the access":       {func(f *fakeGitHub) { f.ungranted = true }, testRedirect, ErrPermissionNotGranted},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f, client := newFakeGitHub(t)
-			tc.arrange(f)
-			if repo, err := client.Repository(ctx, "acme/model", "code-alice", tc.redirect); !errors.Is(err, tc.want) || repo != nil {
-				t.Fatalf("Repository = %+v, %v, want %v", repo, err, tc.want)
-			}
-			if len(f.userTokens) != 0 {
-				t.Fatalf("the person's token outlived the refusal: %v", f.userTokens)
-			}
-		})
-	}
-}
-
-// A person's token that cannot be revoked would outlive the one question it was issued for.
-func TestAnAttachFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
-	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusUnprocessableEntity} {
-		f, client := newFakeGitHub(t)
-		f.revokeStatus = status
-		repo, err := client.Repository(ctx, "acme/model", "code-alice", testRedirect)
-		if err == nil || repo != nil || len(f.tokens) != 0 {
-			t.Errorf("revocation answered %d: Repository = %+v, %v with %d installation tokens, want a failure and none", status, repo, err, len(f.tokens))
-		}
-	}
-	// The refusal of the check itself is what the caller hears when both fail.
+func TestTokenNamesTheRepositoryInGitHubsOwnCasing(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	f.revokeStatus = http.StatusInternalServerError
-	if _, err := client.Repository(ctx, "acme/model", "code-reader", testRedirect); !errors.Is(err, ErrUserCannotPush) {
-		t.Errorf("a reader whose token could not be revoked: got = %v, want %v", err, ErrUserCannotPush)
-	}
-}
-
-func TestTokenNamesTheRepositoryAsItStandsNow(t *testing.T) {
-	f, client := newFakeGitHub(t)
-	f.repos["acme/model"].fullName = "acme/renamed"
-	token, err := client.Token(ctx, 100, 1, Read)
-	if err != nil || token.Repository != "acme/renamed" {
-		t.Fatalf("Token = %+v, %v, want the name after the rename", token, err)
+	token, err := client.Token(ctx, 100, "ACME/model", Read)
+	if err != nil || token.Repository != "Acme/Model" {
+		t.Fatalf("Token = %+v, %v, want the name as GitHub spells it", token, err)
 	}
 	f.repos["acme/model"].fullName = ""
-	if token, err := client.Token(ctx, 100, 1, Read); err == nil {
+	if token, err := client.Token(ctx, 100, "acme/model", Read); err == nil {
 		t.Fatalf("a token whose answer does not name its repository was handed on: %+v", token)
 	}
 	f.repos["acme/model"].fullName = "Acme/Model"
 	f.ungranted = true
-	if _, err := client.Token(ctx, 100, 1, Write); !errors.Is(err, ErrPermissionNotGranted) {
+	if _, err := client.Token(ctx, 100, "acme/model", Write); !errors.Is(err, ErrPermissionNotGranted) {
 		t.Fatalf("a permission the installation has not granted: got = %v, want %v", err, ErrPermissionNotGranted)
 	}
 }

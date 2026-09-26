@@ -10,13 +10,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProjectRepos reaches the repository attached to a project. *accounts.Repos satisfies it.
-type ProjectRepos interface {
-	// CloneURL is empty for a project with no repository attached.
-	CloneURL(ctx context.Context, projectID string) (string, error)
-	// ExperimentBase returns the repository's experiment file. What it refuses is returned as
-	// the API answers it.
-	ExperimentBase(ctx context.Context, projectID string) ([]byte, error)
+// Repositories reaches GitHub through the installations a project's org connected.
+// *accounts.Repositories satisfies it. What either call refuses is returned as the API answers it.
+type Repositories interface {
+	// Reachable returns the repository as GitHub names it, when an installation the org of the
+	// project connected covers it.
+	Reachable(ctx context.Context, projectID, repository string) (string, error)
+	// ExperimentBase returns the repository's experiment file.
+	ExperimentBase(ctx context.Context, projectID, repository string) ([]byte, error)
 }
 
 // statedByTheRequest are the fields a create without from_repo must carry, though the schema
@@ -25,7 +26,7 @@ var statedByTheRequest = []string{"name", "description", "metrics", "report_inte
 
 // neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
 // the branch the file is read from, so these come from the request and from nowhere else.
-var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at", "coordinator_hosted", "coordinator_model"}
+var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at", "coordinator_hosted", "coordinator_model", "agent_image"}
 
 // missing lists the fields of statedByTheRequest the body did not carry.
 func (r CreatePlatformExperimentRequest) missing() []string {
@@ -40,10 +41,10 @@ func (r CreatePlatformExperimentRequest) missing() []string {
 	return out
 }
 
-// fromRepo returns req laid over the experiment file of its project's repository: every field
-// the body carried is the request's, every other one the file's.
+// fromRepo returns req laid over the experiment file of the repository it names: every field the
+// body carried is the request's, every other one the file's.
 func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	data, err := h.repos.ExperimentBase(ctx, req.ProjectID)
+	data, err := h.repos.ExperimentBase(ctx, req.ProjectID, req.Repository)
 	if err != nil {
 		return req, err
 	}
@@ -69,7 +70,7 @@ func decodeExperimentBase(data []byte) (CreatePlatformExperimentRequest, error) 
 	if len(document) == 0 {
 		return base, fmt.Errorf("it is empty")
 	}
-	for _, key := range []string{"project_id", "from_repo"} {
+	for _, key := range []string{"project_id", "from_repo", "repository"} {
 		if _, set := document[key]; set {
 			return base, fmt.Errorf("it must not set %s: the request does", key)
 		}

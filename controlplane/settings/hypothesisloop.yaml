@@ -54,6 +54,13 @@ auth:
 #              11 seconds on the slowest provider measured). Too low spends every restart on slow
 #              pulls. Restarts are spent under one image and one launcher config: a change of
 #              either gives every agent its restarts back and starts a stopped one again.
+#   progress_limit_seconds  how long a running hosted machine may go without its agent reporting
+#              progress before it is given up on and a restart is spent. An agent prints a
+#              progress marker every 15 seconds while it works or waits as it should, its launcher
+#              reads the newest one on each pass, and the limit runs on this platform's clock
+#              from the last time the marker was seen to change. A hung agent is replaced between
+#              one and one and a quarter limits after it stopped. At least 120, and at least
+#              twice a launcher's pass as boot_limit_seconds is.
 #   max_new_instances_per_answer  how many machines one answer asks a launcher to create; the
 #              rest follow in the next. A launcher creates them one after another, so this bounds
 #              how long a pass takes. A launcher says how it paces itself with every question and
@@ -69,6 +76,7 @@ agents:
   api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   default_model: claude-sonnet-5
   boot_limit_seconds: 300
+  progress_limit_seconds: 300
   max_new_instances_per_answer: 10
   max_hosted_per_platform_experiment: 25
 

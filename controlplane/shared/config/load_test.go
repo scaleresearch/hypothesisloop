@@ -231,21 +231,23 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no launcher":           {"  launcher: main", `  launcher: ""`},
-		"launcher not an id":    {"  launcher: main", "  launcher: Main_1"},
-		"no image":              {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
-		"no api url":            {"  api_url: http://host.example.invalid:8081", `  api_url: ""`},
-		"api url with no host":  {"  api_url: http://host.example.invalid:8081", "  api_url: /api"},
-		"api url not http":      {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
-		"misspelled agents key": {"  launcher: main", "  launcher: main\n  launchers: [main]"},
-		"no default model":      {"  default_model: claude-sonnet-5\n", ""},
-		"no boot limit":         {"  boot_limit_seconds: 300\n", ""},
-		"negative boot limit":   {"  boot_limit_seconds: 300", "  boot_limit_seconds: -1"},
-		"no answer size":        {"  max_new_instances_per_answer: 10\n", ""},
-		"no hosted bound":       {"  max_hosted_per_platform_experiment: 25\n", ""},
-		"zero hosted bound":     {"  max_hosted_per_platform_experiment: 25", "  max_hosted_per_platform_experiment: 0"},
-		"launcher with a dash":  {"  launcher: main", "  launcher: main-2"},
-		"default model unsafe":  {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
+		"no launcher":              {"  launcher: main", `  launcher: ""`},
+		"launcher not an id":       {"  launcher: main", "  launcher: Main_1"},
+		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
+		"no api url":               {"  api_url: http://host.example.invalid:8081", `  api_url: ""`},
+		"api url with no host":     {"  api_url: http://host.example.invalid:8081", "  api_url: /api"},
+		"api url not http":         {"  api_url: http://host.example.invalid:8081", "  api_url: ftp://example.invalid"},
+		"misspelled agents key":    {"  launcher: main", "  launcher: main\n  launchers: [main]"},
+		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
+		"no boot limit":            {"  boot_limit_seconds: 300\n", ""},
+		"no progress limit":        {"  progress_limit_seconds: 300\n", ""},
+		"progress limit too short": {"  progress_limit_seconds: 300", "  progress_limit_seconds: 60"},
+		"negative boot limit":      {"  boot_limit_seconds: 300", "  boot_limit_seconds: -1"},
+		"no answer size":           {"  max_new_instances_per_answer: 10\n", ""},
+		"no hosted bound":          {"  max_hosted_per_platform_experiment: 25\n", ""},
+		"zero hosted bound":        {"  max_hosted_per_platform_experiment: 25", "  max_hosted_per_platform_experiment: 0"},
+		"launcher with a dash":     {"  launcher: main", "  launcher: main-2"},
+		"default model unsafe":     {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {

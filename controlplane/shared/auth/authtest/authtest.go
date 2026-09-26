@@ -40,9 +40,14 @@ type Placement struct {
 	// Members holds the users of an org who are not its owners, as "org/user". Every other user
 	// asked about owns the org, which is the only kind of person production has.
 	Members map[string]bool
+	// ClosedAt holds when a platform experiment was closed, for the ones that were.
+	ClosedAt map[string]time.Time
 }
 
 func (p Placement) PlatformExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, *time.Time, error) {
+	if closedAt, closed := p.ClosedAt[id]; closed {
+		return lookup(p.PlatformExperiments, id), &closedAt, nil
+	}
 	return lookup(p.PlatformExperiments, id), nil, nil
 }
 

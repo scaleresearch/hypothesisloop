@@ -14,7 +14,10 @@ import (
 type LauncherCoordinator struct {
 	PlatformExperimentID string
 	domain.HostedCoordinator
-	Ending bool
+	// AgentImage is the image the platform experiment names for its machines, empty for the
+	// platform's own.
+	AgentImage string
+	Ending     bool
 }
 
 // launcherCoordinatorsWhere selects the platform experiments whose coordinator a launcher still
@@ -29,7 +32,7 @@ WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1
 // decided from.
 func (s *PlatformExperimentsStore) ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherCoordinator, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT pe.id, `+coordinatorColumns+`, pe.status = 'closed'`+launcherCoordinatorsWhere+`
+SELECT pe.id, `+coordinatorColumns+`, pe.agent_image, pe.status = 'closed'`+launcherCoordinatorsWhere+`
 ORDER BY pe.id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherCoordinators: %w", err)
@@ -40,7 +43,7 @@ ORDER BY pe.id`, launcher, windDown.Seconds())
 		var c LauncherCoordinator
 		var hosted bool
 		if err := rows.Scan(&c.PlatformExperimentID, &hosted, &c.Launcher, &c.Model, &c.Instance.Name, &c.Instance.Restarts,
-			&c.Instance.Stopped, &c.Instance.ExitedAt, &c.Instance.ExitLog, &c.Instance.SeenAt, &c.Instance.Launch, &c.Ending); err != nil {
+			&c.Instance.Stopped, &c.Instance.ExitedAt, &c.Instance.ExitLog, &c.Instance.SeenAt, &c.Instance.Launch, &c.Instance.Reported, &c.Instance.ProgressAt, &c.Instance.EndReason, &c.AgentImage, &c.Ending); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherCoordinators: %w", err)
 		}
 		coordinators = append(coordinators, c)

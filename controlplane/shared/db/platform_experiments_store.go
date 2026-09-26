@@ -43,12 +43,13 @@ func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
 // for it, read from platform_experiments as pe.
 const coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coordinator_model, pe.coordinator_instance_name,
        pe.coordinator_instance_restarts, pe.coordinator_instance_stopped, pe.coordinator_instance_exited_at, pe.coordinator_instance_exit_log,
-       pe.coordinator_instance_seen_at, pe.coordinator_instance_launch`
+       pe.coordinator_instance_seen_at, pe.coordinator_instance_launch,
+       pe.coordinator_instance_state, pe.coordinator_instance_progress_at, pe.coordinator_instance_end_reason`
 
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, agent_image)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -78,6 +79,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
+		pe.Repository, pe.AgentImage,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -89,7 +91,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	const q = `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
-       ` + coordinatorColumns + `, pe.max_hosted
+       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -106,8 +108,9 @@ WHERE id = $1`
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
-		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &pe.MaxHosted,
+		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
 	)
+	pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -293,7 +296,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.stages, pe.current_stage, pe.summary,
        pe.hypothesis_submit_policy, pe.job_submit_policy,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       pe.coordinator_hosted, pe.max_hosted,
+       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.agent_image,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
 LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
@@ -321,11 +324,12 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&hypothesisPolicy, &jobPolicy,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-			&pe.CoordinatorHosted, &pe.MaxHosted,
+			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
 			&pe.SignupCount,
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)
 		}
+		pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 		if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal metrics: %w", err)
 		}
@@ -854,4 +858,23 @@ func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donati
 		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: commit: %w", err)
 	}
 	return true, nil
+}
+
+// ErrPlatformExperimentNotFound reports an id no platform experiment has.
+var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
+
+// PlatformExperimentRepository returns the repository a platform experiment names, empty for
+// none, and the org it belongs to. ErrPlatformExperimentNotFound when there is no such one.
+func (s *PlatformExperimentsStore) PlatformExperimentRepository(ctx context.Context, id string) (orgID, repository string, err error) {
+	err = s.pool.pool.QueryRow(ctx, `
+SELECT p.org_id, pe.repository
+FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+WHERE pe.id = $1`, id).Scan(&orgID, &repository)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrPlatformExperimentNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("platform_experiments_store.PlatformExperimentRepository: %w", err)
+	}
+	return orgID, repository, nil
 }

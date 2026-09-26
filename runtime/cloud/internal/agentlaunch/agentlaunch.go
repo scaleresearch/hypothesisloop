@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -270,23 +271,54 @@ const (
 	// to the control plane.
 	exitLogLines = 60
 	exitLogBytes = 4 << 10
+	// progressLines is how far back in a running instance's output its newest progress marker
+	// is looked for. An agent prints one every few seconds and little else that fast.
+	progressLines = 200
 )
 
+// progressPattern is the line an agent's harness prints while it works or waits as it should.
+// What follows the word is the marker, which only the control plane gives a meaning to.
+var progressPattern = regexp.MustCompile(`^hl-progress ([A-Za-z0-9._:-]{1,64})$`)
+
+// lastProgress is the marker of the newest progress line among lines, or "" when none is one.
+func lastProgress(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if found := progressPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
+			return found[1]
+		}
+	}
+	return ""
+}
+
 // observe is what the control plane is told with the question: every name of this launcher's
-// namespace once, live if any instance of it is, and for a name whose instances all exited the
-// end of the output of the newest. The output is sent and never logged here.
+// namespace once, live if any instance of it is, for a name whose instances all exited the end
+// of the output of the newest, and for a running one the progress marker its command last
+// printed. A marker that could not be read is left out, which the control plane tells apart from
+// one that was never printed. The output is sent and never logged here.
 func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []observedInstance {
 	observed := []observedInstance{}
 	for _, name := range sortedKeys(byName) {
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
 		state, last := provider.StateExited, instances[len(instances)-1]
+		var running *provider.Instance
 		for _, i := range instances {
 			if i.State == provider.StateRunning || (i.State == provider.StateStarting && state != provider.StateRunning) {
 				state = i.State
 			}
+			if i.State == provider.StateRunning && running == nil {
+				running = &i
+			}
 		}
 		entry := observedInstance{Name: name[len(l.prefix):], State: string(state)}
+		if running != nil {
+			if lines, err := l.provider.Logs(ctx, running.ID, progressLines); err != nil {
+				l.cfg.Log("read the progress of running %s: %v", name, err)
+			} else {
+				progress := lastProgress(lines)
+				entry.Progress = &progress
+			}
+		}
 		if state == provider.StateExited {
 			lines, err := l.provider.Logs(ctx, last.ID, exitLogLines)
 			if err != nil {

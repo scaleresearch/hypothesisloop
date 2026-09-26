@@ -36,13 +36,13 @@ const usage = `usage: hl-admin <command>
   launcher add NAME                register an agent-launcher and print its token
   launcher remove NAME             end a launcher's token. Empty it first: what it still holds
                                    is then nobody's to take down
-  repo attach PROJECT INSTALLATION REPOSITORY_ID
-                                   make a GitHub repository the project's, as an operator who
-                                   vouches for it. GitHub is asked, as the App, that the installation
-                                   covers the repository, and names it. The API's own attach also asks
-                                   the person to prove they can push to it, and this does not
+  github connect ORG INSTALLATION_ID
+                                   connect an installation of the platform's GitHub App to an org, as
+                                   an operator who vouches for it. GitHub is asked, as the App, which
+                                   account the installation is on. The API's own connect also asks a
+                                   person to prove they reach the installation, and this does not
 
-token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL, and repo attach needs the
+token reads HYPOTHESISLOOP_CONFIG. The others also read DATABASE_URL, and github connect needs the
 github section of the config.`
 
 func main() {
@@ -142,24 +142,20 @@ func run(args []string, stdout io.Writer) error {
 			}
 			return nil
 		})
-	case len(args) == 5 && args[0] == "repo" && args[1] == "attach":
+	case len(args) == 4 && args[0] == "github" && args[1] == "connect":
 		installation, err := strconv.ParseInt(args[3], 10, 64)
 		if err != nil || installation <= 0 {
-			return fmt.Errorf("INSTALLATION must be the installation's number, got %q", args[3])
-		}
-		repository, err := strconv.ParseInt(args[4], 10, 64)
-		if err != nil || repository <= 0 {
-			return fmt.Errorf("REPOSITORY_ID must be the repository's number on GitHub, got %q", args[4])
+			return fmt.Errorf("INSTALLATION_ID must be the installation's number, got %q", args[3])
 		}
 		if !cfg.GitHub.Configured() {
-			return errors.New("the config has no github section, so there is no App to ask about the repository")
+			return errors.New("the config has no github section, so there is no App to ask about the installation")
 		}
 		app, err := github.New(cfg.GitHub)
 		if err != nil {
 			return err
 		}
 		return withPool(func(ctx context.Context, pool *db.Pool) error {
-			return attachRepo(ctx, db.NewAccountsStore(pool), app, args[2], installation, repository, stdout)
+			return connectGitHub(ctx, db.NewAccountsStore(pool), app, args[2], installation, stdout)
 		})
 	default:
 		return errors.New(usage)
@@ -185,35 +181,29 @@ func loadConfig() (*config.Config, error) {
 	return config.Load(path)
 }
 
-type repoProjects interface {
-	GetProject(ctx context.Context, id string) (*domain.Project, error)
-	AttachProjectRepo(ctx context.Context, repo *domain.ProjectRepo) error
+type installationStore interface {
+	ConnectGitHubInstallation(ctx context.Context, installation *domain.OrgGitHubInstallation) error
 }
 
 type installations interface {
-	Token(ctx context.Context, installationID, repositoryID int64, access github.Access) (*github.Token, error)
+	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
 }
 
-// attachRepo records a repository as a project's. Nothing typed is recorded unchecked: GitHub
-// mints a token for the repository only when the installation covers it, and its answer is where
-// the name comes from.
-func attachRepo(ctx context.Context, projects repoProjects, app installations, projectID string, installation, repository int64, stdout io.Writer) error {
-	project, err := projects.GetProject(ctx, projectID)
+// connectedByOperator is who connected an installation that no person proved they reach.
+const connectedByOperator = "hl-admin"
+
+// connectGitHub records an installation as an org's. Nothing typed is recorded unchecked: the
+// installation is the App's own, and the account it is on is GitHub's answer.
+func connectGitHub(ctx context.Context, store installationStore, app installations, orgID string, installationID int64, stdout io.Writer) error {
+	found, err := app.Installation(ctx, installationID)
 	if err != nil {
+		return fmt.Errorf("installation %d: %w", installationID, err)
+	}
+	connected := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: found.ID, AccountLogin: found.AccountLogin, ConnectedBy: connectedByOperator}
+	if err := store.ConnectGitHubInstallation(ctx, connected); err != nil {
 		return err
 	}
-	if project == nil {
-		return fmt.Errorf("project %s does not exist", projectID)
-	}
-	token, err := app.Token(ctx, installation, repository, github.Read)
-	if err != nil {
-		return fmt.Errorf("installation %d and repository %d: %w", installation, repository, err)
-	}
-	repo := &domain.ProjectRepo{ProjectID: projectID, InstallationID: installation, RepositoryID: repository, Repo: token.Repository}
-	if err := projects.AttachProjectRepo(ctx, repo); err != nil {
-		return err
-	}
-	return json.NewEncoder(stdout).Encode(repo)
+	return json.NewEncoder(stdout).Encode(connected)
 }
 
 func withPool(do func(context.Context, *db.Pool) error) error {

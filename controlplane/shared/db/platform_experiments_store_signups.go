@@ -207,7 +207,8 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 const agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
        s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
-       s.instance_seen_at, s.instance_launch`
+       s.instance_seen_at, s.instance_launch,
+       s.instance_state, s.instance_progress_at, s.instance_end_reason`
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -217,7 +218,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
-		&instance.SeenAt, &instance.Launch}, more...)...); err != nil {
+		&instance.SeenAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	if signup.Hosted {
@@ -271,7 +272,10 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID
 // finish its last turn.
 type LauncherAgent struct {
 	domain.AgentSignup
-	Ending bool
+	// AgentImage is the image the agent's platform experiment names for its machines, empty for
+	// the platform's own.
+	AgentImage string
+	Ending     bool
 }
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
@@ -291,7 +295,7 @@ WHERE s.hosted AND s.launcher = $1
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, (pe.status = 'closed' OR c.agent_id IS NOT NULL)`+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image, (pe.status = 'closed' OR c.agent_id IS NOT NULL)`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -301,7 +305,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	for rows.Next() {
 		var agent LauncherAgent
 		var err error
-		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.Ending); err != nil {
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage, &agent.Ending); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 		}
 		agents = append(agents, agent)

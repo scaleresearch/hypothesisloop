@@ -25,7 +25,8 @@ import (
 //	HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY  owner/name of a sandbox repository the push check
 //	                                          may push a branch to, which it deletes again
 //
-// Attaching a repository needs a person's authorisation code from a browser and has no check here.
+// Connecting an installation needs a person's authorisation code from a browser, so the code
+// exchange, GET /user/installations with a person's token and its revocation have no check here.
 func liveClient(t *testing.T) *Client {
 	t.Helper()
 	appID, keyFile := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_APP_ID"), os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_KEY_FILE")
@@ -80,11 +81,11 @@ func TestLiveGitHubTakesTheAppJWT(t *testing.T) {
 
 func TestLiveGitHubRefusalsReadAsTheClientNamesThem(t *testing.T) {
 	client := liveClient(t)
-	if _, err := client.Token(ctx, 1, 1, Read); !errors.Is(err, ErrInstallationGone) {
+	if _, err := client.Token(ctx, 1, "nobody/nothing", Read); !errors.Is(err, ErrInstallationGone) {
 		t.Errorf("a token for an installation that is not this App's: got = %v, want %v", err, ErrInstallationGone)
 	}
 	client.key, _ = rsa.GenerateKey(rand.Reader, 2048)
-	if _, err := client.Token(ctx, 1, 1, Read); !errors.Is(err, ErrAppCredentials) {
+	if _, err := client.Token(ctx, 1, "nobody/nothing", Read); !errors.Is(err, ErrAppCredentials) {
 		t.Errorf("a token asked for with a key that is not the App's: got = %v, want %v", err, ErrAppCredentials)
 	}
 }
@@ -97,94 +98,89 @@ func TestLiveInstallationTokenIsLimitedToOneRepository(t *testing.T) {
 	if ValidRepository(name) != nil {
 		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY is not set to owner/name")
 	}
+	owner, repoName, _ := strings.Cut(name, "/")
+	found, err := client.Installation(ctx, installation)
+	if err != nil || found.ID != installation || !strings.EqualFold(found.AccountLogin, owner) {
+		t.Fatalf("Installation = %+v, %v, want the one on the account that owns %s", found, err, name)
+	}
+	if _, err := client.Installation(ctx, 1); !errors.Is(err, ErrInstallationGone) {
+		t.Errorf("an installation that is not this App's: got = %v, want %v", err, ErrInstallationGone)
+	}
+
+	all, err := client.Repositories(ctx, installation)
+	if err != nil {
+		t.Fatalf("Repositories: %v", err)
+	}
+	listed, sibling := false, ""
+	for _, repo := range all {
+		switch {
+		case strings.EqualFold(repo.FullName, name):
+			listed = true
+		case repo.Private && sibling == "":
+			sibling = repo.FullName
+		}
+	}
+	if !listed {
+		t.Fatalf("the installation does not list the repository among its %d", len(all))
+	}
+
+	token, err := client.Token(ctx, installation, strings.ToUpper(name), Read)
+	if err != nil {
+		t.Fatalf("Token for the name in another casing: %v", err)
+	}
+	if !strings.EqualFold(token.Repository, name) || token.Repository == strings.ToUpper(name) {
+		t.Errorf("the token names its repository %q, want %q as GitHub spells it", token.Repository, name)
+	}
+	var reached struct {
+		Repositories []struct {
+			FullName string `json:"full_name"`
+		} `json:"repositories"`
+	}
+	if err := client.call(ctx, http.MethodGet, "/installation/repositories", token.Value, nil, &reached); err != nil {
+		t.Fatalf("list what the token reaches: %v", err)
+	}
+	if len(reached.Repositories) != 1 || !strings.EqualFold(reached.Repositories[0].FullName, name) {
+		t.Fatalf("the token reaches %d repositories, want the one asked for", len(reached.Repositories))
+	}
+	var read struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := client.call(ctx, http.MethodGet, "/repos/"+name, token.Value, nil, &read); err != nil || read.DefaultBranch == "" {
+		t.Fatalf("the token reading its own repository: default branch %q, %v", read.DefaultBranch, err)
+	}
+	if sibling == "" {
+		t.Log("the installation has no second private repository to try the token on")
+	} else if err := client.call(ctx, http.MethodGet, "/repos/"+sibling, token.Value, nil, &read); !errors.Is(err, errNotFound) {
+		t.Errorf("the token reading a private sibling on the same installation: got = %v, want not found", err)
+	}
+
+	if _, err := client.Token(ctx, installation, owner+"/a-repository-nobody-has-made-7c1f", Read); !errors.Is(err, ErrRepositoryNotInstalled) {
+		t.Errorf("a token for a repository outside the installation: got = %v, want %v", err, ErrRepositoryNotInstalled)
+	}
+	// The installation names repositories without their owner: another owner's is refused here.
+	if _, err := client.Token(ctx, installation, "an-owner-that-is-not-this-one-7c1f/"+repoName, Read); !errors.Is(err, ErrRepositoryNotInstalled) {
+		t.Errorf("a token for the same name under another owner: got = %v, want %v", err, ErrRepositoryNotInstalled)
+	}
+	if _, err := client.File(ctx, token, "", "a-path-no-repository-holds.yaml"); !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("a file the repository does not hold: got = %v, want %v", err, ErrFileNotFound)
+	}
+	if _, err := client.File(ctx, token, "", "README.md"); err != nil && !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("reading README.md at the default branch: %v", err)
+	}
+	// A permission the App does not hold is refused with the message Token reads.
 	jwt, err := client.appJWT()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var covering struct {
-		ID int64 `json:"id"`
-	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name+"/installation", jwt, nil, &covering); err != nil || covering.ID != installation {
-		t.Fatalf("the installation covering the repository = %d, %v, want %d", covering.ID, err, installation)
-	}
-
-	// The whole installation, to learn the repository's id and find a private sibling.
-	type listing struct {
-		Repositories []struct {
-			ID       int64  `json:"id"`
-			FullName string `json:"full_name"`
-			Private  bool   `json:"private"`
-		} `json:"repositories"`
-	}
-	var whole struct {
-		Token string `json:"token"`
-	}
 	path := "/app/installations/" + strconv.FormatInt(installation, 10) + "/access_tokens"
-	if err := client.call(ctx, http.MethodPost, path, jwt, map[string]any{"permissions": map[string]string{"metadata": "read"}}, &whole); err != nil {
-		t.Fatalf("mint a metadata token for the installation: %v", err)
-	}
-	var all listing
-	if err := client.call(ctx, http.MethodGet, "/installation/repositories?per_page=100", whole.Token, nil, &all); err != nil {
-		t.Fatal(err)
-	}
-	var repository, sibling int64
-	for _, repo := range all.Repositories {
-		switch {
-		case strings.EqualFold(repo.FullName, name):
-			repository = repo.ID
-		case repo.Private && sibling == 0:
-			sibling = repo.ID
-		}
-	}
-	if repository == 0 {
-		t.Fatalf("the installation does not list the repository among its %d", len(all.Repositories))
-	}
-
-	token, err := client.Token(ctx, installation, repository, Read)
-	if err != nil {
-		t.Fatalf("Token: %v", err)
-	}
-	var reached listing
-	if err := client.call(ctx, http.MethodGet, "/installation/repositories", token.Value, nil, &reached); err != nil {
-		t.Fatalf("list what the token reaches: %v", err)
-	}
-	if len(reached.Repositories) != 1 || reached.Repositories[0].ID != repository {
-		t.Fatalf("the token reaches %d repositories, want the one asked for", len(reached.Repositories))
-	}
-	var read struct {
-		ID            int64  `json:"id"`
-		DefaultBranch string `json:"default_branch"`
-	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name, token.Value, nil, &read); err != nil || read.ID != repository || read.DefaultBranch == "" {
-		t.Fatalf("the token reading its own repository: id %d, default branch %q, %v", read.ID, read.DefaultBranch, err)
-	}
-	if sibling == 0 {
-		t.Log("the installation has no second private repository to try the token on")
-	} else if err := client.call(ctx, http.MethodGet, "/repositories/"+strconv.FormatInt(sibling, 10), token.Value, nil, &read); !errors.Is(err, errNotFound) {
-		t.Errorf("the token reading a private sibling on the same installation: got = %v, want not found", err)
-	}
-
-	if _, err := client.Token(ctx, installation, 1, Read); !errors.Is(err, ErrRepositoryNotInstalled) {
-		t.Errorf("a token for a repository outside the installation: got = %v, want %v", err, ErrRepositoryNotInstalled)
-	}
-	if !strings.EqualFold(token.Repository, name) {
-		t.Errorf("the token names its repository %q, want %q", token.Repository, name)
-	}
-	if _, err := client.File(ctx, token, repository, "", "a-path-no-repository-holds.yaml"); !errors.Is(err, ErrFileNotFound) {
-		t.Errorf("a file the repository does not hold: got = %v, want %v", err, ErrFileNotFound)
-	}
-	if _, err := client.File(ctx, token, repository, "", "README.md"); err != nil && !errors.Is(err, ErrFileNotFound) {
-		t.Errorf("reading README.md at the default branch: %v", err)
-	}
-	// A permission the App does not hold is refused with the message Token reads.
 	var out map[string]any
-	body := map[string]any{"repository_ids": []int64{repository}, "permissions": map[string]string{"issues": "write"}}
+	body := map[string]any{"repositories": []string{repoName}, "permissions": map[string]string{"issues": "write"}}
 	err = client.call(ctx, http.MethodPost, path, jwt, body, &out)
 	var refused *refusal
 	if !errors.Is(err, errUnprocessable) || !errors.As(err, &refused) || !strings.Contains(strings.ToLower(refused.message), "permission") {
 		t.Errorf("a permission the App lacks: got = %v, want a 422 whose message names permissions", err)
 	}
-	body = map[string]any{"repository_ids": []int64{1}, "permissions": map[string]string{"metadata": "read"}}
+	body = map[string]any{"repositories": []string{"a-repository-nobody-has-made-7c1f"}, "permissions": map[string]string{"metadata": "read"}}
 	err = client.call(ctx, http.MethodPost, path, jwt, body, &out)
 	if !errors.Is(err, errUnprocessable) || !errors.As(err, &refused) || strings.Contains(strings.ToLower(refused.message), "permission") {
 		t.Errorf("a repository outside the installation: got = %v, want a 422 whose message does not name permissions", err)
@@ -212,30 +208,11 @@ func TestLiveReadTokenClonesAndOnlyAWriteTokenPushes(t *testing.T) {
 	if ValidRepository(name) != nil {
 		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY is not set to owner/name")
 	}
-	jwt, err := client.appJWT()
+	read, err := client.Token(ctx, installation, name, Read)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var probe struct {
-		Token string `json:"token"`
-	}
-	_, repoName, _ := strings.Cut(name, "/")
-	path := "/app/installations/" + strconv.FormatInt(installation, 10) + "/access_tokens"
-	body := map[string]any{"repositories": []string{repoName}, "permissions": map[string]string{"metadata": "read"}}
-	if err := client.call(ctx, http.MethodPost, path, jwt, body, &probe); err != nil {
-		t.Fatalf("mint a metadata token for the sandbox: %v", err)
-	}
-	var repo struct {
-		ID int64 `json:"id"`
-	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name, probe.Token, nil, &repo); err != nil {
-		t.Fatalf("read the sandbox repository: %v", err)
-	}
-	read, err := client.Token(ctx, installation, repo.ID, Read)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write, err := client.Token(ctx, installation, repo.ID, Write)
+	write, err := client.Token(ctx, installation, name, Write)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,22 +15,29 @@ import (
 
 const testGitToken = "ghs_a_token_minted_for_this_test"
 
-// platform answers GET /git-credential as the control plane does for a project whose repository
-// is Acme/Model: a token for that repository's address and its LFS address, 404 for any other.
+// platform answers POST /git-credentials as the control plane does for a platform experiment
+// whose repository is Acme/Model: a token for that repository's address and its LFS address, 404
+// for any other. It records each call with its body as a query string.
 func platform(t *testing.T) *[]string {
 	t.Helper()
 	asked := &[]string{}
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		*asked = append(*asked, r.Method+" "+r.URL.RequestURI())
-		query := r.URL.Query()
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		query := url.Values{}
+		for key, value := range body {
+			query.Set(key, value)
+		}
+		*asked = append(*asked, r.Method+" "+r.URL.Path+"?"+query.Encode())
 		path := strings.ToLower(strings.Trim(query.Get("path"), "/"))
 		w.Header().Set("Content-Type", "application/json")
 		served := path == "acme/model" || path == "acme/model.git" || path == "acme/model.git/info/lfs"
-		if r.URL.Path != "/git-credential" || query.Get("protocol") != "https" || !strings.EqualFold(query.Get("host"), "github.com") || !served {
+		if r.Method != "POST" || r.URL.Path != "/git-credentials" || query.Get("protocol") != "https" || !strings.EqualFold(query.Get("host"), "github.com") || !served {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":"no git credential for that address"}`)) //nolint:errcheck
+			w.Write([]byte(`{"reason":"not_found","message":"no git credential for that address"}`)) //nolint:errcheck
 			return
 		}
+		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"protocol":"https","host":"github.com","path":"Acme/Model.git","username":"x-access-token","password":"` + testGitToken + `","expires_at":"2099-01-01T01:00:00Z"}`)) //nolint:errcheck
 	}))
 	return asked
@@ -57,8 +65,8 @@ func TestGitCredentialHandsGitAFreshTokenForTheProjectsRepository(t *testing.T) 
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want %q", tc.name, code, stdout, stderr, want)
 		}
 		wantQuery, _ := url.ParseQuery(tc.query)
-		last, _ := url.Parse(strings.TrimPrefix((*asked)[len(*asked)-1], "GET "))
-		if last.Path != "/git-credential" || last.Query().Encode() != wantQuery.Encode() {
+		last, _ := url.Parse(strings.TrimPrefix((*asked)[len(*asked)-1], "POST "))
+		if last.Path != "/git-credentials" || last.Query().Encode() != wantQuery.Encode() {
 			t.Errorf("%s: asked the platform %q, want the address git stated: %s", tc.name, (*asked)[len(*asked)-1], tc.query)
 		}
 	}
@@ -121,9 +129,9 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		status int
 		body   string
 	}{
-		"nothing attached": {http.StatusNotFound, `{"error":"no repository is attached to this project"}`},
-		"the run is over":  {http.StatusForbidden, `{"error":"forbidden: platform experiment pe-1 is closed, and no git credential is handed out for it"}`},
-		"token refused":    {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
+		"no repository":   {http.StatusNotFound, `{"reason":"no_repository","message":"platform experiment pe-1 names no repository"}`},
+		"the run is over": {http.StatusForbidden, `{"reason":"run_over","message":"the run of this agent token in platform experiment pe-1 is over"}`},
+		"token refused":   {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
 	} {
 		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(tc.status)

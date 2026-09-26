@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,25 +67,32 @@ func TestTheExperimentFileIsShapedLikeTheCreateBody(t *testing.T) {
 	}
 }
 
-type fakeProjectRepos struct {
-	files    map[string]string
-	refusal  error
-	cloneErr error
-	asked    []string
+// fakeRepositories is GitHub as the org of each project reaches it: files holds, by project, the
+// experiment file of the one repository its org's installation covers, acme/model, which GitHub
+// spells Acme/Model.
+type fakeRepositories struct {
+	files   map[string]string
+	refusal error
+	checked []string
+	asked   []string
 }
 
-func (f *fakeProjectRepos) CloneURL(_ context.Context, projectID string) (string, error) {
-	if f.cloneErr != nil {
-		return "", f.cloneErr
-	}
-	if _, ok := f.files[projectID]; !ok {
-		return "", nil
-	}
-	return "https://github.com/acme/" + projectID + ".git", nil
+const testRepository = "Acme/Model"
+
+func notReachable() error {
+	return &reasonError{status: http.StatusUnprocessableEntity, Reason: "repository_not_reachable", Message: "the GitHub installation the org connected does not cover that repository"}
 }
 
-func (f *fakeProjectRepos) ExperimentBase(_ context.Context, projectID string) ([]byte, error) {
-	f.asked = append(f.asked, projectID)
+func (f *fakeRepositories) Reachable(_ context.Context, projectID, repository string) (string, error) {
+	f.checked = append(f.checked, projectID+" "+repository)
+	if _, ok := f.files[projectID]; !ok || !strings.EqualFold(repository, testRepository) {
+		return "", notReachable()
+	}
+	return testRepository, nil
+}
+
+func (f *fakeRepositories) ExperimentBase(_ context.Context, projectID, repository string) ([]byte, error) {
+	f.asked = append(f.asked, projectID+" "+repository)
 	if f.refusal != nil {
 		return nil, f.refusal
 	}
@@ -124,7 +130,7 @@ func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.Pl
 	return nil
 }
 
-func repoAPI(t *testing.T, caller authtest.As, repos *fakeProjectRepos) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
+func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
 	t.Helper()
 	store := &createdStore{}
 	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
@@ -154,7 +160,7 @@ var ownerOfA = authtest.As{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{
 
 // run is what a request with from_repo must always state itself.
 func run(more map[string]any) map[string]any {
-	body := map[string]any{"project_id": "prj-a", "from_repo": true, "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": "2027-01-01T00:00:00Z"}
+	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": "2027-01-01T00:00:00Z"}
 	for key, value := range more {
 		body[key] = value
 	}
@@ -162,7 +168,7 @@ func run(more map[string]any) map[string]any {
 }
 
 func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
-	repos := &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}}
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
 	rec := call("POST", "/platform-experiments", run(map[string]any{"description": ""}))
 	if rec.Code != http.StatusCreated {
@@ -183,8 +189,12 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	if pe.Description != "" {
 		t.Fatalf("description = %q, want the empty one the request stated", pe.Description)
 	}
-	if len(repos.asked) != 1 || repos.asked[0] != "prj-a" {
-		t.Fatalf("the file was read for %v, want the request's project once", repos.asked)
+	// The file is read from the repository as GitHub names it, which is also what is stored.
+	if len(repos.asked) != 1 || repos.asked[0] != "prj-a "+testRepository {
+		t.Fatalf("the file was read for %v, want the request's project and repository once", repos.asked)
+	}
+	if pe.Repository != testRepository || pe.RepositoryURL != "https://github.com/Acme/Model.git" {
+		t.Fatalf("created with repository %q at %q, want GitHub's own spelling and its clone address", pe.Repository, pe.RepositoryURL)
 	}
 }
 
@@ -192,7 +202,7 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 // a run costs: without them in the body the request is refused before the repository is read.
 func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 	for _, field := range []string{"budget_accelerator_hours", "max_agents", "ends_at"} {
-		repos := &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}}
+		repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 		store, call := repoAPI(t, ownerOfA, repos)
 		body := run(nil)
 		delete(body, field)
@@ -201,7 +211,7 @@ func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 			t.Errorf("without %s: got = %d %s, read %v, want 422 before the repository is read", field, rec.Code, rec.Body, repos.asked)
 		}
 	}
-	repos := &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}}
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
 	if rec := call("POST", "/platform-experiments", run(map[string]any{"budget_accelerator_hours": 0})); rec.Code != http.StatusUnprocessableEntity || len(store.created) != 0 {
 		t.Errorf("a zero budget in the request: got = %d %s, want 422 and the file's 40 hours left unread", rec.Code, rec.Body)
@@ -218,7 +228,7 @@ func TestCreateWithoutFromRepoRequiresWhatTheFileCouldHaveStated(t *testing.T) {
 			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
 		}
 	}
-	repos := &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}}
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusCreated {
 		t.Fatalf("a whole body with an empty description and a zero starts_at: got = %d %s, want 201", rec.Code, rec.Body)
@@ -236,10 +246,10 @@ func TestCreateWithoutFromRepoRequiresWhatTheFileCouldHaveStated(t *testing.T) {
 	}
 }
 
-// The project is checked before its repository is read, so from_repo cannot be used to learn
-// whether another org's project has one.
+// The project is checked before GitHub is asked anything, so a repository cannot be probed
+// through another org's installation.
 func TestCreateFromRepoChecksTheProjectFirst(t *testing.T) {
-	repos := &fakeProjectRepos{files: map[string]string{"prj-b": experimentBase}}
+	repos := &fakeRepositories{files: map[string]string{"prj-b": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
 	for _, project := range []string{"prj-b", "prj-missing"} {
 		rec := call("POST", "/platform-experiments", run(map[string]any{"project_id": project}))
@@ -247,8 +257,8 @@ func TestCreateFromRepoChecksTheProjectFirst(t *testing.T) {
 			t.Errorf("%s: got = %d %s, want 404", project, rec.Code, rec.Body)
 		}
 	}
-	if len(repos.asked) != 0 || len(store.created) != 0 {
-		t.Fatalf("another org's repository was read: %v", repos.asked)
+	if len(repos.asked) != 0 || len(repos.checked) != 0 || len(store.created) != 0 {
+		t.Fatalf("GitHub was asked for another org: checked %v, read %v", repos.checked, repos.asked)
 	}
 }
 
@@ -263,8 +273,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 		want      int
 		namesFile bool
 	}{
-		"no repository attached":                {"", huma.Error422UnprocessableEntity("from_repo needs a repository attached to the project, and this one has none"), nil, http.StatusUnprocessableEntity, false},
-		"the installation was removed":          {"", huma.Error409Conflict("the GitHub App installation behind the repository was removed or suspended"), nil, http.StatusConflict, false},
+		"the repository has no such file":       {"", &reasonError{status: 422, Reason: "no_experiment_file", Message: "the repository has none"}, nil, http.StatusUnprocessableEntity, false},
 		"no app on this deployment":             {"", huma.Error503ServiceUnavailable("this deployment has no GitHub App configured"), nil, http.StatusServiceUnavailable, false},
 		"an empty file":                         {"", nil, nil, http.StatusUnprocessableEntity, true},
 		"a file that is not the body":           {"nmae: typo\n", nil, nil, http.StatusUnprocessableEntity, true},
@@ -276,7 +285,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 		"a request that spoils the merged body": {experimentBase, nil, map[string]any{"default_quota_tier": "gold"}, http.StatusUnprocessableEntity, true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			repos := &fakeProjectRepos{files: map[string]string{"prj-a": tc.file}, refusal: tc.refusal}
+			repos := &fakeRepositories{files: map[string]string{"prj-a": tc.file}, refusal: tc.refusal}
 			store, call := repoAPI(t, ownerOfA, repos)
 			rec := call("POST", "/platform-experiments", run(tc.more))
 			if rec.Code != tc.want || len(store.created) != 0 || names(rec.Body.String()) != tc.namesFile {
@@ -297,7 +306,7 @@ func TestAPartialUpdateIsRefusedAndClearsNothing(t *testing.T) {
 		}
 	}
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
-		repos := &fakeProjectRepos{}
+		repos := &fakeRepositories{}
 		store, call := repoAPI(t, authtest.Staff, repos)
 		stored := func() *domain.PlatformExperiment { return store.created[0] }
 		store.created = []*domain.PlatformExperiment{{
@@ -329,26 +338,103 @@ func TestAPartialUpdateIsRefusedAndClearsNothing(t *testing.T) {
 	}
 }
 
-func TestAPlatformExperimentIsReadWithItsProjectsCloneAddress(t *testing.T) {
-	repos := &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, authtest.Staff, repos)
-	store.created = []*domain.PlatformExperiment{{ID: "pe-with", ProjectID: "prj-a"}, {ID: "pe-without", ProjectID: "prj-b"}}
-	for id, want := range map[string]string{"pe-with": "https://github.com/acme/prj-a.git", "pe-without": ""} {
-		rec := call("GET", "/platform-experiments/"+id, nil)
-		var pe map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &pe); rec.Code != http.StatusOK || err != nil {
-			t.Fatalf("%s: got = %d %s", id, rec.Code, rec.Body)
+// The repository and the image are the experiment's own, stated at create and by nothing else.
+func TestCreateNamesTheRepositoryAndTheAgentImage(t *testing.T) {
+	whole := func(more map[string]any) map[string]any {
+		body := map[string]any{
+			"project_id": "prj-a", "name": "by hand", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3,
+			"report_interval_seconds": 10, "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
+			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
 		}
-		got, present := pe["code_repo_url"]
-		if (want == "" && present) || (want != "" && got != want) {
-			t.Errorf("%s: code_repo_url = %v (present %v), want %q", id, got, present, want)
+		for key, value := range more {
+			body[key] = value
+		}
+		return body
+	}
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
+	store, call := repoAPI(t, ownerOfA, repos)
+	rec := call("POST", "/platform-experiments", whole(map[string]any{"repository": "acme/model", "agent_image": "registry.example/team/agent:v2"}))
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != http.StatusCreated || err != nil {
+		t.Fatalf("got = %d %s, want 201", rec.Code, rec.Body)
+	}
+	if out["repository"] != testRepository || out["repository_url"] != "https://github.com/Acme/Model.git" || out["agent_image"] != "registry.example/team/agent:v2" {
+		t.Fatalf("answer = %v, want the repository as GitHub names it, its clone address and the image", out)
+	}
+	if _, old := out["code_repo_url"]; old {
+		t.Fatalf("the answer still carries code_repo_url: %v", out)
+	}
+	if pe := store.created[0]; pe.Repository != testRepository || pe.AgentImage != "registry.example/team/agent:v2" {
+		t.Fatalf("stored = %+v", pe)
+	}
+	if len(repos.asked) != 0 {
+		t.Fatalf("a create without from_repo read the experiment file: %v", repos.asked)
+	}
+
+	// Neither is needed: an experiment its owner runs by hand names no repository and no image.
+	rec = call("POST", "/platform-experiments", whole(nil))
+	bare := map[string]any{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &bare)
+	if _, named := bare["repository_url"]; rec.Code != http.StatusCreated || named || store.created[1].Repository != "" || store.created[1].AgentImage != "" {
+		t.Fatalf("without either: got = %d %s", rec.Code, rec.Body)
+	}
+
+	for name, tc := range map[string]struct {
+		more   map[string]any
+		reason string
+	}{
+		"a repository the org does not reach": {map[string]any{"repository": "rival/secret"}, "repository_not_reachable"},
+		"an image with a space":               {map[string]any{"agent_image": "agent image"}, "invalid_agent_image"},
+		"an image with a newline":             {map[string]any{"agent_image": "agent\nENV=x"}, "invalid_agent_image"},
+		"an image too long to be one":         {map[string]any{"agent_image": strings.Repeat("a", domain.MaxAgentImageLength+1)}, "invalid_agent_image"},
+		"from_repo with no repository":        {map[string]any{"from_repo": true}, "no_repository"},
+	} {
+		rec := call("POST", "/platform-experiments", whole(tc.more))
+		var refused map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &refused)
+		if rec.Code != http.StatusUnprocessableEntity || refused["reason"] != tc.reason || len(store.created) != 2 {
+			t.Errorf("%s: got = %d %s, want 422 %s and nothing created", name, rec.Code, rec.Body, tc.reason)
 		}
 	}
-	// A store that cannot say is a failure of the read. An experiment shown without its address
-	// would read as one whose project has no repository.
-	repos.cloneErr = errors.New("connection refused to 10.0.0.7")
-	rec := call("GET", "/platform-experiments/pe-with", nil)
-	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "10.0.0.7") {
-		t.Fatalf("with the repository unreadable: got = %d %s, want 500 without the failure's text", rec.Code, rec.Body)
+}
+
+// Any agent's token can push to the branch the file is read from: the file cannot move the
+// experiment to another repository or put another image on its machines.
+func TestTheExperimentFileNamesNeitherRepositoryNorImage(t *testing.T) {
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase + "agent_image: registry.example/of-the-file\n"}}
+	store, call := repoAPI(t, ownerOfA, repos)
+	if rec := call("POST", "/platform-experiments", run(nil)); rec.Code != http.StatusCreated || store.created[0].AgentImage != "" {
+		t.Fatalf("an image in the file: got = %d %s, created %+v, want it left unread", rec.Code, rec.Body, store.created)
+	}
+	repos.files["prj-a"] = experimentBase + "repository: rival/secret\n"
+	if rec := call("POST", "/platform-experiments", run(nil)); rec.Code != http.StatusUnprocessableEntity || len(store.created) != 1 {
+		t.Fatalf("a repository in the file: got = %d %s, want 422", rec.Code, rec.Body)
+	}
+}
+
+// Both are fixed at create: an update has no field for either.
+func TestAnUpdateCannotMoveTheRepositoryOrTheImage(t *testing.T) {
+	store, call := repoAPI(t, authtest.Staff, &fakeRepositories{})
+	store.created = []*domain.PlatformExperiment{{
+		ID: "pe-1", ProjectID: "prj-a", Name: "kept", Status: domain.PlatformExpOpen, Repository: testRepository, AgentImage: "image:1",
+		BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10, EndsAt: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
+	}}
+	whole := map[string]any{
+		"name": "renamed", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3,
+		"report_interval_seconds": 10, "starts_at": "2026-06-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
+		"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
+	}
+	for _, field := range []string{"repository", "agent_image"} {
+		body := map[string]any{field: "other/one"}
+		for key, value := range whole {
+			body[key] = value
+		}
+		if rec := call("PUT", "/platform-experiments/pe-1", body); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("an update with %s: got = %d %s, want 422", field, rec.Code, rec.Body)
+		}
+	}
+	if rec := call("PUT", "/platform-experiments/pe-1", whole); rec.Code != http.StatusOK || store.created[0].Repository != testRepository || store.created[0].AgentImage != "image:1" {
+		t.Fatalf("a whole update: got = %d %s, stored %+v, want the repository and image kept", rec.Code, rec.Body, store.created[0])
 	}
 }

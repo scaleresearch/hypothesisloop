@@ -236,6 +236,10 @@ func (c *Config) build() error {
 	if c.Agents.BootLimitSeconds <= 0 {
 		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a hosted agent's machine may stay starting")
 	}
+	if c.Agents.ProgressLimitSeconds < domain.MinAgentProgressLimitSeconds {
+		return fmt.Errorf("agents progress_limit_seconds is required and at least %d: an agent prints its progress every %d seconds, and a limit under %d of those ends machines whose output only reached the platform late",
+			domain.MinAgentProgressLimitSeconds, domain.AgentProgressIntervalSeconds, domain.MinAgentProgressLimitSeconds/domain.AgentProgressIntervalSeconds)
+	}
 	if c.Agents.MaxNewInstancesPerAnswer <= 0 {
 		return fmt.Errorf("agents max_new_instances_per_answer is required and positive: how many machines one answer asks a launcher to create")
 	}

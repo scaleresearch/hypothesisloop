@@ -121,7 +121,7 @@ type CreatePlatformExperimentRequest struct {
 	// ProjectID places the platform experiment. Required on create, and fixed from then on.
 	ProjectID string `json:"project_id,omitempty"`
 	// FromRepo takes every field the request leaves out from .hypothesisloop/experiment.yaml at
-	// the head of the default branch of the project's repository.
+	// the head of the default branch of the repository the request names.
 	FromRepo               bool    `json:"from_repo,omitempty"`
 	Name                   string  `json:"name" required:"false"`
 	Description            string  `json:"description" required:"false"`
@@ -150,6 +150,12 @@ type CreatePlatformExperimentRequest struct {
 	// from the experiment file.
 	CoordinatorHosted bool   `json:"coordinator_hosted,omitempty"`
 	CoordinatorModel  string `json:"coordinator_model,omitempty"`
+	// Repository is the code the platform experiment works on, owner/name on GitHub, reachable
+	// through an installation its org connected. AgentImage is the image its hosted agents and
+	// coordinator run, empty for the platform's own. Both are fixed at creation, and the image
+	// is not read from the experiment file.
+	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it."`
+	AgentImage string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator

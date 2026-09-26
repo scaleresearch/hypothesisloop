@@ -209,7 +209,7 @@ func (noLauncherAgents) AskInstance(context.Context, string, string, string, str
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) SeeInstance(context.Context, string, string, string) error {
+func (noLauncherAgents) ObserveInstance(context.Context, string, string, string, string, *string, time.Duration) error {
 	panic("the launcher handler reached its store")
 }
 
@@ -268,16 +268,17 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	launchers := chi.NewRouter()
 	api.docs["/internal/launchers"] = apidocs.New(launchers, "launcher", "1.0.0", "", authenticator, access, logger)
-	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, MaxNewPerAnswer: 1}, logger))
+	launcherapi.RegisterHuma(api.docs["/internal/launchers"], launcherapi.NewHandler(noLauncherAgents{}, launcherapi.Settings{Image: "image", APIURL: "http://api", SigningSecret: worldSecret, BootLimit: time.Minute, ProgressLimit: time.Hour, MaxNewPerAnswer: 1}, logger))
 	api.router.Mount("/internal/launchers", launchers)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, noProjectRepos{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
+	peHandler := quota.NewPlatformExperimentsHandler(nil, noRepositories{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, nil, logger)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))
+	quota.RegisterSessionsHuma(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, nil, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", logger).WithLoop(noopLoop{})))

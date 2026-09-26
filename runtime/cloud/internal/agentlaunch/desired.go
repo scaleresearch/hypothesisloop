@@ -49,6 +49,8 @@ type observedInstance struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 	Log   string `json:"log,omitempty"`
+	// Progress is nil when the output of a running instance could not be read.
+	Progress *string `json:"progress,omitempty"`
 }
 
 // reconcileQuestion is what the launcher tells the control plane with every question.

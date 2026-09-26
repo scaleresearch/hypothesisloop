@@ -3,12 +3,12 @@ package quota
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -146,13 +146,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Operator/dashboard endpoint. project_id, name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
 			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\". " +
 			"description, metrics and starts_at are required as well, and a zero starts_at starts it now. " +
-			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of the " +
-			"project's repository, a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and ends_at " +
+			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
+			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and ends_at " +
 			"are never read from the file and stay required of the body: any agent's token can push to that branch, so what a run costs and how " +
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
-			"It needs the project's repository (409 no_repository without one), is not read from the file, and is fixed from then on. " +
+			"It needs repository (409 no_repository without one), is not read from the file, and is fixed from then on. " +
+			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, " +
+			"and repository_url in the answer is where from. An installation of the platform's GitHub App that the org connected must cover it " +
+			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
+			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
+			"installation_gone when the App was removed on GitHub, and 503 github_not_configured on a deployment with no GitHub App. " +
+			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
+			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Neither is read from the file and both are fixed from then on. " +
 			"This call creates the experiment and no agent: each agent joins by its own POST /platform-experiments/{id}/agents. " +
 			"max_hosted in the answer is how many machines the platform runs for this platform experiment, its hosted agents of every role and its coordinator together. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
@@ -165,14 +172,29 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
 		}
+		if in.Body.Repository != "" {
+			named, err := peh.repos.Reachable(ctx, in.Body.ProjectID, in.Body.Repository)
+			if err != nil {
+				return nil, err
+			}
+			in.Body.Repository = named
+		}
+		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
+			return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_agent_image", Message: err.Error()}
+		}
 		// What is wrong with a body laid over the experiment file may be the file's doing, so every
 		// such refusal has one status and names the file.
 		invalid := func(reason string) error { return huma.Error400BadRequest(reason) }
 		if in.Body.FromRepo {
 			invalid = func(reason string) error {
-				return huma.Error422UnprocessableEntity("with " + domain.ExperimentFile + " of the project's repository under the request: " + reason)
+				return huma.Error422UnprocessableEntity("with " + domain.ExperimentFile + " of the repository under the request: " + reason)
 			}
+			if in.Body.Repository == "" {
+				return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "no_repository", Message: "from_repo reads " + domain.ExperimentFile + " of the repository the request names, and it names none: set repository"}
+			}
+			named := in.Body.Repository
 			body, err := peh.fromRepo(ctx, in.Body)
+			body.Repository = named
 			if errors.Is(err, ErrInvalidPlatformExperiment) {
 				return nil, invalid(err.Error())
 			}
@@ -283,8 +305,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. code_repo_url is the repository attached to its project, " +
-			"which agents clone and jobs check out; absent while none is attached.",
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. repository is the code it works on, owner/name on GitHub, " +
+			"and repository_url the address agents clone and jobs check out. Both are absent when it names none.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
@@ -304,10 +326,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
-		if pe.CodeRepoURL, err = peh.repos.CloneURL(ctx, pe.ProjectID); err != nil {
-			peh.logger.Error("read the repository of a platform experiment's project", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
-			return nil, huma.Error500InternalServerError("failed to read the project's repository")
-		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
 

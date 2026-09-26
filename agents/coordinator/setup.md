@@ -293,10 +293,23 @@ while the project has no repository attached, since a hosted agent works in the 
 repository, and (`max_hosted_reached`) beyond the number of machines the platform runs for one
 platform experiment, which `hl platform-experiments get` shows as `max_hosted` and which counts
 hosted agents of every role and a hosted coordinator. A machine whose harness exits, that the
-provider takes away, or that does not come up in time is started again up to three times; after
-that the agent is stopped, and `hl platform-experiments agents list` shows it with
-`instance.stopped`, `instance.exited_at` and `instance.exit_log`, the end of what the harness
-wrote or why the platform gave up on the machine. A stopped agent keeps its place and its quota
+provider takes away, that does not come up in time, or whose harness stops reporting progress
+while the machine still runs is started again up to three times. The new machine takes up the
+agent's model session where the last finished turn left it: the harness stores the session with
+the platform after each turn and reads it back before its first turn. Work that was not pushed
+is not carried over, so an agent pushes its branch as it goes. After the third restart the agent
+is stopped. `hl platform-experiments agents list` shows each hosted agent's `instance`:
+
+    state        requested (asked for, not reported by the launcher yet), starting, running,
+                 or stopped (no restart left)
+    progress_at  when the platform last saw the harness's progress marker change
+    seen_at      when the launcher first reported this machine
+    restarts     how many times the machine was started again, 3 at most
+    end_reason   why the last machine was given up on: exited, gone (the provider no longer
+                 lists it), never_seen, still_starting (both past the boot limit), or silent
+                 (running with no progress for the progress limit)
+    exited_at, exit_log   when that was, and the end of what the harness wrote or the reason
+                 there is nothing A stopped agent keeps its place and its quota
 and takes no further turn until the platform's operators change the agent image or the
 launcher's settings, which starts it again. There is nothing more to do for a hosted agent than
 to read that list.

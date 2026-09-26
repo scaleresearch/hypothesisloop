@@ -61,13 +61,6 @@ var (
 	// ErrCodeRejected reports a user authorisation code GitHub did not accept: used, expired or
 	// made up.
 	ErrCodeRejected = errors.New("github did not accept the authorisation code")
-	// ErrUserCannotPush reports that the person behind the authorisation code cannot push to the
-	// repository, so they cannot hand that access to agents.
-	ErrUserCannotPush = errors.New("the GitHub user cannot push to that repository")
-	// ErrUserBlocked reports that GitHub let the person's token see nothing of the repository
-	// though the person may: an organisation that enforces SAML single sign-on has not
-	// authorised the App for them.
-	ErrUserBlocked = errors.New("github blocked the user's token from the repository")
 	// ErrPermissionNotGranted reports an installation that has not granted the access the App
 	// asks for: its owner has yet to accept the App's permissions.
 	ErrPermissionNotGranted = errors.New("the installation has not granted the App the access it asks for")
@@ -83,13 +76,17 @@ const (
 	Write Access = "write"
 )
 
-// Repository is a repository as GitHub states it. ID survives a rename; FullName is owner/name
-// in GitHub's own casing.
+// Installation is one installation of the App: a GitHub account, with the repositories its
+// owner chose there.
+type Installation struct {
+	ID           int64  `json:"installation_id"`
+	AccountLogin string `json:"account_login" doc:"The GitHub user or organisation the App is installed on. It is the owner part of every repository the installation covers."`
+}
+
+// Repository is a repository an installation covers, named owner/name in GitHub's own casing.
 type Repository struct {
-	ID       int64
 	FullName string
-	// InstallationID is the installation of the App that covers it.
-	InstallationID int64
+	Private  bool
 }
 
 // Token is an installation token. It works for about an hour and on one repository, which
@@ -104,7 +101,7 @@ type Token struct {
 type App struct {
 	Slug         string `json:"slug"`
 	ClientID     string `json:"client_id"`
-	InstallURL   string `json:"install_url" doc:"Where a person installs the App on repositories they choose. Nothing GitHub sends them back with is needed: the platform finds the installation itself."`
+	InstallURL   string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. GitHub sends them back with installation_id."`
 	AuthorizeURL string `json:"authorize_url" doc:"Where a person proves who they are on GitHub. Add redirect_uri and state. GitHub sends them back with code."`
 }
 
@@ -166,84 +163,123 @@ func CloneURL(fullName string) string {
 	return webURL + "/" + fullName + ".git"
 }
 
-// Repository checks everything an attach rests on and returns the repository as GitHub states
-// it, with the installation that covers it. Nothing the caller says is taken on trust but the
-// name, and each of these is GitHub's own answer:
-//
-//   - the person behind userCode can push to the repository. Agents will push to it, and nobody
-//     may hand out access they do not hold. redirectURI is the one the code was issued to. The
-//     person's token answers this one question and is revoked before anything is returned.
-//   - the App is installed on the repository. GitHub names the installation, to the App itself.
-//   - an installation token limited to the repository can be minted.
-//
-// A name that cannot be a repository is refused before the code is spent.
-func (c *Client) Repository(ctx context.Context, fullName, userCode, redirectURI string) (*Repository, error) {
-	if err := ValidRepository(fullName); err != nil {
-		return nil, err
-	}
+// UserInstallations returns the installations of the App that the person behind userCode
+// reaches on GitHub: those on their own account and on organisations they belong to. It is
+// GitHub's own answer to who may connect which installation. redirectURI is the one the code was
+// issued to. The person's token answers this one question and is revoked before anything is
+// returned.
+func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) ([]Installation, error) {
 	userToken, err := c.exchangeCode(ctx, userCode, redirectURI)
 	if err != nil {
 		return nil, err
 	}
-	repositoryID, err := c.pushableBy(ctx, userToken, fullName)
+	found, err := c.installationsOf(ctx, userToken)
 	if revokeErr := c.revoke(ctx, userToken); revokeErr != nil && err == nil {
 		err = revokeErr
 	}
 	if err != nil {
 		return nil, err
 	}
+	return found, nil
+}
 
+const pageSize = 100
+
+func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Installation, error) {
+	found := []Installation{}
+	for page := 1; ; page++ {
+		var out struct {
+			TotalCount    int `json:"total_count"`
+			Installations []struct {
+				ID      int64 `json:"id"`
+				AppID   int64 `json:"app_id"`
+				Account struct {
+					Login string `json:"login"`
+				} `json:"account"`
+			} `json:"installations"`
+		}
+		path := fmt.Sprintf("/user/installations?per_page=%d&page=%d", pageSize, page)
+		switch err := c.call(ctx, http.MethodGet, path, userToken, nil, &out); {
+		case errors.Is(err, errUnauthorized):
+			return nil, ErrCodeRejected
+		case err != nil:
+			return nil, err
+		}
+		for _, one := range out.Installations {
+			// A token of this App lists this App's installations only, and it is checked all the
+			// same: an installation of another App must never be connected.
+			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" {
+				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or has no account")
+			}
+			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login})
+		}
+		if len(out.Installations) < pageSize || len(found) >= out.TotalCount {
+			return found, nil
+		}
+	}
+}
+
+// Installation returns one installation of the App as GitHub states it to the App itself.
+func (c *Client) Installation(ctx context.Context, installationID int64) (*Installation, error) {
 	jwt, err := c.appJWT()
 	if err != nil {
 		return nil, err
 	}
-	var installation struct {
+	var out struct {
 		ID          int64   `json:"id"`
 		SuspendedAt *string `json:"suspended_at"`
+		Account     struct {
+			Login string `json:"login"`
+		} `json:"account"`
 	}
-	switch err := c.call(ctx, http.MethodGet, "/repos/"+fullName+"/installation", jwt, nil, &installation); {
+	path := "/app/installations/" + strconv.FormatInt(installationID, 10)
+	switch err := c.call(ctx, http.MethodGet, path, jwt, nil, &out); {
 	case errors.Is(err, errNotFound):
-		return nil, ErrRepositoryNotInstalled
+		return nil, ErrInstallationGone
 	case errors.Is(err, errUnauthorized):
 		return nil, ErrAppCredentials
 	case err != nil:
 		return nil, err
 	}
-	if installation.ID <= 0 {
-		return nil, errors.New("github: the installation of the repository was answered without an id")
-	}
-	if installation.SuspendedAt != nil {
+	if out.SuspendedAt != nil {
 		return nil, ErrInstallationGone
 	}
-	token, err := c.Token(ctx, installation.ID, repositoryID, Read)
+	if out.ID != installationID || out.Account.Login == "" {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for or its account")
+	}
+	return &Installation{ID: out.ID, AccountLogin: out.Account.Login}, nil
+}
+
+// Repositories lists every repository an installation covers, as GitHub pages them. The token
+// it reads with reaches the installation's metadata and nothing else, and does not leave here.
+func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repository, error) {
+	token, err := c.mint(ctx, installationID, map[string]any{"permissions": map[string]string{"metadata": "read"}})
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{ID: repositoryID, FullName: token.Repository, InstallationID: installation.ID}, nil
-}
-
-// pushableBy returns the id of a repository the holder of userToken can push to.
-func (c *Client) pushableBy(ctx context.Context, userToken, fullName string) (int64, error) {
-	var seen struct {
-		ID          int64 `json:"id"`
-		Permissions struct {
-			Push bool `json:"push"`
-		} `json:"permissions"`
+	found := []Repository{}
+	for page := 1; ; page++ {
+		var out struct {
+			TotalCount   int `json:"total_count"`
+			Repositories []struct {
+				FullName string `json:"full_name"`
+				Private  bool   `json:"private"`
+			} `json:"repositories"`
+		}
+		path := fmt.Sprintf("/installation/repositories?per_page=%d&page=%d", pageSize, page)
+		if err := c.call(ctx, http.MethodGet, path, token.Token, nil, &out); err != nil {
+			return nil, err
+		}
+		for _, one := range out.Repositories {
+			if ValidRepository(one.FullName) != nil {
+				return nil, fmt.Errorf("github: GET /installation/repositories answered a repository without its name")
+			}
+			found = append(found, Repository{FullName: one.FullName, Private: one.Private})
+		}
+		if len(out.Repositories) < pageSize || len(found) >= out.TotalCount {
+			return found, nil
+		}
 	}
-	switch err := c.call(ctx, http.MethodGet, "/repos/"+fullName, userToken, nil, &seen); {
-	case errors.Is(err, errNotFound):
-		return 0, ErrRepositoryNotInstalled
-	case errors.Is(err, errUnauthorized):
-		return 0, ErrCodeRejected
-	case errors.Is(err, errForbidden):
-		return 0, ErrUserBlocked
-	case err != nil:
-		return 0, err
-	}
-	if !seen.Permissions.Push {
-		return 0, ErrUserCannotPush
-	}
-	return seen.ID, nil
 }
 
 // revoke ends a person's token at GitHub, so that nothing of theirs outlives the question it
@@ -258,28 +294,51 @@ func (c *Client) revoke(ctx context.Context, userToken string) error {
 	return err
 }
 
-// Token mints an installation token for one repository with the access asked for and nothing
-// else. Two projects on one installation each get a token that reaches only their own repository.
-func (c *Client) Token(ctx context.Context, installationID, repositoryID int64, access Access) (*Token, error) {
+// Token mints an installation token for one repository, named owner/name, with the access asked
+// for and nothing else. Two platform experiments on one installation each get a token that
+// reaches only their own repository.
+func (c *Client) Token(ctx context.Context, installationID int64, fullName string, access Access) (*Token, error) {
 	if access != Read && access != Write {
 		return nil, fmt.Errorf("github: unknown access %q", access)
 	}
+	if err := ValidRepository(fullName); err != nil {
+		return nil, err
+	}
+	_, name, _ := strings.Cut(fullName, "/")
+	out, err := c.mint(ctx, installationID, map[string]any{
+		"repositories": []string{name},
+		"permissions":  map[string]string{"contents": string(access), "metadata": "read"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The scope is what was asked for, and it is checked all the same: a token that reaches
+	// further than one repository must never leave this package. An installation names its
+	// repositories without their owner, so the owner is checked here too: the installation of
+	// another account would answer for a repository of the same name.
+	if len(out.Repositories) != 1 || !strings.EqualFold(out.Repositories[0].FullName, fullName) {
+		if len(out.Repositories) == 1 {
+			return nil, ErrRepositoryNotInstalled
+		}
+		return nil, fmt.Errorf("github: the token minted for installation %d is not limited to one repository", installationID)
+	}
+	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt, Repository: out.Repositories[0].FullName}, nil
+}
+
+type minted struct {
+	Token        string    `json:"token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	Repositories []struct {
+		FullName string `json:"full_name"`
+	} `json:"repositories"`
+}
+
+func (c *Client) mint(ctx context.Context, installationID int64, body map[string]any) (*minted, error) {
 	jwt, err := c.appJWT()
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{
-		"repository_ids": []int64{repositoryID},
-		"permissions":    map[string]string{"contents": string(access), "metadata": "read"},
-	}
-	var out struct {
-		Token        string    `json:"token"`
-		ExpiresAt    time.Time `json:"expires_at"`
-		Repositories []struct {
-			ID       int64  `json:"id"`
-			FullName string `json:"full_name"`
-		} `json:"repositories"`
-	}
+	var out minted
 	path := "/app/installations/" + strconv.FormatInt(installationID, 10) + "/access_tokens"
 	var refused *refusal
 	switch err := c.call(ctx, http.MethodPost, path, jwt, body, &out); {
@@ -297,22 +356,14 @@ func (c *Client) Token(ctx context.Context, installationID, repositoryID int64, 
 		return nil, err
 	}
 	if out.Token == "" || out.ExpiresAt.IsZero() {
-		return nil, fmt.Errorf("github: POST %s answered without a token or its expiry", path)
+		return nil, fmt.Errorf("github: POST %s answered without a token or its expiry", routeOf(path))
 	}
-	// The scope is what was asked for, and it is checked all the same: a token that reaches
-	// further than one repository must never leave this package.
-	if len(out.Repositories) != 1 || out.Repositories[0].ID != repositoryID {
-		return nil, fmt.Errorf("github: POST %s answered a token that is not limited to repository %d", path, repositoryID)
-	}
-	if ValidRepository(out.Repositories[0].FullName) != nil {
-		return nil, fmt.Errorf("github: POST %s answered without the name of repository %d", path, repositoryID)
-	}
-	return &Token{Value: out.Token, ExpiresAt: out.ExpiresAt, Repository: out.Repositories[0].FullName}, nil
+	return &out, nil
 }
 
 // File reads one file of a repository with a token minted for it, at ref, a branch name or a
 // commit. An empty ref is the head of the repository's default branch as it stands now.
-func (c *Client) File(ctx context.Context, token *Token, repositoryID int64, ref, path string) ([]byte, error) {
+func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]byte, error) {
 	segments := strings.Split(path, "/")
 	for i, segment := range segments {
 		if segment == "" || segment == "." || segment == ".." {
@@ -320,7 +371,7 @@ func (c *Client) File(ctx context.Context, token *Token, repositoryID int64, ref
 		}
 		segments[i] = url.PathEscape(segment)
 	}
-	target := "/repositories/" + strconv.FormatInt(repositoryID, 10) + "/contents/" + strings.Join(segments, "/")
+	target := "/repos/" + token.Repository + "/contents/" + strings.Join(segments, "/")
 	if ref != "" {
 		target += "?ref=" + url.QueryEscape(ref)
 	}

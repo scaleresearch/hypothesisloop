@@ -27,12 +27,12 @@ type PlatformExperimentsHandler struct {
 	// Set via WithAgentLaunch.
 	launch AgentLaunch
 
-	// repos reaches the repository attached to a project.
-	repos ProjectRepos
+	// repos reaches the repositories a project's org connected on GitHub.
+	repos Repositories
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
-func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos ProjectRepos, logger *zap.Logger) *PlatformExperimentsHandler {
+func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos Repositories, logger *zap.Logger) *PlatformExperimentsHandler {
 	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger}
 }
 

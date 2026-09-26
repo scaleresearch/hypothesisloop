@@ -73,7 +73,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDonationRequestAndNoDataKey(t
 		caller := authtest.As(auth.Principal{Kind: auth.KindAgent, AgentID: tc.agent, PlatformExperimentID: "pe-1", ProjectID: "prj", OrgIDs: []string{"org"}})
 		r := chi.NewRouter()
 		doc := apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeProjectRepos{}, zap.NewNop()))
+		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()))
 		RegisterDataUsageHuma(doc, NewDataUsageHandler(client, store, svc, 0))
 
 		post := func(path, body string) *httptest.ResponseRecorder {

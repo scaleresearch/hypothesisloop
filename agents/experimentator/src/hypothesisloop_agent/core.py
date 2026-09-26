@@ -33,15 +33,15 @@ def hl_commands(coordinates: bool = False) -> str:
         for group in (_HL_HELP_COORDINATOR if coordinates else _HL_HELP))
 
 
-def system_prompt(cfg: config.Config, rules: str, commands: str, code_repo_url: str) -> str:
+def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str) -> str:
     if config.coordinates(cfg):
         return (_PROMPTS_DIR / "coordinator.md").read_text().format(
             rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
-            code_repo_url=code_repo_url)
+            repository_url=repository_url)
     return (_PROMPTS_DIR / "system_prompt.md").read_text().format(
         rules=rules.strip(), hl_commands=commands, agent_id=cfg.agent_id, flavor=cfg.flavor,
         flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip(),
-        platform_experiment_id=cfg.platform_experiment_id, code_repo_url=code_repo_url,
+        platform_experiment_id=cfg.platform_experiment_id, repository_url=repository_url,
         hyperparameters=json.dumps(cfg.hyperparameters),
     )
 
@@ -86,14 +86,14 @@ def prepare() -> RunSetup:
         client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
-    # The repository is the project's, attached on the platform: the agent clones it through
+    # The repository is the one the platform experiment names: the agent clones it through
     # `hl git-credential`, so no address and no git token is handed to it at launch.
-    code_repo_url = platform_experiment.get("code_repo_url")
-    if not code_repo_url:
-        raise SystemExit(f"agent: the project of platform experiment {cfg.platform_experiment_id} has no repository "
-                         "attached: attach one to the project, then start the agent again")
+    repository_url = platform_experiment.get("repository_url")
+    if not repository_url:
+        raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent "
+                         "works in one: create the platform experiment with repository set")
 
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(config.coordinates(cfg)), code_repo_url)
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(config.coordinates(cfg)), repository_url)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 

@@ -94,6 +94,19 @@ func owned(audience []string, admitted int) rule {
 	}
 }
 
+// ownSession is a stored model session: in scope, only the token of the one it belongs to
+// reaches it, an agent's for its own agent's and the coordinator's for the coordinator's.
+func ownSession(audience []string, owner string) rule {
+	inScope := scoped(audience, reached)
+	return func(principal, object string) int {
+		status := inScope(principal, object)
+		if status == reached && (principal != owner || owner == "agent" && object != "own") {
+			return http.StatusForbidden
+		}
+		return status
+	}
+}
+
 // spendsAs is a rule for a request that spends as the agent it names: a coordinator's token is
 // refused where it would otherwise be admitted, since it acts as no agent.
 func spendsAs(admits rule) rule {
@@ -265,6 +278,10 @@ var routes = []route{
 	{method: "GET", path: "/platform-experiments/{id}/metrics-timeseries", request: "/platform-experiments/<pe>/metrics-timeseries?metric_name=loss", rule: scoped(agentAudience, metricsUnreachable), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/data-usage", request: "/platform-experiments/<pe>/data-usage", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/data-key", request: "/platform-experiments/<pe>/data-key", body: `{"agent_id":"<agent>"}`, rule: spendsAs(owned(agentAudience, reached))},
+	{method: "PUT", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", body: `session`, rule: ownSession(agentAudience, "agent")},
+	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", rule: ownSession(agentAudience, "agent"), sharedRead: true},
+	{method: "PUT", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", body: `session`, rule: ownSession(coordinatorAudience, "coordinator")},
+	{method: "GET", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", rule: ownSession(coordinatorAudience, "coordinator"), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", body: `{"agent_id":"<agent>"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", rule: scoped(coordinatorAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/share", request: "/platform-experiments/<pe>/share", rule: staffOnly},

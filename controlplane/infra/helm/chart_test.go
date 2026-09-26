@@ -64,6 +64,7 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 		// Not a value of the chart: the staged settings file decides it.
 		DefaultModel:                   "claude-sonnet-5",
 		BootLimitSeconds:               300,
+		ProgressLimitSeconds:           300,
 		MaxNewInstancesPerAnswer:       10,
 		MaxHostedPerPlatformExperiment: 25,
 	}); got != want {

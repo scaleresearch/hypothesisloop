@@ -237,6 +237,9 @@ type AgentsConfig struct {
 	// BootLimitSeconds is how long a hosted machine may go unreported after it was asked for, or
 	// stay starting after it was first reported, before it is given up on as an exited one is.
 	BootLimitSeconds int `yaml:"boot_limit_seconds"`
+	// ProgressLimitSeconds is how long a running hosted machine may go without reporting
+	// progress before it is given up on and a restart is spent.
+	ProgressLimitSeconds int `yaml:"progress_limit_seconds"`
 	// MaxNewInstancesPerAnswer is how many machines one answer asks a launcher to create.
 	MaxNewInstancesPerAnswer int `yaml:"max_new_instances_per_answer"`
 	// MaxHostedPerPlatformExperiment is how many machines the platform runs for one platform

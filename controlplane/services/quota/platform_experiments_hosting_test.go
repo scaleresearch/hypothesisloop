@@ -42,7 +42,7 @@ func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.
 	return s.createdStore.CreatePlatformExperiment(ctx, pe)
 }
 
-func hostingAPI(t *testing.T, repos *fakeProjectRepos) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
+func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &hostingStore{}
 	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
@@ -70,7 +70,7 @@ func hostingAPI(t *testing.T, repos *fakeProjectRepos) (*hostingStore, func(body
 }
 
 func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T) {
-	store, create := hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}})
+	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	code, out := create(run(map[string]any{"coordinator_hosted": true}))
 	if code != http.StatusCreated {
 		t.Fatalf("got = %d %v, want 201", code, out)
@@ -83,11 +83,11 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 		t.Errorf("answer = %v, want coordinator_hosted, no agent and the bound on machines", out)
 	}
 
-	store, create = hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}})
+	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	if code, out := create(run(map[string]any{"coordinator_hosted": true, "coordinator_model": "model-2"})); code != http.StatusCreated || store.created[0].Coordinator.Model != "model-2" {
 		t.Fatalf("with a model: got = %d %v, created %+v", code, out, store.created)
 	}
-	store, create = hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}})
+	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
 		t.Fatalf("without one: got = %d %v, created %+v", code, out, store.created[0])
 	}
@@ -96,7 +96,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 // The file is pushed to by any agent's token, and a coordinator rents a machine.
 func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
 	file := experimentBase + "coordinator_hosted: true\ncoordinator_model: model-of-the-file\n"
-	store, create := hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": file}})
+	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": file}})
 	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted {
 		t.Fatalf("got = %d %v, created %+v: want nothing hosted", code, out, store.created)
 	}
@@ -104,7 +104,7 @@ func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
 
 // Creating makes the experiment and nothing else: an agent joins by a call of its own.
 func TestCreateAddsNoAgent(t *testing.T) {
-	store, create := hostingAPI(t, &fakeProjectRepos{files: map[string]string{"prj-a": experimentBase}})
+	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	if code, out := create(run(map[string]any{"hosted_agents": 2})); code != http.StatusUnprocessableEntity || len(store.created) != 0 {
 		t.Fatalf("hosted_agents in the body: got = %d %v with %d created, want 422 and nothing", code, out, len(store.created))
 	}
@@ -127,13 +127,13 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	}
 	for name, tc := range map[string]struct {
 		more   map[string]any
-		repos  *fakeProjectRepos
+		repos  *fakeRepositories
 		status int
 		reason string
 	}{
-		"a coordinator without a repository": {map[string]any{"coordinator_hosted": true}, &fakeProjectRepos{}, 409, "no_repository"},
-		"a model without a coordinator":      {map[string]any{"coordinator_model": "m"}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a model no name can be":             {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b"}, &fakeProjectRepos{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a coordinator without a repository": {map[string]any{"coordinator_hosted": true}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 409, "no_repository"},
+		"a model without a coordinator":      {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model no name can be":             {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 	} {
 		store, create := hostingAPI(t, tc.repos)
 		code, out := create(with(tc.more))
@@ -143,12 +143,12 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		}
 	}
 
-	attached := &fakeProjectRepos{files: map[string]string{"prj-a": ""}}
+	attached := &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	store, create := hostingAPI(t, attached)
 
 	// Nothing is hosted while the launcher config names has no row: its token would be refused.
 	store.unregistered = true
-	code, out := create(with(map[string]any{"coordinator_hosted": true}))
+	code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"}))
 	if message, _ := out["message"].(string); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || !strings.Contains(message, "hl-admin launcher add main") || len(store.created) != 0 {
 		t.Fatalf("a coordinator with no launcher registered: got = %d %v, want 503 launcher_not_registered", code, out)
 	}
@@ -156,15 +156,15 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		t.Fatalf("nothing hosted and no launcher registered: got = %d %v, want 201", code, out)
 	}
 
-	// Without hosting, a project with no repository creates as before.
-	store, create = hostingAPI(t, &fakeProjectRepos{})
+	// Without hosting, an experiment that names no repository is created.
+	store, create = hostingAPI(t, &fakeRepositories{})
 	if code, out := create(with(nil)); code != http.StatusCreated || len(store.created) != 1 {
 		t.Fatalf("nothing hosted and no repository: got = %d %v, want 201", code, out)
 	}
 
 	store, create = hostingAPI(t, attached)
 	store.createErr = errors.New("the database is away")
-	if code, out := create(with(map[string]any{"coordinator_hosted": true})); code != http.StatusInternalServerError || len(store.created) != 0 {
+	if code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {
 		t.Fatalf("a write that failed: got = %d %v with %d created, want 500 and nothing", code, out, len(store.created))
 	}
 }
@@ -203,7 +203,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := chi.NewRouter()
 		doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeProjectRepos{}, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

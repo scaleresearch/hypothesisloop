@@ -11,21 +11,30 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// InstanceEnd is why the machine asked for under a name is given up on.
-type InstanceEnd int
+// InstanceEnd is why the machine asked for under a name is given up on. Its value is what the
+// API shows as the instance's end_reason.
+type InstanceEnd string
 
 const (
 	// InstanceExited: the launcher reported it as exited.
-	InstanceExited InstanceEnd = iota
+	InstanceExited InstanceEnd = "exited"
 	// InstanceGone: the launcher reported it once and no longer does.
-	InstanceGone
-	// InstanceNeverSeen: the launcher has not reported it for the boot limit since it was asked
-	// for. Inside the limit nothing is recorded.
-	InstanceNeverSeen
-	// InstanceStillStarting: the launcher has reported it as starting for the boot limit since
-	// it first reported it. Inside the limit nothing is recorded.
-	InstanceStillStarting
+	InstanceGone InstanceEnd = "gone"
+	// InstanceNeverSeen: the launcher has not reported it for the limit since it was asked for.
+	// Inside the limit nothing is recorded.
+	InstanceNeverSeen InstanceEnd = "never_seen"
+	// InstanceStillStarting: the launcher has reported it as starting for the limit since it
+	// first reported it. Inside the limit nothing is recorded.
+	InstanceStillStarting InstanceEnd = "still_starting"
+	// InstanceSilent: the launcher reports it as running, and what it reports of the machine's
+	// progress has not changed for the limit. Inside the limit nothing is recorded.
+	InstanceSilent InstanceEnd = "silent"
 )
+
+// progressStampsPerLimit is how often inside one progress limit a machine's progress is written
+// down. A machine that keeps reporting progress costs that many writes per limit and no more,
+// and one that stops is ended at most a limit and one such part of it later.
+const progressStampsPerLimit = 4
 
 // instanceColumns is where a hosted agent or a hosted coordinator keeps what became of its
 // machine. Both are evaluated by the same statements. key takes the platform experiment as $1
@@ -55,6 +64,7 @@ func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpI
 	_, err := s.pool.pool.Exec(ctx, `
 UPDATE `+c.table+`
 SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4,
+    `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
     `+c.prefix+`restarts = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarts ELSE 0 END,
     `+c.prefix+`stopped = `+c.prefix+`stopped AND `+c.prefix+`launch = $4
 WHERE `+c.key, platformExpID, agentID, name, launch)
@@ -64,14 +74,25 @@ WHERE `+c.key, platformExpID, agentID, name, launch)
 	return nil
 }
 
-// SeeInstance records the first time the launcher reported the machine asked for under name.
-func (s *PlatformExperimentsStore) SeeInstance(ctx context.Context, platformExpID, agentID, name string) error {
+// ObserveInstance records what the launcher reports of the machine asked for under name while
+// it lives: when it was first reported, the state it is in, and its progress. progress is the
+// marker the machine's command last printed, nil when the launcher could not read it. The time
+// of progress is the database's own, taken when the marker differs from the one stored, and at
+// most progressStampsPerLimit times per progressLimit. A report that changes nothing writes
+// nothing.
+func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error {
 	c := instanceOf(agentID)
+	stamp := `($5::text IS NOT NULL AND $5 <> ` + c.prefix + `progress AND (` + c.prefix + `progress_at IS NULL OR ` + c.prefix + `progress_at <= now() - make_interval(secs => $6)))`
 	_, err := s.pool.pool.Exec(ctx, `
-UPDATE `+c.table+` SET `+c.prefix+`seen_at = now()
-WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+c.prefix+`seen_at IS NULL`, platformExpID, agentID, name)
+UPDATE `+c.table+`
+SET `+c.prefix+`seen_at = COALESCE(`+c.prefix+`seen_at, now()), `+c.prefix+`state = $4,
+    `+c.prefix+`progress = CASE WHEN `+stamp+` THEN $5 ELSE `+c.prefix+`progress END,
+    `+c.prefix+`progress_at = CASE WHEN `+stamp+` THEN now() ELSE `+c.prefix+`progress_at END
+WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
+  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+stamp+`)`,
+		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.SeeInstance: %w", err)
+		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
 	}
 	return nil
 }
@@ -80,9 +101,10 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+c.pre
 // end of what it wrote or the reason there is nothing. A restart is counted while fewer than
 // maxRestarts were, and the agent or coordinator is stopped otherwise. The name is cleared, so
 // the same end reported again records nothing: recorded is false, as it is for a name that is
-// not the one asked for and for an end whose boot limit has not passed on the database's clock.
-// after is the instance as the write left it.
-func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, bootLimit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
+// not the one asked for and for an end whose limit has not passed on the database's clock. limit
+// is the boot limit for a machine never seen or still starting, the progress limit for a silent
+// one, and unused otherwise. after is the instance as the write left it.
+func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
 	c := instanceOf(agentID)
 	// Every form names $6, so that one statement serves them all.
 	var when string
@@ -95,18 +117,20 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 		when = c.prefix + "seen_at IS NULL AND " + c.prefix + "asked_at <= now() - make_interval(secs => $6)"
 	case InstanceStillStarting:
 		when = c.prefix + "seen_at <= now() - make_interval(secs => $6)"
+	case InstanceSilent:
+		when = c.prefix + "state = 'running' AND COALESCE(" + c.prefix + "progress_at, " + c.prefix + "seen_at) <= now() - make_interval(secs => $6)"
 	default:
-		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %d", how)
+		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %q", how)
 	}
 	err = s.pool.pool.QueryRow(ctx, `
 UPDATE `+c.table+`
-SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4,
+SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
     `+c.prefix+`stopped = `+c.prefix+`restarts >= $5,
     `+c.prefix+`restarts = CASE WHEN `+c.prefix+`restarts >= $5 THEN `+c.prefix+`restarts ELSE `+c.prefix+`restarts + 1 END
 WHERE `+c.key+` AND NOT `+c.prefix+`stopped AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+when+`
-RETURNING `+c.prefix+`restarts, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch`,
-		platformExpID, agentID, name, exitLog, maxRestarts, bootLimit.Seconds()).
-		Scan(&after.Restarts, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch)
+RETURNING `+c.prefix+`restarts, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch, `+c.prefix+`end_reason`,
+		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how)).
+		Scan(&after.Restarts, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return after, false, nil
 	}

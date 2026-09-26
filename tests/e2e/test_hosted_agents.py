@@ -157,7 +157,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     hosted_ids = [a["agent_id"] for a in hosted]
     own_id, own_token = self_run[0]["agent_id"], self_run[0]["token"]
     assert all(a["hosted"] and a["launcher"] == LAUNCHER and "token" not in a for a in hosted), hosted
-    assert all(a["instance"] == {"restarts": 0, "stopped": False} for a in hosted), hosted
+    assert all(a["instance"] == {"state": "requested", "restarts": 0, "stopped": False} for a in hosted), hosted
     assert [a["name"] for a in hosted] == [f"hosted-{run_id}"] * 2
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 2})
     assert r.status_code == 422, f"a request that still asks for several agents: {r.status_code} {r.text}"
@@ -257,7 +257,8 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert kept_name in ending, f"{kept_name} is not left to end: {sorted(ending)}"
     _, ending = desired_for(api, pe_id, [{"name": kept_name, "state": "exited", "log": "last turn done"}])
     assert kept_name in ending
-    assert roster(api, pe_id)[kept]["instance"] == {"name": kept_name, "restarts": 0, "stopped": False}
+    left = roster(api, pe_id)[kept]["instance"]
+    assert (left["name"], left["restarts"], left["stopped"]) == (kept_name, 0, False) and "end_reason" not in left, left
 
 
 def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_agent(with_repo: API, hosted_pe, run_id: str):
@@ -484,6 +485,91 @@ def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_re
     assert again != name, "a machine that was running and is gone is still asked for under its name"
     instance = roster(api, pe_id)[agent_id]["instance"]
     assert instance["restarts"] == 1 and "no longer lists it" in instance["exit_log"] and "seen_at" not in instance, instance
+    assert instance["end_reason"] == "gone" and instance["state"] == "requested", instance
+
+
+def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hosted_pe, run_id: str):
+    """A machine whose marker stands still for agents.progress_limit_seconds (minutes on the local
+    stack) is ended as silent, which the handler's and the store's own tests follow with a clock
+    of their own, and test_real_providers.py with a real harness."""
+    api = with_repo
+    pe_id = hosted_pe("hosted-progress", 1.0, 5)
+    agent_id = api.add_agents(pe_id, hosted=True)[0]["agent_id"]
+    name = desired_for(api, pe_id)[0][agent_id]["name"]
+    assert roster(api, pe_id)[agent_id]["instance"]["state"] == "requested"
+
+    desired_for(api, pe_id, [{"name": name, "state": "starting"}])
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert instance["state"] == "starting" and "progress_at" not in instance, instance
+
+    # Running with output that could not be read, then with no marker in it: no progress yet.
+    for observed in ({"name": name, "state": "running"}, {"name": name, "state": "running", "progress": ""}):
+        desired_for(api, pe_id, [observed])
+        instance = roster(api, pe_id)[agent_id]["instance"]
+        assert instance["state"] == "running" and "progress_at" not in instance, instance
+
+    desired_for(api, pe_id, [{"name": name, "state": "running", "progress": "1"}])
+    first = roster(api, pe_id)[agent_id]["instance"]["progress_at"]
+    assert first, "a first marker left no progress time"
+    # The same marker again, and a new one moments later, write nothing more.
+    for marker in ("1", "2"):
+        assert desired_for(api, pe_id, [{"name": name, "state": "running", "progress": marker}])[0][agent_id]["name"] == name
+        assert roster(api, pe_id)[agent_id]["instance"]["progress_at"] == first
+
+    r = api.post(f"/internal/launchers/{LAUNCHER}/reconcile", api.launcher_question([{"name": name, "state": "starting", "progress": "3"}]))
+    assert r.status_code == 400, f"progress of a machine that is not running: {r.status_code} {r.text}"
+
+
+def test_an_agent_and_a_coordinator_keep_their_own_session_and_nobody_else_reads_it(with_repo: API, run_id: str):
+    api = with_repo
+    r = _hosted_run(api, f"hosted-sessions-{run_id}", coordinator_hosted=True)
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    try:
+        _sessions_are_their_owners(api, pe_id)
+    finally:
+        api.close_platform_experiment(pe_id)
+
+
+def _sessions_are_their_owners(api: API, pe_id: str) -> None:
+    first, second = (api.add_agents(pe_id, hosted=True)[0]["agent_id"] for _ in range(2))
+    instances, _ = desired_for(api, pe_id)
+    coordinator, _ = coordinator_for(api, pe_id)
+    tokens = {first: instances[first]["env"]["HL_TOKEN"], second: instances[second]["env"]["HL_TOKEN"],
+              "coordinator": coordinator["env"]["HL_TOKEN"]}
+    paths = {first: f"/platform-experiments/{pe_id}/agents/{first}/session",
+             second: f"/platform-experiments/{pe_id}/agents/{second}/session",
+             "coordinator": f"/platform-experiments/{pe_id}/coordinator/session"}
+
+    def call(method: str, who: str, whose: str, body: bytes | None = None) -> requests.Response:
+        headers = {"Authorization": f"Bearer {tokens[who]}", "Content-Type": "application/octet-stream"}
+        return requests.request(method, api._url(paths[whose]), headers=headers, data=body, timeout=30)
+
+    for who in tokens:
+        assert call("GET", who, who).status_code == 404, f"{who} has a session before it stored one"
+        snapshot = b"\x1f\x8b\x00" + who.encode() + os.urandom(64)
+        stored = call("PUT", who, who, snapshot)
+        assert stored.status_code == 200 and stored.json() == {"size_bytes": len(snapshot)}, f"{who}: {stored.status_code} {stored.text}"
+        read = call("GET", who, who)
+        assert read.status_code == 200 and read.content == snapshot, f"{who} read back something else"
+        replaced = snapshot + b"a second turn"
+        assert call("PUT", who, who, replaced).status_code == 200
+        assert call("GET", who, who).content == replaced
+
+    for who in tokens:
+        for whose in tokens:
+            if who != whose:
+                for method, body in (("GET", None), ("PUT", b"overwritten")):
+                    r = call(method, who, whose, body)
+                    assert r.status_code == 403, f"{who} {method} the session of {whose}: {r.status_code} {r.text}"
+    for whose in tokens:
+        for method, body in (("GET", None), ("PUT", b"overwritten")):
+            r = api.session.request(method, api._url(paths[whose]), data=body, timeout=30)
+            assert r.status_code == 403, f"the org's own caller {method} the session of {whose}: {r.status_code} {r.text}"
+        assert b"overwritten" not in call("GET", whose, whose).content
+
+    assert call("PUT", first, first, b"").status_code == 400
+    assert call("PUT", first, first, b"x" * ((32 << 20) + 1)).status_code == 413
 
 
 def test_a_launcher_is_answered_while_it_is_registered_and_refused_when_its_pass_cannot_fit(api: API, run_id: str):

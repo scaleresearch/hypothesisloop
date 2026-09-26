@@ -303,7 +303,7 @@ func TestAnExitedInstanceIsReportedWithTheEndOfItsOutputAndNeverRentedAgainFromH
 		question := h.cp.lastQuestion()
 		want := []observedInstance{
 			{Name: "a", State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
-			{Name: "b", State: "running"},
+			{Name: "b", State: "running", Progress: new(string)},
 		}
 		if !reflect.DeepEqual(question.Instances, want) {
 			t.Fatalf("pass %d told the control plane %+v\nwant %+v", pass, question.Instances, want)
@@ -382,12 +382,12 @@ func TestANameIsReportedOnceAndAsLiveWhileAnyInstanceOfItIs(t *testing.T) {
 	rent(t, h.rented, full("b"))
 	rent(t, h.rented, "hl-agent-other-zzz")
 	h.mustPass()
-	want := []observedInstance{{Name: "a", State: "starting"}, {Name: "b", State: "running"}}
+	want := []observedInstance{{Name: "a", State: "starting"}, {Name: "b", State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
-	if h.rented.Calls("Logs") != 0 {
-		t.Fatal("the output of an instance with a live twin was read")
+	if h.rented.Calls("Logs") != 1 {
+		t.Fatalf("output was read %d times, want once, for the progress of the one running instance", h.rented.Calls("Logs"))
 	}
 }
 
@@ -1040,5 +1040,57 @@ func TestAVendorErrorThatQuotesTheRequestBackReachesNoLogWithItsSecrets(t *testi
 	}
 	if h.logged("NO INSTANCE COULD BE CREATED") != 1 {
 		t.Fatalf("log = %q", h.log)
+	}
+}
+
+func TestTheNewestProgressMarkerOfEachRunningInstanceIsReported(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c"), agent("d")}, nil)
+	h.mustPass()
+	for _, name := range []string{"a", "b", "d"} {
+		h.rented.Start(full(name))
+	}
+	h.rented.Print(full("a"), "hl-progress 3", "2026-01-01T00:00:00Z a say hello", "hl-progress 4", "a line after it")
+	h.rented.Print(full("b"), "the harness is starting", "hl-progress", "hl-progress 4 and more", " hl-progress 9", "not hl-progress 5")
+	h.rented.Print(full("c"), "hl-progress 7")
+	h.rented.Print(full("d"), "hl-progress 1")
+	h.rented.Fail = func(method, name string) error {
+		if method == "Logs" && name == full("d") {
+			return errors.New("vendor: the log API is away")
+		}
+		return nil
+	}
+	h.mustPass()
+	four, none := "4", ""
+	want := []observedInstance{
+		{Name: "a", State: "running", Progress: &four},
+		{Name: "b", State: "running", Progress: &none},
+		{Name: "c", State: "starting"},
+		{Name: "d", State: "running"},
+	}
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
+		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
+	}
+	if h.logged("read the progress of running "+full("d")) != 1 {
+		t.Fatalf("log = %q, want the failed read said once", h.log)
+	}
+	if h.logged("hl-progress") != 0 || h.logged("say hello") != 0 {
+		t.Fatalf("an instance's output reached the launcher's log: %q", h.log)
+	}
+}
+
+func TestAMarkerFurtherBackThanTheLinesReadIsNotReported(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a")}, nil)
+	h.mustPass()
+	h.rented.Start(full("a"))
+	lines := []string{"hl-progress 1"}
+	for range progressLines {
+		lines = append(lines, "chatter")
+	}
+	h.rented.Print(full("a"), lines...)
+	h.mustPass()
+	if got := h.cp.lastQuestion().Instances[0].Progress; got == nil || *got != "" {
+		t.Fatalf("progress = %v, want read and none found", got)
 	}
 }

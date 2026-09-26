@@ -133,7 +133,35 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// ExperimentFile is where a project's repository keeps the base of its platform experiments,
+// GitHubHost is where every repository lives.
+const GitHubHost = "github.com"
+
+// RepositoryURL is the HTTPS address a repository named owner/name is cloned from, empty for none.
+func RepositoryURL(repository string) string {
+	if repository == "" {
+		return ""
+	}
+	return "https://" + GitHubHost + "/" + repository + ".git"
+}
+
+// MaxAgentImageLength bounds an image reference.
+const MaxAgentImageLength = 512
+
+// ValidateAgentImage accepts an image reference a launcher can be handed: printable, without
+// spaces. Whether the image exists is the launcher's provider's to say.
+func ValidateAgentImage(image string) error {
+	if len(image) > MaxAgentImageLength {
+		return fmt.Errorf("agent_image is at most %d characters", MaxAgentImageLength)
+	}
+	for _, r := range image {
+		if r <= ' ' || r > '~' {
+			return fmt.Errorf("agent_image must be an image reference: printable characters with no spaces")
+		}
+	}
+	return nil
+}
+
+// ExperimentFile is where a platform experiment's repository keeps the base of its definition,
 // read at the head of its default branch when one is created with from_repo.
 const ExperimentFile = ".hypothesisloop/experiment.yaml"
 
@@ -173,8 +201,6 @@ type PlatformExperiment struct {
 	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
 	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
-	// CodeRepoURL is the clone address of the repository attached to the project, as it stands
-	// when read. It is not stored with the platform experiment and is set on a single read only.
 	// MaxHosted is how many machines the platform may run for this platform experiment, its
 	// coordinator included. Fixed at creation.
 	MaxHosted int `json:"max_hosted"`
@@ -188,9 +214,15 @@ type PlatformExperiment struct {
 	CoordinatorHosted bool               `json:"coordinator_hosted"`
 	Coordinator       *HostedCoordinator `json:"coordinator,omitempty"`
 
-	CodeRepoURL string    `json:"code_repo_url,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// Repository is the code the platform experiment works on, owner/name on GitHub, and
+	// RepositoryURL the address it is cloned from. AgentImage is the image its hosted agents and
+	// coordinator run, empty for the platform's own. All fixed at creation.
+	Repository    string `json:"repository,omitempty"`
+	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone, derived from repository."`
+	AgentImage    string `json:"agent_image,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // SignupRole is what an agent was signed up to do in one platform experiment. It lives on the

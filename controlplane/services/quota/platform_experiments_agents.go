@@ -64,9 +64,8 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 }
 
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
-// one created in the experiment's org. The answer holds that one agent. repos says whether the experiment's project has the
-// repository a hosted agent works in.
-func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, launch AgentLaunch, repos ProjectRepos) ([]domain.AgentSignup, error) {
+// one created in the experiment's org. The answer holds that one agent.
+func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, launch AgentLaunch) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
@@ -87,7 +86,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
 			return nil, err
 		}
-		if err := s.requireRepo(ctx, platformExpID, repos); err != nil {
+		if err := s.requireRepository(ctx, platformExpID); err != nil {
 			return nil, err
 		}
 	}
@@ -97,10 +96,10 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	return s.spawn(ctx, platformExpID, req, signup)
 }
 
-// requireRepo refuses to host an agent in a project with no repository attached: the agent
-// clones the project's repository before its first turn, and a machine rented for it would only
-// start and exit.
-func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformExpID string, repos ProjectRepos) error {
+// requireRepository refuses to host an agent in a platform experiment that names no repository:
+// the agent clones it before its first turn, and a machine rented for it would only start and
+// exit.
+func (s *PlatformExperimentsService) requireRepository(ctx context.Context, platformExpID string) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.AddAgent: %w", err)
@@ -108,8 +107,13 @@ func (s *PlatformExperimentsService) requireRepo(ctx context.Context, platformEx
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-	return requireProjectRepo(ctx, pe.ProjectID, repos)
+	if pe.Repository == "" {
+		return errNoRepository
+	}
+	return nil
 }
+
+var errNoRepository = refuseSignup(409, "no_repository", "the platform experiment names no repository, and a hosted agent or coordinator works in one: create it with repository set")
 
 // requireLauncher refuses to host anything while the launcher config gives new machines to is
 // not registered: its token would be refused, and nothing would ever start.
@@ -124,19 +128,8 @@ func (s *PlatformExperimentsService) requireLauncher(ctx context.Context, launch
 	return nil
 }
 
-func requireProjectRepo(ctx context.Context, projectID string, repos ProjectRepos) error {
-	cloneURL, err := repos.CloneURL(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("platform_experiments: repository of project %s: %w", projectID, err)
-	}
-	if cloneURL == "" {
-		return refuseSignup(409, "no_repository", "project %s has no repository attached, and a hosted agent or coordinator works in the project's repository: attach one to the project, then ask again", projectID)
-	}
-	return nil
-}
-
 // withHosting resolves the coordinator a create asks the platform to run: its launcher and
-// model, and that the project has the repository it works in.
+// model, and that the experiment names the repository it works in.
 func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorHosted {
 		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_hosted is not")
@@ -151,8 +144,8 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
 		return req, err
 	}
-	if err := requireProjectRepo(ctx, req.ProjectID, h.repos); err != nil {
-		return req, err
+	if req.Repository == "" {
+		return req, errNoRepository
 	}
 	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
 	if err != nil {
@@ -287,7 +280,7 @@ type joinedAgentsBody struct {
 // RegisterAgentsHuma registers how agents join and leave a platform experiment.
 func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" || h.launch.SigningSecret == "" || h.launch.MaxHosted <= 0 || h.repos == nil {
-		panic("quota.RegisterAgentsHuma: the handler needs its project repositories and WithAgentLaunch with every field set")
+		panic("quota.RegisterAgentsHuma: the handler needs its repositories and WithAgentLaunch with every field set")
 	}
 	access := doc.Access
 
@@ -299,7 +292,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"The answer is agents, a list holding that one agent. " +
 			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut; it is refused " +
-			"with 409 no_repository while the project has no repository attached, since the agent works in it. " +
+			"with 409 no_repository when the platform experiment names no repository, since the agent works in it. " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
@@ -317,7 +310,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 				return nil, err
 			}
 		}
-		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, h.launch, h.repos)
+		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, h.launch)
 		if err != nil {
 			return nil, h.refusal("add agent", err)
 		}

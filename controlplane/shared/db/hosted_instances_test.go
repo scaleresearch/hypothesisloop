@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -165,20 +167,20 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		// ago it was asked for.
 		ask("starting")
 		thing.age(thing.column("asked_at"), 10*bootLimit)
-		if err := pes.SeeInstance(ctx, thing.pe, thing.agentID, "another-name"); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		if thing.instance().SeenAt != nil {
 			t.Fatalf("%s: seeing another name marked this one seen", kind)
 		}
-		if err := pes.SeeInstance(ctx, thing.pe, thing.agentID, "starting"); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		first := thing.instance().SeenAt
 		if first == nil || end("starting", InstanceNeverSeen) || end("starting", InstanceStillStarting) {
 			t.Fatalf("%s: a machine just seen: got = %+v, want it kept", kind, thing.instance())
 		}
-		if err := pes.SeeInstance(ctx, thing.pe, thing.agentID, "starting"); err != nil || !thing.instance().SeenAt.Equal(*first) {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour); err != nil || !thing.instance().SeenAt.Equal(*first) {
 			t.Fatalf("%s: seen again moved the first sight: %v", kind, err)
 		}
 		thing.age(thing.column("seen_at"), bootLimit+time.Second)
@@ -194,7 +196,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		if end("gone", InstanceGone) {
 			t.Fatalf("%s: a machine never seen was recorded as gone", kind)
 		}
-		if err := pes.SeeInstance(ctx, thing.pe, thing.agentID, "gone"); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "gone", "starting", nil, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 		if !end("gone", InstanceGone) || thing.instance().Restarts != 3 || thing.instance().ExitLog != "why" {
@@ -326,5 +328,103 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 4 {
 		t.Fatalf("joined = %d, %v, want the three hosted and the self-run one", len(joined), err)
+	}
+}
+
+func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const limit, maxRestarts = 8 * time.Minute, 3
+	marker := func(m string) *string { return &m }
+	for kind, thing := range hostedThings(t, pool) {
+		observe := func(state string, progress *string) {
+			t.Helper()
+			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit); err != nil {
+				t.Fatal(err)
+			}
+		}
+		silent := func() bool {
+			t.Helper()
+			_, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, "name-1", InstanceSilent, "no progress", limit, maxRestarts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return recorded
+		}
+		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "name-1", "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := json.Marshal(thing.instance()); !strings.Contains(string(got), `"state":"requested"`) {
+			t.Fatalf("%s: asked for and not listed: %s", kind, got)
+		}
+
+		// Starting, however long, is the boot limit's to judge.
+		observe("starting", nil)
+		thing.age(thing.column("seen_at"), 10*limit)
+		if got := thing.instance(); got.Shown() != "starting" || got.ProgressAt != nil || silent() {
+			t.Fatalf("%s: starting: got = %+v, want no progress and no silence", kind, got)
+		}
+
+		// Running and never a marker: the limit runs from the first sight.
+		observe("running", marker(""))
+		if got := thing.instance(); got.Shown() != "running" || got.ProgressAt != nil {
+			t.Fatalf("%s: running with no marker: got = %+v", kind, got)
+		}
+		thing.age(thing.column("seen_at"), limit-10*time.Second)
+		if silent() {
+			t.Fatalf("%s: a machine inside the limit of its first sight was ended as silent", kind)
+		}
+
+		// A marker is stamped when it is first seen, and a report that could not read one
+		// changes nothing.
+		observe("running", marker("7"))
+		first := thing.instance().ProgressAt
+		if first == nil || time.Since(*first) > time.Minute {
+			t.Fatalf("%s: first marker: progress_at = %v, want now", kind, first)
+		}
+		observe("running", nil)
+		observe("running", marker("7"))
+		if got := thing.instance().ProgressAt; !got.Equal(*first) {
+			t.Fatalf("%s: the same marker moved progress_at from %v to %v", kind, first, got)
+		}
+
+		// A new marker is written down at most four times a limit.
+		thing.age(thing.column("progress_at"), limit/4-10*time.Second)
+		aged := thing.instance().ProgressAt
+		observe("running", marker("8"))
+		if got := thing.instance().ProgressAt; !got.Equal(*aged) {
+			t.Fatalf("%s: a marker inside a quarter of the limit was written down", kind)
+		}
+		thing.age(thing.column("progress_at"), limit/4+time.Second)
+		observe("running", marker("8"))
+		if got := thing.instance().ProgressAt; time.Since(*got) > time.Minute {
+			t.Fatalf("%s: a new marker a quarter of the limit later: progress_at = %v, want now", kind, got)
+		}
+
+		// The marker stops changing: nothing inside the limit, an end past it.
+		thing.age(thing.column("progress_at"), limit-10*time.Second)
+		observe("running", marker("8"))
+		if silent() {
+			t.Fatalf("%s: ended as silent inside the limit", kind)
+		}
+		thing.age(thing.column("progress_at"), limit+time.Second)
+		observe("running", marker("8"))
+		if !silent() {
+			t.Fatalf("%s: a machine whose marker stood for the limit was not ended", kind)
+		}
+		got := thing.instance()
+		if got.Restarts != 1 || got.EndReason != "silent" || got.ExitLog != "no progress" || got.Shown() != "requested" {
+			t.Fatalf("%s: after the silence: got = %+v", kind, got)
+		}
+
+		// The next machine starts with no progress of the last one's.
+		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "name-1", "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		observe("running", marker("8"))
+		if got := thing.instance(); got.ProgressAt == nil || time.Since(*got.ProgressAt) > time.Minute || got.EndReason != "silent" {
+			t.Fatalf("%s: the replacement: got = %+v, want its own progress and the last end still shown", kind, got)
+		}
 	}
 }

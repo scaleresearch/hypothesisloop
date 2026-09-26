@@ -27,20 +27,17 @@ type rosterStore struct {
 	pe      *domain.PlatformExperiment
 	agents  map[string]*domain.Agent
 	signups []domain.AgentSignup
-	// cloneURL is the repository attached to the experiment's project, empty for none.
-	cloneURL string
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 }
 
-func (f *rosterStore) CloneURL(_ context.Context, projectID string) (string, error) {
-	if projectID != f.pe.ProjectID {
-		return "", nil
-	}
-	return f.cloneURL, nil
+func (f *rosterStore) Reachable(_ context.Context, _, repository string) (string, error) {
+	return repository, nil
 }
 
-func (f *rosterStore) ExperimentBase(context.Context, string) ([]byte, error) { return nil, nil }
+func (f *rosterStore) ExperimentBase(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}
 
 const rosterMaxHosted = 6
 
@@ -64,9 +61,10 @@ func (f *rosterStore) machines(more ...domain.AgentSignup) int {
 
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
 	return &rosterStore{
-		pe:       &domain.PlatformExperiment{ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxHosted: rosterMaxHosted},
-		agents:   map[string]*domain.Agent{},
-		cloneURL: "https://git.example.invalid/org/repo.git",
+		pe: &domain.PlatformExperiment{
+			ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxHosted: rosterMaxHosted, Repository: "acme/model",
+		},
+		agents: map[string]*domain.Agent{},
 	}
 }
 
@@ -554,9 +552,9 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()))
 }
 
-func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
+func TestAHostedAgentIsRefusedWhenItsPlatformExperimentNamesNoRepository(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.cloneURL = ""
+	store.pe.Repository = ""
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
@@ -564,8 +562,8 @@ func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
 		if code != http.StatusConflict || out["reason"] != "no_repository" {
 			t.Fatalf("%s: got = %d %v, want = 409 no_repository", body, code, out)
 		}
-		if message := out["message"].(string); !strings.Contains(message, "project-a") || !strings.Contains(message, "attach") {
-			t.Errorf("%s: the refusal does not say which project or what to do: %q", body, message)
+		if message := out["message"].(string); !strings.Contains(message, "names no repository") || !strings.Contains(message, "repository set") {
+			t.Errorf("%s: the refusal does not say what is missing or what to do: %q", body, message)
 		}
 	}
 	if len(store.signups) != 0 || len(store.agents) != 1 {
@@ -573,8 +571,8 @@ func TestAHostedAgentIsRefusedWhileItsProjectHasNoRepository(t *testing.T) {
 	}
 	// An agent the caller runs itself needs nothing of the platform's to start, and joins.
 	addEach(t, r, 2, `{}`)
-	// With a repository attached the same hosted request goes through.
-	store.cloneURL = "https://git.example.invalid/org/repo.git"
+	// In an experiment that names one the same hosted request goes through.
+	store.pe.Repository = "acme/model"
 	addEach(t, r, 2, `{"hosted":true}`)
 }
 

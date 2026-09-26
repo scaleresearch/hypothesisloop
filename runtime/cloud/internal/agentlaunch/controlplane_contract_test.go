@@ -29,7 +29,7 @@ const contractBootLimit = 5 * time.Minute
 
 var contractSettings = launcherapi.Settings{
 	Image: "registry.example.invalid/agent:1", APIURL: "https://api.example.invalid",
-	SigningSecret: contractSecret, BootLimit: contractBootLimit, MaxNewPerAnswer: 50,
+	SigningSecret: contractSecret, BootLimit: contractBootLimit, ProgressLimit: 4 * contractBootLimit, MaxNewPerAnswer: 50,
 }
 
 func hostedAgent(pe, agent string) db.LauncherAgent {
@@ -340,7 +340,7 @@ func TestAMachineThatStaysStartingIsReplacedByTheControlPlanesDecisionAndCounted
 	running.pass()
 	running.rented.Start(running.rented.Names()[0])
 	running.pass()
-	running.store.Advance(24 * time.Hour)
+	running.store.Advance(2 * contractBootLimit)
 	running.pass()
 	if running.instance("ag-up").Restarts != 0 || running.rented.Calls("Create") != 1 {
 		t.Fatal("a running machine was held to the boot limit")
@@ -357,7 +357,15 @@ func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing
 		}
 		return nil
 	}
-	pass := func() { _ = c.launcher.Pass(context.Background()) }
+	passes := 0
+	pass := func() {
+		// The agent whose machine came up keeps working through all of it.
+		passes++
+		for _, name := range c.rented.Names() {
+			c.rented.Print(name, fmt.Sprintf("hl-progress %d", passes))
+		}
+		_ = c.launcher.Pass(context.Background())
+	}
 	pass()
 	fine := c.rented.Names()
 	if len(fine) != 1 || !strings.Contains(fine[0], "agfine") {
@@ -492,5 +500,44 @@ func TestARegisteredLauncherNoAgentIsGivenToDestroysWhatItHoldsAndAnUnregistered
 	c.pass()
 	if len(c.rented.Names()) != 0 {
 		t.Fatalf("still rented: %v, want nothing once the empty list reached the launcher", c.rented.Names())
+	}
+}
+
+// The agent's harness prints a progress marker while it works. The launcher carries the newest
+// one to the control plane, which alone decides that a machine whose marker stands still is hung.
+func TestAHungAgentIsReplacedByTheControlPlanesDecisionAndAWorkingOneIsKept(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-hung"), hostedAgent("pe-1", "ag-working"))
+	c.pass()
+	names := c.rented.Names()
+	hung, working := names[0], names[1]
+	for _, name := range names {
+		c.rented.Start(name)
+		c.rented.Print(name, "hl-progress 1")
+	}
+	workingIDs := c.rented.IDs(working)
+	c.pass()
+	limit := contractSettings.ProgressLimit
+	for step := 2; step <= 4; step++ {
+		c.store.Advance(limit / 4)
+		c.rented.Print(working, fmt.Sprintf("hl-progress %d", step))
+		c.rented.Print(hung, "a line that is no progress")
+		c.pass()
+		if !reflect.DeepEqual(c.rented.Names(), names) {
+			t.Fatalf("inside the progress limit: rented %v, want %v", c.rented.Names(), names)
+		}
+	}
+	c.store.Advance(limit / 4)
+	c.rented.Print(working, "hl-progress 5")
+	c.pass()
+	after := c.rented.Names()
+	recorded := c.instance("ag-hung")
+	if len(after) != 2 || after[0] == hung || recorded.Restarts != 1 || recorded.EndReason != "silent" {
+		t.Fatalf("a limit after its last progress: rented %v (was %v), recorded %+v", after, names, recorded)
+	}
+	if !reflect.DeepEqual(c.rented.IDs(working), workingIDs) || c.instance("ag-working").Restarts != 0 {
+		t.Fatal("the agent that kept making progress was replaced")
+	}
+	if c.instance("ag-working").ProgressAt == nil {
+		t.Fatal("the working agent's progress was not recorded")
 	}
 }

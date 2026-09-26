@@ -98,6 +98,9 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		CoordinatorHosted:         req.CoordinatorHosted,
 		Coordinator:               req.coordinator,
 		MaxHosted:                 req.maxHosted,
+		Repository:                req.Repository,
+		RepositoryURL:             domain.RepositoryURL(req.Repository),
+		AgentImage:                req.AgentImage,
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
