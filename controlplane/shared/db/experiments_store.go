@@ -56,7 +56,7 @@ func qualifyColumns(cols, alias string) string {
 const experimentStoredColumns = `
 	id, parent_id, agent_id, actor_kind, actor_id, platform_experiment_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec, resolved_job_spec,
-	hypothesis_id, hypothesis, objective, theory,
+	hypothesis_id, hypothesis, theory,
 	accelerator_type, accelerator_count,
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
@@ -90,7 +90,7 @@ func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Exp
 INSERT INTO experiments (
 	id, parent_id, agent_id, platform_experiment_id, cluster_name,
 	code_ref, config_hash, data_ref, job_spec,
-	hypothesis_id, hypothesis, objective, theory,
+	hypothesis_id, hypothesis, theory,
 	accelerator_type, accelerator_count,
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
@@ -100,13 +100,13 @@ INSERT INTO experiments (
 ) VALUES (
 	$1, $2, $3, $4, $5,
 	$6, $7, $8, $9,
-	$10, $11, $12, $13,
-	$14, $15,
-	$16, $17,
-	$18, $19, $20, $21,
-	$22, NULLIF($23, ''),
-	$24, $25, $26,
-	$27, $28, $29, $30
+	$10, $11, $12,
+	$13, $14,
+	$15, $16,
+	$17, $18, $19, $20,
+	$21, NULLIF($22, ''),
+	$23, $24, $25,
+	$26, $27, $28, $29
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -129,7 +129,7 @@ INSERT INTO experiments (
 	_, err = executor.Exec(ctx, q,
 		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ClusterName,
 		exp.CodeRef, exp.ConfigHash, exp.DataRef, jobSpec,
-		exp.HypothesisID, exp.Hypothesis, exp.Objective, exp.Theory,
+		exp.HypothesisID, exp.Hypothesis, exp.Theory,
 		string(exp.AcceleratorType), exp.AcceleratorCount,
 		exp.EstimatedDurationHours, exp.EstimatedCostAccH,
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
@@ -349,7 +349,7 @@ func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 		clauses = append(clauses, UnsummarizedCompletedPredicate)
 	}
 	if filter.Search != "" {
-		clauses = append(clauses, fmt.Sprintf("(hypothesis ILIKE $%d OR objective ILIKE $%d OR theory ILIKE $%d)", n, n, n))
+		clauses = append(clauses, fmt.Sprintf("(hypothesis ILIKE $%d OR theory ILIKE $%d)", n, n))
 		args = append(args, "%"+filter.Search+"%")
 	}
 	if clause, scoped := tenantClause(filter.Scope, "platform_experiment_id", args); clause != "" {

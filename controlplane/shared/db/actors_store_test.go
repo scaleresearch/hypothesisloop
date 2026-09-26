@@ -127,7 +127,7 @@ func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
 	job := func(id string, actor domain.Actor) *domain.Experiment {
 		return &domain.Experiment{
 			ID: id, AgentID: agentID, Actor: actor, PlatformExperimentID: peID,
-			HypothesisID: "hyp-" + peID, Hypothesis: "h", Objective: "o",
+			HypothesisID: "hyp-" + peID, Hypothesis: "h",
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1,
 			EstimatedDurationHours: 1, EstimatedCostAccH: 1, Status: domain.StatusQueued,
 			Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1},

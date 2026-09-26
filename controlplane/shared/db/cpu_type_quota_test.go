@@ -22,7 +22,7 @@ func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, flavor
 	id := "exp-priced-" + uuid.New().String()[:8]
 	exp := &domain.Experiment{
 		ID: id, AgentID: agentID, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agentID}, PlatformExperimentID: peID,
-		HypothesisID: "priced-hypothesis-" + id, Hypothesis: "h", Objective: "o",
+		HypothesisID: "priced-hypothesis-" + id, Hypothesis: "h",
 		AcceleratorType: flavor, AcceleratorCount: count, EstimatedDurationHours: 3, EstimatedCostAccH: cost,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
 		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: count},

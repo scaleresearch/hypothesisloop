@@ -24,7 +24,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	if err := row.Scan(
 		&exp.ID, &exp.ParentID, &exp.AgentID, &actorKind, &actorID, &exp.PlatformExperimentID, &exp.ClusterName,
 		&exp.CodeRef, &exp.ConfigHash, &exp.DataRef, &jobSpec, &resolvedJobSpec,
-		&exp.HypothesisID, &exp.Hypothesis, &exp.Objective, &exp.Theory,
+		&exp.HypothesisID, &exp.Hypothesis, &exp.Theory,
 		&acceleratorType, &exp.AcceleratorCount,
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,

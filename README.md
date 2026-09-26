@@ -287,7 +287,6 @@ metadata:
   agent_id: agent-007
   platform_experiment_id: pe-llm-finetune-2026-07
   hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
-  objective: "Minimize validation loss"
   theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
   code_ref: "https://github.com/scaleresearch/agent-example@a1b2c3d4e5f6789012345678901234567890abcd"
   capacity_tier: guaranteed
@@ -304,8 +303,12 @@ job:
 
 Submission reads that as 4 units of the one built-in type `hypothesisloop.dev/cpu=core`. Naming
 the type with `accelerator_count: 4` means the same. Cores are whole: `500m` or `1.5` is refused
-with 400, and so is a job with neither an accelerator nor cores. `memory` and `storage` left out
-are the cores' share of the node, one part per core. Budget, quota, fairness, the concurrency cap
+with 400, and so is a job with neither an accelerator nor cores.
+
+A job states little else. `cpu`, `memory` and `storage` left out are the job's share of the node it
+lands on (`"max"`), one part per accelerator or per core, and `max_retries` left out is 0. The
+least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours`, and in `job` a
+`command` with `accelerator_type` and `accelerator_count`, or `cpu`. Budget, quota, fairness, the concurrency cap
 and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
 hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels
 it CPU hours. Sums show cores apart from accelerators (`in_flight_cores`, `core_busy` and

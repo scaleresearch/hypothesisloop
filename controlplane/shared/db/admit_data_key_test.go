@@ -30,7 +30,7 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 	exp := &domain.Experiment{
 		ID: "datakey-exp-" + suffix, AgentID: agent, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agent}, PlatformExperimentID: pe,
 		CodeRef: "repo@" + fortyHexChars(), ConfigHash: "cfg", DataRef: "none",
-		HypothesisID: "h", Hypothesis: "h", Objective: "o", AcceleratorType: "cpu",
+		HypothesisID: "h", Hypothesis: "h", AcceleratorType: "cpu",
 		EstimatedDurationHours: 1, Status: domain.StatusQueued, CreatedAt: now, UpdatedAt: now,
 		Job:     domain.JobSpec{Image: "img", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries},
 		DataKey: domain.DataKey{AccessKeyID: "AK-" + suffix, SecretAccessKey: "SK-" + suffix},

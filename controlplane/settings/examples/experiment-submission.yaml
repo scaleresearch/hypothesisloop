@@ -10,6 +10,16 @@
 #   - metadata: the research/bookkeeping fields (hypothesis, project linkage, cost tier,
 #               ...) that have nothing to do with how the job executes.
 #
+# Most of this file is optional. The least a request states is metadata.hypothesis_id,
+# metadata.theory and metadata.estimated_duration_hours, and in job a command with either
+# accelerator_type and accelerator_count or cpu:
+#
+#   metadata: {hypothesis_id: ..., theory: "...", estimated_duration_hours: 0.5}
+#   job: {command: ["python", "train.py"], cpu: "4"}
+#
+# hl job submit fills in the rest of metadata: the agent and the platform experiment from its
+# environment, and code_ref from the git repository it is run in.
+#
 # See tests/workloads/generic/job.yaml for the minimal fixture the e2e smoke test submits
 # (just `job` — `metadata` is generated inline by tests/e2e/test_stages_and_settlement.py).
 
@@ -29,9 +39,9 @@ job:
   # $NAME from the caller's environment, so no value is committed or put on a command line.
 
   # --- Resources ---------------------------------------------------------------------
-  # cpu/memory/storage: required plain quantity strings. If the platform experiment sets a
-  # CPU/RAM/storage budget (besides accelerator-hours), what you request here (× num_nodes ×
-  # estimated_duration_hours) is debited from it the same way accelerator-hours already are.
+  # cpu/memory/storage: plain quantity strings, or "max". One left out is "max": the job's share
+  # of the node it lands on, one part per accelerator (or per core for a job on CPU). In a
+  # grouped job a group that holds no accelerator states all three.
   cpu: "4"
   memory: "16Gi"
   storage: "10Gi"
@@ -128,7 +138,7 @@ job:
 
   # --- Retry -----------------------------------------------------------------------------
   # max_retries: how many times a failing node is retried before the job is marked failed.
-  # Required and non-negative.
+  # Left out, it is 0: the job runs once.
   max_retries: 3
 
 metadata:
@@ -146,7 +156,6 @@ metadata:
   # creating a duplicate. The server denormalizes that hypothesis's own text onto the
   # experiment row for you; there is no separate free-text "hypothesis" field to fill in here.
   hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
-  objective: "Minimize validation loss"
   theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
 
   # code_ref: required, and format-validated (<git-remote-url>@<40-hex-commit-sha>) — the

@@ -151,9 +151,8 @@ func TestGroupedJobSpecFieldsAreNotSchemaRequired(t *testing.T) {
 	}
 	raw, _ := jobSpec["required"].([]any)
 
-	// max_retries stays required: it is required of EVERY job, grouped or not, and the design
-	// says so deliberately -- an unset retry budget is not a default anyone should inherit.
 	forbidden := map[string]string{
+		"max_retries":       "left out, a job runs once",
 		"accelerator_count": "a grouped job rejects the top-level per-node fields, so it omits this",
 		"cpu":               "same -- each group carries its own",
 		"memory":            "same -- each group carries its own",

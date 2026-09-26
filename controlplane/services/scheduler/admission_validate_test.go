@@ -28,7 +28,6 @@ func validSubmission() *domain.Experiment {
 		AgentID:                "agent-1",
 		HypothesisID:           "hyp-1",
 		Theory:                 "a theory",
-		Objective:              "an objective",
 		CodeRef:                "https://github.com/example/repo@" + strings.Repeat("a", 40),
 		AcceleratorCount:       1,
 		AcceleratorType:        h100,
@@ -113,19 +112,39 @@ func TestANegativeRequestInOneGroupIsRejectedEvenWhenTheTotalLooksFine(t *testin
 	mustReject(t, exp, "job.memory")
 }
 
-// Resource requests must be explicit at submission. The footprint that selects a cluster and
-// debits a quota is computed here, from these fields — leaving one to a cluster-side default means
-// admitting a job whose real size the control plane never saw.
-func TestAnUnspecifiedResourceDimensionIsRejectedRatherThanDefaulted(t *testing.T) {
-	for field, spoil := range map[string]func(*domain.JobSpec){
-		"job.cpu":     func(j *domain.JobSpec) { j.CPU = "" },
-		"job.memory":  func(j *domain.JobSpec) { j.Memory = "" },
-		"job.storage": func(j *domain.JobSpec) { j.Storage = "" },
-	} {
-		exp := validSubmission()
-		spoil(&exp.Job)
-		mustReject(t, exp, field)
+// What a job leaves out has one meaning for every job: no retries, and for cpu, memory and
+// storage its share of the node it lands on. A minimal job is its type and count and nothing
+// else, and what submission wrote is what every later reader of the job sees.
+func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
+	exp := validSubmission()
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries = "", "", "", nil
+	if err := validate(t, exp); err != nil {
+		t.Fatalf("a job that states only its type and count: %v", err)
 	}
+	const max = domain.MaxResourceSentinel
+	if exp.Job.CPU != max || exp.Job.Memory != max || exp.Job.Storage != max || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries != 0 {
+		t.Errorf("cpu, memory, storage, max_retries = %q, %q, %q, %v; want the node's share of each and 0", exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries)
+	}
+
+	exp = validSubmission()
+	exp.Job.Memory = ""
+	if err := validate(t, exp); err != nil || exp.Job.CPU != "2" || exp.Job.Memory != max {
+		t.Errorf("a job that leaves out memory alone: cpu %q, memory %q, err %v; want what it stated and the share", exp.Job.CPU, exp.Job.Memory, err)
+	}
+
+	// A group that holds no unit has no share to take.
+	exp = validSubmission()
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.AcceleratorCount = "", "", "", 0
+	exp.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1}, {Name: "actors", Replicas: 4, CPU: "2"}}
+	mustReject(t, exp, `job.groups["actors"]`)
+	exp.Job.Groups[1].Memory, exp.Job.Groups[1].Storage = "1Gi", "1Gi"
+	if err := validate(t, exp); err != nil || exp.Job.Groups[0].Memory != max {
+		t.Errorf("a group that holds a device and states no size: memory %q, err %v", exp.Job.Groups[0].Memory, err)
+	}
+
+	exp = validSubmission()
+	exp.Job.MaxRetries = maxRetries(-1)
+	mustReject(t, exp, "job.max_retries")
 }
 
 // Budget, quota, fairness and the concurrency cap count the units of a priced type a job holds. A
@@ -199,20 +218,6 @@ func TestACodeRefThatDoesNotPinACommitIsRejected(t *testing.T) {
 	}
 }
 
-// max_retries absent and max_retries zero are different instructions, which is why it is a pointer
-// — reading a missing field as 0 would silently give a job no retries at all.
-func TestMissingMaxRetriesIsRejectedRatherThanReadAsZero(t *testing.T) {
-	exp := validSubmission()
-	exp.Job.MaxRetries = nil
-	mustReject(t, exp, "job.max_retries")
-
-	exp = validSubmission()
-	exp.Job.MaxRetries = maxRetries(0)
-	if err := validate(t, exp); err != nil {
-		t.Fatalf("an explicit zero max_retries was rejected: %v — absent and zero are different instructions", err)
-	}
-}
-
 // An accelerator job with no type has nothing to schedule against, and an unpriced type has no
 // rate to bill at — an operator gap that must surface at submission, not as an experiment that
 // runs for free.
@@ -251,7 +256,6 @@ func TestEveryRequiredIdentityFieldIsEnforced(t *testing.T) {
 		"agent_id":      func(e *domain.Experiment) { e.AgentID = "" },
 		"hypothesis_id": func(e *domain.Experiment) { e.HypothesisID = "" },
 		"theory":        func(e *domain.Experiment) { e.Theory = "" },
-		"objective":     func(e *domain.Experiment) { e.Objective = "" },
 	} {
 		exp := validSubmission()
 		spoil(exp)

@@ -218,7 +218,6 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
                   </>
                 } />
               )}
-              {j.objective && <Row label="Objective" value={j.objective} />}
               {j.theory && <Row label="Rationale" value={j.theory} />}
               {j.job?.env && Object.keys(j.job.env).length > 0 && (
                 <Row label="Environment" value={

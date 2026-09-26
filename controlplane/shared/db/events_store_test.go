@@ -214,9 +214,9 @@ func insertJob(t *testing.T, pool *Pool, agentID, peID, hypothesisID, jobID stri
 	before := cursorNow(t, pool)
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
  estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
-VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accelerator',
+VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
         'QUEUED', 'capacity_unavailable', 1, now(), 'AK', 'SK')`,
 		jobID, agentID, peID, hypothesisID); err != nil {
 		t.Fatalf("insert experiment: got = %v, want = nil", err)
@@ -316,9 +316,9 @@ func TestAJobAwaitingAdmissionOrASummaryIsNotAnnouncedAsBlocked(t *testing.T) {
 	before := cursorNow(t, pool)
 	exec(t, pool, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
  estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
-VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'objective', 'test-accelerator',
+VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
         'QUEUED', 'awaiting_admission', 1, now(), 'AK', 'SK')`, jobID, agentID, peID, hypothesisID)
 	store := NewEventsStore(pool, noHypothesisEvents{})
 	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}

@@ -121,6 +121,7 @@ func coresJob(id string, tier domain.CapacityTier, cores int) *domain.Experiment
 	if err := countSetsCores(&exp.Job); err != nil {
 		panic(err)
 	}
+	shareWhereUnstated(&exp.Job)
 	return exp
 }
 

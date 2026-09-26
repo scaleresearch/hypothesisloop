@@ -21,7 +21,7 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 	values := []any{
 		"exp-1", (*string)(nil), "agent-1", "agent", "agent-1", "pe-1", "cluster-a",
 		"repo@" + fortyHexChars(), "cfg", "s3://data", r.jobSpec, r.resolvedJobSpec,
-		"hyp-1", "hypothesis text", "objective", "theory",
+		"hyp-1", "hypothesis text", "theory",
 		"example.com/product=test-accelerator", 2,
 		1.0, 0.0,
 		0.0, 0.0, "guaranteed", "SUBMITTED",

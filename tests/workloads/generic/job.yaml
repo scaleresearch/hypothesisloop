@@ -9,7 +9,6 @@ metadata:
   agent_id: REPLACE-WITH-YOUR-AGENT-ID
   platform_experiment_id: REPLACE-WITH-YOUR-PLATFORM-EXPERIMENT-ID
   hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
-  objective: "describe what this run is optimizing for"
   theory: "your specific prediction for this run"
   code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
   # config_hash/data_ref: optional reproducibility pointers (hash of the resolved

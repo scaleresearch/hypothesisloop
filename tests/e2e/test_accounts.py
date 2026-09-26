@@ -341,7 +341,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         assert job_b not in runtime.handed, "org A's runtime was handed org B's job with its token and data key"
         handed = next(e for e in runtime.reconcile() if e["id"] == job_a)
         assert handed["token"] and handed["data"]["secret_access_key"], "the runtime is not handed what the workload runs with"
-        kept = {k for k in ("hypothesis", "objective", "theory", "org_id", "platform_experiment_id", "hypothesis_id") if handed.get(k)}
+        kept = {k for k in ("hypothesis", "theory", "org_id", "platform_experiment_id", "hypothesis_id") if handed.get(k)}
         assert not kept, f"the runtime is handed {kept} of the job, which no workload is built from"
 
         assert b.api.admit(job_b, name).status_code == 404, "org B force-admitted onto org A's cluster"

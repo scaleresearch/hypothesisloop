@@ -54,7 +54,6 @@ type Experiment struct {
 	// experiment must test a specific, previously-registered hypothesis, not free text ad hoc.
 	HypothesisID string `json:"hypothesis_id"`
 	Hypothesis   string `json:"hypothesis"`
-	Objective    string `json:"objective"`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
 	Theory                 string           `json:"theory,omitempty"`
@@ -281,7 +280,7 @@ type ExperimentFilter struct {
 	HypothesisID         string
 	Status               ExperimentStatus
 	Since                time.Time
-	// Search matches against hypothesis/objective/theory text, case-insensitively, substring
+	// Search matches against hypothesis/theory text, case-insensitively, substring
 	// match (mirrors PlatformExperimentsFilter.Search).
 	Search string
 	// NeedsSummary selects only COMPLETED experiments with no finding filed against them -- the

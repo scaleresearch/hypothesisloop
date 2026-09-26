@@ -16,8 +16,8 @@ func TestExperimentFilterClausesSearchIsParameterized(t *testing.T) {
 	if strings.Contains(joined, "DROP TABLE") {
 		t.Fatalf("search text leaked into SQL clause instead of being bound as an arg: %q", joined)
 	}
-	if !strings.Contains(joined, "hypothesis ILIKE") || !strings.Contains(joined, "objective ILIKE") || !strings.Contains(joined, "theory ILIKE") {
-		t.Fatalf("expected hypothesis/objective/theory ILIKE clause, got: %q", joined)
+	if !strings.Contains(joined, "hypothesis ILIKE") || !strings.Contains(joined, "theory ILIKE") {
+		t.Fatalf("expected hypothesis/theory ILIKE clause, got: %q", joined)
 	}
 	found := false
 	for _, a := range args {

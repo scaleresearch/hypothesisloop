@@ -134,7 +134,6 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
             "platform_experiment_id": pe_id,
             "hypothesis_id": hyp_id,
             "theory": "e2e scenario coverage",
-            "objective": "maximize val_accuracy",
             "estimated_duration_hours": JOB_HOURS,
             "code_ref": "git://hypothesisloop@" + "a" * 40,
             "config_hash": "",

@@ -229,7 +229,6 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- A hypothesis in the graph store (shared/graphdb), validated there at submit.
     hypothesis_id            TEXT              NOT NULL,
     hypothesis               TEXT              NOT NULL,
-    objective                TEXT              NOT NULL,
     theory                   TEXT              NOT NULL DEFAULT '',
     novelty_score            DOUBLE PRECISION  NOT NULL DEFAULT 0,
     accelerator_type                 TEXT              NOT NULL,
@@ -292,6 +291,10 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS secret_env JSONB NOT NULL DEFAU
 -- nothing else, so a job could never report its own files; the real bytes live in the object
 -- store and GET /experiments/{id}/data lists them there. A copy here would only drift.
 ALTER TABLE experiments DROP COLUMN IF EXISTS artifacts;
+
+-- objective was free text every job repeated. The experiment's metrics state what is optimized,
+-- and a job says what it tests with its hypothesis and its theory.
+ALTER TABLE experiments DROP COLUMN IF EXISTS objective;
 
 -- Per-agent CPU-hours and RAM/storage-hours quota tracking were never reachable through the UI
 -- and are fully deleted.

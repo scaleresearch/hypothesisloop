@@ -31,7 +31,7 @@ type JobSpec struct {
 	SecretEnv map[string]string `json:"secret_env,omitempty" yaml:"secret_env,omitempty" writeOnly:"true"`
 
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
-	// non-Accelerator resources each node gets. All three are required.
+	// non-Accelerator resources each node gets. One left out is "max", see below.
 	// Storage is ephemeral scratch space (k8s ephemeral-storage) — not a persistent volume.
 	//
 	// Any of the three may instead be the literal MaxResourceSentinel ("max"), independently —
@@ -42,9 +42,8 @@ type JobSpec struct {
 	// GET always shows exactly what was submitted; every downstream consumer (Footprint, BuildJobs,
 	// cost estimation) reads domain.Experiment.EffectiveJob() instead of this field directly.
 	//
-	// A job that names no accelerator runs on cores: cpu is then a whole number, the job holds
-	// that many units of CPUType, and memory and storage left out mean "max". Submission writes
-	// that into the job.
+	// A job that names no accelerator runs on cores: cpu is then a whole number and the job holds
+	// that many units of CPUType. Submission writes the count and every "max" into the job.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
@@ -157,7 +156,9 @@ type JobSpec struct {
 	// each case: a single-pod job's retries are the runtime's (k8s BackoffLimit), and a gang's
 	// are the control plane's, since Kubernetes can recreate a failed index — stranding the
 	// survivors — or fail the Job outright, but has no way to restart a gang.
-	MaxRetries *int `json:"max_retries" yaml:"max_retries"`
+	//
+	// Left out, it is 0: the job runs once. Submission writes that into the job.
+	MaxRetries *int `json:"max_retries,omitempty" yaml:"max_retries,omitempty"`
 
 	// TerminationGracePeriodSeconds overrides the platform's default shutdown grace period.
 	// Empty means "use the platform-wide configured default"; capped at the configured max
@@ -240,10 +241,11 @@ type JobGroup struct {
 	Replicas int `json:"replicas" yaml:"replicas"`
 
 	// CPU/Memory/Storage are this group's PER-REPLICA resource-quantity strings, identical in
-	// meaning to JobSpec's own. All three required.
-	CPU     string `json:"cpu" yaml:"cpu"`
-	Memory  string `json:"memory" yaml:"memory"`
-	Storage string `json:"storage" yaml:"storage"`
+	// meaning to JobSpec's own. One left out is "max" in a group that holds units of a priced
+	// type. A group that holds none has no share to take and states all three.
+	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
+	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
+	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
 
 	// AcceleratorCount is accelerators per replica of this group. Zero is legitimate and is the
 	// point of the feature: 64 CPU-only actors alongside one 8-accelerator learner.
@@ -356,7 +358,7 @@ func (j JobSpec) ValidateGroups() error {
 			return fmt.Errorf("job.groups[%q].replicas must be at least 1", g.Name)
 		}
 		if g.CPU == "" || g.Memory == "" || g.Storage == "" {
-			return fmt.Errorf("job.groups[%q] must state cpu, memory and storage (explicit resource requests must be set at submission, not left to a cluster-side default)", g.Name)
+			return fmt.Errorf("job.groups[%q] holds no accelerator and no cores of its own count, so it has no share of a node to take: state its cpu, memory and storage", g.Name)
 		}
 		if g.AcceleratorCount < 0 {
 			return fmt.Errorf("job.groups[%q].accelerator_count must not be negative", g.Name)
@@ -445,7 +447,6 @@ type ExperimentMeta struct {
 	// request — optional and ignored if a caller sends one. Kept only so an already-persisted
 	// Experiment can round-trip through this same struct on read paths.
 	Hypothesis string `json:"hypothesis,omitempty" yaml:"hypothesis,omitempty"`
-	Objective  string `json:"objective" yaml:"objective"`
 	Theory     string `json:"theory,omitempty" yaml:"theory,omitempty"`
 
 	CodeRef string `json:"code_ref" yaml:"code_ref"`

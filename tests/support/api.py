@@ -80,7 +80,6 @@ class JobRequest:
             "agent_id": self.agent_id,
             "platform_experiment_id": self.platform_experiment_id,
             "hypothesis_id": self.hypothesis_id,
-            "objective": "e2e pytest coverage",
             "theory": "e2e pytest coverage",
             "code_ref": "git://hypothesisloop@" + "a" * 40,
             "config_hash": "",

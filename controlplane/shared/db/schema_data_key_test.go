@@ -69,9 +69,9 @@ func TestSchemaCancelsActiveRowsWithoutADataKey(t *testing.T) {
 	insert := func(id, status, notAdmitted, key string) error {
 		_, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
  estimated_duration_hours, data_access_key_id, data_secret_access_key)
-VALUES ('agent', $1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'objective', 'cpu',
+VALUES ('agent', $1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'cpu',
         $2, NULLIF($3, ''), 1, $4, $4)`, id, status, notAdmitted, key)
 		return err
 	}
@@ -122,9 +122,9 @@ func TestSchemaRegistersTheClustersJobsArePlacedOnForTheDefaultOrg(t *testing.T)
 		t.Helper()
 		if _, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, objective, accelerator_type, status, cluster_name, submitted_at,
+ hypothesis_id, hypothesis, accelerator_type, status, cluster_name, submitted_at,
  estimated_duration_hours, data_access_key_id, data_secret_access_key)
-VALUES ('agent', $1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'objective', 'cpu',
+VALUES ('agent', $1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'cpu',
         $2, $3, CASE WHEN $4 THEN now() END, 1, 'AK', 'SK')`, id, status, cluster, submitted); err != nil {
 			t.Fatalf("seed job %s: %v", id, err)
 		}
@@ -136,9 +136,9 @@ VALUES ('agent', $1, 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim',
 	// A row that was never placed still carries the column's default name.
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
- hypothesis_id, hypothesis, objective, accelerator_type, status, not_admitted_reason,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
  estimated_duration_hours, data_access_key_id, data_secret_access_key)
-VALUES ('agent', 'never-placed', 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'objective', 'cpu',
+VALUES ('agent', 'never-placed', 'legacy-agent', 'legacy-pe', 'r@0', 'h', 'd', 'h', 'claim', 'cpu',
         'QUEUED', 'awaiting_admission', 1, 'AK', 'SK')`); err != nil {
 		t.Fatalf("seed queued job: %v", err)
 	}

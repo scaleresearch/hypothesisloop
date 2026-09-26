@@ -60,6 +60,32 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 	return total, nil
 }
 
+// shareWhereUnstated gives every node that holds units of a priced type its share of the node it
+// lands on ("max") for each of cpu, memory and storage the job left out. The footprint that picks
+// a cluster is still known before admission: the share is resolved against the cluster the job is
+// placed on, never left to a default the control plane does not see. A node that holds no unit
+// has no share to take and must state all three (JobSpec.ValidateGroups).
+func shareWhereUnstated(job *domain.JobSpec) {
+	shape := func(count int, quantities ...*string) {
+		if count < 1 {
+			return
+		}
+		for _, quantity := range quantities {
+			if *quantity == "" {
+				*quantity = domain.MaxResourceSentinel
+			}
+		}
+	}
+	if len(job.Groups) == 0 {
+		shape(job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
+		return
+	}
+	for i := range job.Groups {
+		group := &job.Groups[i]
+		shape(group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage)
+	}
+}
+
 // asksForCoresOnly reports whether a job names no type and no accelerator anywhere and does state
 // cores: the plain way to ask for CPU, which submission reads as that many units of domain.CPUType.
 func asksForCoresOnly(job domain.JobSpec) bool {
@@ -95,12 +121,6 @@ func countSetsCores(job *domain.JobSpec) error {
 			*count = int(cores)
 		case cores != float64(*count):
 			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a job on CPU the count is the node's cores, so leave one out or make them equal", field, *cpu, field, *count)
-		}
-		if *memory == "" {
-			*memory = domain.MaxResourceSentinel
-		}
-		if *storage == "" {
-			*storage = domain.MaxResourceSentinel
 		}
 		return nil
 	}
@@ -138,9 +158,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Theory == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "theory is required"}
 	}
-	if exp.Objective == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "objective is required"}
-	}
 	if exp.CodeRef == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref is required"}
 	}
@@ -163,6 +180,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		}
 		exp.AcceleratorCount = exp.Job.TotalAccelerators()
 	}
+	shareWhereUnstated(&exp.Job)
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
 	if err := exp.Job.ValidateGroups(); err != nil {
@@ -175,26 +193,14 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.AcceleratorType == "" {
 		exp.Job.AcceleratorType = exp.Job.GroupAcceleratorType()
 	}
-	// Resource requests must be explicit at submission time: the footprint used for cluster
-	// selection/admission must be known up front, not resolved later from a per-cluster
-	// JobDefaults ConfigMap the control plane never sees. Reject rather than assume a default.
-	// ValidateGroups enforces the same requirement per group for a grouped job.
-	if len(exp.Job.Groups) == 0 {
-		if exp.Job.CPU == "" {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
-		}
-		if exp.Job.Memory == "" {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
-		}
-		if exp.Job.Storage == "" {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage is required (explicit resource requests must be set at submission, not left to a cluster-side default)"}
-		}
-	}
 	if err := exp.Job.ValidateSecretEnv(exp.SecretEnv); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 	}
-	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries is required and must be non-negative"}
+	if exp.Job.MaxRetries == nil {
+		exp.Job.MaxRetries = new(int)
+	}
+	if *exp.Job.MaxRetries < 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries must not be negative"}
 	}
 	switch exp.CapacityTier {
 	case "", domain.CapacityGuaranteed, domain.CapacityBurst:

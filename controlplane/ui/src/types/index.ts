@@ -133,7 +133,6 @@ export interface Experiment {
   capacity_tier?: CapacityTier
   hypothesis_id: string
   hypothesis: string
-  objective?: string
   theory?: string
   status: ExperimentStatus
   estimated_cost_acch?: number

@@ -76,7 +76,7 @@ func TestARuntimeIsHandedOnlyWhatItBuildsAWorkloadFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kept := range []string{"set-OrgID", "set-PlatformExperimentID", "set-HypothesisID", "set-Hypothesis", "set-Objective", "set-Theory", "set-ClusterName", "set-Summary", "set-NotAdmittedReason", "set-EvictionReason"} {
+	for _, kept := range []string{"set-OrgID", "set-PlatformExperimentID", "set-HypothesisID", "set-Hypothesis", "set-Theory", "set-ClusterName", "set-Summary", "set-NotAdmittedReason", "set-EvictionReason"} {
 		if strings.Contains(string(wire), kept) {
 			t.Errorf("the runtime's view carries %s on the wire: %s", kept, wire)
 		}

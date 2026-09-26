@@ -226,7 +226,7 @@ export interface ExperimentsParams {
   status?: string
   agent?: string
   platform_experiment_id?: string
-  /** Substring match against hypothesis/objective/theory. */
+  /** Substring match against hypothesis and theory. */
   search?: string
   /** Only COMPLETED jobs whose agent filed no summary. */
   needs_summary?: boolean

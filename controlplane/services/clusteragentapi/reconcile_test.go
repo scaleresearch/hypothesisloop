@@ -121,7 +121,7 @@ func (w *reconcileWorld) reconcile(t *testing.T, cluster string, report map[stri
 func placedJob(id, org string) *domain.Experiment {
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, OrgID: org, PlatformExperimentID: "pe-" + id, ProjectID: "prj-" + id,
-		HypothesisID: "hyp-" + id, Hypothesis: "the hypothesis of " + org, Objective: "the objective of " + org, Theory: "the theory of " + org,
+		HypothesisID: "hyp-" + id, Hypothesis: "the hypothesis of " + org, Theory: "the theory of " + org,
 		ClusterName: "of-a", Status: domain.StatusRunning, AttemptCount: 2,
 		Job:     domain.JobSpec{Image: "example.invalid/workload"},
 		DataKey: domain.DataKey{AccessKeyID: "AK-" + id, SecretAccessKey: "SK-" + id},
