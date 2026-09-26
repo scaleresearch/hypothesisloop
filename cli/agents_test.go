@@ -127,3 +127,12 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		t.Fatalf("stderr = %q, want the empty roster said out loud", stderr.String())
 	}
 }
+
+// A hosted coordinator's briefing is built from this listing. It crashed on a subcommand that
+// read the token before parsing its flags, so every coordinator exited as it started.
+func TestTheAgentsGroupListsItsCommands(t *testing.T) {
+	code, stdout, stderr := hl(t, "platform-experiments", "agents", "--help")
+	if code != 0 || !strings.Contains(stdout, "\n  add [PE]") || !strings.Contains(stdout, "\n  list [PE]") {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+}

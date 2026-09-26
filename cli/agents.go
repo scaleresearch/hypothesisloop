@@ -24,8 +24,8 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
    or: hl platform-experiments agents add [PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID), and only
-while it is open. The first form creates one agent; the second joins one registered with hl
-register. For several agents, run it once for each. With --hosted the platform runs the agent.
+while it is open. The first form creates one agent; the second joins one that is
+registered already. For several agents, run it once for each. With --hosted the platform runs the agent.
 Without it the line printed carries the agent's token: start the agent yourself with that as
 HL_TOKEN and the API's address as API_URL, which is all it needs. Keep the token out of
 command lines and shell history; write it to an env file the container reads.`, stderr)

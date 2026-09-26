@@ -167,7 +167,8 @@ func groupUsage(group string, subs []subcommand) string {
 	fmt.Fprintf(&b, "usage: hl %s <command> ...\n", group)
 	for _, sub := range subs {
 		var help bytes.Buffer
-		sub.run(nil, []string{"-h"}, &help, &help)
+		// A subcommand may read its defaults from the client's token before it parses its flags.
+		sub.run(&apiclient.Client{}, []string{"-h"}, &help, &help)
 		usage, _, _ := strings.Cut(help.String(), "\n\n")
 		usage, _, _ = strings.Cut(usage, "\n   or:")
 		synopsis := strings.Join(strings.Fields(strings.TrimPrefix(usage, "usage: hl "+group+" ")), " ")
