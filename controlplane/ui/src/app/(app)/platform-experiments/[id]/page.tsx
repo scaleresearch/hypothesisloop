@@ -32,6 +32,7 @@ import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
+import { AgentLabel, AgentNames, useAgentName } from '@/components/agent-label'
 import { Card, CardHeader, CardContent, InsetCard } from '@/components/ui/card'
 import { Badge, Dot, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -148,6 +149,7 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
 // running ones) and pick which of that job's actually-reported metrics to chart, rather than
 // being limited to the experiment's tracked/ranking subset like the per-agent panel above.
 function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
+  const agentName = useAgentName()
   // Most-recently-active first: updated_at moves as a running job reports progress.
   const sorted = useMemo(
     () => [...jobs].sort((a, b) => {
@@ -189,7 +191,7 @@ function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
         <div>
           <Eyebrow className="mb-1.5 block">Job</Eyebrow>
           <SearchableSelect
-            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${j.agent_id}` }))}
+            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${agentName(j.agent_id)}` }))}
             value={selectedJob.id}
             onChange={v => { if (v) setJobId(v) }}
             placeholder="Search jobs…"
@@ -272,7 +274,7 @@ function AgentSelector({
                 isOn ? next.delete(id) : next.add(id)
                 onChange(next)
               }}
-              label={<><Dot color={colorFor(id)} />{id}</>}
+              label={<><Dot color={colorFor(id)} /><AgentLabel id={id} /></>}
             />
           )
         })}
@@ -334,6 +336,7 @@ function CompetingAgentsChart({
   /** Every stage boundary already crossed, as {stage_index, advanced_at}. */
   boundaries?: StagesStatus['advances']
 }) {
+  const agentName = useAgentName()
   // An agent runs many jobs back to back over the course of a platform experiment (baseline,
   // then a string of hypothesis variants), each its own series with its own local warmup ramp
   // and plateau. Plotting those raw per-job values spliced together as one "per agent" line
@@ -435,7 +438,7 @@ function CompetingAgentsChart({
           <Line
             key={agentId}
             dataKey={agentId}
-            name={agentId}
+            name={agentName(agentId)}
             stroke={colorFor(agentId)}
             dot={false}
             strokeWidth={2}
@@ -455,11 +458,11 @@ function AgentJobsPanel({ projectId, platformExperimentId, agentId, trackedMetri
     () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent: agentId, sort: '-created_at' }),
     { refreshInterval: 15_000 },
   )
-  if (error) return <ErrorMessage>Could not load jobs from {agentId}.</ErrorMessage>
+  if (error) return <ErrorMessage>Could not load jobs from <AgentLabel id={agentId} />.</ErrorMessage>
   if (!data) return <Loading />
   const jobs = data.items
   if (jobs.length === 0) {
-    return <EmptyState>No jobs from {agentId} yet.</EmptyState>
+    return <EmptyState>No jobs from <AgentLabel id={agentId} /> yet.</EmptyState>
   }
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(480px,1fr))] gap-2.5 pb-1 pt-2.5">
@@ -496,6 +499,10 @@ function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
 }
 
 export default function PlatformExperimentDetailPage({ params }: { params: { id: string } }) {
+  return <AgentNames platformExperimentID={params.id}><PlatformExperimentDetail params={params} /></AgentNames>
+}
+
+function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const { id } = params
   const router = useProjectRouter()
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string> | null>(null)
@@ -886,7 +893,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                 {stagesStatus.active_agents.length === 0
                   ? <span className="text-xs text-subtle">none</span>
                   : stagesStatus.active_agents.map(a => (
-                    <Pill key={a} tone="success" className="my-0.5 mr-1">{a}</Pill>
+                    <Pill key={a} tone="success" className="my-0.5 mr-1"><AgentLabel id={a} /></Pill>
                   ))}
               </div>
               <div>
@@ -897,7 +904,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   ? <span className="text-xs text-subtle">none</span>
                   : stagesStatus.cut_agents.map(c => (
                     <Pill key={c.agent_id} tone="danger" className="my-0.5 mr-1">
-                      {c.agent_id} <span className="opacity-70">· stage {c.stage_index}</span>
+                      <AgentLabel id={c.agent_id} /> <span className="opacity-70">· stage {c.stage_index}</span>
                     </Pill>
                   ))}
               </div>
@@ -1001,7 +1008,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                         <td className="font-mono text-xs font-semibold">{rank != null ? `#${rank}` : '—'}</td>
                         <td className="whitespace-nowrap font-mono text-xs font-semibold">
                           <span className="inline-block w-3 text-muted">{isExpanded ? '▾' : '▸'}</span>
-                          {agentId}
+                          <AgentLabel id={agentId} />
                           {isCut && <span className="ml-2 text-2xs font-normal text-danger">CUT</span>}
                           {isActive && <span className="ml-2 text-2xs font-normal text-success">ACTIVE</span>}
                           {nonRawMetrics.length > 0 && (
@@ -1098,7 +1105,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                     <td className="font-mono text-2xs">
                       <Link href={`/jobs/${exp.id}`} className="text-accent hover:underline">{exp.id.slice(0, 8)}…</Link>
                     </td>
-                    <td className="font-mono text-xs">{exp.agent_id}</td>
+                    <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
                     <td className="font-mono text-xs">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
                     <td className="text-right font-mono text-xs">{exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} AccH` : '—'}</td>
                     <td className="max-w-[280px] truncate text-xs">{exp.hypothesis}</td>
@@ -1155,7 +1162,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                       <td className="font-mono text-2xs">
                         <Link href={`/jobs/${exp.id}`} className="text-accent hover:underline">{exp.id.slice(0, 8)}…</Link>
                       </td>
-                      <td className="font-mono text-xs">{exp.agent_id}</td>
+                      <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
                         <StatusBadge status={exp.status} />
                         {unsummarized?.has(exp.id) && <NoSummary className="ml-1.5" />}
@@ -1204,7 +1211,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
                   const remaining = quotaRemainingAccH(q)
                   return (
                     <tr key={q.id}>
-                      <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
+                      <td className="font-mono text-xs font-semibold"><AgentLabel id={q.agent_id} /></td>
                       <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH</td>
                       <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH</td>
                       <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>
