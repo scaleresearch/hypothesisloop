@@ -213,6 +213,12 @@ func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message strin
 	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: %w", err)
 	}
+	// The planner's last machine ended because its work was done. The one a revision asks for
+	// is a new launch, with its own restarts: a launch the launcher's reconcile does not know
+	// spends none of the old one's.
+	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND flavor = $2`, id, domain.PlannerFlavor); err != nil {
+		return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,
 		id, message, string(by.Kind), by.ID); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)

@@ -78,7 +78,7 @@ func checkBaseline(p Proposal, experiment CreatePlatformExperimentRequest, plann
 		return refusedProposal("baseline_not_completed", "baseline job %s is %s: a proposal rests on a baseline that ran to the end. Wait for it, or fix it and run it again", baseline.Job.ID, baseline.Job.Status)
 	}
 	if !baseline.Finding {
-		return refusedProposal("baseline_without_finding", "baseline job %s has no finding: file what it measured with `hl hypothesis finding`, so the researchers start from it", baseline.Job.ID)
+		return refusedProposal("baseline_without_finding", "baseline job %s has no finding: file what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
 	}
 	var missing []string
 	for _, metric := range experiment.Metrics {

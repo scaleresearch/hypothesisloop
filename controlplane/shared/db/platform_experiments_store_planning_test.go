@@ -142,7 +142,11 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if found, _ := listed(); found {
 		t.Fatal("a planner is kept beside a proposal that waits for a person")
 	}
-	// A revision gives the draft back, and the planner has a plan to make again.
+	// A revision gives the draft back, and the planner has a plan to make again, on a machine
+	// that owes nothing to the restarts of the one before.
+	if err := pes.AskInstance(ctx, pe, planner, "machine-1", "launch-1"); err != nil {
+		t.Fatal(err)
+	}
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	until := time.Now().UTC().Add(30 * time.Minute)
 	if err := pes.Revise(ctx, pe, "it must fit one accelerator", by, until); err != nil {
@@ -158,6 +162,9 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 	if found, ending := listed(); !found || ending {
 		t.Fatalf("revising: listed %v, ending %v, want kept", found, ending)
+	}
+	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Launch != "" {
+		t.Fatalf("after a revision the planner's launch is %+v, %v, want none, so that its next machine is a new launch", signup.Instance, err)
 	}
 	// Accepted, the experiment is open and then running, and the planner has nothing to do in it.
 	propose(windDown + time.Second)
