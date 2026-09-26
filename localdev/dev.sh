@@ -7,7 +7,8 @@
 #
 #   up       render the settings for the local cluster and (re)start the API and metrics-service;
 #            start the UI unless it runs
-#   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io) and cloud-agent
+#   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io or E2B, whichever
+#            HOSTED_SANDBOX_PROVIDER in .env names) and cloud-agent
 #            (vast.ai) as two more processes, and settings that name the running tunnels (make
 #            tunnels) and the images `make -C infra publish` pushed. Its inputs are keys of .env,
 #            and every missing one is named before anything is touched
@@ -133,22 +134,38 @@ render_runtime_configs() {
       -e "s|^job_image: .*$|job_image: ${registry}/hypothesisloop-job:${tag}|" \
       -e "s|^  account_id: .*$|  account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\"|" \
       runtime/cloud/settings/cloud-agent.vast.yaml > "${bin}/cloud-agent.yaml"
+  # Which vendor runs hosted agents is this one section of the launcher's config and nothing
+  # else: the control plane, the harness and the launcher's own loop are the same for both.
+  local sandbox_settings
+  case "${sandbox_provider}" in
+    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value FLY_APP), region: ams, cpu_kind: shared}" ;;
+    e2b) sandbox_settings="{api_key_env: E2B_API_KEY, lifetime_seconds: 3600}" ;;
+  esac
   sed -e "s|^api_url: .*$|api_url: http://localhost:8081|" \
-      -e "s|^  name: example$|  name: fly|" \
-      -e "s|^  settings: {}$|  settings: {api_token_env: FLY_API_TOKEN, app: $(lib_env_value FLY_APP), region: ams, cpu_kind: shared}|" \
+      -e "s|^  name: example$|  name: ${sandbox_provider}|" \
+      -e "s|^  settings: {}$|  settings: ${sandbox_settings}|" \
       runtime/cloud/settings/agent-launcher.yaml > "${bin}/agent-launcher.yaml"
   for value in "cluster_name: ${cloud_cluster}" "api_url: ${public_api}" "job_image: ${registry}/hypothesisloop-job:${tag}" "account_id: \"$(lib_env_value VAST_ACCOUNT_ID)\""; do
     grep -qF -- "${value}" "${bin}/cloud-agent.yaml" || { echo "dev: runtime/cloud/settings/cloud-agent.vast.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
-  for value in "api_url: http://localhost:8081" "  name: fly" "app: $(lib_env_value FLY_APP),"; do
+  for value in "api_url: http://localhost:8081" "  name: ${sandbox_provider}" "  settings: ${sandbox_settings}"; do
     grep -qF -- "${value}" "${bin}/agent-launcher.yaml" || { echo "dev: runtime/cloud/settings/agent-launcher.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
   launcher="$(sed -n 's/^launcher_name: *//p' "${bin}/agent-launcher.yaml")"
 }
 
 hosted_inputs() {
-  local missing=() key tunnels
-  for key in IMAGE_TAG GCP_PROJECT REGISTRY_LOCATION REGISTRY_REPOSITORY FLY_APP FLY_DEPLOY_TOKEN VAST_API_KEY VAST_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN; do
+  local missing=() key tunnels sandbox_keys
+  sandbox_provider="$(lib_env_value HOSTED_SANDBOX_PROVIDER)"
+  case "${sandbox_provider}" in
+    fly) sandbox_keys="FLY_APP FLY_DEPLOY_TOKEN" ;;
+    e2b) sandbox_keys="E2B_API_KEY" ;;
+    *)
+      echo "dev: .env sets HOSTED_SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2
+      exit 1
+      ;;
+  esac
+  for key in IMAGE_TAG GCP_PROJECT REGISTRY_LOCATION REGISTRY_REPOSITORY ${sandbox_keys} VAST_API_KEY VAST_ACCOUNT_ID CLAUDE_CODE_OAUTH_TOKEN; do
     [[ -n "$(lib_env_value "${key}")" ]] || missing+=("${key}")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -270,13 +287,14 @@ case "${action}" in
     CLOUD_AGENT_CONFIG="${repo}/${bin}/cloud-agent.yaml" RUNTIME_TOKEN="${runtime_token}" \
       VAST_API_KEY="$(lib_env_value VAST_API_KEY)" start cloud-agent "${bin}/cloud-agent"
     AGENT_LAUNCHER_CONFIG="${repo}/${bin}/agent-launcher.yaml" LAUNCHER_TOKEN="${launcher_token}" \
-      FLY_API_TOKEN="$(lib_env_value FLY_DEPLOY_TOKEN)" CLAUDE_CODE_OAUTH_TOKEN="$(lib_env_value CLAUDE_CODE_OAUTH_TOKEN)" \
+      FLY_API_TOKEN="$(lib_env_value FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value E2B_API_KEY)" \
+      CLAUDE_CODE_OAUTH_TOKEN="$(lib_env_value CLAUDE_CODE_OAUTH_TOKEN)" \
       start agent-launcher "${bin}/agent-launcher"
     must_stay_up cloud-agent
     must_stay_up agent-launcher
     start_ui
     echo "dev: API http://localhost:8081 (from outside ${public_api}), UI http://localhost:3000"
-    echo "dev: cloud-agent rents for cluster ${cloud_cluster}; agent-launcher ${launcher} rents in Fly.io app $(lib_env_value FLY_APP)"
+    echo "dev: cloud-agent rents for cluster ${cloud_cluster}; agent-launcher ${launcher} runs hosted agents on ${sandbox_provider}"
     status
     ;;
   api)
