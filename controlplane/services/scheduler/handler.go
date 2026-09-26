@@ -50,9 +50,17 @@ type summaryReply struct {
 
 // submitRequest is the wire shape for POST /experiments.
 type submitRequest struct {
-	ID       string                `json:"id"`
-	Metadata domain.ExperimentMeta `json:"metadata"`
-	Job      domain.JobSpec        `json:"job"`
+	ID       string         `json:"id"`
+	Metadata submitMeta     `json:"metadata"`
+	Job      domain.JobSpec `json:"job"`
+}
+
+// submitMeta is the metadata of a job as a request states it. The two ids an agent's token
+// already says are optional here and resolved by access.Spender.
+type submitMeta struct {
+	domain.ExperimentMeta
+	AgentID              string `json:"agent_id,omitempty" required:"false" doc:"Whose job it is. Absent with an agent's token, it is that agent."`
+	PlatformExperimentID string `json:"platform_experiment_id,omitempty" required:"false" doc:"Where it runs. Absent with an agent's token, it is that agent's platform experiment."`
 }
 
 // RegisterHuma registers the public, research-agent-facing scheduler operations
@@ -92,7 +100,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Job:                    req.Job,
 			HypothesisID:           meta.HypothesisID,
 			Hypothesis:             meta.Hypothesis,
-			Objective:              meta.Objective,
 			Theory:                 meta.Theory,
 			AcceleratorType:        primaryAcceleratorType(req.Job),
 			AcceleratorCount:       req.Job.TotalAccelerators(),
@@ -120,7 +127,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	const (
 		defaultExperimentListLimit = 20
 		// Lowered from 200 (2026-09-11): each experiment record duplicates its full job/
-		// resolved_job env and repeats hypothesis/theory/objective text, so even a max-size page
+		// resolved_job env and repeats hypothesis and theory text, so even a max-size page
 		// was ~580KB raw -- too large for an agent to read into context in one call regardless of
 		// how it's asked for. 50 caps a raw page at roughly a tenth of that.
 		maxExperimentListLimit = 50
@@ -132,7 +139,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Filter with ?agent, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?search (substring match " +
-			"against hypothesis/objective/theory), ?needs_summary (finished experiments still missing " +
+			"against hypothesis and theory), ?needs_summary (finished experiments still missing " +
 			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
@@ -145,7 +152,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
 		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
-		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
+		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis and theory."`
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
@@ -244,7 +251,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
 		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
-		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis, objective and theory."`
+		Search               string `query:"search" doc:"Case-insensitive substring match against hypothesis and theory."`
 		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
 		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
