@@ -146,7 +146,7 @@ describe('a cluster the platform shares with the org', () => {
     show()
     const row = (await screen.findByRole('cell', { name: /^platform-gpu/ })).closest('tr')!
     expect(within(row).getByText('Connected')).toBeTruthy()
-    expect(within(row).getByText('the platform')).toBeTruthy()
+    expect(within(row).getByText('Platform')).toBeTruthy()
     expect(within(row).getByText('shared with every org')).toBeTruthy()
     expect(within(row).getByText('set by the platform')).toBeTruthy()
     expect(within(row).queryByRole('button')).toBeNull()
@@ -161,7 +161,7 @@ describe('a cluster\'s start command', () => {
     await userEvent.click(within(lab).getByRole('button', { name: 'Show start command' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab')
     expect((await screen.findByTestId('secret')).textContent).toContain(`hl cluster token 'lab' --org 'org_a')" make cluster-agent-up CLUSTER='lab'`)
-    expect(screen.getByText(/brings the\s+same command back/)).toBeTruthy()
+    expect(screen.getByText(/brings it back/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/never again|only time/)
   })
 
@@ -192,6 +192,33 @@ describe('adding a cluster', () => {
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Hide' }))
     expect(screen.queryByTestId('secret')).toBeNull()
+  })
+
+  it('asks which kind first, and shows a bare-metal node the command that runs its agent', async () => {
+    show()
+    const kinds = within(await screen.findByRole('group', { name: 'Kind of cluster' }))
+    expect(kinds.getByRole('button', { name: 'Kubernetes cluster' }).getAttribute('aria-pressed')).toBe('true')
+    await userEvent.click(kinds.getByRole('button', { name: 'Bare-metal node' }))
+    expect(screen.getByText(/starts jobs as containers with podman or docker/)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('Cluster name'), 'gpu-box-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Add node' }))
+    expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'gpu-box-1')
+    expect((await screen.findByTestId('secret')).textContent).toBe(
+      `RUNTIME_TOKEN="$(hl cluster token 'gpu-box-1' --org 'org_a')" CLUSTER_NAME='gpu-box-1' API_URL='http://api.cluster.test' go run ./runtime/bare-metal/cmd/bare-agent`,
+    )
+    expect(screen.getByText(/Run it on the node/)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('hls_')
+  })
+
+  it('switches the command on show when the other kind is chosen, without asking the API again', async () => {
+    show()
+    await userEvent.type(await screen.findByLabelText('Cluster name'), 'edge')
+    await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
+    expect((await screen.findByTestId('secret')).textContent).toContain('make cluster-agent-up')
+    await userEvent.click(screen.getByRole('button', { name: 'Bare-metal node' }))
+    expect(screen.getByTestId('secret').textContent).toContain('go run ./runtime/bare-metal/cmd/bare-agent')
+    expect(screen.getByTestId('secret').textContent).not.toContain('METRICS_URL')
+    expect(registerCluster).toHaveBeenCalledTimes(1)
   })
 
   it('shows the API\'s refusal, as for a name another org owns', async () => {

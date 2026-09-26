@@ -111,7 +111,7 @@ async function choose(page, field, option) {
 }
 
 // Clicks the GitHub sign-in button and follows the redirects back into the app.
-async function signIn(page, user, landing = '**/') {
+async function signIn(page, user, landing = `${UI}/console`) {
   await configure({ nextUser: user })
   await page.getByRole('button', { name: 'Continue with GitHub' }).click()
   await page.waitForURL(landing)
@@ -158,6 +158,7 @@ async function main() {
       NEXT_PUBLIC_API_URL: API,
       NEXT_PUBLIC_SUPABASE_URL: IDP,
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run',
+      NEXT_PUBLIC_SIGN_IN_PROVIDERS: 'github,google,apple',
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
@@ -179,9 +180,36 @@ async function main() {
 }
 
 async function scenarios(browser) {
-  section('a sign-in that does not complete says so')
+  section('the landing page is public and offers sign-in and sign-up')
   const visitor = await newContext(browser)
   const visitorPage = await visitor.newPage()
+  await visitorPage.goto(UI)
+  await visitorPage.getByRole('heading', { level: 1 }).waitFor()
+  assert.equal(new URL(visitorPage.url()).pathname, '/', 'a visitor without a session stays on the landing page')
+  assert.equal(await visitorPage.getByRole('link', { name: 'Console' }).count(), 0)
+  await shot(visitorPage, 'landing-signed-out')
+  await visitorPage.getByRole('link', { name: 'Sign up' }).click()
+  await visitorPage.waitForURL(`${UI}/login?mode=sign-up`)
+  await visitorPage.getByRole('heading', { name: 'Create your account' }).waitFor()
+  await shot(visitorPage, 'sign-up')
+  await visitorPage.getByRole('link', { name: 'Sign in' }).click()
+  await visitorPage.waitForURL(`${UI}/login`)
+  await visitorPage.getByRole('heading', { name: 'Sign in' }).waitFor()
+
+  section('a provider the identity provider has switched off says so and leaves the others')
+  assert.deepEqual(
+    await visitorPage.getByRole('button').allInnerTexts(),
+    ['Continue with GitHub', 'Continue with Google', 'Continue with Apple'],
+    'the sign-in page offers the configured providers',
+  )
+  await visitorPage.getByRole('button', { name: 'Continue with Google' }).click()
+  await visitorPage.locator('.error-banner', { hasText: 'Sign-in with Google is not available yet.' }).waitFor()
+  assert.equal(visitorPage.url(), `${UI}/login`, 'the visitor is still on the sign-in page')
+  assert.ok(await visitorPage.getByRole('button', { name: 'Continue with Google' }).isDisabled())
+  assert.ok(await visitorPage.getByRole('button', { name: 'Continue with GitHub' }).isEnabled())
+  await shot(visitorPage, 'sign-in-provider-refused')
+
+  section('a sign-in that does not complete says so')
   await visitorPage.goto(`${UI}/auth/callback?code=not-a-code&next=%2Fjobs`)
   await visitorPage.waitForURL(`${UI}/login?notice=failed`)
   await visitorPage.getByText('Sign-in did not complete. Try again.').waitFor()
@@ -193,12 +221,19 @@ async function scenarios(browser) {
   section('a way back that leads off the site is dropped, signed out and signed in')
   const HOSTILE = ['/%09/evil.example', '/%0A/evil.example', '/%5Cevil.example', '%2F%2Fevil.example', 'https%3A%2F%2Fevil.example']
   await visitorPage.goto(`${UI}/login?next=${HOSTILE[0]}`)
-  await signIn(visitorPage, eve, `${UI}/`)
-  assert.equal(new URL((await idpState()).authorizeRequests.at(-1)).searchParams.get('redirect_to'), `${UI}/auth/callback?next=%2F`)
+  await signIn(visitorPage, eve, `${UI}/console`)
+  assert.equal(new URL((await idpState()).authorizeRequests.at(-1)).searchParams.get('redirect_to'), `${UI}/auth/callback?next=%2Fconsole`)
   for (const next of HOSTILE) {
     await visitorPage.goto(`${UI}/login?next=${next}`)
-    await visitorPage.waitForURL(`${UI}/`)
+    await visitorPage.waitForURL(`${UI}/console`)
   }
+
+  section('the landing page offers a signed-in visitor the console')
+  await visitorPage.goto(UI)
+  assert.equal(await visitorPage.getByRole('link', { name: 'Sign in' }).count(), 0)
+  await shot(visitorPage, 'landing-signed-in')
+  await visitorPage.getByRole('link', { name: 'Console' }).click()
+  await visitorPage.waitForURL(`${UI}/console`)
   await visitor.close()
 
   const context = await newContext(browser)
@@ -213,7 +248,7 @@ async function scenarios(browser) {
   await page.goto(`${UI}/jobs?status=RUNNING`)
   await page.waitForURL(`${UI}/login?next=%2Fjobs%3Fstatus%3DRUNNING`)
   await page.getByRole('button', { name: 'Continue with GitHub' }).waitFor()
-  assert.equal(await page.getByRole('button').count(), 1, 'the login page has one button')
+  assert.equal(await page.getByRole('button').count(), 3, 'the login page has one button for each configured provider')
   await shot(page, 'login')
 
   await signIn(page, ada, `${UI}/jobs?status=RUNNING`)
@@ -239,7 +274,7 @@ async function scenarios(browser) {
   }
 
   section('a first-time user lands in their own org and default project, with what to do next')
-  await page.goto(UI)
+  await page.goto(`${UI}/console`)
   await page.getByText('is empty. Start here.').waitFor()
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().waitFor()
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), ada.name)
@@ -400,6 +435,14 @@ async function scenarios(browser) {
   secrets.add(runtimeToken)
   assert.ok(!(await page.content()).includes(runtimeToken), 'the runtime token is nowhere on the page')
   assert.ok(command.includes(`API_URL='${registered.api_url}' METRICS_URL='${registered.metrics_url}'`))
+  await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
+  assert.equal(
+    await page.getByTestId('secret').innerText(),
+    `RUNTIME_TOKEN="$(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}')" CLUSTER_NAME='${clusterName}' API_URL='${registered.api_url}' go run ./runtime/bare-metal/cmd/bare-agent`,
+    'a bare-metal node is shown the command that runs its agent, with the same token read',
+  )
+  await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
+  await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
   await page.getByRole('cell', { name: clusterName }).waitFor()
   await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }))
   await page.getByRole('button', { name: 'Hide' }).click()
@@ -441,7 +484,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByRole('button', { name: 'Show start command' }).count(), 0, 'the cluster page manages nothing')
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
   await shot(page, 'cluster-page')
-  await page.getByRole('link', { name: 'Dashboard' }).click()
+  await page.getByRole('link', { name: 'Statistics' }).click()
   await page.getByText('Job Status Breakdown').waitFor()
   assert.equal(await page.getByText('staff only').count(), 0)
 
@@ -807,7 +850,7 @@ async function scenarios(browser) {
   await signIn(danPage, dan, `${UI}/invite`)
   await shot(danPage, 'invite-offered')
   await danPage.getByRole('button', { name: 'Accept invite' }).click()
-  await danPage.waitForURL(`${UI}/?project=${labProject}`)
+  await danPage.waitForURL(`${UI}/console?project=${labProject}`)
   const danID = (await (await api(await tokenOf(dan), '/me')).json()).user_id
   assert.match(danID, /^[\w-]+$/)
   assert.deepEqual(await pendingInvites(), [], 'an accepted invite is no longer pending')
@@ -909,17 +952,18 @@ async function scenarios(browser) {
     await otherPage.getByText('All Clusters · every org · staff only').waitFor()
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
     await shot(otherPage, 'staff-cluster-page', otherPage.getByRole('columnheader', { name: 'Autoscaler' }))
-    await otherPage.goto(`${UI}/dashboard`)
+    await otherPage.goto(`${UI}/statistics`)
     await otherPage.getByText('Scheduler Quality · every org · staff only').waitFor()
     await otherPage.getByText('Burst eviction rate').waitFor()
-    await shot(otherPage, 'staff-dashboard', otherPage.getByText('Burst eviction rate'))
+    await shot(otherPage, 'staff-statistics', otherPage.getByText('Burst eviction rate'))
   } finally {
     hlAdmin('user', 'staff', bob.id, 'off')
   }
 
   section('sign-out ends the session')
   await otherPage.getByRole('button', { name: 'Sign out' }).click()
-  await otherPage.waitForURL(`${UI}/login`)
+  await otherPage.waitForURL(`${UI}/`)
+  await otherPage.getByRole('link', { name: 'Sign in' }).waitFor()
   await otherPage.goto(`${UI}/jobs`)
   await otherPage.waitForURL(`${UI}/login?next=%2Fjobs`)
   await other.close()

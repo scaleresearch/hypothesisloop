@@ -6,32 +6,51 @@ import { fetchOrgClusters, registerCluster } from '@/lib/api'
 import type { RegisteredCluster } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
-import { StatusLabel } from '@/components/ui/badge'
+import { Badge, StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
+import { Segmented } from '@/components/ui/tabs'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
 function shellQuote(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`
 }
 
-// The command `hl cluster add` prints, word for word. It reads the runtime token with
-// `hl cluster token` when it runs, so the token is on no page and in no shell history.
-function startCommand(orgID: string, cluster: RegisteredCluster): string {
+// What runs the jobs. The API records no kind: a cluster is a name, and its kind is whichever agent
+// connects under it. So the choice here only selects the command that starts that agent.
+type Kind = 'kubernetes' | 'bare-metal'
+
+const KINDS: { value: Kind; label: string }[] = [
+  { value: 'kubernetes', label: 'Kubernetes cluster' },
+  { value: 'bare-metal', label: 'Bare-metal node' },
+]
+
+const KIND_HINT: Record<Kind, string> = {
+  kubernetes: 'One agent is installed on the cluster with helm and schedules jobs as pods on its nodes.',
+  'bare-metal': 'One agent process runs on the node and starts jobs as containers with podman or docker. Each node is added as a cluster of its own.',
+}
+
+// Both commands read the runtime token with `hl cluster token` when they run, as the command
+// `hl cluster add` prints does, so the token is on no page and in no shell history.
+function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): string {
   const name = shellQuote(cluster.name)
-  return `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})" make cluster-agent-up CLUSTER=${name} API_URL=${shellQuote(cluster.api_url)} METRICS_URL=${shellQuote(cluster.metrics_url)}`
+  const token = `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})"`
+  const api = `API_URL=${shellQuote(cluster.api_url)}`
+  if (kind === 'bare-metal') return `${token} CLUSTER_NAME=${name} ${api} go run ./runtime/bare-metal/cmd/bare-agent`
+  return `${token} make cluster-agent-up CLUSTER=${name} ${api} METRICS_URL=${shellQuote(cluster.metrics_url)}`
 }
 
 /**
  * The clusters the org's jobs can run on: its own, with the scheduler settings an owner reads and
- * changes, and any the platform shares with it. With `manage` an owner also registers a cluster
- * and reads the command that starts its agent.
+ * changes, and any the platform provides. With `manage` an owner also adds a Kubernetes cluster
+ * or a bare-metal node and reads the command that starts its agent.
  */
 export function OrgClusters({ manage }: { manage: boolean }) {
   const { org, administers } = useTenant()
   const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
+  const [kind, setKind] = useState<Kind>('kubernetes')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
@@ -63,33 +82,46 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   return (
     <div className="grid gap-3.5">
       {manages && (
-        <form className="flex flex-wrap items-center gap-2" onSubmit={add}>
-          <Input
-            fieldSize="sm"
-            mono
-            className="w-60"
-            aria-label="Cluster name"
-            placeholder="cluster name, e.g. lab-k8s"
-            value={name}
-            onChange={e => setName(e.target.value)}
-          />
-          <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
-            {busy ? 'Adding…' : 'Add cluster'}
-          </Button>
+        <form className="grid justify-items-start gap-2" onSubmit={add}>
+          <Segmented label="Kind of cluster" options={KINDS} value={kind} onChange={setKind} />
+          <p className="max-w-[640px] text-xs text-subtle">{KIND_HINT[kind]}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              fieldSize="sm"
+              mono
+              className="w-60"
+              aria-label="Cluster name"
+              placeholder={kind === 'kubernetes' ? 'cluster name, e.g. lab-k8s' : 'node name, e.g. gpu-box-1'}
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+            <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>
+              {kind === 'kubernetes' ? 'Add cluster' : 'Add node'}
+            </Button>
+          </div>
         </form>
       )}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
       {registered && (
         <Secret
-          label={`Start the agent of ${registered.name}`}
-          value={startCommand(org.id, registered)}
+          label={`Start the agent of ${registered.name} · ${kind === 'kubernetes' ? 'Kubernetes cluster' : 'bare-metal node'}`}
+          value={startCommand(kind, org.id, registered)}
           note={<>
-            Run it from a checkout of the repository, with <span className="font-mono">kubectl</span> pointed
-            at the cluster and <span className="font-mono">hl</span> signed in as an owner of {org.name}.
+            {kind === 'kubernetes' ? (
+              <>
+                Run it from a checkout of the repository, with <span className="font-mono">kubectl</span> pointed
+                at the cluster and <span className="font-mono">hl</span> signed in as an owner of {org.name}.
+              </>
+            ) : (
+              <>
+                Run it on the node, from a checkout of the repository, with Go and podman or docker installed
+                and <span className="font-mono">hl</span> signed in as an owner of {org.name}. The agent runs in
+                the foreground until it is stopped.
+              </>
+            )}{' '}
             It reads the cluster&apos;s runtime token with <span className="font-mono">hl cluster token</span>{' '}
-            when it runs, so the token is not on this page.{' '}
-            <span className="font-mono">Show start command</span> in the cluster&apos;s row brings the
-            same command back, as does <span className="font-mono">hl cluster add {registered.name}</span>.
+            when it runs, so the token is not on this page. The kind chosen above selects the command, and{' '}
+            <span className="font-mono">Show start command</span> in the cluster&apos;s row brings it back.
           </>}
           dismiss="Hide"
           onDismiss={() => setRegistered(null)}
@@ -100,7 +132,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
       {!data && !error && <Loading />}
       {data && data.length === 0 && (
         <EmptyState>
-          No cluster is registered for {org.name}, and the platform shares none with it.
+          No cluster is registered for {org.name}, and the platform provides none.
           {manages ? ' Add one above to run jobs on your own hardware.' : ' An owner adds one in Settings.'}
         </EmptyState>
       )}
@@ -110,7 +142,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
             <tr>
               <th>Cluster</th>
               <th>Status</th>
-              <th>Belongs to</th>
+              <th>Provided by</th>
               <th>Scheduler settings</th>
               {manages && <th />}
             </tr>
@@ -124,8 +156,8 @@ export function OrgClusters({ manage }: { manage: boolean }) {
                 </td>
                 <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                 <td className="text-xs">
-                  {c.owned ? org.name : 'the platform'}
-                  {c.shared && <div className="text-2xs text-muted">shared with every org</div>}
+                  {c.owned ? org.name : <Badge tone="accent">Platform</Badge>}
+                  {c.shared && <div className="mt-0.5 text-2xs text-muted">shared with every org</div>}
                 </td>
                 <td>
                   {!c.owned
