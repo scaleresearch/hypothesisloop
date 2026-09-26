@@ -367,14 +367,14 @@ VALUES ($1, $2, $3, 1, 'r', 'open')`, donationID, agentID, peID); err != nil {
 		t.Fatal("tenancy of an evicted job: got ended = false, want true")
 	}
 	pes := NewPlatformExperimentsStore(pool)
-	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpRunning); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID); err != nil {
 		t.Fatalf("start platform experiment: %v", err)
 	}
 	if _, closedAt, _ := accounts.PlatformExperimentTenancy(ctx, peID); closedAt != nil {
 		t.Fatalf("tenancy of a running platform experiment: got closed at %v, want nil", closedAt)
 	}
 	before := time.Now().Add(-time.Second)
-	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpClosed); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, peID, nil); err != nil {
 		t.Fatalf("close platform experiment: %v", err)
 	}
 	_, closedAt, _ = accounts.PlatformExperimentTenancy(ctx, peID)
@@ -386,7 +386,7 @@ VALUES ($1, $2, $3, 1, 'r', 'open')`, donationID, agentID, peID); err != nil {
 	if err := pes.SetPlatformExperimentSummary(ctx, peID, "done"); err != nil {
 		t.Fatalf("file summary: %v", err)
 	}
-	if err := pes.UpdatePlatformExperimentStatus(ctx, peID, domain.PlatformExpClosed); err != nil {
+	if err := pes.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorStaff}); err != nil {
 		t.Fatalf("close again: %v", err)
 	}
 	if _, again, _ := accounts.PlatformExperimentTenancy(ctx, peID); again == nil || !again.Equal(*closedAt) {

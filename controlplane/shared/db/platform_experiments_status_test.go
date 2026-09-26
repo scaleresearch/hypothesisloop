@@ -10,7 +10,7 @@ import (
 
 // Against a real PostgreSQL, because the defect this covers is invisible to anything else: a
 // statement that compiles, type-checks and passes every Go test can still be rejected by the
-// planner. A version of UpdatePlatformExperimentStatus once wrote
+// planner. A version of the close once wrote
 //
 //	SET status = $2 ... CASE WHEN $2 = 'running' THEN ...
 //
@@ -36,10 +36,15 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM platform_experiments WHERE id = $1`, id)
 	})
 
-	// Every status this function is asked to write, executed for real.
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
-		if err := store.UpdatePlatformExperimentStatus(ctx, id, status); err != nil {
-			t.Fatalf("UpdatePlatformExperimentStatus(%s): %v", status, err)
+	// The close records who asked, and a second close leaves it as it is.
+	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
+	for _, by := range []*domain.Actor{&owner, nil} {
+		if err := store.ClosePlatformExperiment(ctx, id, by); err != nil {
+			t.Fatalf("ClosePlatformExperiment: %v", err)
 		}
+	}
+	closed, err := store.GetPlatformExperiment(ctx, id)
+	if err != nil || closed.Status != domain.PlatformExpClosed || closed.CloseReason != domain.CloseByRequest || closed.ClosedAt == nil || closed.ClosedBy == nil || closed.ClosedBy.ID != owner.ID {
+		t.Fatalf("closed experiment: got = (%+v, %v), want it closed by request of %s", closed, err, owner.ID)
 	}
 }

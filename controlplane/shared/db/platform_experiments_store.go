@@ -385,20 +385,6 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 	return total, nil
 }
 
-// UpdatePlatformExperimentStatus transitions a platform experiment to a new status.
-func (s *PlatformExperimentsStore) UpdatePlatformExperimentStatus(ctx context.Context, id string, status domain.PlatformExperimentStatus) error {
-	const q = `
-UPDATE platform_experiments
-SET status = $2::platform_experiment_status, updated_at = NOW(),
-    closed_at = CASE WHEN $2 = 'closed' THEN COALESCE(closed_at, NOW()) ELSE closed_at END
-WHERE id = $1`
-	_, err := s.pool.pool.Exec(ctx, q, id, string(status))
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.UpdateStatus: %w", err)
-	}
-	return nil
-}
-
 // ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
 // asked, nil when the platform closes it at its end time. One already closed keeps what it has.
 func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error {

@@ -36,7 +36,13 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExperimentStatus, ago time.Duration) {
 	t.Helper()
 	ctx := context.Background()
-	if err := NewPlatformExperimentsStore(pool).UpdatePlatformExperimentStatus(ctx, pe, status); err != nil {
+	var err error
+	if status == domain.PlatformExpClosed {
+		err = NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, nil)
+	} else {
+		_, err = pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = $2::platform_experiment_status WHERE id = $1`, pe, string(status))
+	}
+	if err != nil {
 		t.Fatalf("set status %s: got = %v, want = nil", status, err)
 	}
 	if _, err := pool.pool.Exec(ctx, `
