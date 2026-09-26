@@ -113,3 +113,5 @@ local.secrets.env
 # Pulumi local state and stack config (stack config holds secrets)
 infra/.state/
 infra/pulumi/Pulumi.*.yaml
+# What a plain `go build` in infra/pulumi leaves: the program, named after its directory
+infra/pulumi/pulumi
