@@ -64,6 +64,9 @@ RUN useradd --create-home --shell /bin/bash agent
 # copy, adapt into its own repo. Deliberately not experiment-specific.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY --from=samples /samples $WORKLOAD_SAMPLES
+# The briefings tell an agent to take code back with `hl-clone <code_ref> <dir>`, so it is a
+# command here as it is in the job image.
+RUN ln -s $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
 
 # The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
 # for everything a human would use it for too -- hl platform-experiments
