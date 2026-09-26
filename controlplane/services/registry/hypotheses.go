@@ -206,23 +206,41 @@ func (s *Service) HypothesisStats(ctx context.Context, f graphdb.ListFilter) (*d
 	return stats, nil
 }
 
-// HypothesisGraph returns the whole hypothesis graph of one platform experiment.
-func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error) {
-	_, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
+// GraphNode is a hypothesis in its platform experiment's graph with what was found for it.
+type GraphNode struct {
+	*domain.HypothesisListItem
+	Evidence
+}
+
+// HypothesisGraph returns the whole hypothesis graph of one platform experiment, each node with
+// its newest finding and its best job.
+func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID string) ([]*GraphNode, []domain.GraphEdge, error) {
+	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	if !found {
 		return nil, nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
-	nodes, edges, err := s.graph.ExperimentGraph(ctx, platformExperimentID)
+	items, edges, err := s.graph.ExperimentGraph(ctx, platformExperimentID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
-	if err := s.addActivity(ctx, nodes); err != nil {
+	if err := s.addActivity(ctx, items); err != nil {
 		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
-	actors := itemActors(nodes)
+	evidence, err := s.evidence(ctx, metrics, items)
+	if err != nil {
+		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+	}
+	nodes := make([]*GraphNode, len(items))
+	actors := itemActors(items)
+	for i, item := range items {
+		nodes[i] = &GraphNode{HypothesisListItem: item, Evidence: evidence[item.ID]}
+		if f := nodes[i].Finding; f != nil {
+			actors = append(actors, &f.Actor)
+		}
+	}
 	for i := range edges {
 		actors = append(actors, &edges[i].Actor)
 	}
@@ -253,14 +271,19 @@ func (s *Service) QueryGraph(ctx context.Context, platformExperimentID, cypher s
 	return result, nil
 }
 
-// HypothesisEvidence is a hypothesis with what was found for it.
-type HypothesisEvidence struct {
-	*domain.Hypothesis
+// Evidence is what was found for one hypothesis.
+type Evidence struct {
 	// Finding is the newest finding filed against it, nil when none was.
 	Finding *domain.HypothesisFinding `json:"finding,omitempty"`
 	// BestJob is the job testing it that holds the best raw value on the platform experiment's
 	// first ranking metric, nil when none reported it.
 	BestJob *BestJob `json:"best_job,omitempty"`
+}
+
+// HypothesisEvidence is a hypothesis with what was found for it.
+type HypothesisEvidence struct {
+	*domain.Hypothesis
+	Evidence
 }
 
 type BestJob struct {
@@ -288,20 +311,47 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
 	}
+	evidence, err := s.evidence(ctx, metrics, hypotheses)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	out := []*HypothesisEvidence{}
+	var actors []*domain.Actor
+	for _, h := range hypotheses {
+		e := &HypothesisEvidence{Hypothesis: h.Hypothesis, Evidence: evidence[h.ID]}
+		if h.Status == domain.HypothesisOpen && e.Finding == nil && e.BestJob == nil {
+			continue
+		}
+		out = append(out, e)
+		actors = append(actors, hypothesisActors(e.Hypothesis)...)
+		if e.Finding != nil {
+			actors = append(actors, &e.Finding.Actor)
+		}
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
+		return nil, fmt.Errorf("registry.Findings: %w", err)
+	}
+	return out, nil
+}
+
+// evidence returns, by hypothesis id, the newest finding of each of the hypotheses and the job
+// testing it that did best on the first ranking metric of metrics, with that job's own summary.
+// It is a fixed number of reads however many hypotheses are given.
+func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinition, hypotheses []*domain.HypothesisListItem) (map[string]Evidence, error) {
 	ids := make([]string, len(hypotheses))
 	for i, h := range hypotheses {
 		ids[i] = h.ID
 	}
 	newest, err := s.store.NewestFindings(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("registry.Findings: %w", err)
+		return nil, err
 	}
 	jobs, err := s.store.ListExperimentsTesting(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("registry.Findings: %w", err)
+		return nil, err
 	}
 	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, jobs); err != nil {
-		return nil, fmt.Errorf("registry.Findings: %w", err)
+		return nil, err
 	}
 	primary, _ := domain.PrimaryRankingMetric(metrics)
 	best := map[string]*domain.Experiment{}
@@ -326,27 +376,15 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	}
 	summaries, err := s.store.FindingSummaries(ctx, bestIDs)
 	if err != nil {
-		return nil, fmt.Errorf("registry.Findings: %w", err)
+		return nil, err
 	}
-	out := []*HypothesisEvidence{}
-	for _, h := range hypotheses {
-		e := &HypothesisEvidence{Hypothesis: h.Hypothesis, Finding: newest[h.ID]}
-		if job := best[h.ID]; job != nil {
+	out := make(map[string]Evidence, len(ids))
+	for _, id := range ids {
+		e := Evidence{Finding: newest[id]}
+		if job := best[id]; job != nil {
 			e.BestJob = &BestJob{ID: job.ID, Metric: job.Metric, Summary: summaries[job.ID]}
 		}
-		if h.Status != domain.HypothesisOpen || e.Finding != nil || e.BestJob != nil {
-			out = append(out, e)
-		}
-	}
-	var actors []*domain.Actor
-	for _, e := range out {
-		actors = append(actors, hypothesisActors(e.Hypothesis)...)
-		if e.Finding != nil {
-			actors = append(actors, &e.Finding.Actor)
-		}
-	}
-	if err := s.store.NameActors(ctx, actors); err != nil {
-		return nil, fmt.Errorf("registry.Findings: %w", err)
+		out[id] = e
 	}
 	return out, nil
 }

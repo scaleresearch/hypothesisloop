@@ -94,6 +94,8 @@ func (s *poolStore) NameActors(_ context.Context, actors []*domain.Actor) error 
 	return nil
 }
 
+func (s *poolStore) DescribeJobs(context.Context, []*domain.Experiment) error { return nil }
+
 func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.ActorAgent, ID: id} }
 
 var adaActor = domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
@@ -530,6 +532,10 @@ func (missingExperimentStore) GetPlatformExperimentSubmitPolicies(context.Contex
 	return "", "", false, nil
 }
 
+func (missingExperimentStore) GetPlatformExperimentMetrics(context.Context, string) ([]domain.MetricDefinition, bool, error) {
+	return nil, false, nil
+}
+
 // The graph does not know which platform experiments exist; Postgres does, and a hypothesis under
 // an id nobody created would be an orphan no job could ever run against.
 func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
@@ -640,7 +646,16 @@ func (findingsStore) ListExperimentsTesting(_ context.Context, ids []string) ([]
 	return jobs, nil
 }
 
+func (findingsStore) CountHypothesisActivity(context.Context, []string) (map[string]db.HypothesisActivity, error) {
+	return map[string]db.HypothesisActivity{}, nil
+}
+
 type findingsGraph struct{ Graph }
+
+func (g findingsGraph) ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error) {
+	nodes, err := g.ListHypotheses(ctx, graphdb.ListFilter{PlatformExperimentID: platformExperimentID})
+	return nodes, nil, err
+}
 
 func (findingsGraph) ListHypotheses(_ context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
 	if f.PlatformExperimentID != "pe-1" || f.Status != "" {
@@ -683,6 +698,19 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 	}
 	if open.ID != "hyp-open" || open.Finding == nil || open.Finding.Summary != "no verdict yet" {
 		t.Errorf("open hypothesis: got = %+v, want it listed with its finding", open)
+	}
+
+	// The graph carries the same on its nodes, and keeps the hypothesis nothing was found for.
+	nodes, _, err := svc.HypothesisGraph(context.Background(), "pe-1")
+	if err != nil || len(nodes) != 4 {
+		t.Fatalf("HypothesisGraph: got = (%+v, %v), want 4 nodes", nodes, err)
+	}
+	if node := nodes[0]; node.ID != "hyp-tested" || node.Finding == nil || node.Finding.Summary != "the newest write-up" ||
+		node.BestJob == nil || node.BestJob.ID != "job-b" || node.BestJob.Summary != "the best job's write-up" {
+		t.Errorf("tested node: got = %+v, want the finding and best job the findings read answers", node)
+	}
+	if idle := nodes[3]; idle.ID != "hyp-idle" || idle.Finding != nil || idle.BestJob != nil {
+		t.Errorf("idle node: got = %+v, want no finding and no best job", idle)
 	}
 
 	if _, err := svc.Findings(context.Background(), "pe-none"); !errors.Is(err, ErrUnknownPlatformExperiment) {
