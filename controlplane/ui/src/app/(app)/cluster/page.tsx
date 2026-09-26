@@ -8,10 +8,10 @@ import { useTenant } from '@/lib/tenant'
 import { budgetUnit, unitCount, unitRate } from '@/lib/units'
 import { OrgClusters } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
 import { StatusLabel } from '@/components/ui/badge'
-import { Table } from '@/components/ui/table'
+import { Table, num } from '@/components/ui/table'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
 function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
@@ -104,7 +104,7 @@ function LiveCapacity() {
 
   return (
     <Card>
-      <CardHeader>What {org.name} can run on right now</CardHeader>
+      <CardHeader><CardTitle>What {org.name} can run on right now</CardTitle></CardHeader>
       <CardContent>
         {isLoading && <Loading />}
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
@@ -132,7 +132,7 @@ function LiveCapacity() {
                     {cluster.on_demand
                       ? <th title="No machine stands by. The cluster rents one when a job needs it, up to this many at once.">Rented on demand</th>
                       : <th>Free / total</th>}
-                    <th title={`What one accelerator of the type, or one CPU core, takes from a budget for an hour of run, in ${budgetUnit('accelerator', 'long')}`}>Budget per hour</th>
+                    <th className="text-right" title={`What one accelerator of the type, or one CPU core, takes from a budget for an hour of run, in ${budgetUnit('accelerator', 'long')}`}>Budget per hour</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -147,7 +147,7 @@ function LiveCapacity() {
                           <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
                         </td>
                       )}
-                      <td className="font-mono text-xs">{unitRate(a.kind, a.acch_per_hour)}</td>
+                      <td className={num}>{unitRate(a.kind, a.acch_per_hour)}</td>
                     </tr>
                   ))}
                 </tbody>
