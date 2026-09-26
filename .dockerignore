@@ -47,6 +47,10 @@ secrets/
 *.key
 *.crt
 
+# Settings rendered for one machine's stack (git-ignored): an image runs on
+# controlplane/settings/hypothesisloop.yaml, and these name a deployment's app ids and addresses.
+controlplane/settings/.*.yaml
+
 # Logs
 *.log
 logs/
