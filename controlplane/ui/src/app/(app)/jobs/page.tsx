@@ -158,7 +158,7 @@ function JobsPageContent() {
 
       {/* One tile per status: its count, and the filter that lists those jobs. */}
       <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-2.5">
-        <StatTile label="All" value={stats?.total ?? '—'} href={statusHref('')} sub={statusFilter === '' ? 'listed below' : undefined} />
+        <StatTile label="All" value={stats?.total ?? '—'} href={statusHref('')} active={statusFilter === ''} />
         {STATUSES.map(({ status, label }) => (
           <StatTile
             key={status}
@@ -166,7 +166,7 @@ function JobsPageContent() {
             value={stats ? byStatus[status] ?? 0 : '—'}
             tone={statusTone(status)}
             href={statusHref(status)}
-            sub={statusFilter === status ? 'listed below' : undefined}
+            active={statusFilter === status}
           />
         ))}
       </div>

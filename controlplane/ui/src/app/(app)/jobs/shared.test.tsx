@@ -113,5 +113,6 @@ describe('the jobs of the whole project', () => {
     expect('status' in stats).toBe(false)
     expect(screen.getByRole('link', { name: /Evicted/ }).getAttribute('href')).toBe('/jobs?status=EVICTED')
     expect(screen.getByRole('link', { name: /All/ }).getAttribute('href')).toBe('/jobs')
+    expect(screen.getByRole('link', { current: true }).textContent).toContain('Running')
   })
 })
