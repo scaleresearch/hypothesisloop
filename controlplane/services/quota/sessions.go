@@ -85,11 +85,13 @@ func RegisterSessionsHuma(doc *apidocs.Doc, sessions SessionStore, logger *zap.L
 	}) (*sessionBytes, error) {
 		return get(ctx, in.ID, in.AgentID)
 	})
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	// A coordinator's last turn is the one that closes the experiment, so its session is one of
+	// the writes its token keeps after the close. access.OwnSession ends it with the wind-down.
+	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
 		OperationID: "put-coordinator-session", Method: "PUT", Path: "/platform-experiments/{id}/coordinator/session",
 		Summary: "Store the hosted coordinator's model session", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxAgentSessionBytes, Description: sessionDescription,
-	}, func(ctx context.Context, in *struct {
+	}), func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		RawBody []byte `contentType:"application/octet-stream"`
 	}) (*struct{ Body storedSession }, error) {

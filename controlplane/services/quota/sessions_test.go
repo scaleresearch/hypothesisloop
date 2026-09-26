@@ -148,6 +148,11 @@ func TestASessionIsStoredThroughTheWindDownAndNoLonger(t *testing.T) {
 		}
 	}
 	store := &memorySessions{stored: map[string][]byte{}}
+	// The coordinator as its token resolves once the experiment is closed, which leaves it reads
+	// and the writes marked for after the close. In four real runs the turn that wrote the
+	// summary and closed was never stored: the write was refused as one of the others.
+	coordinator := coordinator
+	coordinator.PlatformExperimentClosed, coordinator.RunOver = true, true
 	if code, body := sessionCall(t, store, closedFor(domain.AgentWindDown-10*time.Second), coordinator, "PUT", coordinatorSession, []byte("last turn")); code != http.StatusOK {
 		t.Fatalf("inside the wind-down: %d %s, want 200", code, body)
 	}
