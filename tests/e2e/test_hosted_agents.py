@@ -9,12 +9,10 @@ runtime/cloud/internal/agentlaunch's own tests, one of which runs it against the
 handler. The local control plane gives hosted agents to the launcher named in its config
 (agents.launcher).
 
-A hosted agent works in its project's repository, so hosting is refused for a project that has
-none. The tests that host agents therefore need a repository to attach, the same sandbox
-test_project_repo.py names, and are skipped without it:
-
-    HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
-    HL_E2E_GITHUB_REPO_ID         its id on GitHub
+A hosted agent works in its platform experiment's repository, so hosting is refused for an
+experiment that names none. The tests that host agents therefore need a repository to name, the
+same sandbox test_experiment_repo.py pushes to, and are skipped without it (conftest's
+sandbox_repository).
 
 Exclusive: every test here asks as the one launcher the local control plane gives hosted agents
 to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
@@ -48,25 +46,13 @@ RUN_SECONDS = 40
 BUDGET = 0.03
 
 
-def _new_project(api: API, label: str) -> API:
-    """The staff caller in a fresh project of the default org, which has clusters to run jobs on."""
-    created = api.post(f"/orgs/{api.org_id}/projects", {"name": f"hosted {label} {uuid.uuid4().hex[:8]}"})
-    assert created.status_code == 201, f"create a project: {created.status_code} {created.text}"
-    return api.as_caller(api.token, api.org_id, created.json()["id"])
-
-
 @pytest.fixture(scope="module")
-def with_repo(api: API) -> API:
-    """A project with a repository attached, where agents can be hosted."""
-    installation, repo_id = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO_ID")
-    if not installation or not repo_id:
-        pytest.skip("hosting an agent needs a repository: set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO_ID")
-    if api.get("/github/app").status_code == 503:
-        pytest.skip("this deployment has no GitHub App configured")
-    project = _new_project(api, "repo")
-    admin.attach_repo(project.project_id, installation, repo_id)
-    yield project
-    project.session.delete(project._url(f"/projects/{project.project_id}/repo"), timeout=30)
+def with_repo(api: API, sandbox_repository: str) -> API:
+    """The staff caller whose platform experiments name the sandbox repository, so agents can be
+    hosted in them. It works in the default org, which has clusters to run jobs on."""
+    caller = api.as_caller(api.token, api.org_id, api.project_id)
+    caller.repository = sandbox_repository
+    return caller
 
 
 @pytest.fixture
@@ -106,7 +92,8 @@ def _hosted_run(project: API, name: str, **more) -> requests.Response:
     body = {
         "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
         "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z", **more,
+        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z",
+        **({"repository": project.repository} if project.repository else {}), **more,
     }
     return project.post("/platform-experiments", body)
 
@@ -115,13 +102,13 @@ def roster(api: API, pe_id: str) -> dict[str, dict]:
     return {a["agent_id"]: a for a in api.agents(pe_id)}
 
 
-def test_an_agent_is_hosted_only_in_a_project_with_a_repository(api: API, run_id: str):
-    project = _new_project(api, "bare")
+def test_an_agent_is_hosted_only_in_a_platform_experiment_that_names_a_repository(api: API, run_id: str):
+    project = api
     pe_id = project.create_platform_experiment(f"hosted-no-repo-{run_id}", 1.0, 5)
     try:
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
         assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"hosted with no repository: {r.status_code} {r.text}"
-        assert project.project_id in r.json()["message"], r.text
+        assert "names no repository" in r.json()["message"], r.text
         assert project.agents(pe_id) == [], "a refused hosted join left agents behind"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
@@ -342,7 +329,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
 
 
 def test_a_coordinator_is_hosted_only_in_a_project_with_a_repository(api: API, run_id: str):
-    project = _new_project(api, "bare-coordinator")
+    project = api
     r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_hosted=True)
     assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"{r.status_code} {r.text}"
     r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_model="some-model")

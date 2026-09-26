@@ -33,18 +33,10 @@ def launcher_binary(tmp_path_factory) -> Path:
 
 
 @pytest.fixture
-def project_with_repo(api: API) -> API:
-    installation, repo_id = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO_ID")
-    if not installation or not repo_id:
-        pytest.skip("hosting an agent needs a repository: set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO_ID")
-    if api.get("/github/app").status_code == 503:
-        pytest.skip("this deployment has no GitHub App configured")
-    created = api.post(f"/orgs/{api.org_id}/projects", {"name": f"launcher process {uuid.uuid4().hex[:8]}"})
-    assert created.status_code == 201, f"create a project: {created.status_code} {created.text}"
-    project = api.as_caller(api.token, api.org_id, created.json()["id"])
-    admin.attach_repo(project.project_id, installation, repo_id)
-    yield project
-    project.session.delete(project._url(f"/projects/{project.project_id}/repo"), timeout=30)
+def project_with_repo(api: API, sandbox_repository: str) -> API:
+    caller = api.as_caller(api.token, api.org_id, api.project_id)
+    caller.repository = sandbox_repository
+    return caller
 
 
 class Launcher:

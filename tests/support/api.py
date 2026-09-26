@@ -106,6 +106,8 @@ class API:
         self.token = token
         self.org_id = org_id
         self.project_id = project_id
+        # The repository its platform experiments name unless a create says otherwise.
+        self.repository: str | None = None
         self.session = requests.Session()
         self.session.headers["Authorization"] = f"Bearer {token}"
         # Every platform experiment created through hl, closed by conftest at session end.
@@ -189,6 +191,7 @@ class API:
         metrics: list[dict] | None = None,
         stages: list[dict] | None = None,
         max_concurrent_accelerators: int | None = None,
+        repository: str | None = None,
     ) -> str:
         body: dict[str, Any] = {
             "name": name,
@@ -206,6 +209,8 @@ class API:
             body["stages"] = stages
         if max_concurrent_accelerators is not None:
             body["max_concurrent_accelerators"] = max_concurrent_accelerators
+        if repository or self.repository:
+            body["repository"] = repository or self.repository
         out = self.hl("platform-experiments", "create", "-", input=yaml.safe_dump(body, sort_keys=False))
         return json.loads(out)["id"]
 

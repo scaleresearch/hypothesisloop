@@ -70,8 +70,7 @@ def share_platform_experiment(pe_id: str, shared: bool) -> None:
     _run("platform-experiment", "share" if shared else "unshare", pe_id)
 
 
-def attach_repo(project_id: str, installation_id: str, repository_id: str) -> None:
-    """Records a GitHub repository as the project's, standing in for the person who proves in a
-    browser that they can push to it. GitHub is asked that the installation covers it."""
-    _run("repo", "attach", project_id, installation_id, repository_id)
-
+def connect_github(org_id: str, installation_id: str) -> dict:
+    """Connects an installation of the platform's GitHub App to the org, standing in for the
+    person who proves in a browser that they reach it. GitHub is asked that it exists."""
+    return json.loads(_run("github", "connect", org_id, installation_id))

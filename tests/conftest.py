@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import requests
 
+from support import admin
 from support.api import API
 from support.cluster import wait_scope_idle
 from support.wait import Deadline
@@ -103,6 +104,26 @@ def deadline(request: pytest.FixtureRequest) -> Deadline:
     budget = marker.args[0] if marker and marker.args else request.config.getini("timeout")
     margin = 15
     return Deadline.in_seconds(max(1.0, float(budget) - margin))
+
+
+@pytest.fixture(scope="session")
+def sandbox_repository(api: API):
+    """owner/name of the GitHub repository tests may work in, reachable by the default org: an
+    agent the platform hosts works in its experiment's repository, so hosting needs one. The
+    installation that covers it is connected to the default org for the session unless it
+    already was, and what was found connected is left connected."""
+    installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
+    if not installation or not repository:
+        pytest.skip("needs a repository: set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO")
+    if api.get("/github/app").status_code == 503:
+        pytest.skip("this deployment has no GitHub App configured")
+    installations = f"/orgs/{api.org_id}/github-installations"
+    found = any(i["installation_id"] == int(installation) for i in api.get_json(installations, params={"limit": 200}))
+    if not found:
+        admin.connect_github(api.org_id, installation)
+    yield repository
+    if not found:
+        api.session.delete(api._url(f"{installations}/{installation}"), timeout=30)
 
 
 def make_agent(api: API, run_id: str, label: str = "agent") -> str:
