@@ -60,8 +60,9 @@ silently improvise.
    experiment's project decides the org of every job in it, so the cluster must be registered
    for that org, or be shared by staff. `hl cluster list` shows the clusters the org's jobs run
    on and whether each is connected; the capacity check in step 1 lists only clusters the token's jobs can be
-   placed on, so a cluster missing there is unregistered, another org's, or disconnected. A job
-   with nowhere to go stays QUEUED with `not_admitted_reason: no_cluster_for_org`. To add a
+   placed on, so a cluster missing there is unregistered, another org's, disconnected, or turned off for the org
+   (`enabled: false` in `hl cluster list`; `hl cluster enable <name>` turns it on). A job
+   with nowhere to go stays QUEUED with `not_admitted_reason: no_cluster_for_org`, or `clusters_disabled` when the org turned off every cluster it could use. To add a
    cluster, `hl cluster add <name>` registers the name and prints the `make cluster-agent-up`
    command with the platform's addresses filled in; run it with `kubectl` pointed at the cluster (it reads the runtime token with `hl cluster token` when it runs). `hl cluster remove <name>` ends a cluster and requeues its jobs. The local stack registers its own clusters for the
    org `default`.

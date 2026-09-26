@@ -206,6 +206,7 @@ hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
 hl cluster token my-cluster | forget-identity my-cluster | remove my-cluster
+hl cluster disable my-cluster | enable my-cluster          # turn a cluster off or on for the org's jobs; running ones finish
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment

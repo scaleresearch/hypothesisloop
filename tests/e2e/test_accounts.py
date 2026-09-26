@@ -415,6 +415,103 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
             org.api.close_platform_experiment(pe_id)
 
 
+@pytest.mark.timeout(240)
+@pytest.mark.exclusive
+def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_id: str, deadline: Deadline):
+    """Exclusive: while the cluster is shared, every org's capacity and cluster listing show it."""
+    a, b = orgs
+    name = f"use-{a.marker}"[:40]
+    token = a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})["runtime_token"]
+    runtime = FakeRuntime(a.api, name, token)
+    assert runtime.reconcile() == []
+    admin.share_cluster(name, True)
+
+    def clusters_of(org: Org) -> dict[str, dict]:
+        return {c["name"]: c for c in org.api.get_json(f"/orgs/{org.org_id}/clusters")["clusters"]}
+
+    def after_a_tick(org: Org, job_id: str):
+        def read() -> dict:
+            runtime.reconcile()
+            return org.api.experiment(job_id)
+        return read
+
+    agent_a, pe_a = _running_org(a, run_id)
+    agent_b, pe_b = _running_org(b, run_id)
+    jobs: list[tuple[Org, str]] = []
+    # Every other cluster org B can use, which are the ones the platform shares in this stack. It
+    # turns them off too, so that the one under test is all that decides where its jobs go.
+    others = [c for c in clusters_of(b) if c != name]
+    try:
+        assert clusters_of(a)[name]["enabled"] is True and clusters_of(b)[name]["enabled"] is True, "a cluster does not start enabled"
+
+        project_key = b.api.as_caller(_key(b.api, b.org_id, f"one-project-{b.marker}", b.project_id)["token"], b.org_id, b.project_id)
+        for verb in ("disable", "enable"):
+            assert _status(project_key, "POST", f"/orgs/{b.org_id}/clusters/{name}/{verb}").status_code == 403, "a key of one project decided for its org"
+            assert _status(b.api, "POST", f"/orgs/{a.org_id}/clusters/{name}/{verb}").status_code == 404, "org B decided for org A"
+            assert _status(a.api, "POST", f"/orgs/{a.org_id}/clusters/never-{a.marker}/{verb}").status_code == 404, "a name nobody registered was found"
+        assert clusters_of(a)[name]["enabled"] is True and clusters_of(b)[name]["enabled"] is True, "a refused request turned the cluster off"
+
+        for other in others:
+            b.api.hl("cluster", "disable", other)
+        running = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
+        jobs.append((b, running))
+        eventually("org B's job is placed on the shared cluster", after_a_tick(b, running), deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("cluster_name") == name)
+
+        off = json.loads(b.api.hl("cluster", "disable", name))
+        assert off == {**off, "name": name, "shared": True, "enabled": False}, f"hl cluster disable answered {off}"
+        assert "org_id" not in off and "cluster_id" not in off, f"org B is shown the owner or the settings key of the cluster it turned off: {off}"
+        assert json.loads(b.api.hl("cluster", "disable", name)) == off, "turning it off again answered something else"
+        listed = {c["name"]: c for c in _lines(b.api.hl("cluster", "list"))}
+        assert listed[name]["enabled"] is False, f"hl cluster list shows the cluster org B turned off as {listed[name]}"
+        assert clusters_of(a)[name]["enabled"] is True, "org B turning the shared cluster off turned it off for org A"
+        assert name not in _capacity_names(b.api), "org B reads the capacity of a cluster it turned off"
+        assert name in _capacity_names(a.api), "org A lost the capacity of its own cluster when org B turned it off"
+
+        # What was placed before stays: the runtime is still told to run it, and it is not requeued.
+        waiting = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
+        jobs.append((b, waiting))
+        eventually("org B's next job says every cluster of its org is turned off", after_a_tick(b, waiting), deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("not_admitted_reason") == "clusters_disabled")
+        for _ in range(4):
+            queued = after_a_tick(b, waiting)()
+            assert queued["status"] == "QUEUED" and not queued.get("cluster_name"), f"org B's job beside a cluster its org turned off: {queued}"
+            time.sleep(2)
+        assert waiting not in runtime.handed, "the runtime was handed a job of an org that turned its cluster off"
+        kept = b.api.experiment(running)
+        assert kept["cluster_name"] == name and kept["status"] in ("SUBMITTED", "RUNNING"), f"the job placed before the cluster was turned off: {kept}"
+        assert running in {e["id"] for e in runtime.reconcile()}, "the runtime is no longer told to run the job placed before"
+
+        refused = api.admit(waiting, name)
+        assert refused.status_code == 409 and refused.json()["reason"] == "cluster_disabled", (
+            f"staff placing org B's job on a cluster org B turned off: {refused.status_code} {refused.text}"
+        )
+        assert b.api.experiment(waiting)["status"] == "QUEUED"
+
+        # The other org is placed there as before.
+        of_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)
+        jobs.append((a, of_a))
+        eventually("org A's job is placed on its own cluster", after_a_tick(a, of_a), deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("cluster_name") == name)
+
+        # The node holds two jobs: the one placed before makes room, and the cluster is turned on.
+        b.api.cancel_job(running)
+        on = json.loads(b.api.hl("cluster", "enable", name))
+        assert on["enabled"] is True and json.loads(b.api.hl("cluster", "enable", name)) == on
+        assert clusters_of(b)[name]["enabled"] is True and name in _capacity_names(b.api)
+        eventually("org B's waiting job is placed once the cluster is on again", after_a_tick(b, waiting), deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("cluster_name") == name)
+    finally:
+        for other in others:
+            _status(b.api, "POST", f"/orgs/{b.org_id}/clusters/{other}/enable")
+        # Removing the cluster also ends its sharing and forgets who turned it off.
+        _status(api, "DELETE", f"/orgs/{a.org_id}/clusters/{name}")
+        for org, job_id in jobs:
+            org.api.post(f"/experiments/{job_id}/cancel")
+        for org, pe_id in ((a, pe_a), (b, pe_b)):
+            org.api.close_platform_experiment(pe_id)
+
+
 @pytest.mark.parallel
 def test_only_staff_see_every_org(orgs, api: API):
     a, b = orgs
