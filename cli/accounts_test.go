@@ -200,6 +200,25 @@ func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
 	}
 }
 
+// A bare-metal node gets one command that needs docker and nothing else on the node, and holds
+// no token either.
+func TestClusterAddPrintsTheContainerThatAttachesABareMetalNode(t *testing.T) {
+	accountsServer(t, nil, `{"name":"gpu-box","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
+	code, stdout, stderr := hl(t, "cluster", "add", "gpu-box", "--bare-metal", "--org", "org-1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	if strings.Contains(stdout+stderr, "hls_cnVudGltZQ") {
+		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
+	}
+	want := `RUNTIME_TOKEN="$(hl cluster token 'gpu-box' --org 'org-1')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
+		`-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ` +
+		`-e CLUSTER_NAME='gpu-box' -e API_URL='https://api.example' -e RUNTIME_TOKEN 'registry.example/images/hypothesisloop-bare-agent:abc1234'` + "\n"
+	if stdout != want {
+		t.Fatalf("stdout: got = %q, want = %q", stdout, want)
+	}
+}
+
 func TestClusterTokenPrintsTheTokenOfAClusterTheOrgRegisteredAndRegistersNothing(t *testing.T) {
 	var posted []string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {

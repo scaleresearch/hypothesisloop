@@ -30,8 +30,10 @@ const KINDS: { value: Kind; label: string }[] = [
 
 const KIND_HINT: Record<Kind, string> = {
   kubernetes: 'One agent is installed on the cluster with helm and schedules jobs as pods on its nodes.',
-  'bare-metal': 'One agent process runs on the node and starts jobs as containers with podman or docker. Each node is added as a cluster of its own.',
+  'bare-metal': 'One agent container runs on the node and starts jobs as containers beside it with docker. Each node is added as a cluster of its own.',
 }
+
+const DETACH_NODE = 'docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent'
 
 // Both commands read the runtime token with `hl cluster token` when they run, as the command
 // `hl cluster add` prints does, so the token is on no page and in no shell history.
@@ -39,7 +41,13 @@ function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): st
   const name = shellQuote(cluster.name)
   const token = `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})"`
   const api = `API_URL=${shellQuote(cluster.api_url)}`
-  if (kind === 'bare-metal') return `${token} CLUSTER_NAME=${name} ${api} go run ./runtime/bare-metal/cmd/bare-agent`
+  if (kind === 'bare-metal') {
+    // The same command `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalCommand).
+    const image = shellQuote(`${cluster.registry}/hypothesisloop-bare-agent:${cluster.image_tag}`)
+    return `${token} docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
+      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
+      `-e CLUSTER_NAME=${name} -e ${api} -e RUNTIME_TOKEN ${image}`
+  }
   return `${token} make cluster-agent-up CLUSTER=${name} ${api} METRICS_URL=${shellQuote(cluster.metrics_url)} REGISTRY=${shellQuote(cluster.registry)} TAG=${shellQuote(cluster.image_tag)}`
 }
 
@@ -130,9 +138,12 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               </>
             ) : (
               <>
-                Run it on the node, from a checkout of the repository, with Go and podman or docker installed
-                and <span className="font-mono">hl</span> signed in as an owner of {org.name}. The agent runs in
-                the foreground until it is stopped.
+                Run it on the node. It needs docker there and nothing else, and{' '}
+                <span className="font-mono">hl</span> signed in as an owner of {org.name}; without{' '}
+                <span className="font-mono">hl</span> on the node, set <span className="font-mono">RUNTIME_TOKEN</span>{' '}
+                to what <span className="font-mono">hl cluster token</span> prints. The agent comes back after a
+                reboot. To detach the node, run on it:{' '}
+                <span className="font-mono">{DETACH_NODE}</span>
               </>
             )}{' '}
             It reads the cluster&apos;s runtime token with <span className="font-mono">hl cluster token</span>{' '}

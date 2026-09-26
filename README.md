@@ -406,18 +406,40 @@ as plain manifests, no helm release) refuses the install: delete the old
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
-**A bare-metal node.** Needs podman or docker on the node, and Go and gcc to build the agent
-there (it links the NVIDIA management library through cgo, so it is not cross-compiled).
+**A bare-metal node.** Needs docker on the node and nothing else. `hl cluster add my-node
+--bare-metal` prints the command, which runs on the node:
 
 ```bash
-go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent
-CLUSTER_NAME='my-node' API_URL='https://your-control-plane:8081' \
-  RUNTIME_TOKEN="$(hl cluster token 'my-node' --org 'org-1')" ./bare-agent
+RUNTIME_TOKEN="$(hl cluster token 'my-node' --org 'org-1')" docker run -d --name hypothesisloop-agent \
+  --restart unless-stopped --hostname "$(hostname)" \
+  -v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro \
+  -v /var/lib/hypothesisloop:/var/lib/hypothesisloop \
+  -e CLUSTER_NAME='my-node' -e API_URL='https://your-control-plane:8081' -e RUNTIME_TOKEN \
+  'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
 ```
 
-The node is its own cluster, registered with `hl cluster add my-node` like any other. It
-runs no node-agent, so there is no `METRICS_URL`. `SCRATCH_DIR` is where job
-storage lives (default `/var/lib/hypothesisloop/scratch`, which needs root to create).
+The node is its own cluster. The agent is one container that starts jobs as containers beside
+it through the engine's socket, comes back after a reboot, and needs outbound access to the
+platform and the image registries and nothing inbound. On a node without `hl`, set
+`RUNTIME_TOKEN` to what `hl cluster token my-node` prints. `docker logs hypothesisloop-agent`
+starts with what the node offers: the engine, its accelerators under the names jobs ask for
+them by, the hugepages reserved on a Tenstorrent node, and whether job storage is enforced
+(only on XFS). It stops there if the platform does not answer from the node. An NVIDIA node
+adds `--gpus all`, so the agent reads the GPUs through the driver's library.
+
+To detach the node, on the node:
+
+```bash
+docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent
+```
+
+That removes the cluster from the platform, its jobs go back to the queue, and the agent stops
+the containers it started. `hl cluster remove my-node` does the same from the other side: the
+agent reads that its cluster is gone, stops its jobs and exits. Left on the node are the pulled
+images and `/var/lib/hypothesisloop`.
+
+Without a container, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent`
+on the node (it needs Go and gcc there) and runs with the same three variables.
 
 `RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
 a make argument or a flag is readable in the process list. Both commands read the token with

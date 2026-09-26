@@ -775,8 +775,10 @@ async function scenarios(browser) {
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
   assert.equal(
     await page.getByTestId('secret').innerText(),
-    `RUNTIME_TOKEN="$(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}')" CLUSTER_NAME='${clusterName}' API_URL='${registered.api_url}' go run ./runtime/bare-metal/cmd/bare-agent`,
-    'a bare-metal node is shown the command that runs its agent, with the same token read',
+    `RUNTIME_TOKEN="$(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
+      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
+      `-e CLUSTER_NAME='${clusterName}' -e API_URL='${registered.api_url}' -e RUNTIME_TOKEN '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}'`,
+    'a bare-metal node is shown the container that runs its agent, with the same token read',
   )
   await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()

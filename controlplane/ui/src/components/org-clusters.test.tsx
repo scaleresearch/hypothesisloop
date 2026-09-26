@@ -261,14 +261,17 @@ describe('adding a cluster', () => {
     const kinds = within(await screen.findByRole('group', { name: 'Kind of cluster' }))
     expect(kinds.getByRole('button', { name: 'Kubernetes cluster' }).getAttribute('aria-pressed')).toBe('true')
     await userEvent.click(kinds.getByRole('button', { name: 'Bare-metal node' }))
-    expect(screen.getByText(/starts jobs as containers with podman or docker/)).toBeTruthy()
+    expect(screen.getByText(/starts jobs as containers beside it with docker/)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('Cluster name'), 'gpu-box-1')
     await userEvent.click(screen.getByRole('button', { name: 'Add node' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'gpu-box-1')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      `RUNTIME_TOKEN="$(hl cluster token 'gpu-box-1' --org 'org_a')" CLUSTER_NAME='gpu-box-1' API_URL='http://api.cluster.test' go run ./runtime/bare-metal/cmd/bare-agent`,
+      `RUNTIME_TOKEN="$(hl cluster token 'gpu-box-1' --org 'org_a')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
+      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
+      `-e CLUSTER_NAME='gpu-box-1' -e API_URL='http://api.cluster.test' -e RUNTIME_TOKEN 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234'`,
     )
     expect(screen.getByText(/Run it on the node/)).toBeTruthy()
+    expect(screen.getByText(/bare-agent detach && docker wait/)).toBeTruthy()
     expect(document.body.textContent).not.toContain('hls_')
   })
 
@@ -278,7 +281,7 @@ describe('adding a cluster', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect((await screen.findByTestId('secret')).textContent).toContain('make cluster-agent-up')
     await userEvent.click(screen.getByRole('button', { name: 'Bare-metal node' }))
-    expect(screen.getByTestId('secret').textContent).toContain('go run ./runtime/bare-metal/cmd/bare-agent')
+    expect(screen.getByTestId('secret').textContent).toContain('hypothesisloop-bare-agent:')
     expect(screen.getByTestId('secret').textContent).not.toContain('METRICS_URL')
     expect(registerCluster).toHaveBeenCalledTimes(1)
   })

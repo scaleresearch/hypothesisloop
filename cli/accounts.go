@@ -398,21 +398,29 @@ type registeredCluster struct {
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster add", `usage: hl cluster add NAME [--org ORG]
+	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
 
-Registers the cluster name for the org and prints the command that installs its agent on a
-Kubernetes cluster, with the addresses its agent reaches the platform at and the registry and
-tag of its images filled in. Run that command from a checkout of the platform with helm
-installed and kubectl pointed at the cluster (or with KUBECONFIG_PATH=... KUBE_CONTEXT=...
-added). It reads the cluster's runtime token with hl cluster token when it runs, so the token is
-in no terminal scrollback and no shell history. Adding a name the org already has prints the
-same command again. A cluster takes its own org's jobs only.
+Registers the cluster name for the org and prints the one command that attaches it, with the
+addresses its agent reaches the platform at and the registry and tag of its images filled in.
+The command reads the cluster's runtime token with hl cluster token when it runs, so the token is
+in no terminal scrollback and no shell history; where hl is not installed, set RUNTIME_TOKEN to
+what hl cluster token NAME prints. Adding a name the org already has prints the same command
+again. A cluster takes its own org's jobs only.
 
-A bare-metal node with podman or docker is registered the same way, as a cluster of its own, and
-runs one process in place of the printed command. On the node, from a checkout, with Go and gcc:
+Without --bare-metal the command is for a Kubernetes cluster: run it from a checkout of the
+platform with helm installed and kubectl pointed at the cluster (or with KUBECONFIG_PATH=...
+KUBE_CONTEXT=... added).
 
-  go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent
-  CLUSTER_NAME=NAME API_URL=<the API_URL printed> RUNTIME_TOKEN="$(hl cluster token NAME)" ./bare-agent`, stderr)
+With --bare-metal it is for one node with docker, which is a cluster of its own: run it on the
+node. It starts the agent as a container that comes back after a reboot and starts jobs as
+containers beside it. The node needs outbound access to the platform and to the image
+registries and nothing inbound. To detach the node again, on the node:
+
+  docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent
+
+That removes the cluster here too: its jobs go back to the queue and the agent stops what it
+runs. hl cluster remove NAME does the same from this side, and the agent then stops by itself.`, stderr)
+	bareMetal := fs.Bool("bare-metal", false, "print the command for a bare-metal node with docker")
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -426,10 +434,26 @@ runs one process in place of the printed command. On the node, from a checkout, 
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
+	if *bareMetal {
+		fmt.Fprintln(stdout, bareMetalCommand(id, registered))
+		return 0
+	}
 	fmt.Fprintf(stdout, "RUNTIME_TOKEN=\"$(hl cluster token %s --org %s)\" make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s REGISTRY=%s TAG=%s\n",
 		shellQuote(registered.Name), shellQuote(id), shellQuote(registered.Name), shellQuote(registered.APIURL), shellQuote(registered.MetricsURL),
 		shellQuote(registered.Registry), shellQuote(registered.ImageTag))
 	return 0
+}
+
+// bareMetalCommand starts the agent of a bare-metal node as a container. It is handed the
+// engine's socket to start jobs with, the machine id it reports as the cluster's identity, and
+// the directory job storage lives in, under the same path as on the host since the engine
+// resolves it there. --hostname keeps the node's own name on what it reports.
+func bareMetalCommand(orgID string, registered registeredCluster) string {
+	return fmt.Sprintf(`RUNTIME_TOKEN="$(hl cluster token %s --org %s)" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" `+
+		`-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop `+
+		`-e CLUSTER_NAME=%s -e API_URL=%s -e RUNTIME_TOKEN %s`,
+		shellQuote(registered.Name), shellQuote(orgID), shellQuote(registered.Name), shellQuote(registered.APIURL),
+		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag))
 }
 
 // shellQuote writes text as one word of a POSIX shell command, whatever it holds.
@@ -510,8 +534,8 @@ func clusterRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 
 Ends the cluster. Every job placed on it goes back to the queue, keeping its retries, and is
 placed on another cluster that takes its org; requeued lists them. The cluster's settings are
-deleted and its runtime token is refused from then on, so stop its agent. The name becomes free
-for any org to register.`, stderr)
+deleted and its runtime token is refused from then on. Its agent reads that, stops the jobs it
+still runs and exits. The name becomes free for any org to register.`, stderr)
 	return onCluster(c, fs, args, "DELETE", "", stdout, stderr)
 }
 
