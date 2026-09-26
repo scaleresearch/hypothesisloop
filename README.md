@@ -143,8 +143,13 @@ browser run uses the stand-in:
 ```bash
 cd controlplane/ui
 npm run lint && npm run typecheck && npm test      # static checks and unit tests
-npm run e2e                                        # a real browser against the local stack, port 3000
+npm run e2e                                        # a real browser against the stack make dev runs
 ```
+
+The browser run leaves the UI on port 3000 alone. It serves its own copy on port 3100, and its
+browser reaches that copy as `http://localhost:3000` through a proxy of the run, since that is
+the one origin the API allows. It refuses a stack that rents compute (`make dev-hosted`) and one
+whose lock another run holds, and it closes, removes or revokes what it created when it ends.
 
 ### Repository
 

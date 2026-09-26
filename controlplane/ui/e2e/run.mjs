@@ -1,20 +1,29 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync } from 'node:fs'
+import { once } from 'node:events'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { startIdentityProvider } from './identity-provider.mjs'
+import { startProxy } from './proxy.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..', '..')
 const shots = join(here, 'screenshots')
+// The one origin the API allows a browser from and the GitHub App returns to. Port 3000 itself
+// belongs to the UI the stack's owner runs: the run serves its own copy on UI_PORT, and its
+// browser reaches that copy under this origin through the proxy.
 const UI = 'http://localhost:3000'
+const UI_PORT = 3100
+const PROXY_PORT = 54398
+const UI_BUILD = '.next-e2e'
 const API = 'http://localhost:8081'
 const IDP = 'http://127.0.0.1:54399'
-// The member scenario writes its membership row itself, in the local stack's database.
-const POSTGRES_CONTAINER = 'controlplane-postgres-1'
+const STACK_LOCK = '/tmp/hl-stack.lock'
+// hl-admin reads the settings the running control plane was started with.
+const SETTINGS = join(repo, 'controlplane', 'settings', '.hypothesisloop.dev.yaml')
 const run = randomUUID().slice(0, 8)
 
 // Reduced motion turns the fade-in of panels off, so a screenshot shows them as they end up.
@@ -35,18 +44,23 @@ async function idpState() {
   return (await fetch(`${IDP}/test/state`)).json()
 }
 
+// Everyone the stand-in issued a token for. The API gives each a home org at their first request,
+// so these are the accounts the run leaves behind and cleans up after.
+const people = new Map()
+
 // A token of the user straight from the identity provider, for reading back what a page did.
 async function tokenOf(user) {
+  people.set(user.id, user)
   const res = await fetch(`${IDP}/test/token`, { method: 'POST', body: JSON.stringify({ user }) })
   return (await res.json()).access_token
 }
 
-async function api(token, path) {
-  return fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } })
-}
-
-function sql(statement) {
-  execFileSync('podman', ['exec', '-i', POSTGRES_CONTAINER, 'psql', '-U', 'hypothesisloop', '-d', 'hypothesisloop', '-v', 'ON_ERROR_STOP=1', '-q'], { input: statement, stdio: ['pipe', 'inherit', 'inherit'] })
+async function api(token, path, method = 'GET', body) {
+  return fetch(`${API}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
 }
 
 const crashes = []
@@ -67,19 +81,106 @@ async function newContext(browser) {
 }
 
 function hlAdmin(...args) {
-  execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], { cwd: repo, stdio: 'inherit' })
+  execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], {
+    cwd: repo, stdio: 'inherit', env: { ...process.env, HYPOTHESISLOOP_CONFIG: SETTINGS },
+  })
 }
 
-async function waitForUI() {
+const listening = port => fetch(`http://localhost:${port}`).then(() => true, () => false)
+
+// The run creates platform experiments and adds agents to them. On a stack that rents compute
+// (make dev-hosted) a hosted one would be rented for real, so only the local stack is run against.
+async function requireLocalStack() {
+  if (spawnSync('bash', ['localdev/dev.sh', 'require-local'], { cwd: repo, stdio: 'inherit' }).status !== 0) {
+    throw new Error('the browser run needs the stack make dev runs, which rents nothing')
+  }
+  if (existsSync(STACK_LOCK)) {
+    const owner = existsSync(join(STACK_LOCK, 'owner')) ? readFileSync(join(STACK_LOCK, 'owner'), 'utf8').trim() : 'no owner named'
+    throw new Error(`the stack is held (${STACK_LOCK}): ${owner}`)
+  }
+  const health = await fetch(`${API}/health`).catch(() => null)
+  if (!health?.ok) throw new Error(`no control plane answers at ${API}; start it with make dev`)
+  for (const port of [UI_PORT, PROXY_PORT]) {
+    if (await listening(port)) throw new Error(`port ${port} is already serving something, and the browser run needs it`)
+  }
+}
+
+// Asked in node, so at the port the copy listens on: only the browser goes through the proxy.
+async function waitForUI(ui) {
   for (let i = 0; i < 120; i++) {
-    try {
-      if ((await fetch(`${UI}/login`)).ok) return
-    } catch {
-      // not listening yet
-    }
+    if (ui.exitCode !== null || ui.signalCode !== null) throw new Error(`next dev stopped (${ui.exitCode ?? ui.signalCode}) before it served anything`)
+    const login = await fetch(`http://localhost:${UI_PORT}/login`).catch(() => null)
+    if (login?.ok) return
     await new Promise(resolve => setTimeout(resolve, 1000))
   }
-  throw new Error('the UI did not come up on port 3000')
+  throw new Error(`the UI did not come up on port ${UI_PORT}`)
+}
+
+// Leaves the stack without what the run created, through the API as the people who created it.
+// Every one of them is new in this run, so every org one of them owns is the run's own. An open
+// platform experiment is closed, a cluster removed, an API key and an invite revoked, a GitHub
+// account disconnected and every other member removed. The API deletes no org, project or closed
+// platform experiment, so those stay.
+async function cleanUp() {
+  await configure({ tokenLifetimeSeconds: 3600, audience: 'hypothesisloop-dev' })
+  const failures = []
+  const attempt = async (what, act) => {
+    try {
+      await act()
+    } catch (error) {
+      failures.push(`${what}: ${error.message}`)
+    }
+  }
+  const read = async (token, path) => {
+    const res = await api(token, path)
+    if (!res.ok) throw new Error(`GET ${path} answered ${res.status} ${await res.text()}`)
+    return res.json()
+  }
+  const change = (token, method, path) => attempt(`${method} ${path}`, async () => {
+    const res = await api(token, path, method)
+    if (!res.ok) throw new Error(`answered ${res.status} ${await res.text()}`)
+  })
+  for (const user of people.values()) {
+    await attempt(`cleaning up after ${user.name}`, async () => {
+      const token = await tokenOf(user)
+      const me = await read(token, '/me')
+      for (const org of me.orgs.filter(o => o.role === 'owner')) {
+        for (const project of me.projects.filter(p => p.org_id === org.id)) {
+          await attempt(`platform experiments of project ${project.id}`, async () => {
+            for (const status of ['open', 'running']) {
+              for (const pe of await read(token, `/platform-experiments?project_id=${project.id}&status=${status}&limit=200`)) {
+                await change(token, 'POST', `/platform-experiments/${pe.id}/close`)
+              }
+            }
+          })
+        }
+        await attempt(`clusters of org ${org.id}`, async () => {
+          for (const cluster of (await read(token, `/orgs/${org.id}/clusters`)).clusters.filter(c => c.owned)) {
+            await change(token, 'DELETE', `/orgs/${org.id}/clusters/${cluster.name}`)
+          }
+        })
+        await attempt(`API keys of org ${org.id}`, async () => {
+          for (const key of (await read(token, `/orgs/${org.id}/api-keys`)).api_keys.filter(k => !k.revoked_at)) {
+            await change(token, 'DELETE', `/api-keys/${key.id}`)
+          }
+        })
+        await attempt(`invites of org ${org.id}`, async () => {
+          for (const invite of await read(token, `/orgs/${org.id}/invites?limit=200`)) await change(token, 'DELETE', `/invites/${invite.id}`)
+        })
+        await attempt(`GitHub accounts of org ${org.id}`, async () => {
+          for (const installation of await read(token, `/orgs/${org.id}/github-installations?limit=200`)) {
+            await change(token, 'DELETE', `/orgs/${org.id}/github-installations/${installation.installation_id}`)
+          }
+        })
+        await attempt(`members of org ${org.id}`, async () => {
+          for (const member of (await read(token, `/orgs/${org.id}/members?limit=200`)).filter(m => m.user_id !== me.user_id)) {
+            await change(token, 'DELETE', `/orgs/${org.id}/members/${member.user_id}`)
+          }
+        })
+      }
+    })
+  }
+  if (failures.length > 0) throw new Error(`the run left something behind on the stack:\n  ${failures.join('\n  ')}`)
 }
 
 let step = 0
@@ -112,6 +213,7 @@ async function choose(page, field, option) {
 
 // Clicks the GitHub sign-in button and follows the redirects back into the app.
 async function signIn(page, user, landing = `${UI}/console`) {
+  people.set(user.id, user)
   await configure({ nextUser: user })
   await page.getByRole('button', { name: 'Continue with GitHub' }).click()
   await page.waitForURL(landing)
@@ -146,15 +248,41 @@ function idleReport(clusterID) {
 }
 
 async function main() {
+  await requireLocalStack()
   rmSync(shots, { recursive: true, force: true })
   mkdirSync(shots, { recursive: true })
   const idp = await startIdentityProvider({ port: 54399, keyPath: join(repo, 'localdev', '.dev-jwt-key.pem'), ui: UI })
-  const taken = await fetch(UI).then(() => true, () => false)
-  assert.ok(!taken, 'port 3000 is already serving something: stop it first')
-  const ui = spawn(process.execPath, [join(here, '..', 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', '3000'], {
+  const closers = [() => idp.close()]
+  try {
+    // Asked as the first person a scenario signs in, so the question leaves no account of its own.
+    if ((await api(await tokenOf(eve), '/me')).status !== 200) {
+      throw new Error(`the API at ${API} does not accept a person signed with localdev/.dev-jwt-key.pem: restart it with make dev, which lists that key in auth.identity_providers`)
+    }
+    try {
+      await play(closers)
+      console.log('\nbrowser run passed')
+    } finally {
+      // A failed cleanup fails the run and leaves the scenario's own error to be the one thrown.
+      await cleanUp().catch(error => {
+        console.error(error)
+        process.exitCode = 1
+      })
+    }
+  } finally {
+    for (const close of closers.reverse()) await close()
+  }
+}
+
+// Serves the run's copy of the UI, opens a browser that reaches it as UI, and plays the scenarios.
+async function play(closers) {
+  const [host, port] = new URL(UI).host.split(':')
+  const proxy = await startProxy({ port: PROXY_PORT, from: { host, port: Number(port) }, to: { host, port: UI_PORT } })
+  closers.push(() => proxy.close())
+  const ui = spawn(process.execPath, [join(here, '..', 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', String(UI_PORT)], {
     cwd: join(here, '..'),
     env: {
       ...process.env,
+      NEXT_DIST_DIR: UI_BUILD,
       NEXT_PUBLIC_API_URL: API,
       NEXT_PUBLIC_SUPABASE_URL: IDP,
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run',
@@ -162,20 +290,26 @@ async function main() {
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
-  const browser = await chromium.launch()
+  // The build goes with the server: tsconfig lists its generated types, and ones left behind
+  // would fail the next typecheck once a page they name has moved.
+  closers.push(async () => {
+    if (ui.exitCode === null && ui.signalCode === null) {
+      ui.kill()
+      await once(ui, 'exit')
+    }
+    rmSync(join(here, '..', UI_BUILD), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  })
+  // Chromium reaches loopback addresses directly unless told that they go through the proxy too.
+  const browser = await chromium.launch({ proxy: { server: `http://127.0.0.1:${PROXY_PORT}`, bypass: '<-loopback>' } })
+  closers.push(() => browser.close())
   try {
-    await waitForUI()
+    await waitForUI(ui)
     await scenarios(browser)
-    console.log('\nbrowser run passed')
   } catch (error) {
     for (const context of browser.contexts()) {
       for (const page of context.pages()) await shot(page, 'failure')
     }
     throw error
-  } finally {
-    await browser.close()
-    ui.kill()
-    idp.close()
   }
 }
 
@@ -305,11 +439,17 @@ async function scenarios(browser) {
   await page.waitForURL(/\/platform-experiments\/[^/?]+/)
   const experimentURL = page.url()
   await page.getByText('No agents yet.').waitFor()
-  await page.getByText('Count').locator('..').getByRole('textbox').fill('2')
+  const agentAdds = []
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/agents')) agentAdds.push(request)
+  })
   await page.getByPlaceholder("agent's default").first().fill('hyperparameter-search')
   await page.getByRole('button', { name: 'Me', exact: true }).click()
-  await page.getByRole('button', { name: 'Add 2 agents' }).click()
+  await page.getByRole('button', { name: 'Add agent' }).click()
+  await page.getByTestId('secret').waitFor()
+  await page.getByRole('button', { name: 'Add agent' }).click()
   await page.getByTestId('secret').nth(1).waitFor()
+  assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ hosted: false, flavor: 'hyperparameter-search' }), 'each agent is one call that names no count')
   const agentEnv = await page.getByTestId('secret').first().innerText()
   assert.match(agentEnv, /^AGENT_ID=ag-/)
   assert.match(agentEnv, /HL_TOKEN=hls_/)
@@ -329,20 +469,61 @@ async function scenarios(browser) {
   await page.getByText('brings the same one back').waitFor()
   await page.getByRole('button', { name: 'Hide' }).click()
   assert.equal(await page.getByTestId('secret').count(), 0)
-  await page.getByRole('button', { name: 'The platform' }).click()
-  await page.getByText('Count').locator('..').getByRole('textbox').fill('1')
-  await page.getByRole('button', { name: 'Add agent' }).click()
-  await page.getByRole('cell', { name: 'the platform', exact: true }).waitFor()
-  assert.equal(await page.getByTestId('secret').count(), 0, 'a hosted agent has no token to show')
   const agentRows = page.locator('table', { hasText: 'Run by' }).locator('tbody tr')
-  assert.equal(await agentRows.count(), 3)
+  assert.equal(await agentRows.count(), 2)
+
+  section('the platform hosts no agent in an experiment without a repository')
+  // This is also why the run rents nothing: none of its experiments names a repository.
+  const hostedAdd = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === `${API}/platform-experiments/${experimentID}/agents`)
+  await page.getByRole('button', { name: 'The platform' }).click()
+  await page.getByRole('button', { name: 'Add agent' }).click()
+  assert.equal((await hostedAdd).status(), 409)
+  assert.equal((await (await hostedAdd).json()).reason, 'no_repository')
+  const hostedRefusal = page.locator('.error-banner', { hasText: 'the platform experiment names no repository' })
+  await hostedRefusal.waitFor()
+  assert.equal(await agentRows.count(), 2, 'the refused agent is not listed')
+  await shot(page, 'hosted-agent-refused', hostedRefusal)
+
+  section('removing an agent ends its token')
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 200, 'the agent token still works before its agent is removed')
   await agentRows.filter({ hasText: agentID }).getByRole('button', { name: 'Remove' }).click()
   await confirmWith(page, 'Remove')
   await agentRows.filter({ hasText: agentID }).waitFor({ state: 'detached' })
-  assert.equal(await agentRows.count(), 2)
+  assert.equal(await agentRows.count(), 1)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 401, 'the same request is refused once the agent is removed')
   await shot(page, 'experiment-agents', agentRows.last())
+
+  section('a hosted agent shows what became of its machine')
+  // Stood in for: an agent the platform really hosts needs a repository and a launcher that rents.
+  const agentsAPI = `${API}/platform-experiments/${experimentID}/agents`
+  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', hosted: true, flavor: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
+  await page.route(agentsAPI, route => route.request().method() === 'GET'
+    ? route.fulfill({
+      headers: { 'access-control-allow-origin': UI },
+      json: {
+        agents: [
+          { ...signedUp, agent_id: 'ag-hosted-running', name: 'ag-hosted-running', instance: { state: 'running', restarts: 1, stopped: false, progress_at: new Date().toISOString(), end_reason: 'exited', exited_at: new Date().toISOString() } },
+          { ...signedUp, agent_id: 'ag-hosted-stopped', name: 'ag-hosted-stopped', instance: { state: 'stopped', restarts: 3, stopped: true, end_reason: 'silent', exited_at: new Date().toISOString(), exit_log: 'the last lines it wrote' } },
+          { ...signedUp, agent_id: 'ag-hosted-new', name: 'ag-hosted-new' },
+        ],
+      },
+    })
+    : route.fallback())
+  await page.reload()
+  const runningRow = agentRows.filter({ hasText: 'ag-hosted-running' })
+  await runningRow.getByText('running', { exact: true }).waitFor()
+  await runningRow.getByText('restarts 1 of 3').waitFor()
+  await runningRow.getByText(/^last progress /).waitFor()
+  await runningRow.getByText(/^Replaced: the machine before this one ended .*, its command ended\.$/).waitFor()
+  assert.equal(await runningRow.getByRole('button', { name: 'Show token' }).count(), 0, 'a hosted agent has no token to show')
+  const stoppedRow = agentRows.filter({ hasText: 'ag-hosted-stopped' })
+  await stoppedRow.getByText('stopped', { exact: true }).waitFor()
+  await stoppedRow.getByText(/^Stopped for good: its last machine ended .*, it ran and made no progress\.$/).waitFor()
+  await stoppedRow.getByRole('button', { name: 'Exit log' }).click()
+  await stoppedRow.getByText('the last lines it wrote').waitFor()
+  await agentRows.filter({ hasText: 'ag-hosted-new' }).getByText('not reported yet').waitFor()
+  await shot(page, 'hosted-agent-health', stoppedRow)
+  await page.unroute(agentsAPI)
 
   section('the idea form has no name field and the idea is filed under the signed-in name')
   await page.goto(`${UI}/hypotheses?pe=${experimentID}`)
@@ -425,11 +606,7 @@ async function scenarios(browser) {
     new RegExp(`^RUNTIME_TOKEN="\\$\\(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}'\\)" make cluster-agent-up CLUSTER='${clusterName}' API_URL='https?://[^']+' METRICS_URL='https?://[^']+' REGISTRY='[^']+' TAG='[^']+'$`),
     'the command is the one hl cluster add prints, with the addresses the platform answered with',
   )
-  const registered = await (await fetch(`${API}/orgs/${adaMe.orgs[0].id}/clusters`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${await tokenOf(ada)}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: clusterName }),
-  })).json()
+  const registered = await (await api(await tokenOf(ada), `/orgs/${adaMe.orgs[0].id}/clusters`, 'POST', { name: clusterName })).json()
   const runtimeToken = registered.runtime_token
   assert.match(runtimeToken, /^hls_/)
   secrets.add(runtimeToken)
@@ -443,8 +620,8 @@ async function scenarios(browser) {
   )
   await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
-  await page.getByRole('cell', { name: clusterName }).waitFor()
-  await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }))
+  await page.getByRole('cell', { name: clusterName }).first().waitFor()
+  await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }).first())
   await page.getByRole('button', { name: 'Hide' }).click()
   await page.getByRole('button', { name: 'Show start command' }).click()
   assert.equal(await page.getByTestId('secret').innerText(), command, 'asking again shows the same command')
@@ -453,11 +630,7 @@ async function scenarios(browser) {
 
   section('the settings editor on an owned cluster, once its agent has reported')
   const clusterID = `id-${clusterName}`
-  const reported = await fetch(`${API}/internal/clusters/${clusterName}/reconcile`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${runtimeToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(idleReport(clusterID)),
-  })
+  const reported = await api(runtimeToken, `/internal/clusters/${clusterName}/reconcile`, 'POST', idleReport(clusterID))
   assert.equal(reported.status, 200, `the stand-in agent's report: ${await reported.clone().text()}`)
   const clusterRow = page.getByRole('row', { name: new RegExp(clusterName) })
   await clusterRow.getByText('Connected', { exact: true }).waitFor()
@@ -480,7 +653,7 @@ async function scenarios(browser) {
   await page.getByRole('link', { name: 'Compute Resources' }).click()
   await page.getByRole('heading', { name: 'Compute Resources' }).waitFor()
   assert.equal(new URL((await capacityRead).url()).searchParams.get('org_id'), adaMe.orgs[0].id, 'capacity is read for the selected org')
-  await page.getByRole('cell', { name: new RegExp(clusterName) }).waitFor()
+  await page.getByRole('cell', { name: new RegExp(clusterName) }).first().waitFor()
   assert.equal(await page.getByRole('button', { name: 'Show start command' }).count(), 0, 'the cluster page manages nothing')
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
   await shot(page, 'cluster-page')
@@ -698,7 +871,7 @@ async function scenarios(browser) {
   await page.getByLabel('Organization name').locator('..').getByRole('button', { name: 'Rename' }).click()
   await page.waitForFunction(name => document.querySelector('.wa-nav-tenant input')?.value === name, `${ada.name} Second`)
   await selectInNav(page, 'Organization', `${ada.name} Lab`)
-  await page.getByRole('cell', { name: new RegExp(clusterName) }).waitFor()
+  await page.getByRole('cell', { name: new RegExp(clusterName) }).first().waitFor()
 
   section('switching org on Settings takes the last org\'s token and half-typed form off the screen')
   await page.getByLabel('Key name').fill('on-show')
@@ -717,7 +890,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByLabel('Cluster name').inputValue(), '', 'the half-typed cluster name is gone')
   await shot(page, 'token-gone-after-switch')
   await selectInNav(page, 'Organization', `${ada.name} Lab`)
-  await page.getByRole('cell', { name: new RegExp(clusterName) }).waitFor()
+  await page.getByRole('cell', { name: new RegExp(clusterName) }).first().waitFor()
 
   section('an API that fails is said to fail: no empty page')
   await page.route(`${API}/me`, route => route.abort())
@@ -855,8 +1028,11 @@ async function scenarios(browser) {
   section('a member of an org sees its work and can change nothing about the org')
   const bobID = (await (await api(await tokenOf(bob), '/me')).json()).user_id
   const labID = adaMe.orgs[0].id
-  for (const id of [bobID, labID]) assert.match(id, /^[\w-]+$/)
-  sql(`INSERT INTO org_members (org_id, user_id, role) VALUES ('${labID}', '${bobID}', 'member');`)
+  const bobInvite = await api(await tokenOf(ada), `/orgs/${labID}/invites`, 'POST', { role: 'member' })
+  assert.equal(bobInvite.status, 201)
+  const bobInviteToken = (await bobInvite.json()).token
+  secrets.add(bobInviteToken)
+  assert.equal((await api(await tokenOf(bob), '/invites/accept', 'POST', { token: bobInviteToken })).status, 201)
   try {
     await otherPage.goto(`${UI}/settings?project=${adaMe.projects[0].id}`)
     await otherPage.getByText(`You are a member of ${ada.name} Lab. Only an owner can`).waitFor()
@@ -894,7 +1070,7 @@ async function scenarios(browser) {
     await shot(otherPage, 'member-github-accounts', memberGitHub)
     await otherPage.unroute(url => url.href.startsWith(memberInstallationsAPI))
   } finally {
-    sql(`DELETE FROM org_members WHERE org_id = '${labID}' AND user_id = '${bobID}' AND role = 'member';`)
+    assert.equal((await api(await tokenOf(ada), `/orgs/${labID}/members/${bobID}`, 'DELETE')).status, 204)
   }
 
   section('staff see the views across every org, and a customer does not')
@@ -985,7 +1161,7 @@ async function scenarios(browser) {
   }
 }
 
-main().catch(error => {
+main().then(() => process.exit(), error => {
   console.error(error)
   process.exit(1)
 })
