@@ -19,6 +19,13 @@ class SystemPromptTest(unittest.TestCase):
             self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
             self.assertIn("clone https://github.com/acme/model.git and work on branch `hl/pe-1/agent-a`", prompt)
 
+    # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
+    # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
+    def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("A brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`", prompt)
+        self.assertIn("end your turn", prompt)
+
     def test_the_briefing_hands_out_no_git_token(self):
         self.assertNotIn("GIT_TOKEN", self.render("generalist"))
 

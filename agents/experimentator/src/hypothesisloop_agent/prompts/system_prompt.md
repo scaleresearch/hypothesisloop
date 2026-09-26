@@ -96,13 +96,11 @@ it outranks this briefing. Roughly, not a rigid script:
          `git push` only after changing a tracked file (message = hypothesis id + one-line theory).
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
-       - `image`: leave it out unless the experiment brings its own. `hl capacity` shows a
-         `job_image` on the clusters that run every job in the platform's own image (hl, hl-clone,
-         git, uv and python): a job with no `image` runs there, in that image, and a job that
-         names any other image is never placed there. A cluster shown without `job_image` runs a
-         job in the image it names, so a job for it must name one. A job no cluster can run waits
-         with `not_admitted_reason` `no_cluster_for_image`, which says what runs where. The job gets its own read access to the repository, so put no git
-         token in the job's `env`.
+       - `image`: leave it out unless the experiment brings its own. A cluster `hl capacity`
+         shows with a `job_image` runs every job in that image (hl, hl-clone, git, uv, python)
+         and takes no job naming another; one shown without runs the image a job names, so a
+         job for it must name one. `no_cluster_for_image` says what runs where.
+       - the job gets its own read access to the repository: put no git token in its `env`.
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as
          `hl job submit --secret-env NAME`, which sends $NAME from your environment.
@@ -119,7 +117,9 @@ it outranks this briefing. Roughly, not a rigid script:
      or its brief changing, and others' comments, findings and links on your hypotheses. A
      completed job's carries its metrics, best and last; `hl job list` has every job's,
      `hl hypothesis get` the rest.
-     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A changed
+     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A
+     brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
+     a turn that waits is cut off after ten minutes and keeps your session from being saved. A changed
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
      cut, wind up and stop.
      While a job is QUEUED, cancel and resubmit it smaller if its `not_admitted_reason` stays
