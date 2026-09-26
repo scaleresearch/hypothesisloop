@@ -405,8 +405,9 @@ class API:
         assert not body["truncated"], f"query result truncated: {cypher}"
         return [dict(zip(body["columns"], row, strict=True)) for row in body["rows"]]
 
-    def post_hypothesis_comment(self, hyp_id: str, text: str, agent_id: str = "", author: str = "") -> requests.Response:
-        return self.post(f"/hypotheses/{hyp_id}/comments", {"agent_id": agent_id, "author": author, "text": text})
+    def post_hypothesis_comment(self, hyp_id: str, text: str, agent_id: str = "") -> requests.Response:
+        """A comment of agent_id's, or with none the caller's own. Who wrote it is the caller either way."""
+        return self.post(f"/hypotheses/{hyp_id}/comments", {"text": text} | ({"agent_id": agent_id} if agent_id else {}))
 
     # What a test says for a confirmed or refuted verdict it gives without the jobs that carry one.
     NO_EVIDENCE = "the test settles this hypothesis without running jobs for it"

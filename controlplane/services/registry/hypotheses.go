@@ -312,8 +312,9 @@ func (s *Service) addActivity(ctx context.Context, items []*domain.HypothesisLis
 // domain.HypothesisStatus). Ownership is checked in the same graph transaction as the write.
 //
 // A confirmed or refuted verdict is given only with the evidence for it (see supported), and
-// what it rests on is kept as a comment of the agent's on the hypothesis.
-func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, verdict Verdict) (*domain.Hypothesis, error) {
+// what it rests on is kept as a comment of the agent's on the hypothesis, written by actor, the
+// credential that gave the verdict.
+func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, verdict Verdict) (*domain.Hypothesis, error) {
 	status := verdict.Status
 	if !domain.ValidHypothesisStatus(status) {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
@@ -347,7 +348,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	s.logger.Info("hypothesis status updated",
 		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
 	if announced && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted) {
-		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, "", basis(verdict)); err != nil {
+		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, actor, basis(verdict)); err != nil {
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
 		}
 	}
@@ -369,14 +370,9 @@ func (s *Service) ListHypothesisFindings(ctx context.Context, hypothesisID strin
 }
 
 // AddHypothesisComment records a freeform, job-independent note against a hypothesis — see
-// domain.HypothesisComment for how this differs from a finding.
-// A human commenting from the UI passes author instead of agentID, under the same exactly-one-of
-// rule registration applies.
-func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID, author, text string) (*domain.HypothesisComment, error) {
-	source, err := domain.ClassifyHypothesisOrigin(agentID, author)
-	if err != nil {
-		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
-	}
+// domain.HypothesisComment for how this differs from a finding. agentID is the agent whose note
+// it is, empty for one no agent owns, and actor the credential writing it.
+func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
 	h, err := s.graph.GetHypothesis(ctx, hypothesisID)
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
@@ -384,12 +380,16 @@ func (s *Service) AddHypothesisComment(ctx context.Context, hypothesisID, agentI
 	if h == nil {
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w: %s", ErrHypothesisNotFound, hypothesisID)
 	}
-	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, h.PlatformExperimentID, source, agentID, author, text)
+	c, err := s.store.CreateHypothesisComment(ctx, hypothesisID, h.PlatformExperimentID, agentID, actor, text)
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
 	}
+	if err := s.store.NameActors(ctx, []*domain.Actor{&c.Actor}); err != nil {
+		return nil, fmt.Errorf("registry.AddHypothesisComment: %w", err)
+	}
 	s.logger.Info("hypothesis comment added",
-		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID), zap.String("author", author))
+		zap.String("hypothesis_id", hypothesisID), zap.String("agent", agentID),
+		zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID))
 	return c, nil
 }
 
@@ -409,6 +409,13 @@ func (s *Service) RecordHumanWrite(ctx context.Context, origin auth.Origin, kind
 func (s *Service) ListHypothesisComments(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, int, error) {
 	cs, err := s.store.ListCommentsByHypothesis(ctx, hypothesisID, limit, offset)
 	if err != nil {
+		return nil, 0, fmt.Errorf("registry.ListHypothesisComments: %w", err)
+	}
+	actors := make([]*domain.Actor, len(cs))
+	for i, c := range cs {
+		actors[i] = &c.Actor
+	}
+	if err := s.store.NameActors(ctx, actors); err != nil {
 		return nil, 0, fmt.Errorf("registry.ListHypothesisComments: %w", err)
 	}
 	total, err := s.store.CountCommentsByHypothesis(ctx, hypothesisID)

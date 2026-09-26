@@ -180,7 +180,8 @@ FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 
 // CreateHypothesisComment records a freeform, job-independent note against a hypothesis — see
 // domain.HypothesisComment for how this differs from a finding.
-func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
+// agentID is whose note it is, empty when no agent owns it, and actor whose credential wrote it.
+func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
 	id, err := newHypothesisID()
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
@@ -190,15 +191,15 @@ func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesi
 		HypothesisID:         hypothesisID,
 		PlatformExperimentID: platformExperimentID,
 		AgentID:              agentID,
-		Source:               source,
-		Author:               author,
+		Source:               domain.SourceOf(agentID),
+		Actor:                actor,
 		Text:                 text,
 		CreatedAt:            time.Now().UTC(),
 	}
 	const q = `
-INSERT INTO hypothesis_comments (id, hypothesis_id, platform_experiment_id, agent_id, source, author, text, created_at)
-VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
-	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, c.Source, c.Author, c.Text, c.CreatedAt); err != nil {
+INSERT INTO hypothesis_comments (id, hypothesis_id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, created_at)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)`
+	if _, err := s.pool.pool.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, c.Source, string(actor.Kind), actor.ID, c.Text, c.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
@@ -223,7 +224,7 @@ INSERT INTO human_writes (user_id, author, kind, subject, platform_experiment_id
 // first — bounded like ListFindingsByHypothesis, for the same reason.
 func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
-	const q = `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), source, author, text, created_at
+	const q = `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), source, actor_kind, actor_id, author, text, created_at
 FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisID, limit, offset)
 	if err != nil {
@@ -234,9 +235,12 @@ FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 	out := []*domain.HypothesisComment{}
 	for rows.Next() {
 		c := &domain.HypothesisComment{}
-		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.PlatformExperimentID, &c.AgentID, &c.Source, &c.Author, &c.Text, &c.CreatedAt); err != nil {
+		var actorKind domain.ActorKind
+		var actorID, author string
+		if err := rows.Scan(&c.ID, &c.HypothesisID, &c.PlatformExperimentID, &c.AgentID, &c.Source, &actorKind, &actorID, &author, &c.Text, &c.CreatedAt); err != nil {
 			return nil, fmt.Errorf("hypotheses_store.ListCommentsByHypothesis: scan: %w", err)
 		}
+		c.Actor = domain.StoredActor(actorKind, actorID, author, c.AgentID)
 		out = append(out, c)
 	}
 	return out, rows.Err()

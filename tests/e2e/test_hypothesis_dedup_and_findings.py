@@ -140,15 +140,23 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert human_name not in str(results)
 
     human_comment = f"Worth re-running this at the shorter warmup before concluding -- {human_name}"
-    # A human may also comment on an agent's hypothesis, same origin rule.
+    # A caller that is no agent may also comment on an agent's hypothesis, as itself. The note is
+    # no agent's, and who wrote it is the credential: here the staff token, which names nobody.
     agent_hyp = api.register_hypothesis(pe_id, agent_a, f"a separate agent claim {run_id}")
-    comment_resp = api.post_hypothesis_comment(agent_hyp["id"], human_comment, author=human_name)
+    named = api.post(f"/hypotheses/{agent_hyp['id']}/comments", {"author": human_name, "text": human_comment})
+    assert named.status_code == 422, f"a comment stating its author: {named.status_code} {named.text}"
+    comment_resp = api.post_hypothesis_comment(agent_hyp["id"], human_comment)
     assert comment_resp.status_code == 201
+    assert comment_resp.json()["actor"] == {"kind": "staff", "id": "", "name": "staff"}, comment_resp.text
     comment_row = next(
         (c for c in api.hypothesis(agent_hyp["id"]).get("comments") or [] if c.get("text") == human_comment), None
     )
     assert comment_row is not None
-    assert (comment_row.get("source"), comment_row.get("author")) == ("human", human_name)
+    assert (comment_row.get("source"), comment_row.get("agent_id")) == ("human", "") and "author" not in comment_row, comment_row
+    assert comment_row["actor"] == {"kind": "staff", "id": "", "name": "staff"}, comment_row
+    by_agent = api.post_hypothesis_comment(agent_hyp["id"], f"its owner's note {run_id}", agent_id=agent_a)
+    assert by_agent.status_code == 201 and by_agent.json()["agent_id"] == agent_a and by_agent.json()["source"] == "agent", by_agent.text
+    assert by_agent.json()["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "a note written for an agent names who wrote it"
 
     # Status is the owner's verdict: an unowned (human) row may be settled by any agent...
     status_resp = api.set_hypothesis_status(human["id"], agent_a, "confirmed")

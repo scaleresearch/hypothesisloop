@@ -32,6 +32,10 @@ type poolStore struct {
 	// jobs is every job on record, and comments every note written, in order.
 	jobs     []*domain.Experiment
 	comments []string
+	// commentActors is whose credential wrote each of comments, and actorNames the name kept
+	// for an actor, by its id.
+	commentActors []domain.Actor
+	actorNames    map[string]string
 }
 
 func (s *poolStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
@@ -73,13 +77,34 @@ func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error
 
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
 // beyond its id — a note is attached to a row, not authorised against its owner.
-func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error) {
+func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
 	s.comments = append(s.comments, text)
+	s.commentActors = append(s.commentActors, actor)
 	return &domain.HypothesisComment{
-		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID, Source: source,
-		AgentID: agentID, Author: author, Text: text,
+		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID, Source: domain.SourceOf(agentID),
+		AgentID: agentID, Actor: actor, Text: text,
 	}, nil
 }
+
+// NameActors names an actor as the database does: by the name kept for it, else by its id, and a
+// coordinator and a staff token by what they are.
+func (s *poolStore) NameActors(_ context.Context, actors []*domain.Actor) error {
+	for _, a := range actors {
+		switch a.Kind {
+		case domain.ActorCoordinator, domain.ActorStaff:
+			a.Name = string(a.Kind)
+		case domain.ActorUnverified:
+		default:
+			a.Name = a.ID
+			if name, ok := s.actorNames[a.ID]; ok {
+				a.Name = name
+			}
+		}
+	}
+	return nil
+}
+
+func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.ActorAgent, ID: id} }
 
 // fakeGraph is the hypothesis graph reduced to the rules the registry relies on it for: dedup on
 // (platform_experiment_id, normalized text), and the owner rule on status and links. Link
@@ -303,7 +328,7 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
+	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 	if err != nil {
 		t.Fatalf("SetHypothesisStatus on a human row: got = %v, want nil", err)
 	}
@@ -324,10 +349,10 @@ func TestSetHypothesisStatusRefusesAnAgentSettingAnotherAgentsRowStatus(t *testi
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-2", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); !errors.Is(err, ErrHypothesisNotOwner) {
+	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-2", agentActor("agent-2"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); !errors.Is(err, ErrHypothesisNotOwner) {
 		t.Fatalf("SetHypothesisStatus by a non-owner: got = %v, want %v", err, ErrHypothesisNotOwner)
 	}
-	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
+	if _, err := svc.SetHypothesisStatus(context.Background(), owned.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
 		t.Fatalf("SetHypothesisStatus by the owner: got = %v, want nil", err)
 	}
 }
@@ -344,7 +369,7 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	c, err := svc.AddHypothesisComment(context.Background(), human.ID, "agent-1", "", "retested at 500 steps")
+	c, err := svc.AddHypothesisComment(context.Background(), human.ID, "agent-1", agentActor("agent-1"), "retested at 500 steps")
 	if err != nil {
 		t.Fatalf("AddHypothesisComment on a human row: got = %v, want nil", err)
 	}
@@ -353,17 +378,6 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 	}
 	if c.HypothesisID != human.ID {
 		t.Errorf("comment hypothesis_id: got = %v, want %v", c.HypothesisID, human.ID)
-	}
-}
-
-// A comment carries the same origin pair as a hypothesis, and for the same reason: a note signed
-// by both an agent and a person is signed by neither.
-func TestAddHypothesisCommentRejectsARowClaimingBothAnAgentAndAHumanAuthor(t *testing.T) {
-	svc := poolService(newPoolStore())
-
-	_, err := svc.AddHypothesisComment(context.Background(), "h-1", "agent-1", "Ada", "try a shorter warmup")
-	if !errors.Is(err, domain.ErrHypothesisOrigin) {
-		t.Fatalf("AddHypothesisComment with both agent_id and author: got = %v, want %v", err, domain.ErrHypothesisOrigin)
 	}
 }
 
@@ -416,7 +430,7 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	}
 
 	for range 2 {
-		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
+		if _, err := svc.SetHypothesisStatus(context.Background(), h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
 			t.Fatalf("SetHypothesisStatus: got = %v, want nil", err)
 		}
 	}
@@ -481,7 +495,7 @@ func TestARetryAfterAFailedEmitSendsTheEventTheFailureLost(t *testing.T) {
 			return err
 		}},
 		{db.EventHypothesisStatus, func() error {
-			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
+			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 			return err
 		}},
 		{db.EventHypothesisLink, func() error {
@@ -531,14 +545,14 @@ func TestAddHypothesisCommentCarriesTheHypothesisPlatformExperimentAndRefusesAnU
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
 
-	c, err := svc.AddHypothesisComment(context.Background(), h.ID, "agent-2", "", "retested")
+	c, err := svc.AddHypothesisComment(context.Background(), h.ID, "agent-2", agentActor("agent-2"), "retested")
 	if err != nil {
 		t.Fatalf("AddHypothesisComment: got = %v, want nil", err)
 	}
 	if c.PlatformExperimentID != "pe-1" {
 		t.Errorf("comment platform_experiment_id: got = %v, want %v", c.PlatformExperimentID, "pe-1")
 	}
-	if _, err := svc.AddHypothesisComment(context.Background(), "no-such-hypothesis", "agent-2", "", "x"); !errors.Is(err, ErrHypothesisNotFound) {
+	if _, err := svc.AddHypothesisComment(context.Background(), "no-such-hypothesis", "agent-2", agentActor("agent-2"), "x"); !errors.Is(err, ErrHypothesisNotFound) {
 		t.Errorf("AddHypothesisComment on an unknown hypothesis: got = %v, want %v", err, ErrHypothesisNotFound)
 	}
 }

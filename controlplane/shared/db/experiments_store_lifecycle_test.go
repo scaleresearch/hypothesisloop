@@ -210,7 +210,7 @@ func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t 
 		t.Fatalf("CreateHypothesisFinding: %v", err)
 	}
 	for _, c := range [][3]string{{busy, peID, agentID}, {discussed, peID, agentID}, {discussed, peID, agentID}, {busy, otherPE, otherAgent}} {
-		if _, err := hyps.CreateHypothesisComment(ctx, c[0], c[1], domain.HypothesisSourceAgent, c[2], "", "note"); err != nil {
+		if _, err := hyps.CreateHypothesisComment(ctx, c[0], c[1], c[2], domain.Actor{Kind: domain.ActorAgent, ID: c[2]}, "note"); err != nil {
 			t.Fatalf("CreateHypothesisComment: %v", err)
 		}
 	}

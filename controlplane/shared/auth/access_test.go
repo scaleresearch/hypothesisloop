@@ -277,6 +277,51 @@ func TestARequestWithNoPrincipalReachesNothing(t *testing.T) {
 	}
 }
 
+// The owner of a record is the agent a request names, and the actor is the caller whatever the
+// request names.
+func TestWhoseRecordAWriteIsAndWhoseCredentialMadeIt(t *testing.T) {
+	access := twoOrgs()
+	ada := auth.Principal{Kind: auth.KindUser, UserID: "user-ada", Name: "Ada Lovelace", OrgIDs: []string{"org-a"}}
+	nameless := auth.Principal{Kind: auth.KindUser, UserID: "user-x", OrgIDs: []string{"org-a"}}
+	staffUser := auth.Principal{Kind: auth.KindStaff, UserID: "user-ops", Name: "Ops"}
+	adaActor := domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}
+	agent := domain.Actor{Kind: domain.ActorAgent, ID: callers["agent in pe-a"].AgentID}
+	key := domain.Actor{Kind: domain.ActorKey, ID: callers["key of A"].KeyID}
+	for name, tc := range map[string]struct {
+		caller  auth.Principal
+		agentID string
+		owner   string
+		actor   domain.Actor
+		status  int
+	}{
+		"agent as itself":                         {callers["agent in pe-a"], "agent-a", "agent-a", agent, 200},
+		"agent naming no agent":                   {callers["agent in pe-a"], "", "agent-a", agent, 200},
+		"agent as another agent":                  {callers["agent in pe-a"], "agent-a-other", "", domain.Actor{}, 403},
+		"user as themselves":                      {ada, "", "", adaActor, 200},
+		"user for an agent of their org":          {ada, "agent-a", "agent-a", adaActor, 200},
+		"user for an agent of another org":        {ada, "agent-b", "", domain.Actor{}, 404},
+		"user the provider gave no name":          {nameless, "", "", domain.Actor{Kind: domain.ActorUser, ID: "user-x"}, 200},
+		"staff user as themselves":                {staffUser, "", "", domain.Actor{Kind: domain.ActorUser, ID: "user-ops", Name: "Ops"}, 200},
+		"staff user for any agent":                {staffUser, "agent-b", "agent-b", domain.Actor{Kind: domain.ActorUser, ID: "user-ops", Name: "Ops"}, 200},
+		"staff token":                             {auth.Principal{Kind: auth.KindStaff}, "", "", domain.Actor{Kind: domain.ActorStaff}, 200},
+		"key as itself":                           {callers["key of A"], "", "", key, 200},
+		"key for an agent":                        {callers["key of A"], "agent-a", "agent-a", key, 200},
+		"key for an agent of another org":         {callers["key of A"], "agent-b", "", domain.Actor{}, 404},
+		"coordinator as itself":                   {callers["coordinator of pe-a"], "", "", domain.Actor{Kind: domain.ActorCoordinator, ID: callers["coordinator of pe-a"].PlatformExperimentID}, 200},
+		"coordinator for an agent of another org": {callers["coordinator of pe-a"], "agent-b", "", domain.Actor{}, 404},
+		"runtime":  {auth.Principal{Kind: auth.KindRuntime, ClusterName: "c", OrgIDs: []string{"org-a"}}, "", "", domain.Actor{}, 403},
+		"launcher": {auth.Principal{Kind: auth.KindLauncher, LauncherName: "l"}, "", "", domain.Actor{}, 403},
+	} {
+		owner, actor, err := access.Writer(auth.WithPrincipal(context.Background(), tc.caller), tc.agentID)
+		if status(err) != tc.status || owner != tc.owner || actor != tc.actor {
+			t.Errorf("%s: got = owner %q, actor %+v, %d (%v), want = owner %q, actor %+v, %d", name, owner, actor, status(err), err, tc.owner, tc.actor, tc.status)
+		}
+	}
+	if _, _, err := access.Writer(context.Background(), ""); status(err) != 401 {
+		t.Errorf("no caller: got = %d (%v), want = 401", status(err), err)
+	}
+}
+
 func TestWhoAHypothesisWriteIsBy(t *testing.T) {
 	access := twoOrgs()
 	ada := auth.Principal{Kind: auth.KindUser, UserID: "user-ada", Name: "Ada Lovelace", OrgIDs: []string{"org-a"}}

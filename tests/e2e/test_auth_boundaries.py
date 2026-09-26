@@ -204,7 +204,7 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as a person"), author="Mallory"), 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as both"), agent_id=mine.agent, author="Mallory"), 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as nobody")), 403),
-        ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"author": "Mallory", "text": "as a person"}, 403),
+        ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"author": "Mallory", "text": "as a person"}, 422),
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"agent_id": theirs.agent, "text": "as the rival"}, 403),
         ("POST", f"/hypotheses/{mine.hypothesis_id}/links", {"author": "Mallory", "type": "related", "to": theirs.hypothesis_id}, 403),
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/links", {"agent_id": mine.agent, "type": "related", "to": mine.hypothesis_id}, 403),
@@ -226,6 +226,7 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
 
     _assert_each(mine.token, "an agent on its own", [
         ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"agent_id": mine.agent, "text": "my own note"}, 201),
+        ("POST", f"/hypotheses/{mine.hypothesis_id}/comments", {"text": "my own note, naming nobody"}, 201),
         ("POST", f"/experiments/{mine.job_id}/metrics", SAMPLE, 204),
     ])
 
@@ -307,7 +308,13 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
         assert for_agent.status_code == 201, f"a person naming their agent: {for_agent.status_code} {for_agent.text}"
         assert for_agent.json()["agent_id"] == agent and not for_agent.json().get("author"), for_agent.text
         comment = person.post(f"/hypotheses/{own.json()['id']}/comments", {"text": "my note"})
-        assert comment.status_code == 201 and comment.json()["author"] == "Ada Lovelace", comment.text
+        assert comment.status_code == 201, comment.text
+        assert comment.json()["actor"] == {"kind": "user", "id": subject, "name": "Ada Lovelace"} and "author" not in comment.json(), comment.text
+        claimed = person.post(f"/hypotheses/{own.json()['id']}/comments", {"author": "Mallory", "text": "under another name"})
+        assert claimed.status_code == 422, f"a person stating who they are: {claimed.status_code} {claimed.text}"
+        for_agent_note = person.post(f"/hypotheses/{own.json()['id']}/comments", {"agent_id": agent, "text": "for my agent"})
+        assert for_agent_note.status_code == 201 and for_agent_note.json()["agent_id"] == agent, for_agent_note.text
+        assert for_agent_note.json()["actor"] == {"kind": "user", "id": subject, "name": "Ada Lovelace"}, "a note written for an agent names the person who wrote it"
 
         nameless = api.as_caller(_jwt(key, sub=subject), me["orgs"][0]["id"], me["projects"][0]["id"])
         refused = nameless.post("/hypotheses", _hypothesis_body(pe_id, _claim("nobody's idea")))

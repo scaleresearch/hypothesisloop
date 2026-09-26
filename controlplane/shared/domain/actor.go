@@ -24,3 +24,16 @@ type Actor struct {
 	ID   string    `json:"id" doc:"The user, API key or agent, or the platform experiment of a coordinator. Empty for a staff token and for unverified."`
 	Name string    `json:"name" doc:"The name the actor carries now, its id when it has none."`
 }
+
+// StoredActor is the actor a record was stored with. A record from before actors were kept is
+// unverified and has no id: it is named by what it said of its author then, the author it
+// stated or else the agent it named.
+func StoredActor(kind ActorKind, id, author, agentID string) Actor {
+	if kind != ActorUnverified {
+		return Actor{Kind: kind, ID: id}
+	}
+	if author == "" {
+		author = agentID
+	}
+	return Actor{Kind: ActorUnverified, Name: author}
+}

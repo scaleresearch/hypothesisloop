@@ -83,7 +83,7 @@ func with(base map[string]any, origin map[string]any) map[string]any {
 	return out
 }
 
-// The three writes that take agent_id or author, as each origin an agent token might claim.
+// The two graph writes that take agent_id or author, as each origin an agent token might claim.
 func TestAnAgentTokenWritesToTheGraphAsItsOwnAgentOnly(t *testing.T) {
 	for origin, tc := range map[string]struct {
 		fields map[string]any
@@ -102,8 +102,6 @@ func TestAnAgentTokenWritesToTheGraphAsItsOwnAgentOnly(t *testing.T) {
 				"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}, tc.fields)),
 			"POST /hypotheses/{id}/links": f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/links",
 				with(map[string]any{"type": "related", "to": f.rivals.ID}, tc.fields)),
-			"POST /hypotheses/{id}/comments": f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments",
-				with(map[string]any{"text": "a note"}, tc.fields)),
 		} {
 			if rec.Code != tc.want {
 				t.Errorf("%s as %s: got = %d %s, want = %d", route, origin, rec.Code, rec.Body, tc.want)
@@ -111,6 +109,74 @@ func TestAnAgentTokenWritesToTheGraphAsItsOwnAgentOnly(t *testing.T) {
 		}
 		if len(f.store.humanWrites) != 0 {
 			t.Errorf("as %s: an agent token left human writes %+v", origin, f.store.humanWrites)
+		}
+	}
+}
+
+var (
+	keyOne      = auth.Principal{Kind: auth.KindKey, KeyID: "key-1", OrgIDs: []string{"org-a"}}
+	coordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
+	staffToken  = auth.Principal{Kind: auth.KindStaff}
+)
+
+// Who wrote a comment is the credential that sent it. agent_id says whose note it is, and no
+// caller's word on who they are is taken: there is no field for it.
+func TestACommentIsWrittenByTheCredentialThatSentIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		caller auth.Principal
+		fields map[string]any
+		want   int
+		owner  string
+		actor  domain.Actor
+	}{
+		"an agent naming itself":             {agentOne, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}},
+		"an agent naming nobody":             {agentOne, nil, 201, "agent-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}},
+		"an agent naming another":            {agentOne, map[string]any{"agent_id": "agent-2"}, 403, "", domain.Actor{}},
+		"an agent naming one of another org": {agentOne, map[string]any{"agent_id": "agent-9"}, 403, "", domain.Actor{}},
+		"an agent claiming a person's name":  {agentOne, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
+		"a person":                           {ada, nil, 201, "", domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}},
+		"a person claiming another's name":   {ada, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
+		"a person for an agent":              {ada, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}},
+		"a person for another org's agent":   {ada, map[string]any{"agent_id": "agent-9"}, 404, "", domain.Actor{}},
+		"a person with no name":              {nameless, nil, 201, "", domain.Actor{Kind: domain.ActorUser, ID: "user-x", Name: "user-x"}},
+		"an api key":                         {keyOne, nil, 201, "", domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"an api key claiming a name":         {keyOne, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
+		"an api key for an agent":            {keyOne, map[string]any{"agent_id": "agent-2"}, 201, "agent-2", domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"a coordinator":                      {coordinator, nil, 201, "", domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1", Name: "coordinator"}},
+		"a coordinator claiming a name":      {coordinator, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
+		"a staff token":                      {staffToken, nil, 201, "", domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
+		"a staff token claiming a name":      {staffToken, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
+	} {
+		f := newRegistryAs(t, tc.caller)
+		f.store.actorNames = map[string]string{"user-ada": "Ada Lovelace", "key-1": "laptop"}
+		rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", with(map[string]any{"text": "a note"}, tc.fields))
+		if rec.Code != tc.want {
+			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
+			continue
+		}
+		if tc.want != http.StatusCreated {
+			if len(f.store.comments) != 0 {
+				t.Errorf("%s: a refused comment was written: %v", name, f.store.comments)
+			}
+			continue
+		}
+		var got domain.HypothesisComment
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s: %v in %s", name, err, rec.Body)
+		}
+		if got.AgentID != tc.owner || got.Actor != tc.actor || got.Source != domain.SourceOf(tc.owner) || strings.Contains(rec.Body.String(), `"author"`) {
+			t.Errorf("%s: got = %s, want owner %q and actor %+v and no author", name, rec.Body, tc.owner, tc.actor)
+		}
+		// What is stored is the kind and the id. The name is looked up when the comment is read.
+		stored := tc.actor
+		if stored.Kind != domain.ActorUser {
+			stored.Name = ""
+		}
+		if len(f.store.commentActors) != 1 || f.store.commentActors[0].Kind != stored.Kind || f.store.commentActors[0].ID != stored.ID {
+			t.Errorf("%s: stored actors = %+v, want one of kind %s and id %q", name, f.store.commentActors, stored.Kind, stored.ID)
+		}
+		if len(f.store.humanWrites) != 0 {
+			t.Errorf("%s: the account was kept beside the comment as well as on it: %+v", name, f.store.humanWrites)
 		}
 	}
 }
@@ -128,8 +194,8 @@ func TestAnAgentTokenSettlesAsItselfOnly(t *testing.T) {
 	}
 }
 
-// A signed-in user writes under the name the identity provider states, the account is kept
-// beside it, and naming an agent makes the write that agent's.
+// A signed-in user registers and links under the name the identity provider states, the account
+// is kept beside it, and naming an agent makes the write that agent's.
 func TestAUsersWriteCarriesTheProvidersNameAndTheirAccount(t *testing.T) {
 	f := newRegistryAs(t, ada)
 	register := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
@@ -143,14 +209,12 @@ func TestAUsersWriteCarriesTheProvidersNameAndTheirAccount(t *testing.T) {
 		t.Fatalf("registered as author %q agent %q, want Ada Lovelace and no agent", registered.Author, registered.AgentID)
 	}
 	link := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(registered.ID)+"/links", map[string]any{"type": "related", "to": f.own.ID})
-	comment := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"text": "a note"})
-	if link.Code != http.StatusCreated || comment.Code != http.StatusCreated {
-		t.Fatalf("link: %d %s, comment: %d %s, want both 201", link.Code, link.Body, comment.Code, comment.Body)
+	if link.Code != http.StatusCreated {
+		t.Fatalf("link: %d %s, want 201", link.Code, link.Body)
 	}
 	want := []domain.HumanWrite{
 		{UserID: "user-ada", Author: "Ada Lovelace", Kind: domain.HumanWriteHypothesis, Subject: registered.ID, PlatformExperimentID: "pe-1"},
 		{UserID: "user-ada", Author: "Ada Lovelace", Kind: domain.HumanWriteLink, Subject: registered.ID + " related " + f.own.ID, PlatformExperimentID: "pe-1"},
-		{UserID: "user-ada", Author: "Ada Lovelace", Kind: domain.HumanWriteComment, Subject: "c-1", PlatformExperimentID: "pe-1"},
 	}
 	if !slices.Equal(f.store.humanWrites, want) {
 		t.Fatalf("accounts kept:\n got = %+v\nwant = %+v", f.store.humanWrites, want)
@@ -162,17 +226,6 @@ func TestAUsersWriteCarriesTheProvidersNameAndTheirAccount(t *testing.T) {
 		t.Fatalf("registering the same text again: got = %d with %d accounts kept, want 200 and no new one", again.Code, len(f.store.humanWrites))
 	}
 
-	forAgent := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"agent_id": "agent-1", "text": "as the agent"})
-	var asAgent domain.HypothesisComment
-	if err := json.Unmarshal(forAgent.Body.Bytes(), &asAgent); err != nil || forAgent.Code != http.StatusCreated || asAgent.AgentID != "agent-1" || asAgent.Author != "" {
-		t.Fatalf("a user naming an agent: got = %d %s, want 201 as agent-1 with no author", forAgent.Code, forAgent.Body)
-	}
-	if len(f.store.humanWrites) != len(want) {
-		t.Fatalf("a write made for an agent was kept as a person's: %+v", f.store.humanWrites)
-	}
-	if rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"agent_id": "agent-9", "text": "x"}); rec.Code != http.StatusNotFound {
-		t.Fatalf("a user naming an agent of another org: got = %d, want = 404", rec.Code)
-	}
 }
 
 func TestAUserWithNoNameIsToldSoAndWritesNothing(t *testing.T) {
@@ -180,21 +233,18 @@ func TestAUserWithNoNameIsToldSoAndWritesNothing(t *testing.T) {
 	for route, rec := range map[string]*httptest.ResponseRecorder{
 		"register": f.do(t, http.MethodPost, "/hypotheses", map[string]any{
 			"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}),
-		"comment": f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"text": "a note"}),
 	} {
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no name") {
 			t.Errorf("%s: got = %d %s, want 400 saying the sign-in carries no name", route, rec.Code, rec.Body)
 		}
-	}
-	if rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"agent_id": "agent-1", "text": "x"}); rec.Code != http.StatusCreated {
-		t.Errorf("a nameless user naming an agent: got = %d %s, want = 201", rec.Code, rec.Body)
 	}
 }
 
 func TestAWriteWhoseAccountCouldNotBeKeptIsAnErrorWithoutTheCause(t *testing.T) {
 	f := newRegistryAs(t, ada)
 	f.store.failRecord = errors.New("pq: connection refused at 10.0.0.7")
-	rec := f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.own.ID)+"/comments", map[string]any{"text": "a note"})
+	rec := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
+		"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "pq:") {
 		t.Fatalf("got = %d %s, want 500 with no cause in the body", rec.Code, rec.Body)
 	}

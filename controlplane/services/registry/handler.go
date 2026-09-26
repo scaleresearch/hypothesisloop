@@ -698,14 +698,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		DefaultStatus: 201,
 		Description: "A freeform note with no job behind it (abandon/revise/cross-reference), as opposed to " +
 			"a finding, which requires a terminal job. Read the hypothesis's existing comments (GET " +
-			"/hypotheses/{id}) first — don't re-record a conclusion already there.",
+			"/hypotheses/{id}) first — don't re-record a conclusion already there. " +
+			"Who wrote it is the caller, answered as actor, and no field of the body names it: author is refused. " +
+			"agent_id says whose note it is. An agent token's note is its own agent's, named or not. " +
+			"Any other caller names an agent it reaches to write that agent's note, or names none and the note is the caller's own.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
-			// See the register-hypothesis body above: exactly-one-of is a rule about the pair,
-			// so neither field can be schema-required without rejecting the other's valid case.
-			AgentID string `json:"agent_id,omitempty" required:"false"`
-			Author  string `json:"author,omitempty" required:"false" doc:"A human contributor's name. Set this instead of agent_id, never both. A signed-in user is named by the identity provider whatever is sent here, and an agent token may not set it."`
+			AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent whose note this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
 			Text    string `json:"text"`
 		}
 	}) (*struct {
@@ -718,17 +718,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if _, err := loadHypothesis(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		origin, err := access.Origin(ctx, in.Body.AgentID, in.Body.Author)
+		owner, actor, err := access.Writer(ctx, in.Body.AgentID)
 		if err != nil {
 			return nil, err
 		}
-		c, err := h.svc.AddHypothesisComment(ctx, in.ID, origin.AgentID, origin.Author, in.Body.Text)
+		c, err := h.svc.AddHypothesisComment(ctx, in.ID, owner, actor, in.Body.Text)
 		if err != nil {
 			h.logger.Info("add hypothesis comment", zap.Error(err))
 			return nil, hypothesisWriteError(err)
-		}
-		if err := recordHumanWrite(ctx, origin, domain.HumanWriteComment, c.ID, c.PlatformExperimentID); err != nil {
-			return nil, err
 		}
 		return &struct {
 			Status int
@@ -767,10 +764,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if _, err := loadHypothesis(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if err := access.Agent(ctx, in.Body.AgentID); err != nil {
+		owner, actor, err := access.Writer(ctx, in.Body.AgentID)
+		if err != nil {
 			return nil, err
 		}
-		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, in.Body.AgentID, Verdict{Status: in.Body.Status, Against: in.Body.Against, Despite: in.Body.Despite})
+		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, owner, actor, Verdict{Status: in.Body.Status, Against: in.Body.Against, Despite: in.Body.Despite})
 		if err != nil {
 			h.logger.Info("set hypothesis status", zap.Error(err))
 			return nil, hypothesisWriteError(err)

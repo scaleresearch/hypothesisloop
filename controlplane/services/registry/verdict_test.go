@@ -46,7 +46,7 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 			"a reason that is one word": {Verdict{Status: status, Despite: "obvious"}, []string{"say in a sentence"}},
 		}
 		for name, c := range refusals {
-			_, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", c.verdict)
+			_, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), c.verdict)
 			var unsupported *UnsupportedVerdictError
 			if !errors.As(err, &unsupported) {
 				t.Fatalf("%s, %s: err = %v, want the verdict refused", status, name, err)
@@ -67,11 +67,11 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 
 		// A failed second run is no repeat; a completed one is.
 		store.jobs = append(store.jobs, jobOn("job-2", h.ID, domain.StatusFailed))
-		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", Verdict{Status: status, Against: "job-control"}); err == nil {
+		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: status, Against: "job-control"}); err == nil {
 			t.Fatalf("%s with one completed and one failed run was accepted", status)
 		}
 		store.jobs = append(store.jobs, jobOn("job-3", h.ID, domain.StatusCompleted))
-		settled, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", Verdict{Status: status, Against: "job-control"})
+		settled, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: status, Against: "job-control"})
 		if err != nil || settled.Status != status {
 			t.Fatalf("%s with two completed runs and a control: %v, %+v", status, err, settled)
 		}
@@ -89,7 +89,7 @@ func TestAVerdictWithoutTheEvidenceStandsOnAStatedReasonWhichIsKept(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.comments) != 1 || !strings.Contains(store.comments[0], enoughSaid) {
@@ -108,7 +108,7 @@ func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, status := range []domain.HypothesisStatus{domain.HypothesisInconclusive, domain.HypothesisOpen} {
-		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", Verdict{Status: status}); err != nil {
+		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: status}); err != nil {
 			t.Fatalf("%s: %v", status, err)
 		}
 	}

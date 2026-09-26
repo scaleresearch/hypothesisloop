@@ -118,7 +118,7 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     )
     assert r.status_code == 201, "a reviewer must be able to comment on another agent's hypothesis"
     hyp = api.hypothesis(reviewed_hyp["id"])
-    authors = {c.get("agent_id") or c.get("author") for c in hyp.get("comments") or []}
+    authors = {c["agent_id"] for c in hyp.get("comments") or []}
     assert reviewer in authors, "the reviewer's comment is not readable on the hypothesis"
 
     # The baseline and reviewer run HIGH, every competitor runs LOW: rank 1 can then only be a

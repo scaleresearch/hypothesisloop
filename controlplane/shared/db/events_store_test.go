@@ -94,8 +94,8 @@ func seedRun(t *testing.T, pool *Pool, suffix string, commit bool) (agentID, peI
 VALUES ($1, 'default', $1, 1, now(), now() + interval '1 hour')`, peID); err != nil {
 		t.Fatalf("insert platform experiment: got = %v, want = nil", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, text)
-VALUES ($1, $2, $3, 'watch test comment')`, hypothesisID, peID, agentID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, actor_kind, actor_id, text)
+VALUES ($1, $2, $3, 'agent', $3, 'watch test comment')`, hypothesisID, peID, agentID); err != nil {
 		t.Fatalf("insert comment: got = %v, want = nil", err)
 	}
 	if !commit {
@@ -580,7 +580,7 @@ func TestAnEventCommittedAfterALaterOneIsReplayedFromTheLaterOnesCursor(t *testi
 	defer stop()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	insert := `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, text) VALUES ($1, $2, $3, $4)`
+	insert := `INSERT INTO hypothesis_comments (hypothesis_id, platform_experiment_id, agent_id, actor_kind, actor_id, text) VALUES ($1, $2, $3, 'agent', $3, $4)`
 
 	early, err := pool.pool.Begin(ctx)
 	if err != nil {

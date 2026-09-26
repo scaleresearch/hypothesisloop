@@ -371,8 +371,7 @@ CREATE TABLE IF NOT EXISTS hypothesis_comments (
     -- Same pair as hypothesis_findings above.
     hypothesis_id  TEXT        NOT NULL,
     platform_experiment_id TEXT NOT NULL REFERENCES platform_experiments(id),
-    -- NULL on a human comment; author carries the typed name instead. Exactly one of the two is
-    -- set, on the same rule as hypotheses (domain.ClassifyHypothesisOrigin).
+    -- NULL on a comment no agent owns.
     agent_id       TEXT        REFERENCES agents(id),
     source         TEXT        NOT NULL DEFAULT 'agent',
     author         TEXT        NOT NULL DEFAULT '',
@@ -386,6 +385,13 @@ ALTER TABLE hypothesis_comments ALTER COLUMN agent_id DROP NOT NULL;
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'agent';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS platform_experiment_id TEXT REFERENCES platform_experiments(id);
+
+-- Whose credential wrote the comment, beside agent_id, which is whose comment it is. A row from
+-- before the credential was kept is 'unverified' with no id, and author holds the name it stated;
+-- no new row sets author.
+ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
+ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
+ALTER TABLE hypothesis_comments ALTER COLUMN actor_kind DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_platform ON hypothesis_comments(platform_experiment_id, created_at);

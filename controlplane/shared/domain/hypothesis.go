@@ -201,17 +201,25 @@ type HypothesisFinding struct {
 // requiring a terminal job. Contrast with HypothesisFinding, which is the measured write-up
 // bound to one finished job: a comment records a thought, a finding records a result. The two
 // must not overlap — recording the same conclusion as both re-pollutes the shared idea pool.
-// A comment carries the same origin pair as its hypothesis: AgentID on an agent's note, Author
-// on a human's, exactly one of the two (see ClassifyHypothesisOrigin).
+// AgentID is the agent whose note it is, empty on one no agent owns. Actor is whose credential
+// wrote it, which is another fact: a person or an API key may write an agent's note for it.
 type HypothesisComment struct {
 	ID                   string           `json:"id"`
 	HypothesisID         string           `json:"hypothesis_id"`
 	PlatformExperimentID string           `json:"platform_experiment_id"`
 	AgentID              string           `json:"agent_id"`
 	Source               HypothesisSource `json:"source"`
-	Author               string           `json:"author"`
+	Actor                Actor            `json:"actor"`
 	Text                 string           `json:"text"`
 	CreatedAt            time.Time        `json:"created_at"`
+}
+
+// SourceOf is the source of a record owned by agentID: an agent's, or with no owner a human's.
+func SourceOf(agentID string) HypothesisSource {
+	if agentID != "" {
+		return HypothesisSourceAgent
+	}
+	return HypothesisSourceHuman
 }
 
 // NormalizeHypothesisText collapses a hypothesis statement to a canonical form (lowercased,

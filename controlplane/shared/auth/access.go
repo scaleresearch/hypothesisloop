@@ -402,6 +402,34 @@ func (a *Access) PlatformExperimentIDs(ctx context.Context, projectID string) (i
 	return ids, true, err
 }
 
+// Writer resolves the two facts a record of a write keeps: whose record it is, and whose
+// credential made it. The owner is the agent the request names, and the actor is the caller,
+// never anything the request says.
+//
+// An agent token is both: it names itself or nobody, and its record is its own. Any other caller
+// may name an agent it reaches and so write for it, which leaves the agent as owner with the
+// caller recorded beside it. With no agent named the record has no owner and is the caller's own.
+func (a *Access) Writer(ctx context.Context, agentID string) (ownerAgentID string, actor domain.Actor, err error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return "", domain.Actor{}, err
+	}
+	actor = p.Actor()
+	if actor.Kind == "" {
+		return "", domain.Actor{}, forbidden("a " + string(p.Kind) + " token writes no record of its own")
+	}
+	if p.Kind == KindAgent && agentID == "" {
+		return p.AgentID, actor, nil
+	}
+	if agentID == "" {
+		return "", actor, nil
+	}
+	if err := a.Agent(ctx, agentID); err != nil {
+		return "", domain.Actor{}, err
+	}
+	return agentID, actor, nil
+}
+
 // Origin is who a contribution to the hypothesis graph is by: an agent, or a person by name.
 // UserID is the signed-in person behind Author, since the name is their own claim.
 type Origin struct {

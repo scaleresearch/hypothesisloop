@@ -33,7 +33,9 @@ type Store interface {
 	CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error)
 	FindingSummaries(ctx context.Context, experimentIDs []string) (map[string]string, error)
-	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID string, source domain.HypothesisSource, agentID, author, text string) (*domain.HypothesisComment, error)
+	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error)
+	// NameActors sets on each actor the name it carries now.
+	NameActors(ctx context.Context, actors []*domain.Actor) error
 	RecordHumanWrite(ctx context.Context, w domain.HumanWrite) error
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
