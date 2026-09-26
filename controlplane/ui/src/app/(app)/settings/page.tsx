@@ -2,14 +2,15 @@
 
 import { useState } from 'react'
 import { createProject, renameOrg, renameProject } from '@/lib/api'
+import { GITHUB_CARD } from '@/lib/github-connect'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgClusters } from '@/components/org-clusters'
+import { OrgGitHub } from '@/components/org-github'
 import { OrgMembers } from '@/components/org-members'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
-import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 
@@ -119,11 +120,11 @@ export default function SettingsPage() {
   const { org, project, administers } = useTenant()
   return (
     <div>
-      <PageHeader title="Settings" description={`${org.name}: its name, projects, members, API keys and clusters.`} />
+      <PageHeader title="Settings" description={`${org.name}: its name, projects, members, API keys, clusters and GitHub accounts.`} />
 
       {!administers && (
         <p className="mb-4 text-sm text-muted">
-          You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and clusters.
+          You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys, clusters and GitHub accounts.
         </p>
       )}
 
@@ -154,13 +155,10 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>Repository</CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted">
-            The GitHub repository the agents and jobs of {project.name} clone, and its agents push their branches to.{' '}
-            <Link href="/settings/repository" className="text-accent hover:underline">Repository of {project.name}</Link>
-          </p>
+      <Card id={GITHUB_CARD} className="scroll-mt-4">
+        <CardHeader>GitHub</CardHeader>
+        <CardContent scrollX>
+          <OrgGitHub />
         </CardContent>
       </Card>
     </div>

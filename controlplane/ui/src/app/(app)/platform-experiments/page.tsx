@@ -22,6 +22,8 @@ import { COMMON_ML_METRICS } from '@/types'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { formatDate, isZeroDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/page-header'
+import { Disclosure } from '@/components/ui/disclosure'
+import { RepositorySelect } from '@/components/repository-select'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
@@ -239,6 +241,8 @@ interface FormState {
   stages: StageDraft[]
   hypothesis_submit_policy: SubmitterPolicy
   job_submit_policy: SubmitterPolicy
+  repository: string
+  agent_image: string
 }
 
 const POLICY_OPTIONS: Array<{ value: SubmitterPolicy; label: string }> = [
@@ -510,6 +514,8 @@ function ExperimentModal({
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
     hypothesis_submit_policy: initial?.hypothesis_submit_policy ?? 'mixed',
     job_submit_policy: initial?.job_submit_policy ?? 'mixed',
+    repository: initial?.repository ?? '',
+    agent_image: initial?.agent_image ?? '',
   })
   const [step, setStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
@@ -556,6 +562,9 @@ function ExperimentModal({
         // Omitted when editing: the backend fixes the ladder at creation and silently ignores
         // it on update, so sending it would imply an edit that never happens.
         ...(isEdit ? {} : { stages: toStages(form.stages) }),
+        // The repository and the agent image are fixed at creation too.
+        ...(!isEdit && form.repository ? { repository: form.repository } : {}),
+        ...(!isEdit && form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
         starts_at: new Date(form.starts_at).toISOString(),
         ends_at: new Date(form.ends_at).toISOString(),
       }
@@ -629,6 +638,31 @@ function ExperimentModal({
                     <MetricsEditor metrics={form.metrics} onChange={m => set('metrics', m)} />
                   )}
                 </FieldGroup>
+
+                {isEdit ? (
+                  <FieldGroup label="Repository and agent image" hint="Fixed when the experiment was created.">
+                    <p className="font-mono text-xs">
+                      {form.repository || 'no repository'} · {form.agent_image || 'the platform\'s agent image'}
+                    </p>
+                  </FieldGroup>
+                ) : (
+                  <>
+                    <FormField
+                      label="Repository"
+                      hint="The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. Fixed once created."
+                    >
+                      <RepositorySelect value={form.repository} onChange={r => set('repository', r)} />
+                    </FormField>
+                    <Disclosure label="Advanced">
+                      <FormField
+                        label="Agent image"
+                        hint="The container image hosted agents and the coordinator run. Leave it empty for the platform's own agent image. A custom image must be built FROM that one, so the harness is in it. Fixed once created."
+                      >
+                        <Input mono value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
+                      </FormField>
+                    </Disclosure>
+                  </>
+                )}
               </>
             ) : (
               <>

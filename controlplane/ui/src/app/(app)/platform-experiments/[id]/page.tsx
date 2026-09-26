@@ -38,6 +38,7 @@ import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { StatTile } from '@/components/ui/stat-tile'
 import { PageHeader } from '@/components/ui/page-header'
+import { ExperimentCode } from '@/components/experiment-code'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { Table } from '@/components/ui/table'
 import { Eyebrow, Pill } from '@/components/ui/text'
@@ -692,6 +693,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
               {hypothesisCount} Hypotheses →
             </Link>
             <SubmitPolicyChips pe={pe} />
+            <div className="basis-full">
+              <ExperimentCode pe={pe} />
+            </div>
           </div>
         }
       />

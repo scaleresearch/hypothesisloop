@@ -31,7 +31,8 @@ import type {
   HypothesisWithJobs,
   JobMetric,
   GitHubApp,
-  ProjectRepo,
+  GitHubInstallation,
+  GitHubRepository,
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
@@ -47,7 +48,8 @@ function apiURL(): string {
 
 /** A refusal or failure the API answered with: its status, its own message, and its reason code when it gave one. */
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string, readonly reason?: string) {
+  /** `body` is the whole answer, for a refusal that carries more than its reason. */
+  constructor(readonly status: number, message: string, readonly reason?: string, readonly body?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
   }
@@ -58,14 +60,15 @@ async function failure(res: Response): Promise<ApiError> {
   const text = await res.text()
   let message = text
   let reason: string | undefined
+  let body: Record<string, unknown> | undefined
   try {
-    const body = JSON.parse(text)
-    message = body.message ?? body.error ?? text
-    reason = body.reason
+    body = JSON.parse(text)
+    message = (body?.message ?? body?.error ?? text) as string
+    reason = body?.reason as string | undefined
   } catch {
     // A proxy in front of the API answers in its own format.
   }
-  return new ApiError(res.status, message || `API error ${res.status}`, reason)
+  return new ApiError(res.status, message || `API error ${res.status}`, reason, body)
 }
 
 // Every call to the API goes through here: it carries the session's access token, and a session
@@ -431,6 +434,10 @@ export interface CreatePlatformExperimentRequest {
   stages?: Stage[]
   starts_at: string
   ends_at: string
+  /** owner/name of a repository a connected GitHub account covers. Read at creation only. */
+  repository?: string
+  /** The image hosted agents and the coordinator run; omitted means the platform's. Read at creation only. */
+  agent_image?: string
 }
 
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
@@ -669,39 +676,42 @@ export function acceptOrgInvite(token: string): Promise<OrgMember> {
 }
 
 // ---------------------------------------------------------------------------
-// Repositories
+// GitHub
 // ---------------------------------------------------------------------------
 
-// Answered 503 on a deployment that has no GitHub App.
+/** The reason the API gives on a deployment that has no GitHub App. */
+export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
+/** The person's GitHub account reaches no installation of the App. */
+export const APP_NOT_INSTALLED = 'app_not_installed'
+/** The person reaches several installations; the refusal's body lists them as `installations`. */
+export const INSTALLATION_CHOICE_REQUIRED = 'installation_choice_required'
+
+// Answered 503 github_not_configured on a deployment that has no GitHub App.
 export function fetchGitHubApp(): Promise<GitHubApp> {
   return apiFetch<GitHubApp>('/github/app')
 }
 
-// A project with no repository is answered 404 with this reason, which is an answer and no
-// failure. Any other 404, such as a project that is gone, is a failure like the rest.
-const NO_REPOSITORY = 'no_repository'
-
-export async function fetchProjectRepo(projectID: string): Promise<ProjectRepo | null> {
-  const res = await request('GET', `/projects/${projectID}/repo`)
-  if (res.ok) return res.json()
-  const refusal = await failure(res)
-  if (refusal.status === 404 && refusal.reason === NO_REPOSITORY) return null
-  throw refusal
+// Oldest first, as recorded at connect: GitHub is not asked.
+export function fetchGitHubInstallations(orgID: string): Promise<Page<GitHubInstallation>> {
+  return apiFetchPage<GitHubInstallation>(`/orgs/${orgID}/github-installations?limit=${MAX_LIST_PAGE_SIZE}`)
 }
 
-/** The reason the API gives for refusing an attach when the GitHub App is not on the repository. */
-export const APP_NOT_INSTALLED = 'app_not_installed'
-
 // `code` is what GitHub returned from authorising the App, to `redirectURI`: it proves the person
-// can push to the repository, and works once.
-export function attachProjectRepo(
-  projectID: string, attach: { repo: string; code: string; redirectURI: string },
-): Promise<ProjectRepo> {
-  return apiSend<ProjectRepo>('POST', `/projects/${projectID}/repo`, {
-    repo: attach.repo, code: attach.code, redirect_uri: attach.redirectURI,
+// reaches the installation, and works once. Without `installationID` the one installation they
+// reach is connected, and reaching several is refused with INSTALLATION_CHOICE_REQUIRED.
+export function connectGitHubInstallation(
+  orgID: string, connect: { code: string; redirectURI: string; installationID?: number },
+): Promise<GitHubInstallation> {
+  return apiSend<GitHubInstallation>('POST', `/orgs/${orgID}/github-installations`, {
+    code: connect.code, redirect_uri: connect.redirectURI, installation_id: connect.installationID,
   })
 }
 
-export async function detachProjectRepo(projectID: string): Promise<void> {
-  await answer('DELETE', `/projects/${projectID}/repo`)
+export async function disconnectGitHubInstallation(orgID: string, installationID: number): Promise<void> {
+  await answer('DELETE', `/orgs/${orgID}/github-installations/${installationID}`)
+}
+
+// Read from GitHub on every call, so a caller that searches as the person types waits for a pause.
+export function fetchGitHubRepositories(orgID: string, params: { q?: string; limit?: number } = {}): Promise<Page<GitHubRepository>> {
+  return apiFetchPage<GitHubRepository>(withQuery(`/orgs/${orgID}/github-repositories`, params))
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
-  ApiError, addHumanHypothesisComment, registerCluster, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
+  ApiError, addHumanHypothesisComment, registerCluster, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
   fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
   registerHumanHypothesis, revokeAPIKey,
   acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
@@ -211,45 +211,61 @@ describe('registering a cluster', () => {
   })
 })
 
-describe('a project\'s repository', () => {
-  it('is null for a project that has none, which the API answers 404 with its reason', async () => {
-    fetchMock().mockResolvedValue(answer(404, { reason: 'no_repository', message: 'no repository is attached to this project' }))
-    await expect(fetchProjectRepo('prj_1')).resolves.toBeNull()
-    expect(sent().url.pathname).toBe('/projects/prj_1/repo')
+describe('an org\'s GitHub accounts', () => {
+  it('are read as a page with its total', async () => {
+    fetchMock().mockResolvedValue(answer(200, [{ installation_id: 7, account_login: 'acme' }], { 'X-Total-Count': '1' }))
+    await expect(fetchGitHubInstallations('org_a')).resolves.toEqual({ items: [{ installation_id: 7, account_login: 'acme' }], total: 1 })
+    expect(sent().url.pathname).toBe('/orgs/org_a/github-installations')
+    expect(sent().url.searchParams.get('limit')).toBe('200')
   })
 
-  it('is a failure for any other 404, such as a project that is gone', async () => {
-    fetchMock().mockResolvedValue(answer(404, { message: 'project not found' }))
-    await expect(fetchProjectRepo('prj_1')).rejects.toMatchObject({ status: 404, message: 'project not found' })
-  })
-
-  it('is a failure when the read fails any other way, whatever reason it carries', async () => {
-    fetchMock().mockResolvedValue(answer(500, { reason: 'no_repository', message: 'internal error' }))
-    await expect(fetchProjectRepo('prj_1')).rejects.toThrow('internal error')
-  })
-
-  it('is attached with the name, the code GitHub returned and where it returned it', async () => {
-    fetchMock().mockResolvedValue(answer(200, { project_id: 'prj_1', repo: 'acme/widgets' }))
-    await attachProjectRepo('prj_1', { repo: 'acme/widgets', code: 'code-1', redirectURI: 'http://ui.test/settings/repository' })
+  it('are connected with the code GitHub returned and where it returned it, naming no installation', async () => {
+    fetchMock().mockResolvedValue(answer(201, { org_id: 'org_a', installation_id: 7, account_login: 'acme' }))
+    await connectGitHubInstallation('org_a', { code: 'code-1', redirectURI: 'http://ui.test/settings/repository' })
     expect(sent().init.method).toBe('POST')
-    expect(sent().url.pathname).toBe('/projects/prj_1/repo')
-    expect(sent().body).toEqual({ repo: 'acme/widgets', code: 'code-1', redirect_uri: 'http://ui.test/settings/repository' })
+    expect(sent().url.pathname).toBe('/orgs/org_a/github-installations')
+    expect(sent().body).toEqual({ code: 'code-1', redirect_uri: 'http://ui.test/settings/repository' })
   })
 
-  it('carries the API\'s reason for a refusal, as when the App is not on the repository', async () => {
-    fetchMock().mockResolvedValue(answer(422, { reason: 'app_not_installed', message: 'the GitHub App is not installed on acme/widgets' }))
-    await expect(attachProjectRepo('prj_1', { repo: 'acme/widgets', code: 'c', redirectURI: 'u' })).rejects.toMatchObject({
-      status: 422, reason: 'app_not_installed', message: 'the GitHub App is not installed on acme/widgets',
+  it('are connected by installation once the person chose one', async () => {
+    fetchMock().mockResolvedValue(answer(201, { org_id: 'org_a', installation_id: 9, account_login: 'lab' }))
+    await connectGitHubInstallation('org_a', { code: 'c', redirectURI: 'u', installationID: 9 })
+    expect(sent().body).toEqual({ code: 'c', redirect_uri: 'u', installation_id: 9 })
+  })
+
+  it('carry the installations to choose from when the person reaches several', async () => {
+    const installations = [{ installation_id: 7, account_login: 'acme' }, { installation_id: 9, account_login: 'lab' }]
+    fetchMock().mockResolvedValue(answer(409, { reason: 'installation_choice_required', message: 'name one', installations }))
+    const refusal = await connectGitHubInstallation('org_a', { code: 'c', redirectURI: 'u' }).catch(e => e)
+    expect(refusal).toBeInstanceOf(ApiError)
+    expect(refusal).toMatchObject({ status: 409, reason: 'installation_choice_required', message: 'name one' })
+    expect(refusal.body.installations).toEqual(installations)
+  })
+
+  it('carry the API\'s reason for a refusal, as when the App is installed nowhere the person reaches', async () => {
+    fetchMock().mockResolvedValue(answer(422, { reason: 'app_not_installed', message: 'you reach no installation' }))
+    await expect(connectGitHubInstallation('org_a', { code: 'c', redirectURI: 'u' })).rejects.toMatchObject({
+      status: 422, reason: 'app_not_installed', message: 'you reach no installation',
     })
   })
 
-  it('is detached by a call that answers with no body', async () => {
+  it('are disconnected by a call that answers with no body', async () => {
     fetchMock().mockResolvedValue(new Response(null, { status: 204 }))
-    await expect(detachProjectRepo('prj_1')).resolves.toBeUndefined()
+    await expect(disconnectGitHubInstallation('org_a', 7)).resolves.toBeUndefined()
     expect(sent().init.method).toBe('DELETE')
+    expect(sent().url.pathname).toBe('/orgs/org_a/github-installations/7')
   })
 
-  it('cannot be attached on a deployment without a GitHub App, which answers 503', async () => {
+  it('list their repositories by a search the server runs', async () => {
+    fetchMock().mockResolvedValue(answer(200, [{ repository: 'acme/widgets', installation_id: 7, private: true }], { 'X-Total-Count': '12' }))
+    await expect(fetchGitHubRepositories('org_a', { q: 'wid', limit: 50 })).resolves.toEqual({
+      items: [{ repository: 'acme/widgets', installation_id: 7, private: true }], total: 12,
+    })
+    expect(sent().url.pathname).toBe('/orgs/org_a/github-repositories')
+    expect(sent().url.search).toBe('?q=wid&limit=50')
+  })
+
+  it('cannot be connected on a deployment without a GitHub App, which answers 503', async () => {
     fetchMock().mockResolvedValue(answer(503, { reason: 'github_not_configured', message: 'this deployment has no GitHub App configured' }))
     await expect(fetchGitHubApp()).rejects.toMatchObject({ status: 503, reason: 'github_not_configured' })
   })

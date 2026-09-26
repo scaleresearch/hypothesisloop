@@ -211,6 +211,12 @@ export interface PlatformExperiment {
   signed_up_agents?: string[]
   metrics?: MetricDefinition[]
   report_interval_seconds?: number
+  // The code it works on, owner/name on GitHub, and the address agents clone and jobs check out.
+  // Both absent when it names none. Fixed at creation.
+  repository?: string
+  repository_url?: string
+  // The image its hosted agents and coordinator run. Absent means the platform's own.
+  agent_image?: string
   created_at: string
 }
 
@@ -570,13 +576,29 @@ export interface GitHubApp {
   authorize_url: string
 }
 
-/** The repository a project's agents and jobs clone. */
-export interface ProjectRepo {
-  project_id: string
+/**
+ * An installation of the platform's GitHub App that an org connected: a GitHub account, with the
+ * repositories its owner chose on GitHub. A platform experiment of the org may name any of them.
+ */
+export interface GitHubInstallation {
+  org_id: string
   installation_id: number
-  repository_id: number
+  /** The GitHub user or organisation the App is installed on. */
+  account_login: string
+  connected_by: string
+  connected_at: string
+}
+
+/** An installation the person can reach, as a connect that must ask which one lists it. */
+export interface ReachableInstallation {
+  installation_id: number
+  account_login: string
+}
+
+/** A repository a platform experiment of the org may name. */
+export interface GitHubRepository {
   /** owner/name. */
-  repo: string
-  attached_at: string
-  clone_url: string
+  repository: string
+  installation_id: number
+  private: boolean
 }

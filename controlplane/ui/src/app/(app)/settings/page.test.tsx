@@ -12,6 +12,7 @@ vi.mock('@/lib/api', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOr
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))
 vi.mock('@/components/org-clusters', () => ({ OrgClusters: () => <p>clusters</p> }))
 vi.mock('@/components/org-members', () => ({ OrgMembers: () => <p>members</p> }))
+vi.mock('@/components/org-github', () => ({ OrgGitHub: () => <p>github accounts</p> }))
 
 const at = '2026-01-01T00:00:00Z'
 const owner: Me = {
@@ -113,7 +114,7 @@ describe('creating a project', () => {
 describe('a member of the org', () => {
   it('sees its clusters and that the rest is an owner\'s, with nothing to change', () => {
     show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member' }] })
-    expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys and clusters/)).toBeTruthy()
+    expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys, clusters and GitHub accounts/)).toBeTruthy()
     expect(screen.getByText('clusters')).toBeTruthy()
     expect(screen.getByText('members')).toBeTruthy()
     expect(screen.queryByText('api keys')).toBeNull()
@@ -122,10 +123,9 @@ describe('a member of the org', () => {
   })
 })
 
-describe('the repository section', () => {
-  it('leads to the repository of the selected project', () => {
+describe('the GitHub section', () => {
+  it('is a card of the page, which a link can lead to, for an owner and a member alike', () => {
     show()
-    const link = screen.getByRole('link', { name: 'Repository of default' })
-    expect(link.getAttribute('href')).toBe('/settings/repository?project=prj_1')
+    expect(screen.getByText('github accounts').closest('#github')).not.toBeNull()
   })
 })

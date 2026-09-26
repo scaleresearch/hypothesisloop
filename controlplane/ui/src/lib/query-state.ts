@@ -28,10 +28,11 @@ export function useQueryParam(name: string, defaultValue = '') {
 const PROJECT_PARAM = 'project'
 
 function withProject(href: string, project: string): string {
-  const [path, query = ''] = href.split('?')
+  const [address, fragment] = href.split('#')
+  const [path, query = ''] = address.split('?')
   const params = new URLSearchParams(query)
   params.set(PROJECT_PARAM, project)
-  return `${path}?${params.toString()}`
+  return `${path}?${params.toString()}${fragment === undefined ? '' : `#${fragment}`}`
 }
 
 /** Maps an in-app href to the same place inside the selected project. */
