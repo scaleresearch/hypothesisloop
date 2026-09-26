@@ -109,14 +109,6 @@ def prepare() -> RunSetup:
         cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"))
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
-    # hl reads who it is from HL_TOKEN. These two are what its commands that have not moved to
-    # the token yet still read, so they say what the token says and nothing left over from
-    # whoever started this process.
-    os.environ["PLATFORM_EXPERIMENT_ID"] = cfg.platform_experiment_id
-    os.environ.pop("AGENT_ID", None)
-    if not config.coordinates(cfg):
-        os.environ["AGENT_ID"] = cfg.agent_id
-
     # Per-agent by default: two agents launched from the same cwd (the natural way to run a
     # multi-agent competition on one box) must not resolve to the same repo checkout.
     workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
