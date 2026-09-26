@@ -554,9 +554,10 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
+	shared := fs.Bool("shared", false, "the platform experiments the platform shows every account, in place of your own: read them like your own, write nothing to them")
 	if len(args) > 0 && args[0] == "list" {
 		args = args[1:]
 	}
@@ -567,7 +568,13 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 		return parseExit(misuse(fs, "unknown subcommand %q", fs.Arg(0)))
 	}
 	q := url.Values{"limit": {strconv.Itoa(*limit)}}
-	if p := orEnv(*project, projectEnv); p != "" {
+	if *shared {
+		// A shared platform experiment is in another org's project, so $HL_PROJECT does not narrow these.
+		q.Set("shared", "true")
+		if *project != "" {
+			q.Set("project_id", *project)
+		}
+	} else if p := orEnv(*project, projectEnv); p != "" {
 		q.Set("project_id", p)
 	}
 	var out any

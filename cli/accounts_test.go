@@ -270,6 +270,17 @@ func TestAccountGroupsListTheirCommands(t *testing.T) {
 	}
 }
 
+func TestPlatformExperimentsListSharedAsksForTheSharedOnesOfEveryProject(t *testing.T) {
+	calls := accountsServer(t, nil, `[]`)
+	t.Setenv("HL_PROJECT", "prj-env")
+	if code, _, stderr := hl(t, "platform-experiments", "list", "--shared"); code != 0 || (*calls)[0].path != "/platform-experiments?limit=20&shared=true" {
+		t.Fatalf("--shared: exit code = %d, calls = %+v, stderr = %s, want the shared ones with no project of the environment", code, *calls, stderr)
+	}
+	if code, _, _ := hl(t, "platform-experiments", "--shared", "--project", "prj-flag", "--limit", "5"); code != 0 || (*calls)[1].path != "/platform-experiments?limit=5&project_id=prj-flag&shared=true" {
+		t.Fatalf("--shared with --project: exit code = %d, call = %+v", code, (*calls)[1])
+	}
+}
+
 func TestPlatformExperimentsListFiltersByProject(t *testing.T) {
 	calls := accountsServer(t, nil, `[]`)
 	if code, _, stderr := hl(t, "platform-experiments", "list"); code != 0 || (*calls)[0].path != "/platform-experiments?limit=20" {

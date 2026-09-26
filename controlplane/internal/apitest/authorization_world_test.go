@@ -30,7 +30,8 @@ import (
 )
 
 // world is the rows every token and every access check of the authorization table is resolved
-// against: two orgs, org-a holding two projects, and one platform experiment in each project.
+// against: two orgs, org-a holding two projects, one platform experiment in each project, and a
+// second one in org-b that staff shared.
 // It is the directory behind the real authenticator and the placement behind the real access
 // checks, so the table exercises both as control-service joins them.
 type world struct {
@@ -43,14 +44,17 @@ const (
 	worldAudience = "hypothesisloop-test"
 	worldLauncher = "main"
 	worldMember   = "user-m"
+	// worldShared is the one platform experiment of org-b that staff shared with every account.
+	worldShared = "pe-show"
 )
 
 var (
 	worldOrgOf     = map[string]string{"prj-a1": "org-a", "prj-a2": "org-a", "prj-b": "org-b"}
-	worldProjectOf = map[string]string{"pe-a1": "prj-a1", "pe-a2": "prj-a2", "pe-b": "prj-b"}
+	worldProjectOf = map[string]string{"pe-a1": "prj-a1", "pe-a2": "prj-a2", "pe-b": "prj-b", worldShared: "prj-b"}
 	// Each job, donation request and hypothesis: its platform experiment and its agent.
 	worldPlaced = map[string][2]string{
 		"own": {"pe-a1", "agent-1"}, "peer": {"pe-a1", "agent-2"}, "sibling": {"pe-a2", "agent-2"}, "foreign": {"pe-b", "agent-9"},
+		"shared": {worldShared, "agent-9"},
 	}
 	worldAgentOrg   = map[string]string{"agent-1": "org-a", "agent-2": "org-a", "agent-9": "org-b"}
 	worldClusterOrg = map[string]string{"cluster-a": "org-a", "cluster-b": "org-b"}
@@ -61,7 +65,8 @@ func (w *world) tenancy(platformExperimentID, agentID string) *domain.Tenancy {
 	if !ok {
 		return nil
 	}
-	return &domain.Tenancy{PlatformExperimentID: platformExperimentID, ProjectID: projectID, OrgID: worldOrgOf[projectID], AgentID: agentID}
+	return &domain.Tenancy{PlatformExperimentID: platformExperimentID, ProjectID: projectID, OrgID: worldOrgOf[projectID], AgentID: agentID,
+		Shared: platformExperimentID == worldShared}
 }
 
 // placed resolves an id of the form "<prefix>-<owner>", as every job, donation request and
@@ -271,6 +276,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	peHandler := quota.NewPlatformExperimentsHandler(nil, noProjectRepos{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
+	quota.RegisterShareHuma(doc, nil, logger)
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(

@@ -65,6 +65,11 @@ def share_cluster(name: str, shared: bool) -> None:
     _run("cluster", "share", name, "on" if shared else "off")
 
 
+def share_platform_experiment(pe_id: str, shared: bool) -> None:
+    """Lets every account read the platform experiment, or only its own org again."""
+    _run("platform-experiment", "share" if shared else "unshare", pe_id)
+
+
 def attach_repo(project_id: str, installation_id: str, repository_id: str) -> None:
     """Records a GitHub repository as the project's, standing in for the person who proves in a
     browser that they can push to it. GitHub is asked that the installation covers it."""

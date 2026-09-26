@@ -19,14 +19,16 @@ var principals = []string{"user", "member", "org key", "project key", "agent", "
 
 // Whose object a request names. own is agent-1's in pe-a1, peer another agent's in the same
 // platform experiment, sibling one in pe-a2 (same org, another project), foreign one in org-b,
-// absent an id with no row.
-var owners = []string{"own", "peer", "sibling", "foreign", "absent"}
+// absent an id with no row, and shared one in the platform experiment of org-b that staff shared
+// with every account.
+var owners = []string{"own", "peer", "sibling", "foreign", "absent", "shared"}
 
 var named = map[string]map[string]string{
 	"own":     {"pe": "pe-a1", "job": "job-own", "don": "don-own", "hyp": "hyp-own", "agent": "agent-1", "cluster": "cluster-a", "org": "org-a", "prj": "prj-a1"},
 	"peer":    {"pe": "pe-a1", "job": "job-peer", "don": "don-peer", "hyp": "hyp-peer", "agent": "agent-2", "cluster": "cluster-a", "org": "org-a", "prj": "prj-a1"},
 	"sibling": {"pe": "pe-a2", "job": "job-sibling", "don": "don-sibling", "hyp": "hyp-sibling", "agent": "agent-2", "cluster": "cluster-a", "org": "org-a", "prj": "prj-a2"},
 	"foreign": {"pe": "pe-b", "job": "job-foreign", "don": "don-foreign", "hyp": "hyp-foreign", "agent": "agent-9", "cluster": "cluster-b", "org": "org-b", "prj": "prj-b"},
+	"shared":  {"pe": "pe-show", "job": "job-shared", "don": "don-shared", "hyp": "hyp-shared", "agent": "agent-9", "cluster": "cluster-b", "org": "org-b", "prj": "prj-b"},
 	"absent":  {"pe": "pe-none", "job": "job-none", "don": "don-none", "hyp": "hyp-none", "agent": "agent-none", "cluster": "cluster-none", "org": "org-none", "prj": "prj-none"},
 }
 
@@ -46,6 +48,21 @@ type route struct {
 	request string
 	body    string
 	rule    rule
+	// sharedRead is the route's cell for another org's account on the shared platform
+	// experiment: set, an account reads there what it reads of its own; unset, the route answers
+	// every caller there exactly as on a platform experiment of another org.
+	sharedRead bool
+}
+
+// want is what the route answers the caller for an object of the owner.
+func (r route) want(principal, owner string) int {
+	if owner != "shared" {
+		return r.rule(principal, owner)
+	}
+	if r.sharedRead && among(people, principal) {
+		return r.rule(principal, "own")
+	}
+	return r.rule(principal, "foreign")
 }
 
 func (api *worldAPI) call(method, target, body, token string) int {
@@ -124,7 +141,7 @@ func TestEveryRouteAnswersEachCallerAsItsRuleSays(t *testing.T) {
 				if discover || r.rule == nil {
 					continue
 				}
-				if want := r.rule(principal, owner); got != want {
+				if want := r.want(principal, owner); got != want {
 					t.Errorf("%s %s as %s on the %s object: got = %d, want = %d", r.method, target, principal, owner, got, want)
 				}
 			}

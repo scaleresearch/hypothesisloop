@@ -214,6 +214,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Limit     int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset    int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort      string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
+		Shared    bool   `query:"shared" doc:"The platform experiments staff shared with every account, of whatever org, in place of the caller's own. Each can be read and not written."`
 	}) (*struct {
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
@@ -227,11 +228,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		scope, err := access.ListScope(ctx, in.ProjectID)
+		scope, err := access.PlatformExperimentListScope(ctx, in.ProjectID, in.Shared)
 		if err != nil {
 			return nil, err
 		}
 		filter := db.PlatformExperimentsFilter{
+			Shared: in.Shared,
 			Scope:  scope,
 			Status: in.Status,
 			Search: in.Search,

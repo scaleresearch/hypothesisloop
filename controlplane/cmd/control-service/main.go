@@ -249,6 +249,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repos, p
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access, logger)
 	quota.RegisterHuma(doc, handler, peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
+	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)

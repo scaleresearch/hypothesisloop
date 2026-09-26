@@ -52,6 +52,7 @@ func TestAMalformedScopeOrCommandIsAnError(t *testing.T) {
 	for _, args := range [][]string{
 		{"token", "root"}, {"token", "agent:pe-only"}, {"token"}, {"cluster", "add", "name"}, {"user", "add", "subject"}, {},
 		{"user", "staff", "subject"}, {"user", "staff", "subject", "yes"}, {"cluster", "share", "name"}, {"cluster", "share", "name", "true"},
+		{"platform-experiment", "share"}, {"platform-experiment", "share", "pe-1", "on"}, {"platform-experiment", "show", "pe-1"},
 		{"launcher", "add"}, {"launcher", "remove"}, {"launcher", "add", "main", "default"}, {"launcher", "list", "main"},
 	} {
 		var stdout bytes.Buffer
@@ -68,6 +69,7 @@ func TestDatabaseCommandsNeedADatabase(t *testing.T) {
 	for _, args := range [][]string{
 		{"cluster", "add", "name", "default"}, {"cluster", "share", "name", "on"}, {"user", "staff", "subject", "off"},
 		{"launcher", "add", "main"}, {"launcher", "remove", "main"},
+		{"platform-experiment", "share", "pe-1"}, {"platform-experiment", "unshare", "pe-1"},
 	} {
 		if err := run(args, &stdout); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
 			t.Fatalf("hl-admin %v: got = %v, want an error naming DATABASE_URL", args, err)

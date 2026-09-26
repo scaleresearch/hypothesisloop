@@ -31,6 +31,8 @@ const usage = `usage: hl-admin <command>
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
+  platform-experiment share ID     let every account read a platform experiment and what is in it
+  platform-experiment unshare ID   take that back: its own org alone reads it again
   launcher add NAME                register an agent-launcher and print its token
   launcher remove NAME             end a launcher's token. Empty it first: what it still holds
                                    is then nobody's to take down
@@ -96,6 +98,14 @@ func run(args []string, stdout io.Writer) error {
 			return json.NewEncoder(stdout).Encode(struct {
 				Requeued []string `json:"requeued"`
 			}{append([]string{}, requeued...)})
+		})
+	case len(args) == 3 && args[0] == "platform-experiment" && (args[1] == "share" || args[1] == "unshare"):
+		return withPool(func(ctx context.Context, pool *db.Pool) error {
+			found, err := db.NewPlatformExperimentsStore(pool).SetPlatformExperimentShared(ctx, args[2], args[1] == "share")
+			if err == nil && !found {
+				err = fmt.Errorf("no platform experiment %s", args[2])
+			}
+			return err
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "add":
 		return withPool(func(ctx context.Context, pool *db.Pool) error {

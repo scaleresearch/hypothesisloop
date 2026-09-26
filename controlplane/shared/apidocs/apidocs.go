@@ -73,11 +73,14 @@ const (
 	// its {name} path parameter names, and staff. Kept apart from AudienceInternal so that a
 	// runtime whose cluster shares a launcher's name is not let in, nor the other way round.
 	AudienceLauncher Audience = "launcher"
+	// AudienceStaff: the platform's own operators and nobody else. The audience is the whole
+	// rule of such an operation: a decision the platform makes across orgs.
+	AudienceStaff Audience = "staff"
 )
 
 func validAudience(a Audience) bool {
 	switch a {
-	case AudienceAgent, AudienceJob, AudienceCoordinator, AudienceInternal, AudienceLauncher:
+	case AudienceAgent, AudienceJob, AudienceCoordinator, AudienceInternal, AudienceLauncher, AudienceStaff:
 		return true
 	default:
 		return false
@@ -92,7 +95,7 @@ func (a Audience) Admits(p auth.Principal, clusterName string) bool {
 	case auth.KindStaff:
 		return true
 	case auth.KindUser, auth.KindKey, auth.KindCoordinator:
-		return a != AudienceInternal && a != AudienceLauncher
+		return a == AudienceAgent || a == AudienceJob || a == AudienceCoordinator
 	case auth.KindAgent:
 		return a == AudienceAgent || a == AudienceJob
 	case auth.KindJob:
