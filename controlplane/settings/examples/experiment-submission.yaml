@@ -138,8 +138,9 @@ job:
 
   # --- Retry -----------------------------------------------------------------------------
   # max_retries: how many times a failing node is retried before the job is marked failed.
-  # Left out, it is 0: the job runs once.
-  max_retries: 3
+  # Left out, it is 0: the job runs once, which is right for a failure that would repeat (a
+  # failed gate, a bad path, an out-of-memory). Set it only for a failure known to be flaky.
+  # max_retries: 1
 
 metadata:
   # Which agent and platform experiment this run belongs to. Required for quota

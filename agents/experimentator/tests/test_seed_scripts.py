@@ -112,6 +112,25 @@ class MetricHelperTest(unittest.TestCase):
                 self.assertEqual(stderr, "")
 
 
+class SampleJobFilesTest(unittest.TestCase):
+    """The samples an agent's image carries: none retries a job, since a failed gate would only
+    fail again, and every file one of them names is in the image."""
+
+    def test_no_sample_retries_and_the_reference_they_name_is_shipped(self):
+        samples = sorted((REPO / "agents/coordinator/experiments").glob("*/seed/*.yaml"))
+        self.assertTrue(samples)
+        dockerfile = (REPO / "agents/experimentator/Dockerfile.base").read_text()
+        shipped = "controlplane/settings/examples/experiment-submission.yaml"
+        self.assertIn(f"COPY {shipped} $WORKLOAD_SAMPLES/", dockerfile)
+        self.assertTrue((REPO / shipped).is_file())
+        for path in samples:
+            with self.subTest(path=path.name):
+                text = path.read_text()
+                self.assertNotIn("max_retries", text)
+                if "experiment-submission.yaml" in text:
+                    self.assertIn("under $WORKLOAD_SAMPLES", text)
+
+
 class BuildAndPushTest(unittest.TestCase):
     def test_names_the_missing_registry_in_one_line(self):
         with tempfile.TemporaryDirectory() as repo:

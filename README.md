@@ -282,7 +282,6 @@ job:
   storage: "10Gi"
   accelerator_count: 1
   accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
-  max_retries: 3
 metadata:
   agent_id: agent-007
   platform_experiment_id: pe-llm-finetune-2026-07

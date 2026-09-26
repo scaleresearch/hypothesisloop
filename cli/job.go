@@ -68,7 +68,8 @@ Only hypothesis_id, theory, estimated_duration_hours and, in job, a command with
 accelerator_type and accelerator_count, or cpu, are needed. cpu, memory and storage left out
 are the job's share of the node; max_retries left out is 0.
 
-See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`, stderr)
+The full DSL reference is experiment-submission.yaml: in an agent's image under
+$WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
