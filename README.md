@@ -401,16 +401,9 @@ hl cluster token 'my-cluster' --org 'org-1' | helm upgrade --install hypothesisl
 `make images REGISTRY=...` pushes the chart beside the images, under `charts/` and at a version
 that carries their tag, so the command needs no checkout. It installs the release into the
 namespace `hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it
-again upgrades the release. `--kube-context` after the last value names a context other than the
-current one. helm reads the registry with the credentials of `helm registry login`, and the
-nodes pull the images with their own.
-
-On a cluster that ran the runtime before the chart owned the jobs namespace, the same command
-is the upgrade: `--take-ownership` makes the existing `hypothesisloop-jobs` namespace the
-release's, with whatever is in it. Nothing is removed. The PriorityClasses
-`hypothesisloop-guaranteed` and `hypothesisloop-burst` of that older runtime are left behind
-and no longer used; `kubectl delete priorityclass hypothesisloop-guaranteed hypothesisloop-burst`
-removes them once no pod of an older job is left.
+again upgrades the release. `--kube-context` names a context other than the current one. helm
+reads the registry with the credentials of `helm registry login`, and the nodes pull the images
+with their own.
 
 From a checkout, `make cluster-agent-up` installs the same chart from `runtime/k8s/infra/chart`
 and is what local development uses:
