@@ -28,7 +28,7 @@ import (
 // nodeResourceName maps a fungible domain.ResourceKind to the domain.NodeResource* string key
 // the per-node capacity maps (nodeResources, nodeResourcesTotal) are keyed by — the reverse of
 // loop_tick.go's nodeResourceKind. Only CPU/memory/storage have a node-resource key; accelerators
-// are counted separately (see nodeInstalledAccelerators in selectDisbalanceVictims).
+// are counted separately (see installedOf in selectDisbalanceVictims).
 func nodeResourceName(kind domain.ResourceKind) (string, bool) {
 	switch kind {
 	case domain.ResourceKindCPU:
@@ -354,8 +354,8 @@ func disbalancePremisesHold(
 //     dimension is also short, the accelerators are genuinely busy and nothing is being stranded.
 //  2. Some node `blocked` is allowed to land on currently has enough free accelerators of its
 //     flavor. Without idle accelerators there is no harm to undo.
-//  3. The victim's own node reports installed CPU/memory/storage and installed accelerators,
-//     giving a per-accelerator share local to that node — not a cluster-wide average, which a
+//  3. The victim's own node reports installed CPU/memory/storage and installed units of the
+//     victim's flavor, giving a per-unit share local to that node — not a cluster-wide average, which a
 //     heterogeneous cluster (nodes with different CPU-per-accelerator ratios) can get wrong in
 //     either direction: too lax on a CPU-heavy node, too strict on a CPU-light one.
 //  4. Candidate victims sit on one of those nodes, hold accelerators themselves, and request
@@ -381,18 +381,22 @@ func selectDisbalanceVictims(
 		return nil
 	}
 
-	// (3) Each node's own installed accelerator count: a node's CPU is shared by all the
-	// accelerators plugged into that node regardless of model, so the fair share is per device
-	// local to the node, not per device type and not averaged across the whole cluster. Installed
-	// = currently free (nodeAvail, every flavor) + already running there (placed).
-	nodeInstalledAccelerators := make(map[string]int64, len(nodeAvail))
-	for node, byFlavor := range nodeAvail {
-		for _, free := range byFlavor {
-			nodeInstalledAccelerators[node] += free
+	// (3) Each node's installed units of one flavor: free there now (nodeAvail) plus held by the
+	// jobs of that flavor running there (placed). A job's share of the node is measured among the
+	// units of its own flavor, which is the rule admission bounds its request by (see
+	// installedAcceleratorsByNode), so a job is never evicted for holding what it was admitted
+	// with. Flavors are not pooled: a node that publishes a CPU class beside its chips has many
+	// more core units than chips, and pooled, every chip job's share would shrink to a sliver.
+	// nodeAvail also lists one device under every label of its vendor's domain, so a sum over
+	// flavors counts it several times.
+	installedOf := func(node string, flavor domain.AcceleratorType) int64 {
+		installed := foldLookup(nodeAvail[node], strings.ToLower(string(flavor)))
+		for _, p := range placed {
+			if p.node == node && p.experiment.AcceleratorType.Is(flavor) {
+				installed += int64(p.experiment.AcceleratorCount)
+			}
 		}
-	}
-	for _, p := range placed {
-		nodeInstalledAccelerators[p.node] += int64(p.experiment.AcceleratorCount)
+		return installed
 	}
 
 	// (4) Score every candidate by how far past its proportionate share it reaches, in the
@@ -410,7 +414,7 @@ func selectDisbalanceVictims(
 		if strandedNodes[p.node] <= 0 || p.experiment.AcceleratorCount <= 0 {
 			continue
 		}
-		nodeTotalAccelerators := nodeInstalledAccelerators[p.node]
+		nodeTotalAccelerators := installedOf(p.node, p.experiment.AcceleratorType)
 		if nodeTotalAccelerators <= 0 {
 			continue
 		}
