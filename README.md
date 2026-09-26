@@ -155,8 +155,12 @@ whose lock another run holds, and it closes, removes or revokes what it created 
 
 Settings, then GitHub, connects an installation of the platform's GitHub App to the org: an owner
 installs the App on a GitHub account, choosing its repositories there, and confirms on GitHub who
-they are. From then on a platform experiment of the org names any repository the installation
-covers, picked when the experiment is created. GitHub returns to
+they are. The App asks to create repositories and needs none that exist: selecting one is only
+for an experiment in a repository the person already has. From then on a platform experiment of
+the org names a repository the installation covers, or the platform creates a private one on that
+account, chosen when the experiment is created; with no account connected nothing is created.
+Connecting takes control of the GitHub account: its own user, or an admin of the organisation.
+GitHub returns to
 `<ui origin>/settings/repository`, so the App's callback URL and its setup URL must be that
 address (`infra/github/app-manifest.json`). The page builds the address from the origin it is
 served on and takes the App's addresses from `GET /github/app`. A deployment without a GitHub App

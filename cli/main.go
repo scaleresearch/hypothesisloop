@@ -615,6 +615,12 @@ How long it lasts is duration_hours or ends_at, one of the two. max_agents,
 report_interval_seconds and starts_at may be left out: the platform's limits and defaults
 apply, and without starts_at it starts when you start it.
 
+Where the platform has a GitHub App the experiment keeps its code in a repository:
+repository: owner/name names one a GitHub account connected to the org covers. Left out, the
+platform creates a private one there and the answer names it; repository_account says on
+which account when the org connected several. With no account connected the answer is 422
+github_not_connected: an owner connects GitHub in Settings first.
+
 To create several platform experiments in one call, use an experiments: list. Fields set
 alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
 doesn't set its own:
