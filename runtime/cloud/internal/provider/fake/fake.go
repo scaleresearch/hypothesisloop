@@ -28,8 +28,8 @@ type Provider struct {
 	calls     map[string]int
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
-	// method is "Create", "List", "Logs", "Stop" or "Destroy"; name is the instance's, empty for
-	// List.
+	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause" or "Resume"; name is the
+	// instance's, empty for List.
 	Fail func(method, name string) error
 }
 
@@ -37,7 +37,10 @@ func New() *Provider {
 	return &Provider{instances: map[string]*instance{}, calls: map[string]int{}}
 }
 
-var _ provider.Provider = (*Provider)(nil)
+var (
+	_ provider.Provider = (*Provider)(nil)
+	_ provider.Pauser   = (*Provider)(nil)
+)
 
 func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error) {
 	p.mu.Lock()
@@ -115,6 +118,43 @@ func (p *Provider) Destroy(_ context.Context, id string) error {
 		return err
 	}
 	delete(p.instances, id)
+	return nil
+}
+
+// Pause keeps the command where it is: Resume continues the same process.
+func (p *Provider) Pause(_ context.Context, id string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i, ok := p.instances[id]
+	if !ok {
+		return nil
+	}
+	if err := p.fail("Pause", i.Name); err != nil {
+		return err
+	}
+	switch i.State {
+	case provider.StateRunning:
+		i.State = provider.StatePaused
+	case provider.StatePaused:
+	default:
+		return fmt.Errorf("fake: instance %q is %s, and only a running instance can be paused", id, i.State)
+	}
+	return nil
+}
+
+func (p *Provider) Resume(_ context.Context, id string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i, ok := p.instances[id]
+	if !ok {
+		return fmt.Errorf("fake: no instance %q to resume", id)
+	}
+	if err := p.fail("Resume", i.Name); err != nil {
+		return err
+	}
+	if i.State == provider.StatePaused {
+		i.State = provider.StateRunning
+	}
 	return nil
 }
 

@@ -153,6 +153,8 @@ func (l *Launcher) Run(ctx context.Context) error {
 // the returned error and the rest of the pass still runs.
 func (l *Launcher) Pass(ctx context.Context) error {
 	rented, err := l.provider.List(ctx, l.prefix)
+	// The launcher pauses nothing yet (see the provider package's comment on capabilities).
+	rented = provider.PausedAsStarting(rented)
 	if err != nil {
 		return fmt.Errorf("list instances: %w", err)
 	}

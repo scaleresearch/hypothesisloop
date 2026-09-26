@@ -63,8 +63,10 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 	switch found.State {
 	case "created", "creating", "starting", "restarting", "updating", "replacing":
 		return provider.StateStarting, true
-	case "started", "stopping":
+	case "started", "stopping", "suspending":
 		return provider.StateRunning, true
+	case "suspended":
+		return provider.StatePaused, true
 	case "stopped", "failed":
 		if p.outputComplete(ctx, found, now) {
 			return provider.StateExited, true

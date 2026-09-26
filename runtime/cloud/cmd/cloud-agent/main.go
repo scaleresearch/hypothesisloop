@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/cloudexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
@@ -39,7 +40,7 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	log("starting: cluster=%s provider=%s account=%s namespace=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, cfg.Provider.AccountID, cfg.Namespace, cfg.APIURL, len(cfg.shapes))
+	log("starting: cluster=%s provider=%s capabilities=%v account=%s namespace=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, provider.Capabilities(rented), cfg.Provider.AccountID, cfg.Namespace, cfg.APIURL, len(cfg.shapes))
 
 	a := &agentloop.Agent{
 		ClusterName:       cfg.ClusterName,

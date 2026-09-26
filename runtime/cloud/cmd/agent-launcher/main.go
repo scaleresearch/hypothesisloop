@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/agentlaunch"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/providers"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -41,8 +42,8 @@ func main() {
 
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
-	log("starting: launcher=%s provider=%s control_plane=%s model_provider=%s interval=%s create_pause=%s",
-		cfg.LauncherName, cfg.Provider.Name, cfg.APIURL, cfg.ModelProvider.Name, launch.Interval, launch.CreatePause)
+	log("starting: launcher=%s provider=%s capabilities=%v control_plane=%s model_provider=%s interval=%s create_pause=%s",
+		cfg.LauncherName, cfg.Provider.Name, provider.Capabilities(rented), cfg.APIURL, cfg.ModelProvider.Name, launch.Interval, launch.CreatePause)
 	if err := launcher.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-launcher: %v\n", err)
 		os.Exit(1)

@@ -126,14 +126,14 @@ func TestListMapsWhatTheSupervisorWrote(t *testing.T) {
 	}
 }
 
-func TestAPausedSandboxIsStartingAndNothingInsideItIsRead(t *testing.T) {
+func TestAPausedSandboxIsPausedAndNothingInsideItIsRead(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "paused"))))
 	p := newTestProvider(t, api)
 
 	got, err := p.List(context.Background(), "hl-")
-	if err != nil || len(got) != 1 || got[0].State != provider.StateStarting {
-		t.Fatalf("List = %+v, %v, want the paused sandbox listed as starting, so it can be destroyed", got, err)
+	if err != nil || len(got) != 1 || got[0].State != provider.StatePaused {
+		t.Fatalf("List = %+v, %v, want the paused sandbox listed as paused, so it can be resumed or destroyed", got, err)
 	}
 	if api.total() != 1 {
 		t.Errorf("requests = %d, want the list alone: reading a paused sandbox would resume it", api.total())

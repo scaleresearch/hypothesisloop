@@ -93,6 +93,8 @@ func (e *Executor) current(ctx context.Context) (*view, error) {
 
 func (e *Executor) read(ctx context.Context) (*view, error) {
 	listed, err := e.provider.List(ctx, e.prefix)
+	// A job is never paused: one found paused is one that does not run.
+	listed = provider.PausedAsStarting(listed)
 	if err != nil {
 		return nil, fmt.Errorf("cloudexec: list instances: %w", err)
 	}

@@ -68,7 +68,8 @@ func TestListMapsEveryMachineState(t *testing.T) {
 		"stopping":   {provider.StateRunning, true},
 		"destroying": {"", false},
 		"destroyed":  {"", false},
-		"suspended":  {provider.StateStarting, true},
+		"suspended":  {provider.StatePaused, true},
+		"suspending": {provider.StateRunning, true},
 		"brand-new":  {provider.StateStarting, true},
 	}
 	for vendorState, want := range cases {

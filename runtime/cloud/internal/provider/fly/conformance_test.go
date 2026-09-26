@@ -102,6 +102,10 @@ func TestConformance(t *testing.T) {
 	providertest.Run(t, conformanceProvider(t), conformanceOptions())
 }
 
+func TestConformancePause(t *testing.T) {
+	providertest.RunPause(t, conformanceProvider(t), conformanceOptions(), providertest.SameProcessOrRestart)
+}
+
 func TestConformanceHold(t *testing.T) {
 	if os.Getenv("FLY_CONFORMANCE_HOLD") == "" {
 		t.Skip("FLY_CONFORMANCE_HOLD is not set")

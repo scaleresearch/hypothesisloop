@@ -106,12 +106,14 @@ func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox,
 //   - A state file the supervisor did not write: exited. The file is the command's user's to
 //     change, so the supervisor's word is gone for good and the caller should replace the
 //     instance.
-//   - Paused: starting. This adapter never pauses, so somebody did by hand; the sandbox keeps its
-//     name, can be destroyed, and the caller's boot timeout bounds it.
+//   - Paused: paused, without a read. Reading a paused sandbox would resume it.
 func (p *Provider) stateOf(ctx context.Context, found sandbox) provider.State {
 	id, name := found.SandboxID, found.Metadata[nameKey]
+	if found.State == "paused" {
+		return provider.StatePaused
+	}
 	if found.State != "running" {
-		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter never asks for; reporting it as starting", id, name, found.State)
+		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter does not know; reporting it as starting", id, name, found.State)
 		return provider.StateStarting
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.stateRead)

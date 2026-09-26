@@ -9,7 +9,30 @@ import (
 const CallTimeout = time.Minute
 
 // Bounded wraps p so that an API which stops answering fails the pass instead of stalling it.
-func Bounded(p Provider) Provider { return bounded{p} }
+// What it returns has the capabilities p has.
+func Bounded(p Provider) Provider {
+	if pauser, ok := p.(Pauser); ok {
+		return boundedPauser{bounded{p}, pauser}
+	}
+	return bounded{p}
+}
+
+type boundedPauser struct {
+	bounded
+	pauser Pauser
+}
+
+func (b boundedPauser) Pause(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.pauser.Pause(ctx, id)
+}
+
+func (b boundedPauser) Resume(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.pauser.Resume(ctx, id)
+}
 
 type bounded struct{ Provider }
 

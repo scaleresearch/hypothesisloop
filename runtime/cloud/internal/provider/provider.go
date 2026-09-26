@@ -1,3 +1,37 @@
+// Package provider is the contract between what rents machines (the cloud cluster's runtime for
+// jobs, the launcher for hosted agents) and a vendor's adapter.
+//
+// Provider is the required core, kept to what every vendor can do: create, list, read output,
+// stop, destroy. What only some vendors can do is a capability: a small interface of its own
+// that an adapter implements when its vendor has the thing natively, and leaves out otherwise.
+// The rules a capability follows:
+//
+//   - It is found by a type assertion on the Provider (Pauser is `p.(Pauser)`), once, when the
+//     process starts. A process says which capabilities its provider has in its start line
+//     (Capabilities), and a caller that needs one it lacks refuses to start with that as the
+//     reason. No adapter stubs a capability out, and no caller emulates one.
+//   - It names no vendor concept, as the core does not. What the vendor calls it, which of its
+//     variants is used and what it costs stay in the adapter.
+//   - Whatever it changes about an instance shows in List, in terms a caller that keeps nothing
+//     between passes can act on. A new condition is a new State.
+//   - Its calls are repeatable, like Stop and Destroy: asking twice, or of an instance that is
+//     gone, is not an error.
+//   - It has a check in providertest that every adapter claiming it runs against its real
+//     vendor, and fake implements it.
+//   - A wrapper of a Provider passes on the capabilities of what it wraps (Bounded does).
+//
+// Pauser is the one capability there is. The ones foreseen, to be shaped the same way when
+// something needs them and not before:
+//
+//   - Extender: Extend(ctx, id, until) for a vendor that ends an instance at a lifetime it was
+//     rented with. Today an adapter rents with its longest lifetime and the instance is gone at
+//     the end of it.
+//   - Snapshotter: Snapshot(ctx, id) (ref, error) and a Spec field naming a snapshot to create
+//     from, for a vendor that can copy an instance's filesystem. The harness's own session
+//     snapshot covers what an agent needs across a replacement, on every vendor.
+//   - Execer: Exec(ctx, id, argv) (output, error), a command run beside the instance's own.
+//     Nothing on the platform reaches into a running instance today, and the tests that freeze a
+//     harness call the vendor directly.
 package provider
 
 import (
@@ -20,6 +54,10 @@ const (
 	// from the last lines, once, when it first sees StateExited. An instance the vendor has
 	// removed is absent from List.
 	StateExited State = "exited"
+	// StatePaused is an instance a Pauser paused: it exists, keeps its name and its disk, runs
+	// nothing and is not billed for compute. Logs need not work for it. Only an adapter that
+	// implements Pauser reports it.
+	StatePaused State = "paused"
 )
 
 // MaxNameLength is the longest Spec.Name a caller may ask for.

@@ -48,6 +48,10 @@ func TestConformance(t *testing.T) {
 	providertest.Run(t, conformanceProvider(t), conformanceOptions())
 }
 
+func TestConformancePause(t *testing.T) {
+	providertest.RunPause(t, conformanceProvider(t), conformanceOptions(), providertest.SameProcess)
+}
+
 func TestConformanceHold(t *testing.T) {
 	if os.Getenv("E2B_CONFORMANCE_HOLD") == "" {
 		t.Skip("E2B_CONFORMANCE_HOLD is not set")
