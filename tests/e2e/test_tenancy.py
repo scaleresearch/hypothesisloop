@@ -214,7 +214,7 @@ def test_another_org_writes_nothing(tenants):
         ("POST", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/data-key", {"agent_id": a.agent}),
         ("POST", "/platform-experiments", _platform_experiment_body("intruding", project_id=b.project_id)),
-        ("POST", "/agents", {"id": f"agent-intruder-{uuid.uuid4().hex[:8]}", "kind": "agent", "org_id": b.org_id}),
+        ("POST", "/agents", {"id": f"agent-intruder-{uuid.uuid4().hex[:8]}", "org_id": b.org_id}),
         ("POST", "/experiments", body_naming_b),
         ("POST", "/experiments", body_as_b),
         ("POST", f"/experiments/{b.job_id}/cancel", None),

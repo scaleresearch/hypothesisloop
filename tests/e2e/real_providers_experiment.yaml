@@ -35,5 +35,3 @@ metrics:
   - key: train_loss
     direction: minimize
     role: attribute
-hypothesis_submit_policy: agent_only
-job_submit_policy: agent_only

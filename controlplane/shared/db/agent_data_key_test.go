@@ -16,7 +16,7 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	agent, pe := "agentkey-agent-"+suffix, "agentkey-pe-"+suffix
-	createTestAgent(t, pool, agent, domain.AgentKindAgent)
+	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
 	store := NewPlatformExperimentsStore(pool)
 

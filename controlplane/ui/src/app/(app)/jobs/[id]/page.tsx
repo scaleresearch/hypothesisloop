@@ -3,14 +3,15 @@
 import { CodeRef } from '@/components/code-bundle'
 import useSWR from 'swr'
 import { useRecordScope } from '@/lib/read-only'
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { fetchExperiment, fetchExperimentMetrics, fetchExperimentLogs } from '@/lib/api'
 import type { MetricDataPoint } from '@/types'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { CopyButton } from '@/components/ui/copy-button'
 import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
@@ -48,9 +49,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   )
   if (error) return (
     <div>
-      <PageHeader title="Job Not Found" />
-      <ErrorMessage className="mb-3">Could not load job {id}</ErrorMessage>
-      <Link href="/jobs" className="text-sm text-accent hover:underline">← Back to jobs</Link>
+      <PageHeader title="Job" />
+      <ErrorMessage className="mb-3">Could not load job {id}: {error.message}</ErrorMessage>
+      <TextLink href="/jobs" className="text-sm">← Back to jobs</TextLink>
     </div>
   )
 
@@ -101,32 +102,22 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       <PageHeader
         title={
           <>
-            <span className="font-mono text-base font-normal text-subtle">{j.id}</span>
+            <span className="line-clamp-3 min-w-0 text-lg font-semibold leading-snug" title={j.hypothesis}>{j.hypothesis}</span>
             <Badge status={j.status ?? 'UNKNOWN'}>{j.status ?? 'UNKNOWN'}</Badge>
-            <TierBadge tier={j.capacity_tier} />
           </>
         }
         description={
-          <span className="italic">
-            {j.hypothesis}
-            {j.hypothesis_id && (
-              <>
-                {' '}
-                <Link href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap text-xs not-italic text-accent hover:underline">
-                  View hypothesis →
-                </Link>
-                {' '}
-                <Link href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap text-xs not-italic text-accent hover:underline">
-                  In graph →
-                </Link>
-              </>
-            )}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="font-mono text-2xs">Job {j.id}</span>
+            <CopyButton value={j.id} />
+            <TextLink href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap">View hypothesis →</TextLink>
+            <TextLink href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap">In graph →</TextLink>
           </span>
         }
         actions={
-          <Link href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="whitespace-nowrap text-xs text-accent hover:underline">
+          <TextLink href={`/jobs?platform_experiment_id=${j.platform_experiment_id}`} className="whitespace-nowrap text-xs">
             ← This experiment&apos;s jobs
-          </Link>
+          </TextLink>
         }
       />
 
@@ -144,7 +135,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           knowing what broke. */}
       {j.phase_detail && (j.phase_detail.reason || j.phase_detail.message) && (
         <Callout tone="danger">
-          <strong className="text-danger">Runtime:</strong>{' '}
+          <strong className="text-danger">Reported by the cluster:</strong>{' '}
           {j.phase_detail.reason && (
             <span className="font-mono text-danger">
               {j.phase_detail.reason}
@@ -173,7 +164,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {(j.metrics || j.summary || j.status === 'COMPLETED') && (
         <Card>
-          <CardHeader>Result</CardHeader>
+          <CardHeader><CardTitle>Result</CardTitle></CardHeader>
           <CardContent>
             {(j.metrics ?? []).map(m => (
               <div key={m.name} className="mb-2.5 font-mono">
@@ -195,16 +186,16 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* Job metadata */}
       <Card>
-        <CardHeader>Job Details</CardHeader>
+        <CardHeader><CardTitle>Job details</CardTitle></CardHeader>
         <CardContent>
           <Table>
             <tbody>
-              <Row label="Agent" value={j.agent_id} />
+              <Row label="Agent" value={<span title={j.agent_id}>{j.agent_name}</span>} />
               <Row label="Submitted by" value={<Actor actor={j.actor} />} />
-              <Row label="Platform Experiment" value={
-                <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-accent hover:underline"><PlatformExperimentName id={j.platform_experiment_id} /></Link>
+              <Row label="Experiment" value={
+                <TextLink href={`/platform-experiments/${j.platform_experiment_id}`}><PlatformExperimentName id={j.platform_experiment_id} /></TextLink>
               } />
-              <Row label="Capacity Tier" value={<TierBadge tier={j.capacity_tier} />} />
+              <Row label="Capacity tier" value={<TierBadge tier={j.capacity_tier} />} />
               <Row label="Accelerator" value={`${j.accelerator_count}× ${j.accelerator_type}`} />
               <Row label="Est. duration" value={j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'} />
               <Row label="Est. cost" value={costEstimate != null ? `${costEstimate} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'} />
@@ -233,10 +224,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* Metric trajectories — one chart per reported metric, the ranking metric first */}
       <Card>
-        <CardHeader>Metric Trajectories</CardHeader>
+        <CardHeader><CardTitle>Metrics over the run</CardTitle></CardHeader>
         <CardContent>
           {metricsError ? (
-            <ErrorMessage>Could not read this job&apos;s metrics.</ErrorMessage>
+            <ErrorMessage>Could not read this job&apos;s metrics: {metricsError.message}</ErrorMessage>
           ) : metricNames.length > 0 ? (
             <div className={metricNames.length > 1 ? 'grid grid-cols-2 gap-4' : 'grid gap-4'}>
               {metricNames.map((name, i) => {
@@ -302,14 +293,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       {/* Lineage */}
       {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
         <Card>
-          <CardHeader>Lineage &amp; Reproducibility</CardHeader>
+          <CardHeader><CardTitle>What it ran</CardTitle></CardHeader>
           <CardContent>
             <Table>
               <tbody>
                 {j.job?.image && <Row label="Image" value={j.job.image} />}
-                {j.code_ref && <Row label="Code ref (git SHA)" value={<CodeRef codeRef={j.code_ref} />} />}
-                {j.config_hash && <Row label="Config hash (sha256)" value={j.config_hash} />}
-                {j.data_ref && <Row label="Data ref" value={j.data_ref} />}
+                {j.code_ref && <Row label="Code (git commit)" value={<CodeRef codeRef={j.code_ref} />} />}
+                {j.config_hash && <Row label="Configuration checksum" value={j.config_hash} />}
+                {j.data_ref && <Row label="Data" value={j.data_ref} />}
               </tbody>
             </Table>
           </CardContent>
@@ -319,10 +310,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       {/* Parent lineage */}
       {j.parent_id && (
         <Card>
-          <CardHeader>Derived From</CardHeader>
+          <CardHeader><CardTitle>Derived from</CardTitle></CardHeader>
           <CardContent>
             <p className="text-xs">
-              Parent job: <Link href={`/jobs/${j.parent_id}`} className="font-mono text-accent hover:underline">{j.parent_id}</Link>
+              Parent job: <TextLink inline href={`/jobs/${j.parent_id}`} className="font-mono">{j.parent_id}</TextLink>
             </p>
           </CardContent>
         </Card>
@@ -332,10 +323,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           record carries a reason code, not the error. Includes the crashed instance's output
           when a container restarted, which is otherwise unreachable. */}
       <Card>
-        <CardHeader>Logs</CardHeader>
+        <CardHeader><CardTitle>Logs</CardTitle></CardHeader>
         <CardContent>
           {logsError ? (
-            <ErrorMessage>Could not read this job&apos;s log tail.</ErrorMessage>
+            <ErrorMessage>Could not read this job&apos;s logs: {logsError.message}</ErrorMessage>
           ) : logs && logs.length > 0 ? (
             <pre className="m-0 max-h-[420px] overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
               {logs.join('\n')}

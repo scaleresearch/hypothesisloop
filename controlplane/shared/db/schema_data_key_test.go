@@ -61,7 +61,7 @@ func TestSchemaCancelsActiveRowsWithoutADataKey(t *testing.T) {
 	pool := scratchDatabase(t)
 	applyTestSchema(t, pool)
 	ctx := context.Background()
-	createTestAgent(t, pool, "legacy-agent", domain.AgentKindAgent)
+	createTestAgent(t, pool, "legacy-agent")
 	createTestPE(t, pool, "legacy-pe", 10)
 	if _, err := pool.pool.Exec(ctx, `ALTER TABLE experiments DROP CONSTRAINT experiments_active_has_data_key`); err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestSchemaRegistersTheClustersJobsArePlacedOnForTheDefaultOrg(t *testing.T)
 	pool := scratchDatabase(t)
 	applyTestSchema(t, pool)
 	ctx := context.Background()
-	createTestAgent(t, pool, "legacy-agent", domain.AgentKindAgent)
+	createTestAgent(t, pool, "legacy-agent")
 	createTestPE(t, pool, "legacy-pe", 10)
 	place := func(id, status, cluster string, submitted bool) {
 		t.Helper()
