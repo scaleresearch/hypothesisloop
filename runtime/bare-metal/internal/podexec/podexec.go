@@ -42,7 +42,7 @@ const (
 // implicit defaults.
 type Config struct {
 	APIURL string
-	// ScratchDir is the filesystem this node's Storage quota is measured/enforced against
+	// ScratchDir is the filesystem this node's Storage capacity is measured against
 	// (podman --storage-opt size=, statfs'd for total/available). Required.
 	ScratchDir string
 	// NodeLabels are this node's static facts (zone, disk class, ...) merged with
@@ -69,12 +69,13 @@ type Executor struct {
 	docker engine
 	// engineName is the resolved engine's name ("podman" or "docker"), for logging only.
 	engineName string
-	// storageQuotaEnforced is decided once at startup (see scratchQuotaSupported): whether
-	// ScratchDir's filesystem can back a per-container storage-opt size quota. When false,
+	// storageQuotaEnforced is decided once at startup (see storageQuota): whether the engine
+	// holds a container to a storage-opt size, with storageQuotaRefusal the reason when not. When false,
 	// Storage is still a required, recorded, accounted-for field (capacity math still treats it
 	// as a hard dimension) but is not passed to the engine as an enforced quota — see
 	// BuildContainerSpec.
 	storageQuotaEnforced bool
+	storageQuotaRefusal  string
 	probe                func(context.Context) ([]acceleratorDevice, error)
 
 	mu       sync.Mutex
@@ -166,7 +167,16 @@ func New(cfg Config) (*Executor, error) {
 	for k, v := range cfg.NodeLabels {
 		labels[k] = v
 	}
-	quotaSupported, err := scratchQuotaSupported(cfg.ScratchDir)
+	if _, _, err := scratchCapacityBytes(cfg.ScratchDir); err != nil {
+		return nil, err
+	}
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), engineCallTimeout)
+	defer infoCancel()
+	info, err := docker.Info(infoCtx, client.InfoOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("podexec: read the engine's storage: %w", err)
+	}
+	quotaEnforced, quotaRefusal, err := storageQuota(info.Info.Driver, info.Info.DockerRootDir, "/proc/self/mountinfo")
 	if err != nil {
 		return nil, err
 	}
@@ -178,13 +188,14 @@ func New(cfg Config) (*Executor, error) {
 		clusterID:            clusterID,
 		docker:               bounded{docker},
 		engineName:           engineName,
-		storageQuotaEnforced: quotaSupported,
+		storageQuotaEnforced: quotaEnforced,
+		storageQuotaRefusal:  quotaRefusal,
 		probe:                probeAccelerators,
 	}, nil
 }
 
 // StorageQuotaEnforced reports whether this node can enforce per-container storage quotas
-// (requires an XFS-backed overlay store) — surfaced so main.go can log it plainly at startup.
+// (see storageQuota) — surfaced so main.go can log it plainly at startup.
 func (e *Executor) StorageQuotaEnforced() bool { return e.storageQuotaEnforced }
 
 // NodeName returns this executor's node identity, for callers (main) that log it.

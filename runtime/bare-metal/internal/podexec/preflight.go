@@ -98,9 +98,9 @@ func (e *Executor) Preflight(ctx context.Context, client *http.Client) ([]string
 	}
 
 	if e.storageQuotaEnforced {
-		lines = append(lines, "job storage: "+e.scratchDir+", each job held to the storage it asked for")
+		lines = append(lines, "job storage: the engine holds each job to the storage it asked for")
 	} else {
-		lines = append(lines, "job storage: "+e.scratchDir+" is not on XFS, so a job's storage request is not enforced here")
+		lines = append(lines, "job storage: a job's storage request is counted and not enforced here: "+e.storageQuotaRefusal)
 	}
 	return lines, nil
 }

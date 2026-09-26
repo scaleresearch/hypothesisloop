@@ -44,24 +44,49 @@ func totalMemoryBytes() (int64, error) {
 	return 0, fmt.Errorf("podexec: MemTotal not found in /proc/meminfo")
 }
 
-// xfsSuperMagic is Linux's statfs f_type value for XFS — the only backing filesystem podman's
-// (and docker's) overlay storage driver supports for --storage-opt size= quota enforcement.
-const xfsSuperMagic = 0x58465342
-
-// scratchQuotaSupported reports whether dir's filesystem can back a per-container storage
-// quota. Different-backend.md §7 (open decision 2) leaves the choice of what to do when it
-// can't to the operator; this runtime resolves it once at startup (see Executor.New) rather
-// than discovering it mid-job as a per-container failure.
-func scratchQuotaSupported(dir string) (bool, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		return false, fmt.Errorf("podexec: statfs %s: %w", dir, err)
+// storageQuota says whether the engine holds a container to a storage-opt size, and why not
+// when it does not. Both engines enforce it in one case only: the overlay driver, with its
+// store on XFS mounted with project quotas. The store is the engine's own directory, wherever
+// the node's scratch directory is, so it is the store's mount that is read, from mountinfoPath
+// (/proc/self/mountinfo). An engine whose store is not a directory of this host (a remote
+// one) is one this agent cannot vouch for.
+func storageQuota(driver, storeDir, mountinfoPath string) (enforced bool, why string, err error) {
+	if driver != "overlay" && driver != "overlay2" {
+		return false, fmt.Sprintf("the engine's storage driver is %s, which holds no container to a size", driver), nil
 	}
-	return int64(stat.Type) == xfsSuperMagic, nil
+	if info, err := os.Stat(storeDir); err != nil || !info.IsDir() {
+		return false, fmt.Sprintf("the engine's store %s is not a directory of this host", storeDir), nil
+	}
+	mountinfo, err := os.ReadFile(mountinfoPath)
+	if err != nil {
+		return false, "", fmt.Errorf("podexec: read this host's mounts: %w", err)
+	}
+	mountPoint, fsType, options := "", "", ""
+	for _, line := range strings.Split(string(mountinfo), "\n") {
+		before, after, found := strings.Cut(line, " - ")
+		fields, super := strings.Fields(before), strings.Fields(after)
+		if !found || len(fields) < 5 || len(super) < 3 {
+			continue
+		}
+		point := fields[4]
+		under := point == "/" || storeDir == point || strings.HasPrefix(storeDir, point+"/")
+		if under && len(point) >= len(mountPoint) {
+			mountPoint, fsType, options = point, super[0], super[2]
+		}
+	}
+	if fsType != "xfs" {
+		return false, fmt.Sprintf("the engine's store %s is on %s, and only XFS holds a container to a size", storeDir, fsType), nil
+	}
+	for _, option := range strings.Split(options, ",") {
+		if option == "prjquota" || option == "pquota" {
+			return true, "", nil
+		}
+	}
+	return false, fmt.Sprintf("the engine's store %s is on XFS mounted at %s without project quotas (the pquota mount option)", storeDir, mountPoint), nil
 }
 
-// scratchCapacityBytes statfs's the configured scratch directory — the filesystem podman's
-// --storage-opt size= quota is measured against (different-backend.md §4.2/§7 open decision 2).
+// scratchCapacityBytes statfs's the configured scratch directory, which is what this node
+// reports as its storage.
 func scratchCapacityBytes(dir string) (total, available int64, err error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(dir, &stat); err != nil {
