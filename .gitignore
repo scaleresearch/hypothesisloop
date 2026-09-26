@@ -29,6 +29,7 @@ dist/
 
 # Next.js
 controlplane/ui/.next/
+controlplane/ui/.next-e2e/
 controlplane/ui/out/
 controlplane/ui/node_modules/
 controlplane/ui/.env.local
