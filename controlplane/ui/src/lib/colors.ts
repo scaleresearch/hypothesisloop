@@ -35,6 +35,8 @@ export function tint(color: string, opacity: number): string {
 export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent' | 'purple' | 'pink' | 'neutral'
 
 // Job, platform experiment, capacity tier, hypothesis and participant states, lowercased.
+// success, warning and danger say how a thing is going and nothing else: running or confirmed,
+// waiting, failed or refuted. What is only a kind takes one of the other tones.
 const tones: Record<string, Tone> = {
   running: 'success',
   completed: 'accent',
@@ -54,7 +56,7 @@ const tones: Record<string, Tone> = {
   confirmed: 'success',
   refuted: 'danger',
   inconclusive: 'neutral',
-  human: 'warning',
+  human: 'info',
   agent: 'neutral',
 }
 
