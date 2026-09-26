@@ -4,6 +4,7 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { fetchOrgClusters, registerCluster, setClusterEnabled, setClusterPriority } from '@/lib/api'
 import type { OrgCluster, RegisteredCluster } from '@/types'
+import { type ClusterKind as Kind, startCommand } from '@/lib/attach-command'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { Badge, StatusLabel } from '@/components/ui/badge'
@@ -16,13 +17,8 @@ import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/ui/tabs'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
-function shellQuote(text: string): string {
-  return `'${text.replaceAll("'", `'\\''`)}'`
-}
-
 // What runs the jobs. The API records no kind: a cluster is a name, and its kind is whichever agent
 // connects under it. So the choice here only selects the command that starts that agent.
-type Kind = 'kubernetes' | 'bare-metal'
 
 const KINDS: { value: Kind; label: string }[] = [
   { value: 'kubernetes', label: 'Kubernetes cluster' },
@@ -32,44 +28,6 @@ const KINDS: { value: Kind; label: string }[] = [
 const KIND_HINT: Record<Kind, string> = {
   kubernetes: 'One agent is installed on the cluster with helm and schedules jobs as pods on its nodes.',
   'bare-metal': 'One agent runs on the node as a systemd unit and starts jobs as containers with docker or podman. Each node is added as a cluster of its own.',
-}
-
-// What `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalScript). It runs on the node
-// as root: the node's engine copies the agent out of the image that carries it, and the agent
-// installs itself as a systemd unit and asks for the runtime token. $1 is the cluster name, $2 the
-// API address, $3 the image that carries the agent, $4 the job image and $5, when given, the CPU
-// class the node offers its cores as (hl cluster add --cpu-class).
-const BARE_METAL_SCRIPT =
-  'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ' +
-  'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
-  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}'
-
-// What `hl cluster add` prints (cli/accounts.go kubernetesScript). It reads the runtime token,
-// without echo when a person types it, and hands it to helm on standard input. $1 is the chart,
-// $2 its version, the rest the chart's values.
-const KUBERNETES_SCRIPT =
-  '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ' +
-  'chart="$1" version="$2"; shift 2; ' +
-  'printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ' +
-  '--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"'
-
-// Neither command holds the runtime token, so it is in no shell history. Each asks for it when it
-// runs, and it is shown beside the command, so the machine needs neither hl nor an API key.
-function startCommand(kind: Kind, cluster: RegisteredCluster): string {
-  const name = shellQuote(cluster.name)
-  if (kind === 'bare-metal') {
-    const image = shellQuote(`${cluster.registry}/hypothesisloop-bare-agent:${cluster.image_tag}`)
-    return `sudo sh -c ${shellQuote(BARE_METAL_SCRIPT)} sh ${name} ${shellQuote(cluster.api_url)} ${image} ${shellQuote(cluster.job_image)}`
-  }
-  const set = (key: string, value: string) => ` --set-string ${shellQuote(`${key}=${helmValue(value)}`)}`
-  return `sh -c ${shellQuote(KUBERNETES_SCRIPT)} sh ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ${shellQuote(`0.1.0+${cluster.image_tag}`)}` +
-    set('clusterName', cluster.name) + set('apiURL', cluster.api_url) + set('metricsURL', cluster.metrics_url) +
-    set('images.registry', cluster.registry) + set('images.tag', cluster.image_tag) + set('jobImage', cluster.job_image)
-}
-
-// helm splits a --set-string value on commas and reads a backslash as an escape.
-function helmValue(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/,/g, '\\,')
 }
 
 /**
@@ -119,6 +77,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
   const [kind, setKind] = useState<Kind>('kubernetes')
   const [name, setName] = useState('')
+  const [cpuClass, setCPUClass] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
@@ -191,6 +150,16 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               value={name}
               onChange={e => setName(e.target.value)}
             />
+            <Input
+              fieldSize="sm"
+              mono
+              className="w-48"
+              aria-label="CPU class"
+              title="Optional. The cluster then offers its cores to jobs that need no accelerator, as the type cpu.hypothesisloop.dev/class=<name>, which the platform's catalog must price."
+              placeholder="CPU class, optional"
+              value={cpuClass}
+              onChange={e => setCPUClass(e.target.value)}
+            />
             <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>
               {kind === 'kubernetes' ? 'Add cluster' : 'Add node'}
             </Button>
@@ -201,7 +170,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
       {registered && (
         <Secret
           label={`Start the agent of ${registered.name} · ${kind === 'kubernetes' ? 'Kubernetes cluster' : 'bare-metal node'}`}
-          value={startCommand(kind, registered)}
+          value={startCommand(kind, registered, cpuClass.trim())}
           note={<>
             {kind === 'kubernetes' ? (
               <>

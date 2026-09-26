@@ -887,12 +887,20 @@ async function scenarios(browser) {
   const nodeCommand = await page.getByTestId('secret').innerText()
   assert.ok(
     nodeCommand.startsWith(`sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) &&
-      nodeCommand.endsWith(` install --cluster "$1" --api-url "$2" --job-image "$4"' sh '${clusterName}' '${registered.api_url}' '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}' '${registered.job_image}'`),
+      nodeCommand.endsWith(` install --cluster "$1" --api-url "$2" --job-image "$4" \${5:+--cpu-class "$5"}' sh '${clusterName}' '${registered.api_url}' '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}' '${registered.job_image}'`),
     `a bare-metal node is shown the command that installs its agent: ${nodeCommand}`,
   )
   assert.ok(!nodeCommand.includes(runtimeToken) && !nodeCommand.includes('hl cluster token'), 'the node command holds no token and needs no hl')
   assert.equal(await page.getByTestId('runtime-token').innerText(), runtimeToken, 'the token the node command asks for is shown beside it')
   await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
+  // A CPU class named in the form is the last word of the node's command and the chart's
+  // cpuClass, as hl cluster add --cpu-class prints them, and leaves when the field is emptied.
+  await page.getByLabel('CPU class').fill('ui-e2e-class')
+  assert.equal(await page.getByTestId('secret').innerText(), `${nodeCommand} 'ui-e2e-class'`, 'the node command carries the CPU class')
+  await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
+  assert.equal(await page.getByTestId('secret').innerText(), `${command} --set-string 'cpuClass=ui-e2e-class'`, 'the helm command carries the CPU class')
+  await page.getByLabel('CPU class').fill('')
+  assert.equal(await page.getByTestId('secret').innerText(), command, 'with no CPU class the command is the plain one')
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
   await page.getByRole('cell', { name: clusterName }).first().waitFor()
   await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }).first())

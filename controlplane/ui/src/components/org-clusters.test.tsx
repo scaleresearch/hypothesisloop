@@ -128,6 +128,43 @@ describe('a member who is no owner', () => {
   })
 })
 
+describe('a CPU class named when a cluster is added', () => {
+  const command = async () => (await screen.findByTestId('secret')).textContent ?? ''
+
+  it('is the last value of either command, as hl cluster add --cpu-class prints it', async () => {
+    show()
+    await userEvent.type(screen.getByLabelText('Cluster name'), 'box')
+    await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
+    const plain = await command()
+    expect(plain).not.toContain('cpuClass')
+
+    await userEvent.type(screen.getByLabelText('CPU class'), ' tt-host ')
+    expect(await command()).toBe(`${plain} --set-string 'cpuClass=tt-host'`)
+
+    await userEvent.click(within(screen.getByRole('group', { name: 'Kind of cluster' })).getByRole('button', { name: 'Bare-metal node' }))
+    const node = await command()
+    expect(node.endsWith(`--job-image "$4" \${5:+--cpu-class "$5"}' sh 'box' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234' 'registry.cluster.test/images/hypothesisloop-job:abc1234' 'tt-host'`)).toBe(true)
+
+    await userEvent.clear(screen.getByLabelText('CPU class'))
+    expect((await command()).endsWith(`'registry.cluster.test/images/hypothesisloop-job:abc1234'`)).toBe(true)
+    // The class is the command's alone: the cluster is registered by its name.
+    expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'box')
+  })
+
+  it('is in the command a row brings back', async () => {
+    show()
+    await userEvent.type(screen.getByLabelText('CPU class'), 'tt-host')
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Show start command' }))[0])
+    expect(await command()).toMatch(/ --set-string 'clusterName=lab' .* --set-string 'cpuClass=tt-host'$/)
+  })
+
+  it('is not offered where clusters are only shown', async () => {
+    show({ manage: false })
+    await screen.findByText('lab')
+    expect(screen.queryByLabelText('CPU class')).toBeNull()
+  })
+})
+
 describe('a cluster name the API refuses', () => {
   it('stays in the field with the refusal beside it, and is cleared once one is taken', async () => {
     vi.mocked(registerCluster).mockRejectedValueOnce(new Error('cluster name "Lab K8s" must be lowercase letters, digits and dashes'))
