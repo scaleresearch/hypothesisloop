@@ -402,6 +402,31 @@ func (a *Access) PlatformExperimentIDs(ctx context.Context, projectID string) (i
 	return ids, true, err
 }
 
+// Spender resolves whose job a submission is and which platform experiment it runs in. An
+// agent's token says both, so what it leaves out is read from the token and what it states must
+// agree with it. Any other caller states both, and they are checked as it reaches them.
+func (a *Access) Spender(ctx context.Context, platformExperimentID, agentID string) (string, string, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	if p.Kind == KindAgent {
+		if platformExperimentID == "" {
+			platformExperimentID = p.PlatformExperimentID
+		}
+		if agentID == "" {
+			agentID = p.AgentID
+		}
+	}
+	if err := a.PlatformExperiment(ctx, platformExperimentID); err != nil {
+		return "", "", err
+	}
+	if err := a.ActAs(ctx, agentID); err != nil {
+		return "", "", err
+	}
+	return platformExperimentID, agentID, nil
+}
+
 // Writer resolves the two facts a record of a write keeps: whose record it is, and whose
 // credential made it. The owner is the agent the request names, and the actor is the caller,
 // never anything the request says.

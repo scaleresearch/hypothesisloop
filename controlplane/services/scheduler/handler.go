@@ -65,7 +65,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
 		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
-			"metadata.agent_id is whose job it is and whose quota it spends. Who submitted it is the caller, answered as actor. " +
+			"metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. " +
+			"An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
@@ -74,10 +75,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("experiment id is required")
 		}
 		meta := req.Metadata
-		if err := access.PlatformExperiment(ctx, meta.PlatformExperimentID); err != nil {
-			return nil, err
-		}
-		if err := access.ActAs(ctx, meta.AgentID); err != nil {
+		var err error
+		if meta.PlatformExperimentID, meta.AgentID, err = access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
 			return nil, err
 		}
 		caller, _ := auth.FromContext(ctx)

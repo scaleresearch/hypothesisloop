@@ -168,6 +168,27 @@ func TestNamingAnAgent(t *testing.T) {
 		{"agent in pe-a", "agent-a", 200}, {"agent in pe-a", "agent-new", 403},
 		{"user of A", "agent-b", 200},
 	})
+	// A job's agent and platform experiment: an agent's token says both, so it may leave them out
+	// and may not state another. Anyone else states both.
+	for _, c := range []struct {
+		caller, pe, agent string
+		wantPE, wantAgent string
+		want              int
+	}{
+		{"agent in pe-a", "", "", "pe-a", "agent-a", 200},
+		{"agent in pe-a", "pe-a", "agent-a", "pe-a", "agent-a", 200},
+		{"agent in pe-a", "pe-a2", "", "", "", 404},
+		{"agent in pe-a", "", "agent-a-other", "", "", 403},
+		{"user of A", "pe-a", "agent-a-other", "pe-a", "agent-a-other", 200},
+		{"user of A", "", "agent-a", "", "", 404},
+		{"coordinator of pe-a", "pe-a", "agent-a", "", "", 403},
+	} {
+		ctx := auth.WithPrincipal(context.Background(), callers[c.caller])
+		pe, agent, err := access.Spender(ctx, c.pe, c.agent)
+		if status(err) != c.want || pe != c.wantPE || agent != c.wantAgent {
+			t.Errorf("spender: %s stating (%q, %q): got = (%q, %q, %d), want (%q, %q, %d)", c.caller, c.pe, c.agent, pe, agent, status(err), c.wantPE, c.wantAgent, c.want)
+		}
+	}
 }
 
 func TestClusterAccess(t *testing.T) {
