@@ -5,6 +5,7 @@ import { clsx } from 'clsx'
 import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api'
 import type { ClustersResponse, ClusterInfo } from '@/types'
 import { useTenant } from '@/lib/tenant'
+import { unitCount, unitRate } from '@/lib/units'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { OrgClusters } from '@/components/org-clusters'
 import { PageHeader } from '@/components/ui/page-header'
@@ -120,8 +121,8 @@ function LiveCapacity() {
         {error && <ErrorMessage>Could not load live capacity: {error.message}</ErrorMessage>}
         {data && rows.length === 0 && (
           <EmptyState>
-            No cluster the jobs of {org.name} can be placed on reports live accelerator capacity
-            right now. A cluster-agent reports allocatable-minus-requested accelerators per type
+            No cluster the jobs of {org.name} can be placed on reports live accelerator or CPU
+            class capacity right now. A cluster-agent reports allocatable-minus-requested units per type
             on every desired-state poll, so this table fills once one of its clusters, or one the
             platform shares, has polled.
           </EmptyState>
@@ -131,10 +132,10 @@ function LiveCapacity() {
             <thead>
               <tr>
                 <th>Cluster</th>
-                <th>Accelerator Type</th>
+                <th title="An accelerator type, or a CPU class whose unit is one core">Type</th>
                 <th>Available</th>
                 <th>Total</th>
-                <th title="What one accelerator of this type costs for an hour, in accelerator hours">AccH per hour</th>
+                <th title="What one accelerator of this type, or one core of a CPU class, costs for an hour, in accelerator hours">AccH per hour</th>
               </tr>
             </thead>
             <tbody>
@@ -143,10 +144,10 @@ function LiveCapacity() {
                   <td className="font-mono text-xs">{r.cluster}</td>
                   <td className="font-mono text-xs font-semibold">{r.accelerator_type}</td>
                   <td className={clsx('font-mono text-xs', r.available > 0 ? 'text-success' : 'text-danger')}>
-                    {r.available}
+                    {unitCount(r.kind, r.available)}
                   </td>
-                  <td className="font-mono text-xs text-muted">{r.total}</td>
-                  <td className="font-mono text-xs">{r.acch_per_hour}</td>
+                  <td className="font-mono text-xs text-muted">{unitCount(r.kind, r.total)}</td>
+                  <td className="font-mono text-xs">{unitRate(r.kind, r.acch_per_hour)}</td>
                 </tr>
               ))}
             </tbody>

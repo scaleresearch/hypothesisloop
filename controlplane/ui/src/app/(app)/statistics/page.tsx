@@ -18,6 +18,7 @@ import {
 import { chart, statusColor } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetail, faultBreakdown } from '@/lib/eviction'
 import { acceleratorLabel } from '@/lib/format'
+import { occupancy } from '@/lib/units'
 
 type Job = Record<string, any>
 
@@ -65,15 +66,15 @@ function SchedulerQuality() {
   // recent reconcile snapshot — as opposed to a platform experiment's budget-consumption ratio
   // (used/allocated AccH), which measures spend, not whether chips are actually idle or running
   // a job.
-  const acceleratorBusy = clusterList.reduce((s, c) => s + c.accelerator_busy, 0)
-  const acceleratorTotal = clusterList.reduce((s, c) => s + c.accelerator_total, 0)
-  const occupancyPct = acceleratorTotal > 0 ? Math.round((acceleratorBusy / acceleratorTotal) * 100) : null
+  const chips = occupancy(clusterList.reduce((s, c) => s + c.accelerator_busy, 0), clusterList.reduce((s, c) => s + c.accelerator_total, 0), 'chips')
+  // Cores of the CPU classes clusters publish, counted apart from the chips.
+  const cores = occupancy(clusterList.reduce((s, c) => s + (c.core_busy ?? 0), 0), clusterList.reduce((s, c) => s + (c.core_total ?? 0), 0), 'cores')
 
   return (
     <Card>
       <CardHeader>Scheduler Quality · every org · staff only</CardHeader>
       <CardContent>
-        <div className="mb-4 grid grid-cols-3 gap-2.5">
+        <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5">
           <StatTile label="Total Jobs" value={total} />
           <StatTile
             label="Clusters"
@@ -83,10 +84,11 @@ function SchedulerQuality() {
           />
           <StatTile
             label="Accelerator Occupancy"
-            value={occupancyPct != null ? `${occupancyPct}%` : '—'}
+            value={chips.percent}
             tone="accent"
-            sub={acceleratorTotal > 0 ? `${acceleratorBusy}/${acceleratorTotal} chips busy, live across connected clusters` : 'no live capacity reported'}
+            sub={chips.detail ?? 'no live capacity reported'}
           />
+          {cores.detail && <StatTile label="CPU Class Occupancy" value={cores.percent} tone="accent" sub={cores.detail} />}
         </div>
         <Table className="max-w-[640px]">
           <thead>

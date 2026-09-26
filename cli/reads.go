@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -97,9 +98,12 @@ func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 
 Live capacity per cluster. First one line of its cores and memory, in total and not asked for
 by running jobs, summed over its nodes: what a job with no accelerator needs to know. Then
-its accelerators, one line per type: available, total and acch_per_hour, what an
-hour on one of them costs in accelerator hours. accelerator_type is the exact string a job spec
-takes; a type with none available queues and never errors. A line with job_image is of a
+its priced types, one line per type. For an accelerator: available, total and acch_per_hour,
+what an hour on one of them costs in accelerator hours. For a CPU class (kind cpu), whose unit
+is one core: cores_available, cores_total and acch_per_core_hour; a job asks for cores of it
+with accelerator_count, which is then its cpu. accelerator_type is the exact string a job spec
+takes; a type with none available queues and never errors. Every job asks for one of these
+types: one that needs no accelerator asks for cores of a CPU class. A line with job_image is of a
 cluster that runs a job that names no image, in that one. With only_job_image it runs no other
 image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
 runs only jobs that name their image.
@@ -143,6 +147,10 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			}
 		}
 		for _, a := range cl.Accelerators {
+			a, err := inCores(a)
+			if err != nil {
+				return fail(stderr, err)
+			}
 			if err := printPrefixed(stdout, a, prefix...); err != nil {
 				return fail(stderr, err)
 			}
@@ -152,6 +160,25 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		fmt.Fprintln(stderr, "hl: capacity: no cluster reports capacity")
 	}
 	return 0
+}
+
+// inCores renames the counts and the rate of a capacity line of kind cpu, so that the line says
+// they are cores. A line of any other kind is returned as it came.
+func inCores(raw json.RawMessage) (json.RawMessage, error) {
+	var line struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &line); err != nil {
+		return nil, fmt.Errorf("response is not JSON: %w", err)
+	}
+	if line.Kind != "cpu" {
+		return raw, nil
+	}
+	out := string(raw)
+	for from, to := range map[string]string{`"available":`: `"cores_available":`, `"total":`: `"cores_total":`, `"acch_per_hour":`: `"acch_per_core_hour":`} {
+		out = strings.Replace(out, from, to, 1)
+	}
+	return json.RawMessage(out), nil
 }
 
 // printPrefixed prints the object raw on one line after the given key and value pairs.

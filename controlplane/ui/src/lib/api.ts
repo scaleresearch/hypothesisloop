@@ -37,6 +37,7 @@ import type {
 } from '@/types'
 
 import { isZeroDate } from '@/lib/format'
+import type { TypeKind } from '@/lib/units'
 import { accessToken, endSession } from '@/lib/auth'
 
 // One API, one base URL: quota, scheduler and registry operations are all served together.
@@ -262,8 +263,10 @@ export interface ExperimentStats {
   // ('workload'), the environment's ('infrastructure'), or the platform's own decision
   // ('policy'). Derived server-side from the same tally; see shared/domain/fault_class.go.
   evictions_by_class: Record<string, number>
-  // accelerator_count summed over SUBMITTED and RUNNING jobs.
+  // accelerator_count summed over SUBMITTED and RUNNING jobs: those on an accelerator type, and
+  // those on a CPU class, whose count is cores.
   in_flight_accelerators: number
+  in_flight_cores: number
   // Present only when group_by was asked for: the same stats per agent or hypothesis id.
   groups?: Record<string, ExperimentStats>
 }
@@ -569,7 +572,8 @@ export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<Ag
 export interface ResourceCapacity {
   clusters: Array<{
     cluster_name: string
-    accelerators: Array<{ accelerator_type: string; available: number; total: number; acch_per_hour: number }>
+    // kind says what available and total count: devices, or for cpu the cores of a CPU class.
+    accelerators: Array<{ accelerator_type: string; kind: TypeKind; available: number; total: number; acch_per_hour: number }>
   }>
 }
 

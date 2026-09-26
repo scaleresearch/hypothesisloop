@@ -153,3 +153,35 @@ func TestAcceleratorJobsAreReservedAsBeforeInAnExperimentWithNoCoreJobs(t *testi
 		t.Fatalf("a job that takes the estimates to 1.25 of the 1 left: (%q, %v)", reason, err)
 	}
 }
+
+// Sixteen cores and four devices in flight are not twenty of anything.
+func TestInFlightUnitsAreCountedPerKind(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 1000)
+	domain.SetAcceleratorKinds(map[string]domain.TypeKind{quotaCPUClass: domain.TypeKindCPU, quotaOtherCPUClass: domain.TypeKindCPU})
+	t.Cleanup(func() { domain.SetAcceleratorKinds(nil) })
+
+	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 3, 1, domain.StatusRunning)
+	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 1, 1, domain.StatusSubmitted)
+	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 8, 1, domain.StatusQueued)
+	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 8, 0.24, domain.StatusRunning)
+	seedPricedExperiment(t, pool, agentID, peID, quotaOtherCPUClass, 8, 0.48, domain.StatusSubmitted)
+	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 32, 0.96, domain.StatusCompleted)
+
+	store := NewExperimentsStore(pool)
+	filter := domain.ExperimentFilter{Scope: domain.AllTenants, PlatformExperimentID: peID}
+	stats, err := store.ExperimentStats(context.Background(), filter, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]*domain.ExperimentStats{"all": stats, "the agent": stats.Groups[agentID]} {
+		if got == nil || got.InFlightAccelerators != 4 || got.InFlightCores != 16 || got.Total != 6 || got.ByStatus["RUNNING"] != 2 {
+			t.Errorf("%s: %+v, want 4 devices and 16 cores in flight among 6 jobs, 2 of them running", name, got)
+		}
+	}
+
+	// A catalog with no CPU class counts every unit as a device, as it did.
+	domain.SetAcceleratorKinds(nil)
+	if stats, err := store.ExperimentStats(context.Background(), filter, ""); err != nil || stats.InFlightAccelerators != 20 || stats.InFlightCores != 0 {
+		t.Errorf("without a CPU class: %+v, %v; want 20 in flight", stats, err)
+	}
+}

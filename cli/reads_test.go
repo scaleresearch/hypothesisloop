@@ -71,6 +71,27 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	}
 }
 
+// A CPU class counts cores, and its line says so. The line of an accelerator is as it was.
+func TestCapacitySaysCoresForACPUClass(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"clusters": []any{map[string]any{"cluster_name": "box", "accelerators": []any{
+			map[string]any{"accelerator_type": "cpu.hypothesisloop.dev/class=EPYC-9354", "kind": "cpu", "available": 12, "total": 16, "acch_per_hour": 0.01},
+			map[string]any{"accelerator_type": "tenstorrent.com/chipArch=blackhole", "kind": "accelerator", "available": 3, "total": 4, "acch_per_hour": 0.5},
+		}}}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"capacity"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"cluster":"box","accelerator_type":"cpu.hypothesisloop.dev/class=EPYC-9354","acch_per_core_hour":0.01,"cores_available":12,"kind":"cpu","cores_total":16}`,
+		`{"cluster":"box","accelerator_type":"tenstorrent.com/chipArch=blackhole","acch_per_hour":0.5,"available":3,"kind":"accelerator","total":4}`,
+	}
+	if !reflect.DeepEqual(lines(stdout.String()), want) {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+}
+
 // An agent token cannot read /me, so capacity asks for the org it is told and otherwise leaves
 // the org to the platform, which knows the one a token is bound to.
 func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {

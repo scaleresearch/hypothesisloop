@@ -202,18 +202,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if connected {
 				lastSeen = now
 			}
-			var busySum, totalSum int64
-			for flavor, t := range total[name] {
-				totalSum += t
-				busySum += t - available[name][flavor]
-			}
+			devices, cores := occupancyByKind(available[name], total[name])
 			out[i] = clusterInfo{
 				ClusterName:       name,
 				ClusterID:         clusterIDs[name],
 				LastSeenAt:        lastSeen,
 				Connected:         connected,
-				AcceleratorBusy:   busySum,
-				AcceleratorTotal:  totalSum,
+				AcceleratorBusy:   devices.busy,
+				AcceleratorTotal:  devices.total,
+				CoreBusy:          cores.busy,
+				CoreTotal:         cores.total,
 				AutoscalerEnabled: autoscalerEnabled[name],
 			}
 		}
@@ -588,6 +586,22 @@ type capacityReport struct {
 }
 
 // clusterInfo is one row of GET /internal/clusters.
+type occupancy struct{ busy, total int64 }
+
+// occupancyByKind sums one cluster's reported flavors into devices and cores. A CPU class counts
+// cores and an accelerator type devices, so the two are never one sum.
+func occupancyByKind(available, total map[string]int64) (devices, cores occupancy) {
+	for flavor, installed := range total {
+		sum := &devices
+		if domain.AcceleratorType(flavor).Kind() == domain.TypeKindCPU {
+			sum = &cores
+		}
+		sum.total += installed
+		sum.busy += installed - available[flavor]
+	}
+	return devices, cores
+}
+
 type clusterInfo struct {
 	ClusterName string `json:"cluster_name"`
 	// ClusterID is the runtime-derived stable fingerprint (kube-system namespace UID /
@@ -597,11 +611,15 @@ type clusterInfo struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 	Connected  bool      `json:"connected"`
 	// AcceleratorBusy/AcceleratorTotal are the cluster's most recently reported occupancy,
-	// summed across every accelerator flavor — actual busy-vs-idle chip counts from the last
-	// reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot is
-	// within the connectedWithin freshness window (e.g. a disconnected cluster).
+	// summed across every flavor of kind accelerator — actual busy-vs-idle chip counts from the
+	// last reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot
+	// is within the connectedWithin freshness window (e.g. a disconnected cluster).
 	AcceleratorBusy  int64 `json:"accelerator_busy"`
 	AcceleratorTotal int64 `json:"accelerator_total"`
+	// CoreBusy/CoreTotal are the same for the CPU classes the cluster publishes, in cores. Kept
+	// apart: 16 cores and 4 chips are not 20 of anything.
+	CoreBusy  int64 `json:"core_busy"`
+	CoreTotal int64 `json:"core_total"`
 	// AutoscalerEnabled mirrors the cluster's own most recent capacityReport — see
 	// capacityReport.AutoscalerEnabled. False (the fail-closed default) for a cluster whose agent
 	// has never reported it or is not within the freshness window.

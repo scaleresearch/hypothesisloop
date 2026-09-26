@@ -234,7 +234,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"yours, 'infrastructure' is the environment's (those cost you no quota and no retry " +
 			"attempt -- stop debugging code that was correct), and 'policy' is the platform's " +
 			"own decision, such as a stage cut, which is not a failure at all. " +
-			"in_flight_accelerators sums accelerator_count over SUBMITTED and RUNNING. " +
+			"in_flight_accelerators sums accelerator_count over SUBMITTED and RUNNING jobs on an " +
+			"accelerator type, and in_flight_cores does so for jobs on a CPU class. " +
 			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
 			"agent or hypothesis that has a matching experiment, keyed by its id.",
 	}, func(ctx context.Context, in *struct {

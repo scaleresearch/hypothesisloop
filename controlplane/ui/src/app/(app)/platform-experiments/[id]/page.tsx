@@ -52,6 +52,7 @@ import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/form
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys, verdictSetBy } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
+import { inFlight } from '@/lib/units'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
@@ -656,7 +657,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
     (a.best_job ? bestFirst * a.best_job.metric.best : Infinity) - (b.best_job ? bestFirst * b.best_job.metric.best : Infinity))
 
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
-  const inFlightAccelerators = stats?.in_flight_accelerators ?? 0
+  const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
@@ -919,9 +920,9 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
           <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
             <StatTile label="Budget" value={`${pe.budget_accelerator_hours} AccH`} />
             <StatTile
-              label="Accelerators In Flight"
-              value={pe.max_concurrent_accelerators == null ? `${inFlightAccelerators}` : `${inFlightAccelerators} / ${pe.max_concurrent_accelerators}`}
-              tone={pe.max_concurrent_accelerators != null && inFlightAccelerators >= pe.max_concurrent_accelerators ? 'accent' : undefined}
+              label={held.label}
+              value={held.value}
+              tone={held.atCap ? 'accent' : undefined}
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
             <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />

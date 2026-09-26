@@ -236,9 +236,9 @@ func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.Ex
 	// split_part yields the whole string when there is no ':', so a reason with no detail
 	// suffix is its own code — the same rule the UI applies when it labels one.
 	q := `SELECT ` + groupColumn + ` AS group_key, status, capacity_tier,
-       split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, COUNT(*), SUM(accelerator_count)
+       split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, accelerator_type, COUNT(*), SUM(accelerator_count)
 FROM experiments WHERE ` + strings.Join(clauses, " AND ") + `
-GROUP BY group_key, status, capacity_tier, reason_code`
+GROUP BY group_key, status, capacity_tier, reason_code, accelerator_type`
 
 	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -251,17 +251,18 @@ GROUP BY group_key, status, capacity_tier, reason_code`
 		out.Groups = map[string]*domain.ExperimentStats{}
 	}
 	for rows.Next() {
-		var key, status, tier, reasonCode string
-		var n, accelerators int
-		if err := rows.Scan(&key, &status, &tier, &reasonCode, &n, &accelerators); err != nil {
+		var key, status, tier, reasonCode, acceleratorType string
+		var n, units int
+		if err := rows.Scan(&key, &status, &tier, &reasonCode, &acceleratorType, &n, &units); err != nil {
 			return nil, fmt.Errorf("experiments_store.ExperimentStats: scan: %w", err)
 		}
-		tallyExperimentStats(out, status, tier, reasonCode, n, accelerators)
+		kind := domain.AcceleratorType(acceleratorType).Kind()
+		tallyExperimentStats(out, status, tier, reasonCode, kind, n, units)
 		if groupBy != "" {
 			if out.Groups[key] == nil {
 				out.Groups[key] = newExperimentStats()
 			}
-			tallyExperimentStats(out.Groups[key], status, tier, reasonCode, n, accelerators)
+			tallyExperimentStats(out.Groups[key], status, tier, reasonCode, kind, n, units)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -285,15 +286,19 @@ func newExperimentStats() *domain.ExperimentStats {
 	}
 }
 
-func tallyExperimentStats(out *domain.ExperimentStats, status, tier, reasonCode string, n, accelerators int) {
+func tallyExperimentStats(out *domain.ExperimentStats, status, tier, reasonCode string, kind domain.TypeKind, n, units int) {
 	out.Total += n
 	out.ByStatus[status] += n
 	out.ByCapacityTier[tier] += n
+	inFlight := &out.InFlightAccelerators
+	if kind == domain.TypeKindCPU {
+		inFlight = &out.InFlightCores
+	}
 	switch domain.ExperimentStatus(status) {
 	case domain.StatusSubmitted:
-		out.InFlightAccelerators += accelerators
+		*inFlight += units
 	case domain.StatusRunning:
-		out.InFlightAccelerators += accelerators
+		*inFlight += units
 		out.RunningByCapacityTier[tier] += n
 	case domain.StatusEvicted:
 		out.EvictedByCapacityTier[tier] += n
