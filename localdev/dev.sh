@@ -169,6 +169,12 @@ start_control_plane() {
   stop control-service
   stop metrics-service
   require_port 8081
+  # Checked before anything is stopped too: settings rendered before this tree made a key
+  # required do not load, and the API would be stopped with nothing to start in its place.
+  if ! lib_hl_admin token staff >/dev/null; then
+    echo "dev: ${settings} does not load with this tree; render it again with make dev or make dev-hosted" >&2
+    exit 1
+  fi
   require_port 8084
   start control-service "${bin}/control-service"
   start metrics-service "${bin}/metrics-service"
