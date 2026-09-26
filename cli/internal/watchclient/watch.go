@@ -5,6 +5,7 @@ package watchclient
 
 import (
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
@@ -440,6 +441,13 @@ func connect(base, path, token string, budget time.Duration) (*webSocket, error)
 	}
 	statusLine := strings.SplitN(string(head), "\r\n", 2)[0]
 	if strings.Contains(statusLine, " 101 ") {
+		// A proxy between here and the platform checks this too, and refuses the upgrade when
+		// it is wrong: checking it here is what makes a platform that answers wrongly fail in
+		// its own tests and not first behind a proxy.
+		if got, want := headerValue(string(head), "Sec-WebSocket-Accept"), acceptFor(key); got != want {
+			conn.Close()
+			return nil, &Closed{msg: fmt.Sprintf("handshake failed: the platform answered the upgrade with Sec-WebSocket-Accept %q, and %q is the answer to the key sent", got, want)}
+		}
 		return ws, nil
 	}
 	code := statusCode(statusLine)
@@ -654,4 +662,19 @@ func (ws *webSocket) nextText(deadline time.Time) (string, error) {
 func (ws *webSocket) close() {
 	_ = ws.sendFrame(0x8, nil)
 	_ = ws.conn.Close()
+}
+
+// acceptFor is the answer RFC 6455 gives to a handshake key.
+func acceptFor(key string) string {
+	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) //nolint:gosec // the accept token is specified as SHA-1
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func headerValue(head, name string) string {
+	for _, line := range strings.Split(head, "\r\n")[1:] {
+		if key, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

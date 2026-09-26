@@ -200,6 +200,7 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 	if !strings.Contains(status, "101") {
 		t.Fatalf("handshake status: got = %v, want = 101 Switching Protocols", strings.TrimSpace(status))
 	}
+	accept := ""
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
@@ -208,6 +209,14 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 		if strings.TrimSpace(line) == "" {
 			break
 		}
+		if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(name, "Sec-WebSocket-Accept") {
+			accept = strings.TrimSpace(value)
+		}
+	}
+	// The key above and this answer are the example of RFC 6455 section 1.3. A proxy in front of
+	// the platform refuses an upgrade answered with anything else.
+	if accept != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+		t.Fatalf("Sec-WebSocket-Accept: got = %q, want = the answer RFC 6455 gives to the key sent", accept)
 	}
 	return &watchClient{conn: conn, r: r}
 }

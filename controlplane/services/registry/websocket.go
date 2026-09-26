@@ -22,7 +22,7 @@ import (
 // handshake, write text frames, answer pings, notice a close. That is all this implements. It is
 // server-side only: it never masks what it writes and always unmasks what it reads, per the spec.
 
-const wsGUID = "258EAFA5-E914-47DA-95CA-5AB0DC85B11F"
+const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 const (
 	wsOpText   = 0x1
