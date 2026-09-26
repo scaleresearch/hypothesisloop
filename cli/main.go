@@ -742,7 +742,9 @@ it says optional:
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
   duration_hours: 4
   agents:                              # one entry per researcher
-    - flavor: hyperparameter-search    # optional, as are model and hyperparameters
+    - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
+      hyperparameters:                 #   data-search or hyperparameter-search. The direction you
+        direction: what this one tries #   give a researcher goes in hyperparameters, any keys.
     - {}
   baseline_job_id: job-...             # your COMPLETED job with its summary filed
   metric_reason: why this metric is the goal, in plain words
