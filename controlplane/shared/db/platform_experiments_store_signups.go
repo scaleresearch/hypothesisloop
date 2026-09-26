@@ -406,23 +406,6 @@ ORDER BY signed_up_at ASC`
 }
 
 // ListSignupsByRole returns the agent IDs signed up for a platform experiment in one role.
-// ListParticipants returns the agents taking part in a platform experiment: every signup but
-// the planner of a draft that was accepted, whose work ended there.
-func (s *PlatformExperimentsStore) ListParticipants(ctx context.Context, platformExpID string) ([]string, error) {
-	rows, err := s.pool.pool.Query(ctx, `
-SELECT s.agent_id FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-WHERE s.platform_experiment_id = $1 AND (pe.status = 'draft' OR s.flavor <> '`+domain.PlannerFlavor+`')
-ORDER BY s.signed_up_at ASC`, platformExpID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ListParticipants: %w", err)
-	}
-	agents, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.ListParticipants: %w", err)
-	}
-	return agents, nil
-}
-
 func (s *PlatformExperimentsStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	const q = `
 SELECT agent_id FROM experiment_signups
