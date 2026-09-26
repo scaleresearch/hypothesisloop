@@ -21,6 +21,46 @@ type Repositories interface {
 	Reachable(ctx context.Context, projectID, repository string) (string, error)
 	// ExperimentBase returns the repository's experiment file.
 	ExperimentBase(ctx context.Context, projectID, repository string) ([]byte, error)
+	// Create makes a private repository of that name for a platform experiment that names none,
+	// on the GitHub account the org of the project connected, and returns it. It returns nothing
+	// on a deployment with no GitHub App, where a platform experiment needs no repository.
+	Create(ctx context.Context, projectID, name, description string) (string, error)
+}
+
+// RepositoryName is the name of the repository the platform creates for a platform experiment:
+// what the experiment is called, cut short, and its id, which keeps two of one name apart.
+func RepositoryName(pe *domain.PlatformExperiment) string {
+	var slug []byte
+	for _, c := range []byte(strings.ToLower(pe.Name)) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			slug = append(slug, c)
+		case len(slug) > 0 && slug[len(slug)-1] != '-':
+			slug = append(slug, '-')
+		}
+		if len(slug) == 40 {
+			break
+		}
+	}
+	name := strings.Trim(string(slug), "-")
+	if name == "" {
+		name = "experiment"
+	}
+	return name + "-" + strings.TrimPrefix(pe.ID, "pe-")
+}
+
+// provideRepository gives a platform experiment that names no repository one the platform
+// creates for it.
+func (h *PlatformExperimentsHandler) provideRepository(ctx context.Context, pe *domain.PlatformExperiment) error {
+	if pe.Repository != "" {
+		return nil
+	}
+	created, err := h.repos.Create(ctx, pe.ProjectID, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name)
+	if err != nil {
+		return err
+	}
+	pe.Repository, pe.RepositoryURL = created, domain.RepositoryURL(created)
+	return nil
 }
 
 // statedByTheRequest are the fields a create without from_repo must carry, though the schema

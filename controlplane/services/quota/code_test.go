@@ -37,7 +37,11 @@ func (m *memoryCode) GetCode(_ context.Context, pe, agent, sha string, _ int64) 
 type codeRoster struct {
 	joined map[string]bool
 	closed bool
+	// repository is the one pe-1 names, empty when it names none.
+	repository string
 }
+
+func (r codeRoster) Repository(context.Context, string) (string, error) { return r.repository, nil }
 
 func (r codeRoster) Joined(_ context.Context, _, agentID string) (bool, error) {
 	return r.joined[agentID], nil
@@ -148,6 +152,10 @@ func TestCodeIsRefusedWhenItIsNoBundleOfThatCommitTooLargeOrLate(t *testing.T) {
 	closed := codeRoster{joined: everyone.joined, closed: true}
 	if code, out := codeCall(t, store, closed, agentOne, "PUT", codePath, codeBundle); code != http.StatusConflict {
 		t.Errorf("after the close: %d %s, want 409", code, out)
+	}
+	inGit := codeRoster{joined: everyone.joined, repository: "acme/model"}
+	if code, out := codeCall(t, store, inGit, agentOne, "PUT", codePath, codeBundle); code != http.StatusConflict || !strings.Contains(string(out), "code_in_repository") || !strings.Contains(string(out), "git push") {
+		t.Errorf("for an experiment that names a repository: %d %s, want 409 code_in_repository saying git push", code, out)
 	}
 	person := auth.Principal{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
 	if code, out := codeCall(t, store, everyone, person, "PUT", "/platform-experiments/pe-1/agents/ag-out/code/"+codeSHA, codeBundle); code != http.StatusNotFound {

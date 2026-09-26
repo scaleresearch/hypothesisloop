@@ -67,7 +67,7 @@ describe('the repository of a new platform experiment', () => {
   it('may be left out', async () => {
     show('acme/open')
     await userEvent.click(await screen.findByRole('combobox'))
-    await userEvent.click(await screen.findByRole('option', { name: 'No repository' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository' }))
     expect(screen.getByRole('status').textContent).toBe('')
   })
 
@@ -78,7 +78,7 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.type(field, 'wid')
     await waitFor(() => expect(fetchGitHubRepositories).toHaveBeenLastCalledWith('org_a', { q: 'wid', limit: 50 }))
     expect(vi.mocked(fetchGitHubRepositories).mock.calls.map(c => c[1]?.q)).not.toContain('w')
-    await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['No repository', 'acme/widgetsprivate']))
+    await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['A new private repository', 'acme/widgetsprivate']))
   })
 
   it('says how many more there are than it lists', async () => {
@@ -91,7 +91,7 @@ describe('the repository of a new platform experiment', () => {
   it('leads to the GitHub card of Settings when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect(await screen.findByText(/No GitHub account is connected to Lab, so this experiment has no repository\./)).toBeTruthy()
+    expect(await screen.findByText(/No GitHub account is connected to Lab, and an experiment keeps its code in a repository\./)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Connect GitHub in Settings' }).getAttribute('href')).toBe('/settings?project=prj_1#github')
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(fetchGitHubRepositories).not.toHaveBeenCalled()

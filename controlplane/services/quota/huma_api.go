@@ -172,7 +172,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
 			"It is not read from the file, and is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, " +
-			"Left out, agents start in an empty directory and the platform keeps the code each pushes, one git bundle per commit, which is what a job's code_ref then names. With repository, " +
+			"A platform experiment keeps its code in a repository: left out, the platform creates a private one with one commit on the GitHub account the org connected first, named from the experiment and its id, " +
+			"stores it as if the request had named it and answers with it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
+			"422 github_not_connected when the org has connected no GitHub account, 422 repository_not_created when the installation has not granted the App the creation of repositories " +
+			"(its owner grants it, or the request names a repository), 409 repository_not_created when the name is taken. Nothing is created without its repository. " +
+			"Only a deployment with no GitHub App has platform experiments without one: there agents start in an empty directory and the platform keeps the code each pushes, one git bundle per commit, which is what a job's code_ref then names. With repository, " +
 			"and repository_url in the answer is where from. An installation of the platform's GitHub App that the org connected must cover it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
@@ -239,10 +243,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			by := caller.Actor()
 			hosting.createdBy = &by
 		}
+		hosting.prepare = peh.provideRepository
 		pe, err := peh.svc.Create(ctx, hosting)
 		var refused *reasonError
 		if errors.As(err, &refused) {
 			return nil, refused
+		}
+		var answered huma.StatusError
+		if errors.As(err, &answered) {
+			return nil, err
 		}
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())

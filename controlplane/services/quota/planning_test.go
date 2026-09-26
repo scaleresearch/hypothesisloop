@@ -31,7 +31,8 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
+	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
+	handler := NewPlatformExperimentsHandler(svc, planningRepositories, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: string(domain.CPUType), Kind: domain.TypeKindCPU, AccHRate: 1}}})
 	if drafts, ok := store.(*draftStore); ok {
@@ -63,6 +64,10 @@ var planner = auth.Principal{Kind: auth.KindUser, UserID: "u-1", Name: "Ada", Or
 
 // A person with an idea had to state metrics, a budget, a ladder and dates before anything
 // existed. A draft is the experiment made from the idea alone.
+// planningRepositories is GitHub as the last planningAPI sees it: a deployment with no GitHub
+// App until a test gives it an account to create on.
+var planningRepositories *fakeRepositories
+
 func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t *testing.T) {
 	store := &draftStore{}
 	_, call := planningAPI(t, store, planner)
@@ -94,6 +99,20 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
+	if pe.Repository != "" {
+		t.Errorf("repository = %q on a deployment with no GitHub App, want none", pe.Repository)
+	}
+	// On a deployment with a GitHub App a draft has a repository: the one named, or a new one.
+	planningRepositories.org = "acme"
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 0 {
+		t.Errorf("naming a repository: got = %d %v, want it as GitHub spells it and none created", code, out["repository"])
+	}
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated || len(planningRepositories.created) != 1 ||
+		out["repository"] != "acme/"+RepositoryName(store.created[2]) {
+		t.Errorf("naming none: got = %d %v (created %v), want a repository made for the draft", code, out["repository"], planningRepositories.created)
+	}
+	planningRepositories.org = ""
+	store.created = store.created[:1]
 
 	for name, body := range map[string]map[string]any{
 		"no goal":                {"project_id": "prj-a", "goal": "   "},
@@ -214,12 +233,15 @@ func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
 }
 
-func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits) error {
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error {
 	if limits != (db.DraftLimits{Concurrent: DefaultPlanning.MaxConcurrentPerOrg, PerDay: DefaultPlanning.MaxPerDayPerOrg}) {
 		return errors.New("a draft was created without the planning limits")
 	}
 	if s.over != nil {
 		return s.over
+	}
+	if err := prepare(context.Background(), pe); err != nil {
+		return err
 	}
 	if s.planners == nil {
 		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}

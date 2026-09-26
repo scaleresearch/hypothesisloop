@@ -75,10 +75,10 @@ describe('the connected GitHub accounts', () => {
     expect(within(other).queryByText('you')).toBeNull()
   })
 
-  it('say that experiments run without a repository when there are none', async () => {
+  it('say that an experiment needs one when there are none', async () => {
     installations = []
     show()
-    expect(await screen.findByText(/No GitHub account is connected to Lab, so its experiments run without a repository\./)).toBeTruthy()
+    expect(await screen.findByText(/No GitHub account is connected to Lab, and an experiment needs one/)).toBeTruthy()
   })
 
   it('say why they could not be read', async () => {

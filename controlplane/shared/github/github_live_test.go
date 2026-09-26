@@ -201,6 +201,27 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 }
 
 // A read token clones and cannot push. A write token pushes a branch, and the branch is deleted.
+// Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
+// by name: HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1, once the installation grants the creation of
+// repositories.
+func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
+	if os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_CREATE") != "1" {
+		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_CREATE is not 1: this creates a repository on the installation's account and cannot delete it")
+	}
+	client := liveClient(t)
+	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
+	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
+	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.")
+	if err != nil {
+		t.Fatalf("CreateRepository(%s) = %v", name, err)
+	}
+	t.Logf("created %s: delete it by hand", created.FullName)
+	token, err := client.Token(t.Context(), installation, created.FullName, Write)
+	if err != nil || token.Repository != created.FullName {
+		t.Fatalf("a write token for %s: got = %+v, %v, want one: the installation covers what it created", created.FullName, token != nil, err)
+	}
+}
+
 func TestLiveReadTokenClonesAndOnlyAWriteTokenPushes(t *testing.T) {
 	client := liveClient(t)
 	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")

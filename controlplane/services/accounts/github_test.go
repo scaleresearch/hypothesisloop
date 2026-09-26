@@ -113,6 +113,17 @@ type fakeApp struct {
 	tokenErr error
 	fileErr  error
 	file     string
+	// created holds each repository created, as "installation name", and createErr fails it.
+	created   []string
+	createErr error
+}
+
+func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, name, _ string) (*github.Repository, error) {
+	if a.createErr != nil {
+		return nil, a.createErr
+	}
+	a.created = append(a.created, fmt.Sprintf("%d %s", installationID, name))
+	return &github.Repository{FullName: "Acme/" + name, Private: true}, nil
 }
 
 var (
@@ -767,6 +778,40 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 	delete(w.app.covers, 100)
 	if _, err := w.svc.Reachable(ctx, w.projectA, "acme/model"); statusOf(err) != 422 || reasonOf(err) != ReasonInstallationGone {
 		t.Errorf("with the App removed on GitHub: %v, want 422 installation_gone", err)
+	}
+}
+
+func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
+	ctx := context.Background()
+	bare := newGitHubWorld(t, false)
+	if named, err := bare.svc.Create(ctx, bare.projectA, "sweep-1a2b3c4d", ""); named != "" || err != nil {
+		t.Fatalf("on a deployment with no GitHub App: Create = %q, %v, want none made and no refusal", named, err)
+	}
+	w := newGitHubWorld(t, true)
+	if named, err := w.svc.Create(ctx, w.projectA, "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
+		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
+	}
+	w.connect(w.orgA, acme)
+	w.connect(w.orgB, rival)
+	named, err := w.svc.Create(ctx, w.projectA, "sweep-1a2b3c4d", "")
+	if err != nil || named != "Acme/sweep-1a2b3c4d" || len(w.app.created) != 1 || w.app.created[0] != "100 sweep-1a2b3c4d" {
+		t.Fatalf("Create = %q, %v (created %v), want it made through the org's own installation", named, err, w.app.created)
+	}
+	for name, tc := range map[string]struct {
+		project   string
+		createErr error
+		status    int
+		reason    string
+	}{
+		"the installation may not create": {w.projectA, github.ErrCannotCreateRepositories, 422, ReasonRepositoryNotCreated},
+		"the name is taken":               {w.projectA, github.ErrRepositoryExists, 409, ReasonRepositoryNotCreated},
+		"the App was removed on GitHub":   {w.projectA, github.ErrInstallationGone, 422, ReasonInstallationGone},
+		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
+	} {
+		w.app.createErr = tc.createErr
+		if named, err := w.svc.Create(ctx, tc.project, "another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
+			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
+		}
 	}
 }
 

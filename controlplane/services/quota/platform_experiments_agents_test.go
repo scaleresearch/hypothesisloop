@@ -39,6 +39,10 @@ func (f *rosterStore) ExperimentBase(context.Context, string, string) ([]byte, e
 	return nil, nil
 }
 
+func (f *rosterStore) Create(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+
 const rosterMaxHosted = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {

@@ -52,7 +52,7 @@ type PlatformExperimentsStore interface {
 	// a person; db.ErrNotDraft for anything but a draft.
 	Decline(ctx context.Context, id, reason string, waitUntil time.Time) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits) error
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
@@ -176,7 +176,7 @@ type CreatePlatformExperimentRequest struct {
 	// through an installation its org connected. AgentImage is the image its hosted agents and
 	// coordinator run, empty for the platform's own. Both are fixed at creation, and the image
 	// is not read from the experiment file.
-	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it."`
+	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it."`
 	AgentImage string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
@@ -185,6 +185,9 @@ type CreatePlatformExperimentRequest struct {
 	maxHosted int
 	// createdBy is whose credential the request came with.
 	createdBy *domain.Actor
+	// prepare runs on the platform experiment once the request is found valid and before it is
+	// stored.
+	prepare func(context.Context, *domain.PlatformExperiment) error
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

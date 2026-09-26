@@ -101,7 +101,7 @@ export function OrgGitHub() {
           <Button size="sm" disabled={leaving} onClick={() => leave(beginInstall(github.install_url, origin))}>
             Install the App on an account
           </Button>
-          <span className="text-xs text-subtle">Connect an account the App is on, or install it first: either way you return here.</span>
+          <span className="text-xs text-subtle">Connect an account the App is on, or install it first: either way you return here. The App asks to create repositories and needs none of your existing ones: select one only to run an experiment in a repository you already have.</span>
         </div>
       )}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
@@ -110,7 +110,7 @@ export function OrgGitHub() {
       {!data && !error && <Loading />}
       {installations && installations.length === 0 && (
         <EmptyState>
-          No GitHub account is connected to {org.name}, so its experiments run without a repository.
+          No GitHub account is connected to {org.name}, and an experiment needs one: it keeps its code in a repository there.
           {administers ? '' : ' An owner connects one here.'}
         </EmptyState>
       )}

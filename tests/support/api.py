@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import uuid
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from typing import Any
 
 import requests
 import yaml
+
+from . import admin
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
@@ -141,6 +144,32 @@ class API:
             self.created_platform_experiments.append(json.loads(proc.stdout)["id"])
         return proc.stdout
 
+    # Whether the stack has a GitHub App, in which case every platform experiment keeps its code
+    # in a repository, and the orgs the sandbox installation is already connected to.
+    _github_app: bool | None = None
+    _connected: set[str] = set()
+
+    def sandbox_repository(self) -> str | None:
+        """The repository a create names when the test names none: the sandbox one, on a stack
+        with a GitHub App, where a create that names none would have the platform create a new
+        repository on github.com each time. The installation that covers it is connected to this
+        caller's org first. None on a stack with no App, where no repository is needed."""
+        if API._github_app is None:
+            API._github_app = self.get("/github/app").status_code != 503
+        if not API._github_app:
+            return None
+        installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
+        if not installation or not repository:
+            raise RuntimeError(
+                "this stack has a GitHub App, so every platform experiment names a repository: "
+                "set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO (.env.example says what each is)")
+        if self.org_id and self.org_id not in API._connected:
+            listed = self.get_json(f"/orgs/{self.org_id}/github-installations", params={"limit": 200})
+            if not any(i["installation_id"] == int(installation) for i in listed):
+                admin.connect_github(self.org_id, installation)
+            API._connected.add(self.org_id)
+        return repository
+
     def hl_env(self) -> dict[str, str]:
         """The env `hl()`/`hl_expect()` invoke the CLI with -- exposed so a test that needs its own
         subprocess.Popen (e.g. a long-running `hl watch` run concurrently with another action) can
@@ -173,6 +202,9 @@ class API:
         return self.session.get(self._url(path), timeout=30, **kw)
 
     def post(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
+        if path in ("/platform-experiments", "/platform-experiments/drafts") and json_body is not None and "repository" not in json_body:
+            if repository := self.repository or self.sandbox_repository():
+                json_body = {**json_body, "repository": repository}
         return self.session.post(self._url(path), json=json_body, timeout=30, **kw)
 
     def put(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
@@ -226,8 +258,8 @@ class API:
             body["stages"] = stages
         if max_concurrent_accelerators is not None:
             body["max_concurrent_accelerators"] = max_concurrent_accelerators
-        if repository or self.repository:
-            body["repository"] = repository or self.repository
+        if named := repository or self.repository or self.sandbox_repository():
+            body["repository"] = named
         out = self.hl("platform-experiments", "create", "-", input=yaml.safe_dump(body, sort_keys=False))
         return json.loads(out)["id"]
 

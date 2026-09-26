@@ -19,7 +19,10 @@ import (
 //
 // limits bound the org's drafts, counted under a lock on the org so that two drafts created at
 // once cannot both be the last one allowed: *PlanningLimitError when one is reached.
-func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits DraftLimits) error {
+//
+// prepare, when set, runs once the limits allow the draft and before it is stored, and may still
+// change pe: it is where something is made for a draft that will exist, and for no other.
+func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error {
 	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Flavor != domain.PlannerFlavor || !signup.Hosted {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
 	}
@@ -49,6 +52,11 @@ WHERE p.org_id = $1 AND pe.goal <> ''`, planner.OrgID).Scan(&open, &today); err 
 	}
 	if today >= limits.PerDay {
 		return &PlanningLimitError{Limit: limits.PerDay, PerDay: true}
+	}
+	if prepare != nil {
+		if err := prepare(ctx, pe); err != nil {
+			return err
+		}
 	}
 	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
 		return err

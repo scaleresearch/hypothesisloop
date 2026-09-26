@@ -965,7 +965,7 @@ async function scenarios(browser) {
   const githubCard = page.locator('#github')
   assert.equal((await installationsRead).status(), 200)
   assert.deepEqual(await (await installationsRead).json(), [], 'a new org has connected no GitHub account')
-  await githubCard.getByText(`No GitHub account is connected to ${ada.name} Lab, so its experiments run without a repository.`).waitFor()
+  await githubCard.getByText(`No GitHub account is connected to ${ada.name} Lab, and an experiment needs one: it keeps its code in a repository there.`).waitFor()
   const stackHasGitHub = (await appRead).status() === 200
   if (stackHasGitHub) {
     await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
@@ -1117,7 +1117,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const repositoryField = page.getByLabel('Repository')
   await repositoryField.click()
-  await page.getByRole('option', { name: 'No repository' }).waitFor()
+  await page.getByRole('option', { name: 'A new private repository' }).waitFor()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
   await repositoryField.fill('wid')
   await page.getByRole('option', { name: /ada-personal\/open/ }).waitFor({ state: 'detached' })

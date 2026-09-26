@@ -25,6 +25,7 @@ type GitHubApp interface {
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
+	CreateRepository(ctx context.Context, installationID int64, name, description string) (*github.Repository, error)
 }
 
 // InstallationStore is the persistence of the installations orgs connected. *db.AccountsStore
@@ -104,6 +105,8 @@ const (
 	ReasonInvalidRepository          = "invalid_repository"
 	ReasonRepositoryNotReachable     = "repository_not_reachable"
 	ReasonNoRepository               = "no_repository"
+	ReasonGitHubNotConnected         = "github_not_connected"
+	ReasonRepositoryNotCreated       = "repository_not_created"
 	ReasonNoExperimentFile           = "no_experiment_file"
 	ReasonRunOver                    = "run_over"
 	ReasonForbidden                  = "forbidden"
@@ -126,6 +129,9 @@ var errNoApp = &refused{
 // errNotConnected reports a repository whose owner is no GitHub account the org connected.
 var errNotConnected = errors.New("the org has connected no installation on that GitHub account")
 
+// errNoInstallation reports an org that connected no GitHub account at all.
+var errNoInstallation = errors.New("the org has connected no GitHub account")
+
 // refusal turns what GitHub or the store refused into what the caller is told. gone is the
 // status of a repository the org's installations do not reach: 422 where a request names it,
 // 409 where a platform experiment already does. Anything else is the platform's or GitHub's
@@ -143,6 +149,12 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 		return notFound("platform experiment")
 	case errors.Is(err, github.ErrInvalidRepository):
 		return invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
+	case errors.Is(err, errNoInstallation):
+		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org connects one with POST /orgs/{id}/github-installations (Settings, GitHub), and the experiment then names a repository there or the platform creates one")
+	case errors.Is(err, github.ErrCannotCreateRepositories):
+		return invalid(ReasonRepositoryNotCreated, "the GitHub account the org connected does not let the platform's GitHub App create a repository: its owner grants the App the creation of repositories on GitHub, or the request names a repository the installation covers")
+	case errors.Is(err, github.ErrRepositoryExists):
+		return &refused{status: http.StatusConflict, Reason: ReasonRepositoryNotCreated, Message: "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository"}
 	case errors.Is(err, github.ErrCodeRejected):
 		return invalid(ReasonCodeRejected, "GitHub did not accept the code: it works once, for ten minutes, and with the redirect_uri it was issued to, so authorise again and send the new one")
 	case errors.Is(err, errNotConnected):
@@ -316,6 +328,37 @@ func (r *Repositories) Reachable(ctx context.Context, projectID, repository stri
 		return "", r.refusal("check-repository", err, http.StatusUnprocessableEntity)
 	}
 	return token.Repository, nil
+}
+
+// Create makes a private repository for a platform experiment that names none, on the GitHub
+// account the org of the project connected first, and returns it as GitHub names it. On a
+// deployment that has no GitHub App it makes none and returns nothing: there a platform
+// experiment needs no repository. A refusal is returned as the API answers it.
+func (r *Repositories) Create(ctx context.Context, projectID, name, description string) (string, error) {
+	const op = "create-repository"
+	if r.github == nil {
+		return "", nil
+	}
+	project, err := r.store.GetProject(ctx, projectID)
+	if err != nil {
+		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
+	}
+	if project == nil {
+		return "", notFound("project")
+	}
+	installations, err := r.store.ListGitHubInstallations(ctx, project.OrgID)
+	if err != nil {
+		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
+	}
+	if len(installations) == 0 {
+		return "", r.refusal(op, errNoInstallation, http.StatusUnprocessableEntity)
+	}
+	created, err := r.github.CreateRepository(ctx, installations[0].InstallationID, name, description)
+	if err != nil {
+		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
+	}
+	r.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", project.OrgID))
+	return created.FullName, nil
 }
 
 // ExperimentBase reads domain.ExperimentFile at the head of the default branch of a repository

@@ -118,6 +118,11 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
 	}
+	if req.prepare != nil {
+		if err := req.prepare(ctx, pe); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -25,7 +26,21 @@ type CodeStore interface {
 // CodeRoster says who may still push code. *PlatformExperimentsService is the one in use.
 type CodeRoster interface {
 	Joined(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// Repository returns the repository the platform experiment names, empty when it names none.
+	Repository(ctx context.Context, platformExpID string) (string, error)
 	RequireActive(ctx context.Context, platformExpID, agentID string) error
+}
+
+// Repository returns the repository the platform experiment names, empty when it names none.
+func (s *PlatformExperimentsService) Repository(ctx context.Context, platformExpID string) (string, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return "", fmt.Errorf("platform_experiments.Repository: %w", err)
+	}
+	if pe == nil {
+		return "", ErrPlatformExperimentNotFound
+	}
+	return pe.Repository, nil
 }
 
 // Joined reports whether the agent is in the platform experiment.
@@ -38,7 +53,8 @@ type storedCode struct {
 	SizeBytes int    `json:"size_bytes"`
 }
 
-const codeDescription = "A platform experiment with no repository keeps its agents' code here: one git bundle per commit, made by `git bundle create` and pushed by `hl code push`. " +
+const codeDescription = "A platform experiment with no repository, which only a deployment with no GitHub App has, keeps its agents' code here: one git bundle per commit, made by `git bundle create` and pushed by `hl code push`. " +
+	"Writing answers 409 code_in_repository for a platform experiment that names a repository: its code is pushed there with git. " +
 	"A job's code_ref is this address with @sha in place of /sha, and `hl-clone` fetches it from the API it was given with the job's own token, so the code a job ran stays readable as long as the experiment's data. " +
 	"An agent writes only its own; everyone the platform experiment admits reads all of it, its jobs included. At most 32 MiB (413 above). " +
 	"Writing answers 409 once the platform experiment is closed or the agent was cut, and 422 not_a_bundle for a body that is no bundle holding that commit."
@@ -113,6 +129,15 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 		}
 		if err := roster.RequireActive(ctx, in.ID, in.AgentID); err != nil {
 			return nil, err
+		}
+		repository, err := roster.Repository(ctx, in.ID)
+		if err != nil {
+			logger.Error("store code failed", zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID), zap.Error(err))
+			return nil, huma.Error500InternalServerError(auth.InternalError)
+		}
+		if repository != "" {
+			return nil, &reasonError{status: http.StatusConflict, Reason: "code_in_repository",
+				Message: "platform experiment " + in.ID + " keeps its code in " + domain.RepositoryURL(repository) + ": commit on your branch and `git push` it there. The platform stores code only for a platform experiment that names no repository"}
 		}
 		if !bundleHolds(in.RawBody, in.SHA) {
 			return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "not_a_bundle",

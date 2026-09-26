@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
+import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
 
 /**
  * The shortest way to an experiment: one sentence saying what to find out. The platform plans
@@ -17,6 +18,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const [goal, setGoal] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const needsGitHub = useNeedsGitHub()
 
   async function plan() {
     setSending(true)
@@ -33,7 +35,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
     <div className="grid gap-2">
       <FormField
         label="What do you want to find out?"
-        hint="One sentence is enough. The platform works out how to measure it, runs a baseline and proposes the experiment in about half an hour. Nothing is spent on the run until you accept."
+        hint="One sentence is enough. The platform works out how to measure it, runs a baseline and proposes the experiment in about half an hour. Nothing is spent on the run until you accept. Its code goes to a private repository the platform creates on your connected GitHub account."
       >
         <Textarea
           rows={3}
@@ -43,10 +45,12 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           placeholder="e.g. Does a cosine learning-rate schedule beat a constant one for a small transformer on character-level text?"
         />
       </FormField>
-      <div className="flex items-center gap-3">
-        <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan}>Plan this experiment</Button>
-        {error && <InlineError>{error}</InlineError>}
-      </div>
+      {needsGitHub ? <ConnectGitHubStep /> : (
+        <div className="flex items-center gap-3">
+          <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan}>Plan this experiment</Button>
+          {error && <InlineError>{error}</InlineError>}
+        </div>
+      )}
     </div>
   )
 }

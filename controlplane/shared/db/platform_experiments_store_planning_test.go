@@ -24,7 +24,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}
-	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, DraftLimits{Concurrent: 1000, PerDay: 1000}); err != nil {
+	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, DraftLimits{Concurrent: 1000, PerDay: 1000}, nil); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if planner.OrgID != "default" {
@@ -92,7 +92,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, EndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
-	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, DraftLimits{Concurrent: 1000, PerDay: 1000}); err == nil {
+	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, DraftLimits{Concurrent: 1000, PerDay: 1000}, nil); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, bad.ID); got != nil {
@@ -331,7 +331,7 @@ func TestAnOrgsDraftsAreBoundedAtOnceAndPerDay(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 		}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
-		return pe.ID, pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "l", Flavor: domain.PlannerFlavor, Model: "m"}, limits)
+		return pe.ID, pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "l", Flavor: domain.PlannerFlavor, Model: "m"}, limits, nil)
 	}
 	limits := DraftLimits{Concurrent: 2, PerDay: 3}
 	first, err := create(limits)

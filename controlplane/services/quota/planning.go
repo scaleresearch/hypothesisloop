@@ -61,7 +61,7 @@ func draftName(goal string) string {
 // an agent the platform runs, of role baseline, so that it is never ranked or cut, and of flavor
 // planner. The draft has the planning allowance for a budget and the planning limit for an end,
 // and nothing else of a run: the planner proposes the rest and a person accepts it.
-func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch) (*domain.PlatformExperiment, error) {
+func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, prepare func(context.Context, *domain.PlatformExperiment) error) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return nil, invalidPlatformExperiment(errors.New("goal is required: one sentence saying what you want to find out"))
@@ -104,13 +104,17 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
 	}
-	err = s.store.CreateDraft(ctx, pe, planner, signup, db.DraftLimits{Concurrent: planning.MaxConcurrentPerOrg, PerDay: planning.MaxPerDayPerOrg})
+	err = s.store.CreateDraft(ctx, pe, planner, signup, db.DraftLimits{Concurrent: planning.MaxConcurrentPerOrg, PerDay: planning.MaxPerDayPerOrg}, prepare)
 	var over *db.PlanningLimitError
 	if errors.As(err, &over) {
 		if over.PerDay {
 			return nil, refuseSignup(429, "planning_limit", "this org created %d drafts in the last 24 hours, which is the most the platform plans for one org in a day: accept or use the ones it has, or create the experiment yourself with POST /platform-experiments", over.Limit)
 		}
 		return nil, refuseSignup(429, "planning_limit", "this org has %d drafts open, which is the most the platform plans for one org at once: accept one, or close one with POST /platform-experiments/{id}/close", over.Limit)
+	}
+	var answered huma.StatusError
+	if errors.As(err, &answered) {
+		return nil, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
@@ -142,12 +146,15 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then nothing but the " +
 			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
+			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
+			"422 github_not_connected and 422 or 409 repository_not_created as on POST /platform-experiments, and no repository on a deployment with no GitHub App. " +
 			"503 launcher_not_registered when the deployment has no launcher to run the planner. " +
 			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
-			ProjectID string `json:"project_id"`
-			Goal      string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
+			ProjectID  string `json:"project_id"`
+			Goal       string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
+			Repository string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
 		}
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if in.Body.ProjectID == "" {
@@ -156,10 +163,25 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.Project(ctx, in.Body.ProjectID); err != nil {
 			return nil, err
 		}
+		named := in.Body.Repository
+		if named != "" {
+			reachable, err := h.repos.Reachable(ctx, in.Body.ProjectID, named)
+			if err != nil {
+				return nil, err
+			}
+			named = reachable
+		}
 		caller, _ := auth.FromContext(ctx)
-		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch)
+		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, func(ctx context.Context, pe *domain.PlatformExperiment) error {
+			pe.Repository, pe.RepositoryURL = named, domain.RepositoryURL(named)
+			return h.provideRepository(ctx, pe)
+		})
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, huma.Error422UnprocessableEntity(err.Error())
+		}
+		var answered huma.StatusError
+		if errors.As(err, &answered) {
+			return nil, err
 		}
 		if err != nil {
 			return nil, h.refusal("create draft", err)

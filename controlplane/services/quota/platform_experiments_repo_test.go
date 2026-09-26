@@ -76,6 +76,22 @@ type fakeRepositories struct {
 	refusal error
 	checked []string
 	asked   []string
+	// org is the GitHub account a repository is created on for an experiment that names none,
+	// empty for a deployment with no GitHub App. created holds each as "project name".
+	org        string
+	created    []string
+	notCreated error
+}
+
+func (f *fakeRepositories) Create(_ context.Context, projectID, name, _ string) (string, error) {
+	if f.org == "" {
+		return "", nil
+	}
+	if f.notCreated != nil {
+		return "", f.notCreated
+	}
+	f.created = append(f.created, projectID+" "+name)
+	return f.org + "/" + name, nil
 }
 
 const testRepository = "Acme/Model"
@@ -252,8 +268,34 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_length") {
 		t.Errorf("a duration and an end: got = %d %s, want 422 invalid_length", rec.Code, rec.Body)
 	}
-	if len(store.created) != 1 || len(repos.asked) != 0 {
-		t.Fatalf("created %d, repository read %v, want only the whole body created and no read", len(store.created), repos.asked)
+	if len(store.created) != 1 || len(repos.asked) != 0 || pe.Repository != "" || len(repos.created) != 0 {
+		t.Fatalf("created %d, repository read %v, want only the whole body created, no read and no repository", len(store.created), repos.asked)
+	}
+
+	// On a deployment with a GitHub App, one that names none gets its own on the org's account,
+	// and none is made for a body that is refused or stored when it cannot be made.
+	repos.org = "acme"
+	named := whole()
+	named["name"] = "LR warm-up: a sweep!"
+	rec := call("POST", "/platform-experiments", named)
+	var out domain.PlatformExperiment
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	want := "acme/lr-warm-up-a-sweep-" + strings.TrimPrefix(out.ID, "pe-")
+	if rec.Code != http.StatusCreated || out.Repository != want || out.RepositoryURL != "https://github.com/"+want+".git" ||
+		store.created[1].Repository != want || len(repos.created) != 1 || !strings.HasPrefix(repos.created[0], "prj-a ") {
+		t.Fatalf("with no repository: got = %d %s (created %v), want %s made for the project's org and stored", rec.Code, rec.Body, repos.created, want)
+	}
+	invalid := whole()
+	invalid["metrics"] = []map[string]any{}
+	repos.notCreated = &reasonError{status: http.StatusUnprocessableEntity, Reason: "github_not_connected", Message: "the org has connected no GitHub account"}
+	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusBadRequest {
+		t.Errorf("a body with no ranking metric: got = %d %s, want 400 before any repository is asked for", rec.Code, rec.Body)
+	}
+	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
+		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
+	}
+	if len(store.created) != 2 || len(repos.created) != 1 {
+		t.Fatalf("created %d with %d repositories, want nothing more stored or made", len(store.created), len(repos.created))
 	}
 }
 

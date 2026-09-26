@@ -10,3 +10,5 @@ func (noRepositories) Reachable(context.Context, string, string) (string, error)
 func (noRepositories) ExperimentBase(context.Context, string, string) ([]byte, error) {
 	panic("the handler reached GitHub")
 }
+
+func (noRepositories) Create(context.Context, string, string, string) (string, error) { return "", nil }

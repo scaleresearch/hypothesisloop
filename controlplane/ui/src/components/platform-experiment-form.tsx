@@ -14,6 +14,7 @@ import { useTenant } from '@/lib/tenant'
 import { COMMON_ML_METRICS, PlatformExperimentStatus } from '@/types'
 import type { MetricDefinition, PlatformExperiment } from '@/types'
 import { RepositorySelect } from '@/components/repository-select'
+import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Disclosure } from '@/components/ui/disclosure'
@@ -310,6 +311,7 @@ interface FormProps {
  */
 export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel }: FormProps) {
   const { project } = useTenant()
+  const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
   // Once running, admission and the stage ladder have acted on everything but the name and the
   // description, and the API takes no other field, so the rest is locked here.
@@ -473,7 +475,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   <>
                     <FormField
                       label="Repository"
-                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, agents start in an empty workspace and the platform keeps the code each job ran. Fixed once created."
+                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, the platform creates a private repository for it on your connected GitHub account. Fixed once created."
                     >
                       <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} />
                     </FormField>
@@ -625,9 +627,11 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
               ) : (
                 <>
                   <Button type="button" onClick={() => { setError(null); setStep(1) }}>Back</Button>
-                  <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError)}>
-                    {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save changes' : hosted ? 'Create and run' : 'Create experiment'}
-                  </Button>
+                  {!isEdit && needsGitHub ? <ConnectGitHubStep /> : (
+                    <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError)}>
+                      {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save changes' : hosted ? 'Create and run' : 'Create experiment'}
+                    </Button>
+                  )}
                 </>
               )}
             </div>

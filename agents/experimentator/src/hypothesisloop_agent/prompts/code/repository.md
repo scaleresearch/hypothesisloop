@@ -7,9 +7,10 @@ that names a repository.
      starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}` (create it off
      the default branch, or check it out after a restart). Auth is set up, so
      `git push` just works; push that branch and no other. It is the purge-safe home for your
-     workload code, harnesses, job specs and Dockerfiles: job pods are deleted, it is not. The
-     repository's `.hypothesisloop/job.yaml` is the base job spec. $WORKLOAD_SAMPLES holds working
-     examples to copy and adapt.
+     workload code, harnesses, job specs and Dockerfiles: job pods are deleted, it is not. Other
+     agents push `hl/{platform_experiment_id}/<their id>`: `git fetch` to read or build on their
+     work. `.hypothesisloop/job.yaml`, when the repository has one, is the base job spec.
+     $WORKLOAD_SAMPLES holds working examples to copy and adapt.
 ==== code_submit
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
          `git push` only after changing a tracked file (message = hypothesis id + one-line theory).
@@ -18,7 +19,8 @@ that names a repository.
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  3. To read what the agents start from, clone {repository_url}: `.hypothesisloop/experiment.yaml`
-     is the base of the brief and `.hypothesisloop/job.yaml` the base job spec. Your access to
+  3. To read what the agents start from, clone {repository_url}: when it has them,
+     `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
+     base job spec. Each agent pushes its own branch `hl/{platform_experiment_id}/<its id>`. Your access to
      the repository is read-only. You push nothing, and nothing you write locally outlives
      your machine.
