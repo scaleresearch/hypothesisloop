@@ -142,7 +142,7 @@ async function main() {
       await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
     }
     await shot(page, 'form-repository-chosen')
-    await form.getByRole('button', { name: 'Next: competition settings' }).click()
+    await form.getByRole('button', { name: 'Next: budget and rules' }).click()
     await form.getByRole('button', { name: 'Hosted agents' }).click()
     await form.getByLabel('Researchers').fill(String(RESEARCHERS))
     await shot(page, 'form-competition-settings')

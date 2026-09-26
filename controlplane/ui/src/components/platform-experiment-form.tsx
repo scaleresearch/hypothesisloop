@@ -483,7 +483,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         <div className="mb-4">
           <Tabs
             label="Steps"
-            tabs={[{ id: '1', label: '1. Essentials' }, { id: '2', label: '2. Competition settings' }]}
+            tabs={[{ id: '1', label: '1. Essentials' }, { id: '2', label: '2. Budget and rules' }]}
             value={String(step) as '1' | '2'}
             onChange={id => { setError(null); setStep(id === '1' ? 1 : 2) }}
           />
@@ -519,14 +519,6 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                     {fromFile?.repository === form.repository && fromFile.state === 'failed' && (
                       <InlineError>Could not read .hypothesisloop/experiment.yaml of {fromFile.repository}: {fromFile.message}</InlineError>
                     )}
-                    <Disclosure label="Advanced">
-                      <FormField
-                        label="Agent image"
-                        hint="The container image hosted agents and the coordinator run. Leave it empty for the platform's own agent image. A custom image must be built FROM that one, so the harness is in it. Fixed once created."
-                      >
-                        <Input mono value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
-                      </FormField>
-                    </Disclosure>
                   </>
                 )}
                 <FormField label="Name *" hint="Shown to every agent in the listing. Make it specific enough to tell two runs apart.">
@@ -585,12 +577,12 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   <FormField
                     label={`Budget (${budgetKind ? budgetUnit(budgetKind) : `${budgetUnit('accelerator')}, or ${budgetUnit('cpu')} for jobs on CPU cores`}) *`}
                     hint={lockedWhileRunning
-                      ? 'Locked once running — admission has already committed usage against this budget.'
-                      : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted. An experiment whose jobs run on CPU cores spends 1 a core-hour, so its budget is CPU core-hours.</>}
+                      ? 'Locked once running: jobs have already been admitted against this budget.'
+                      : 'The one budget of the experiment. An hour on an accelerator spends what that accelerator type is priced at, and an hour on a CPU core spends 1. Memory and storage are capped per job and spend nothing.'}
                   >
                     <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
                   </FormField>
-                  <FormField label="Max participants" hint={lockedWhileRunning ? 'Locked once running — the roster is fixed for the run.' : 'Signup cap. Signups close when the experiment starts, and the roster is then fixed for the whole run.'}>
+                  <FormField label="Max participants" hint={lockedWhileRunning ? 'Locked once running: the agents are fixed for the whole run.' : 'The most agents that can join. Nobody joins or leaves once the experiment has started.'}>
                     <Input type="number" min={1} max={500} step={1} value={maxAgents} disabled={lockedWhileRunning} onChange={e => { setMaxAgentsStated(true); set('max_agents', e.target.value) }} />
                   </FormField>
                 </div>
@@ -598,7 +590,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                 <FieldGroup
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
                   hint={isEdit
-                    ? <>The ladder is fixed when the experiment is created and cannot be changed afterwards — agents plan around published boundaries, so moving them mid-run would invalidate the competition. Create a new platform experiment to use a different ladder.</>
+                    ? <>The ladder is fixed when the experiment is created and cannot be changed afterwards — agents plan around published boundaries, so moving them mid-run would invalidate the competition. Create a new experiment to use a different ladder.</>
                     : <>Each stage ends by cutting the worst-performing share of agents (their jobs stop, unspent budget redistributes) — lengths must total 100%, the final stage evicts 0%, and cuts skip entirely at ≤4 agents. <strong>Max job h</strong> caps run length per stage (empty = no limit) and is enforced.</>}
                 >
                   {isEdit ? (
@@ -616,10 +608,18 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
 
                 <Disclosure label="More settings">
                   <div className="flex flex-col gap-4">
+                    {!isEdit && (
+                      <FormField
+                        label="Agent image"
+                        hint="The container image hosted agents and the coordinator run. Leave it empty for the platform's own agent image. A custom image must be built FROM that one, so the agent software is in it. Fixed once created."
+                      >
+                        <Input mono value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
+                      </FormField>
+                    )}
                     {!hosted && (
                       <FormField
                         label="Starts at"
-                        hint={lockedWhileRunning ? 'Locked once running.' : 'Empty, it starts when you start it. With a time, signups close and quota is allocated at that moment.'}
+                        hint={lockedWhileRunning ? 'Locked once running.' : 'Empty, it starts when you start it. With a time, it starts then: no more agents join and the budget is divided among the ones that have.'}
                       >
                         <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
                       </FormField>
@@ -677,12 +677,12 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
             <div className="mt-1 flex justify-end gap-2">
               {onCancel && <Button type="button" onClick={onCancel}>Cancel</Button>}
               {step === 1 ? (
-                <Button type="button" variant="primary" onClick={() => { setError(null); setStep(2) }}>Next: competition settings</Button>
+                <Button type="button" variant="primary" onClick={() => { setError(null); setStep(2) }}>Next: budget and rules</Button>
               ) : (
                 <>
                   <Button type="button" onClick={() => { setError(null); setStep(1) }}>Back</Button>
                   <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError)}>
-                    {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save Changes' : hosted ? 'Create and run' : 'Create Experiment'}
+                    {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save changes' : hosted ? 'Create and run' : 'Create experiment'}
                   </Button>
                 </>
               )}
@@ -700,7 +700,7 @@ export function PlatformExperimentDialog({ initial, onSaved, onClose }: {
   onClose: () => void
 }) {
   return (
-    <Dialog open onClose={onClose} title={initial ? 'Edit Platform Experiment' : 'New Platform Experiment'}>
+    <Dialog open onClose={onClose} title={initial ? 'Edit experiment' : 'New experiment'}>
       <PlatformExperimentForm initial={initial} onCancel={onClose} onSaved={(saved, run) => { onSaved(saved, run); onClose() }} />
     </Dialog>
   )

@@ -42,7 +42,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
     await userEvent.click(await screen.findByLabelText('Repository'))
     await userEvent.click(await screen.findByRole('option', { name: repository }))
   }
-  await userEvent.click(screen.getByRole('button', { name: 'Next: competition settings' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Next: budget and rules' }))
 }
 
 beforeEach(() => {
@@ -61,7 +61,7 @@ describe('a new platform experiment whose agents the operator runs', () => {
     await essentials()
     expect(screen.getByRole('button', { name: 'I run my own agents' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByLabelText('Researchers')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Create Experiment' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created))
     const sent = vi.mocked(createPlatformExperiment).mock.calls[0][1]
     expect(sent.coordinator_hosted).toBeUndefined()
@@ -88,7 +88,7 @@ describe('a repository that brings its own experiment', () => {
     await screen.findByText(/Filled in from \.hypothesisloop\/experiment\.yaml of acme\/widgets/)
     expect(fetchExperimentFile).toHaveBeenCalledExactlyOnceWith('prj_1', 'acme/widgets')
     expect(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')).toHaveProperty('value', 'Widget compression')
-    await userEvent.click(screen.getByRole('button', { name: 'Next: competition settings' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next: budget and rules' }))
     await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
     await userEvent.click(screen.getByRole('button', { name: 'Create and run' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
@@ -176,7 +176,7 @@ describe('editing a platform experiment', () => {
     const name = screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')
     await userEvent.clear(name)
     await userEvent.type(name, 'New')
-    await userEvent.click(screen.getByRole('tab', { name: '2. Competition settings' }))
+    await userEvent.click(screen.getByRole('tab', { name: '2. Budget and rules' }))
     expect(screen.queryByRole('group', { name: 'Who runs the agents?' })).toBeNull()
     // The settings few people change are out of the way until asked for.
     expect(screen.queryByLabelText('Report interval (seconds)')).toBeNull()
@@ -184,7 +184,7 @@ describe('editing a platform experiment', () => {
     expect(screen.getByLabelText('Report interval (seconds)')).toBeTruthy()
     expect(screen.getByLabelText('Starts at')).toBeTruthy()
     expect(screen.getByLabelText('Max concurrent accelerators')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(renamed))
     expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { name: 'New' })
     expect(createPlatformExperiment).not.toHaveBeenCalled()
