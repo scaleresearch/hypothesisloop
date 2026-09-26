@@ -113,6 +113,31 @@ class SessionsTest(unittest.TestCase):
         self.assertFalse(machine.sessions.restore())
         self.assertEqual(list(machine.workdir.iterdir()), [])
 
+    def test_a_platform_that_does_not_answer_is_asked_again_and_a_refusal_stops_the_agent(self):
+        platform = Platform()
+        old = Machine(platform)
+        old.write(old.workdir, ".claude_session_id", "s-1")
+        old.sessions.save([".claude_session_id"], [])
+        answers = [api_client.APIError("GET", "http://x", 0, "timed out"), api_client.APIError("GET", "http://x", 502, "bad gateway")]
+        real = platform.get_bytes
+
+        def flaky(path):
+            if answers:
+                raise answers.pop(0)
+            return real(path)
+
+        new = Machine(platform)
+        with mock.patch.object(platform, "get_bytes", flaky), mock.patch.object(session, "_READ_PAUSE_S", 0), \
+                self.assertLogs("llm_agent", "WARNING"):
+            self.assertTrue(new.sessions.restore())
+        self.assertEqual((new.workdir / ".claude_session_id").read_text(), "s-1")
+
+        def refused(path):
+            raise api_client.APIError("GET", "http://x", 403, "not yours")
+
+        with mock.patch.object(platform, "get_bytes", refused), self.assertRaises(SystemExit):
+            Machine(platform).sessions.restore()
+
     def test_a_stored_session_that_names_a_path_outside_its_roots_stops_the_agent(self):
         import io
         import tarfile
@@ -142,16 +167,20 @@ class ClaudeSessionFilesTest(unittest.TestCase):
 
         new = Machine(platform)
         setup = SimpleNamespace(workdir=str(new.workdir))
-        with mock.patch.object(run, "_sessions", new.sessions):
+        with mock.patch.object(run, "_sessions", new.sessions), mock.patch.object(run, "_on_new_machine", False):
             run._restore_session(setup)
             self.assertEqual(run._restart_state(setup), ("s-1", None))
+            self.assertTrue(run._on_new_machine, "a session restored from the platform is not told its machine is new")
+            run._settled_on_this_machine()
+            self.assertFalse(run._on_new_machine)
 
         # A harness restarted on the machine it ran on keeps what is on its disk.
         kept = Machine(platform)
         kept.write(kept.workdir, ".claude_session_id", "s-local")
         setup = SimpleNamespace(workdir=str(kept.workdir))
-        with mock.patch.object(run, "_sessions", kept.sessions):
+        with mock.patch.object(run, "_sessions", kept.sessions), mock.patch.object(run, "_on_new_machine", False):
             run._restore_session(setup)
+            self.assertFalse(run._on_new_machine)
         self.assertEqual((kept.workdir / ".claude_session_id").read_text(), "s-local")
 
     def test_a_handoff_written_at_rotation_travels_as_the_session(self):
@@ -161,7 +190,7 @@ class ClaudeSessionFilesTest(unittest.TestCase):
         old.sessions.save([".claude_session_id", ".claude_compaction_handoff"], [])
         new = Machine(platform)
         setup = SimpleNamespace(workdir=str(new.workdir))
-        with mock.patch.object(run, "_sessions", new.sessions):
+        with mock.patch.object(run, "_sessions", new.sessions), mock.patch.object(run, "_on_new_machine", False):
             run._restore_session(setup)
         resume_id, prompt = run._restart_state(setup)
         self.assertIsNone(resume_id)

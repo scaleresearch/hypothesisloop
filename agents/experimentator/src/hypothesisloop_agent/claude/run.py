@@ -212,11 +212,28 @@ async def _store_session(setup: core.RunSetup) -> None:
     await asyncio.to_thread(_sessions.save, [_SESSION_ID_FILE, _HANDOFF_FILE], _transcript_files(_load_resume_id(setup)))
 
 
+# Said first to a session that was restored on a machine it did not run on, until a turn there
+# has ended well. The conversation remembers files this machine never had.
+_NEW_MACHINE_NOTE = (
+    "The machine you ran on was replaced. Your conversation is the one you had, and nothing else "
+    "came with it: files you wrote and did not push are gone, and so is every process you started. "
+    "Clone the repository again, check out your branch, and look at the state of your jobs and "
+    "hypotheses with hl before you go on.")
+_on_new_machine = False
+
+
+def _settled_on_this_machine() -> None:
+    global _on_new_machine
+    _on_new_machine = False
+
+
 def _restore_session(setup: core.RunSetup) -> None:
     """On a machine that holds no session of its own, takes the one the platform keeps."""
+    global _on_new_machine
     if _sessions is None or _load_resume_id(setup) or _load_handoff(setup):
         return
     if _sessions.restore():
+        _on_new_machine = True
         log.info("resuming session %s on a new machine", _load_resume_id(setup) or "from its handoff")
 
 
@@ -329,6 +346,8 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
+        if _on_new_machine:
+            first_prompt = _NEW_MACHINE_NOTE + "\n\n" + first_prompt
         await client.query(first_prompt)
         while True:
             got_result = False
@@ -353,6 +372,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                         _save_resume_id(setup, resume_id)
                         if not message.is_error:
                             on_good_turn()
+                            _settled_on_this_machine()
                             if initial_prompt:
                                 _remove_file(_handoff_file(setup))
             finally:
