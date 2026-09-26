@@ -47,8 +47,9 @@ metadata.theory is REQUIRED (from the file or --theory): what you predict this j
 --secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
 the job gets it as an environment variable and no read of the job shows it. FILE may not carry
 job.secret_env, since a job spec is a committed file.
-metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
---platform-experiment. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
+An agent's token says whose job it is and where it runs, so neither is stated. A person or an
+API key names the agent with --agent and the experiment with --platform-experiment.
+An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
 files and HEAD pushed to origin. Commit and git push only after changing a tracked file. In a
 repository with no origin, of a platform experiment that has none, it is the commit as
@@ -65,12 +66,12 @@ Minimal shape:
     ...
 
 See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`, stderr)
-	agent := fs.String("agent", "", "stamped onto metadata.agent_id (default $AGENT_ID)")
+	agent := fs.String("agent", "", "whose job it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
 		"objective":              fs.String("objective", "", "sets metadata.objective"),
 		"theory":                 fs.String("theory", "", "sets metadata.theory"),
-		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then $PLATFORM_EXPERIMENT_ID)"),
+		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's or $PLATFORM_EXPERIMENT_ID)"),
 	}
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
@@ -84,7 +85,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 		return fail(stderr, err)
 	}
 	if *agent == "" {
-		return parseExit(misuse(fs, "--agent is required"))
+		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose job this is"))
 	}
 	body, err := readYAMLBody(path)
 	if err != nil {
@@ -111,7 +112,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	}
 	metadata["agent_id"] = *agent
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
-		metadata["platform_experiment_id"] = os.Getenv(platformExperimentEnv)
+		metadata["platform_experiment_id"] = experimentOf(c, "")
 	}
 	if err := fillCodeRef(c, metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
@@ -327,7 +328,7 @@ reasons, theory, cost and env, the settings that differ between the listed jobs 
 for a job listed alone). hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
-	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED")
 	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
@@ -342,7 +343,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	if *agent != "" {
 		q.Set("agent", *agent)
 	}
-	if p := orEnv(*pe, platformExperimentEnv); p != "" {
+	if p := experimentOf(c, *pe); p != "" {
 		q.Set("platform_experiment_id", p)
 	}
 	if *status != "" {
@@ -572,7 +573,7 @@ func jobStats(c *apiclient.Client, args []string, stdout, stderr io.Writer) int 
 
 Counts over every matching job: by status, capacity tier, eviction reason and eviction class
 (workload is yours, infrastructure the environment's, policy the platform's own decision).`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	agent := fs.String("agent", "", "only this agent's jobs")
 	hypothesis := fs.String("hypothesis", "", "only jobs testing this hypothesis")
 	if err := fs.Parse(args); err != nil {
@@ -582,7 +583,7 @@ Counts over every matching job: by status, capacity tier, eviction reason and ev
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{}
-	if p := orEnv(*pe, platformExperimentEnv); p != "" {
+	if p := experimentOf(c, *pe); p != "" {
 		q.Set("platform_experiment_id", p)
 	}
 	if *agent != "" {

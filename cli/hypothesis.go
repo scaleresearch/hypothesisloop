@@ -62,7 +62,7 @@ API key names an agent to register for it, or names none for a hypothesis no age
 
 FILE shape:
 
-  agent_id: agent-123             # optional, as --agent
+  agent_id: agent-123             # as --agent; an agent's token says both, leave them out
   platform_experiment_id: pe-123
   hypotheses:
     - key: warmup                 # local name, only for links later in this file
@@ -95,8 +95,8 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 
 func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis submit", submitUsage, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis it is (default $AGENT_ID, else the caller's own)")
-	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
+	agent := fs.String("agent", "", "agent whose hypothesis it is (default the token's agent or $AGENT_ID, else the caller's own)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file of one hypothesis, or a hypotheses: list of them (see --help)")
 	var buildsOn, contradicts, related, distinctFrom idList
@@ -135,7 +135,7 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		return fail(stderr, err)
 	}
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
-		"agent_id": owner, "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
+		"agent_id": owner, "platform_experiment_id": experimentOf(c, *pe), "text": *text,
 	})
 	if err != nil {
 		return parseExit(misuse(fs, "%s", err))
@@ -269,7 +269,7 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 			fields[name] = v
 		}
 		if fields["platform_experiment_id"] == "" || fields["text"] == "" {
-			return nil, nil, itemErr(items, i, fmt.Errorf("platform_experiment_id and text are required (via --platform-experiment/--text or --file)"))
+			return nil, nil, itemErr(items, i, fmt.Errorf("platform_experiment_id and text are required (via --platform-experiment/--text or --file; an agent's token says its platform experiment)"))
 		}
 		links := flagLinks
 		if len(links) == 0 {
@@ -406,7 +406,7 @@ func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer
 Adds one link from your own hypothesis ID (--from ID works too), or from one no agent owns.
 Links are append-only. Prints the updated outgoing links. A person or an API key linking from
 an agent's hypothesis names that agent with --agent, and is kept as who made the link.`, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis ID is (default $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent or $AGENT_ID, else the caller's own)")
 	typ := fs.String("type", "", "builds_on, contradicts or related")
 	to := fs.String("to", "", "hypothesis id the link points at")
 	from, err := parseOne(fs, args, "ID", "", "id", "from")
@@ -443,7 +443,7 @@ func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Wri
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. It is
 written by whoever HL_TOKEN is. An agent's token writes its own agent's note; a person or an
 API key writes their own, or an agent's with --agent.`, stderr)
-	agent := fs.String("agent", "", "agent whose note it is (default $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose note it is (default the token's agent or $AGENT_ID, else the caller's own)")
 	text := fs.String("text", "", "the note")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
@@ -482,7 +482,7 @@ the same job without your change), and the hypothesis has two completed jobs of 
 it. One run with no measured control is inconclusive. When the record cannot show what you know
 (a failure that needs no repeat, a control measured outside this experiment), --despite takes a
 sentence of why the verdict holds anyway. What a verdict rests on is kept as a comment.`, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis ID is (default $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent or $AGENT_ID, else the caller's own)")
 	status := fs.String("status", "", "")
 	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
 	despite := fs.String("despite", "", "why a confirmed or refuted verdict holds without a repeated run and a control")
@@ -526,7 +526,7 @@ func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer
 
 Most recent first, one JSON object per line with builds_on, child_count, finding_count and
 comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
@@ -537,7 +537,7 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 	if fs.NArg() > 0 {
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
-	*pe = orEnv(*pe, platformExperimentEnv)
+	*pe = experimentOf(c, *pe)
 	if *pe == "" {
 		return parseExit(misuse(fs, "--platform-experiment is required"))
 	}
@@ -656,7 +656,7 @@ Examples:
   by job count, untested first:
   hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe})
     RETURN h.id, h.text, coalesce($evidence[h.id].jobs, 0) AS n ORDER BY n'`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
 	paramsJSON := fs.String("params", "", "")
@@ -681,7 +681,7 @@ Examples:
 	if strings.HasPrefix(strings.TrimSpace(cypher), "{") {
 		return parseExit(misuse(fs, "want the Cypher text itself, got a JSON object"))
 	}
-	*pe = orEnv(*pe, platformExperimentEnv)
+	*pe = experimentOf(c, *pe)
 	if *pe == "" {
 		return parseExit(misuse(fs, "--platform-experiment is required (or set PLATFORM_EXPERIMENT_ID)"))
 	}

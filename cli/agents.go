@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -24,7 +23,7 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [PE] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
-The only way an agent joins a platform experiment (default $PLATFORM_EXPERIMENT_ID), and only
+The only way an agent joins a platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID), and only
 while it is open. The first form creates one agent; the second joins one registered with hl
 register. For several agents, run it once for each. With --hosted the platform runs the agent.
 Without it the line printed carries the agent's token: start the agent yourself with that as
@@ -39,7 +38,7 @@ command lines and shell history; write it to an env file the container reads.`, 
 	kind := fs.String("kind", "", "kind of a created agent: agent (default) or human")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
-	pe, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "platform-experiment")
+	pe, err := parseOne(fs, args, "PE", experimentOf(c, ""), "platform-experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -86,10 +85,10 @@ agent leaves by being cut or by the experiment closing.`, stderr)
 func agentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents list", `usage: hl platform-experiments agents list [PE]
 
-Every agent that joined the platform experiment (default $PLATFORM_EXPERIMENT_ID), in the order
+Every agent that joined the platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID), in the order
 they did. No token is listed: hl platform-experiments agents add PE --agent ID prints a self-run
 agent's token again.`, stderr)
-	pe, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "platform-experiment")
+	pe, err := parseOne(fs, args, "PE", experimentOf(c, ""), "platform-experiment")
 	if err != nil {
 		return parseExit(err)
 	}

@@ -112,8 +112,8 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	}
 }
 
-// With no agent named and none in the environment, a write to the hypothesis graph names none:
-// the platform reads whose it is off the token, an agent's own or a person's or key's own.
+// With no agent named, a write to the hypothesis graph is the caller's own: the agent an agent's
+// token is, whatever its environment says, and for a person or a key with none there no agent.
 func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
 	commands := map[string][]string{
 		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
@@ -121,19 +121,22 @@ func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
 		"hypothesis comment": {"hypothesis", "comment", "hyp-1", "--text", "t"},
 		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
 	}
-	for _, token := range []string{derivedToken("agent:pe-1/ag-1"), "hlk_an-api-key"} {
+	for token, env := range map[string][2]string{derivedToken("agent:pe-1/ag-1"): {"pe-stale", "ag-stale"}, "hlk_an-api-key": {"pe-1", ""}} {
 		for name, args := range commands {
 			got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
 			t.Setenv("HL_TOKEN", token)
-			t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-			t.Setenv("AGENT_ID", "")
+			t.Setenv("PLATFORM_EXPERIMENT_ID", env[0])
+			t.Setenv("AGENT_ID", env[1])
 			var stdout, stderr bytes.Buffer
 			if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
 				t.Fatalf("%s: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
 			}
 			body := (*got)[0].Body
-			if _, named := body["agent_id"]; named {
-				t.Errorf("%s: body = %v, want no agent_id", name, body)
+			if agent, named := body["agent_id"]; named != (token != "hlk_an-api-key") || named && agent != "ag-1" {
+				t.Errorf("%s: body = %v, want the token's agent, and none for a key", name, body)
+			}
+			if pe, stated := body["platform_experiment_id"]; stated && pe != "pe-1" {
+				t.Errorf("%s: body = %v, want the token's platform experiment", name, body)
 			}
 			if _, stated := body["author"]; stated {
 				t.Errorf("%s: body = %v, want no author", name, body)
@@ -231,7 +234,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 // A hosted agent asked `hl cluster list` and was answered "403: a agent token may not call GET
 // /me", which says neither what the command is for nor what to use.
 func TestAnAgentTokenAskingForAnOrgsCommandIsToldWhatItCanUse(t *testing.T) {
-	for _, scope := range []string{"agent:pe-1:ag-1", "coordinator:pe-1"} {
+	for _, scope := range []string{"agent:pe-1/ag-1", "coordinator:pe-1"} {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
 		t.Setenv("HL_TOKEN", derivedToken(scope))
 		t.Setenv("HL_ORG", "")

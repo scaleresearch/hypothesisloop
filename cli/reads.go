@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -19,19 +18,19 @@ func cmdQuota(c *apiclient.Client, args []string, stdout, stderr io.Writer) int 
 
 Accelerator-hours granted and used, guaranteed and burst, one line per agent. Used includes
 running jobs. In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.`, stderr)
-	agent := fs.String("agent", "", "agent (default $AGENT_ID)")
+	agent := fs.String("agent", "", "agent (default the token's agent, else $AGENT_ID)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
-	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
-	*pe = orEnv(*pe, platformExperimentEnv)
+	*pe = experimentOf(c, *pe)
 	path := "/platform-experiments/" + url.PathEscape(*pe) + "/quotas"
 	if readsEveryAgent(c.Token, *agent) {
 		*all = true
 	}
 	if !*all {
-		*agent = orEnv(*agent, agentEnv)
+		*agent = agentOf(c, *agent)
 		if *agent == "" {
 			return parseExit(misuse(fs, "--agent or --all is required"))
 		}
@@ -66,7 +65,7 @@ func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
 value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, stderr)
-	pe, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id", "platform-experiment")
+	pe, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id", "platform-experiment")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -231,13 +230,13 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 	case "list":
 		fs := newFlags("donation list", "usage: hl donation list [--status open|fulfilled|cancelled] [--limit N] [--platform-experiment PE]", stderr)
 		status := fs.String("status", "", "open, fulfilled or cancelled")
-		pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
+		pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 		limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
 		if err := fs.Parse(rest); err != nil {
 			return parseExit(err)
 		}
 		q := url.Values{}
-		if p := orEnv(*pe, platformExperimentEnv); p != "" {
+		if p := experimentOf(c, *pe); p != "" {
 			q.Set("platform_experiment_id", p)
 		}
 		if *status != "" {
@@ -251,8 +250,8 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		fs := newFlags("donation request", "usage: hl donation request --credits N --reason T [--agent A] [--platform-experiment PE]", stderr)
 		credits := fs.Float64("credits", 0, "accelerator-hours wanted (required)")
 		reason := fs.String("reason", "", "what you would spend them on (required)")
-		agent := fs.String("agent", "", "requesting agent (default $AGENT_ID)")
-		pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
+		agent := fs.String("agent", "", "requesting agent (default the token's agent, else $AGENT_ID)")
+		pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 		if err := fs.Parse(rest); err != nil {
 			return parseExit(err)
 		}
@@ -260,7 +259,7 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		if *agent, err = writingAgent(c, *agent); err != nil {
 			return fail(stderr, err)
 		}
-		*pe = orEnv(*pe, platformExperimentEnv)
+		*pe = experimentOf(c, *pe)
 		if *credits <= 0 || *reason == "" || *agent == "" || *pe == "" {
 			return parseExit(misuse(fs, "--credits above 0, --reason, --agent and --platform-experiment are required"))
 		}
@@ -268,7 +267,7 @@ func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 		body = map[string]any{"agent_id": *agent, "platform_experiment_id": *pe, "credits_want": *credits, "reason": *reason}
 	case "fulfill":
 		fs := newFlags("donation fulfill", "usage: hl donation fulfill ID [--agent A]\n\nTransfers the request's credits from your quota to the requester's.", stderr)
-		agent := fs.String("agent", "", "donating agent (default $AGENT_ID)")
+		agent := fs.String("agent", "", "donating agent (default the token's agent, else $AGENT_ID)")
 		id, err := parseOne(fs, rest, "ID", "", "id")
 		if err != nil {
 			return parseExit(err)

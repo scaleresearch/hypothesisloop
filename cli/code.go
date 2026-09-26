@@ -53,7 +53,7 @@ prints the code_ref a job of that commit carries. hl job submit fills that code_
 itself once the commit is pushed, and hl-clone fetches it, in a job and on your own machine.
 Tracked files must have no uncommitted changes. At most 32 MiB: keep data and build output out
 of git. With a repository, git push is what you want and this is not.`, stderr)
-	agent := fs.String("agent", "", "whose code it is (default $AGENT_ID)")
+	agent := fs.String("agent", "", "whose code it is (default the token's agent, else $AGENT_ID)")
 	pe := fs.String("platform-experiment", "", "default $PLATFORM_EXPERIMENT_ID")
 	if _, err := parseOperands(fs, args); err != nil {
 		return parseExit(err)
@@ -62,9 +62,9 @@ of git. With a repository, git push is what you want and this is not.`, stderr)
 	if err != nil {
 		return fail(stderr, fmt.Errorf("code push: %w", err))
 	}
-	experiment := orEnv(*pe, platformExperimentEnv)
+	experiment := experimentOf(c, *pe)
 	if writer == "" || experiment == "" {
-		return parseExit(misuse(fs, "--agent and --platform-experiment are required (or $AGENT_ID and $PLATFORM_EXPERIMENT_ID)"))
+		return parseExit(misuse(fs, "--agent and --platform-experiment are required: HL_TOKEN is no agent's token, and neither $AGENT_ID nor $PLATFORM_EXPERIMENT_ID says them"))
 	}
 	sha, err := committedHead("")
 	if err != nil {
