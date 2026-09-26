@@ -70,7 +70,8 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
         onChange={onChange}
         onSearch={setQ}
         allLabel="A new private repository"
-        placeholder="A new private repository"
+        placeholder={accounts.length > 1 ? 'Choose a repository' : 'A new private repository'}
+        hideAllOption={accounts.length > 1}
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}
       />

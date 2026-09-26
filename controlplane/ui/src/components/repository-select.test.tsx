@@ -72,6 +72,16 @@ describe('the repository of a new platform experiment', () => {
     expect([repositoryFields(''), repositoryFields('acme/open'), repositoryFields('@acme')]).toEqual([{}, { repository: 'acme/open' }, { repository_account: 'acme' }])
   })
 
+  it('asks which account a new one goes to when several are connected', async () => {
+    const one = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user' as const, id: 'u9', name: 'Una' }, connected_at: at }
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [one, { ...one, installation_id: 8, account_login: 'second' }], total: 2 })
+    show()
+    await userEvent.click(await screen.findByRole('combobox'))
+    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on second' }))
+    expect(screen.getByRole('status').textContent).toBe('@second')
+    expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
+  })
+
   it('is searched on the server once typing pauses', async () => {
     show()
     const field = await screen.findByRole('combobox')
