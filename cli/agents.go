@@ -35,7 +35,6 @@ command lines and shell history; write it to an env file the container reads.`, 
 	hyperparameters := fs.String("hyperparameters", "", "a JSON object of knobs the agent reads back")
 	model := fs.String("model", "", "the model the agent runs on; omitted, the platform's default")
 	name := fs.String("name", "", "display name of a created agent; omitted, its generated id")
-	kind := fs.String("kind", "", "kind of a created agent: agent (default) or human")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
 	pe, err := parseOne(fs, args, "PE", experimentOf(c, ""), "platform-experiment")
@@ -47,7 +46,7 @@ command lines and shell history; write it to an env file the container reads.`, 
 	}
 	body := map[string]any{}
 	for key, value := range map[string]string{
-		"agent_id": *agent, "flavor": *flavor, "model": *model, "name": *name, "kind": *kind, "role": *role, "quota_tier": *quotaTier,
+		"agent_id": *agent, "flavor": *flavor, "model": *model, "name": *name, "role": *role, "quota_tier": *quotaTier,
 	} {
 		if value != "" {
 			body[key] = value

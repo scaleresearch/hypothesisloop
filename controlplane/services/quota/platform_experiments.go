@@ -155,10 +155,6 @@ type CreatePlatformExperimentRequest struct {
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
-	// HypothesisSubmitPolicy/JobSubmitPolicy independently gate who may register a hypothesis vs.
-	// submit a job — empty resolves to "mixed" (today's behavior). See domain.SubmitterPolicy.
-	HypothesisSubmitPolicy string `json:"hypothesis_submit_policy,omitempty"`
-	JobSubmitPolicy        string `json:"job_submit_policy,omitempty"`
 	// DefaultQuotaTier controls signups that omit quota_tier. Empty defaults to "guaranteed" on
 	// create; accepted values are "guaranteed" and "burst_only".
 	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
@@ -211,8 +207,6 @@ type PlatformExperimentPatch struct {
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
 	StartsAt                  *time.Time                 `json:"starts_at,omitempty"`
 	EndsAt                    *time.Time                 `json:"ends_at,omitempty"`
-	HypothesisSubmitPolicy    *string                    `json:"hypothesis_submit_policy,omitempty"`
-	JobSubmitPolicy           *string                    `json:"job_submit_policy,omitempty"`
 }
 
 // beyondTheBrief names the fields the patch carries other than name and description (and name
@@ -233,8 +227,6 @@ func (p PlatformExperimentPatch) beyondTheBrief(alsoName bool) []string {
 	carried("report_interval_seconds", p.ReportIntervalSeconds != nil)
 	carried("starts_at", p.StartsAt != nil)
 	carried("ends_at", p.EndsAt != nil)
-	carried("hypothesis_submit_policy", p.HypothesisSubmitPolicy != nil)
-	carried("job_submit_policy", p.JobSubmitPolicy != nil)
 	return out
 }
 

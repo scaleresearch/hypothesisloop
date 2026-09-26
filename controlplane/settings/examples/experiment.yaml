@@ -41,12 +41,6 @@ metrics:
   # - key: batch_size
   #   role: attribute
 
-# Who may register a hypothesis / submit a job here — "mixed" (default when omitted), "human_only",
-# or "agent_only" (domain.SubmitterPolicy). Use agent_only to keep a human from accidentally
-# competing in an agent-only run, or human_only for a human-curated hypothesis pool.
-# hypothesis_submit_policy: mixed
-# job_submit_policy: mixed
-
 # How long it lasts, stated one way: duration_hours, or ends_at as RFC3339. Both, or neither, is
 # refused. duration_hours counts from starts_at, or from the create when there is no starts_at.
 # The platform experiment closes at its end, and the elimination ladder advances on the clock

@@ -109,56 +109,6 @@ func TestAbsentSignupRoleResolvesToCompetitor(t *testing.T) {
 	}
 }
 
-// An unrecognized submitter policy is rejected rather than defaulted: silently reading a typo as
-// "mixed" would open a restricted platform experiment to submitters the operator meant to
-// exclude.
-func TestUnknownSubmitterPolicyIsRejectedRatherThanDefaulted(t *testing.T) {
-	if _, err := domain.ParseSubmitterPolicy("human_onyl"); err == nil {
-		t.Fatalf("err = nil, want an error for an unrecognized submitter policy")
-	}
-}
-
-// An absent policy means every caller written before this field existed keeps meaning what it
-// meant: both humans and agents may submit.
-func TestAbsentSubmitterPolicyResolvesToMixed(t *testing.T) {
-	policy, err := domain.ParseSubmitterPolicy("")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
-	if got, want := policy, domain.SubmitterPolicyMixed; got != want {
-		t.Errorf("policy = %v, want %v", got, want)
-	}
-	if !policy.AllowsHuman() || !policy.AllowsAgent() {
-		t.Errorf("mixed policy AllowsHuman()=%v AllowsAgent()=%v, want both true", policy.AllowsHuman(), policy.AllowsAgent())
-	}
-}
-
-func TestSubmitterPolicyHumanOnlyRejectsAgents(t *testing.T) {
-	policy, err := domain.ParseSubmitterPolicy("human_only")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
-	if !policy.AllowsHuman() {
-		t.Errorf("human_only AllowsHuman() = false, want true")
-	}
-	if policy.AllowsAgent() {
-		t.Errorf("human_only AllowsAgent() = true, want false")
-	}
-}
-
-func TestSubmitterPolicyAgentOnlyRejectsHumans(t *testing.T) {
-	policy, err := domain.ParseSubmitterPolicy("agent_only")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
-	if policy.AllowsHuman() {
-		t.Errorf("agent_only AllowsHuman() = true, want false")
-	}
-	if !policy.AllowsAgent() {
-		t.Errorf("agent_only AllowsAgent() = false, want true")
-	}
-}
-
 // standingsStore adds the two reads standingsOnMetric makes on top of signupStore's.
 type standingsStore struct {
 	signupStore

@@ -39,12 +39,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
-		Description:   "Registers a lasting identity under an id of your choosing: a person (kind=\"human\"), or an agent whose standing should carry from one platform experiment to the next. Returns 409 if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
+		Description:   "Registers an agent under an id of your choosing, for one whose standing should carry from one platform experiment to the next. Returns 409 if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID    string `json:"id" doc:"Stable unique agent id"`
 			Name  string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
-			Kind  string `json:"kind,omitempty" required:"false" doc:"\"agent\" (default) or \"human\""`
 			OrgID string `json:"org_id,omitempty" required:"false" doc:"The org the agent belongs to. Needed only from a token that is not bound to a single org."`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
@@ -53,9 +52,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		// job may write. Registration is the one moment it can be refused for free.
 		if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
-		}
-		if !domain.ValidAgentKind(domain.AgentKind(in.Body.Kind)) {
-			return nil, huma.Error400BadRequest("kind must be \"agent\" or \"human\", got " + in.Body.Kind)
 		}
 		// id is the only identity that matters; name is presentation-only (UI/leaderboard), so
 		// requiring it would reject an otherwise complete registration over a cosmetic field.
@@ -67,7 +63,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, err
 		}
-		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, orgID, domain.AgentKind(in.Body.Kind))
+		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, orgID)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
@@ -143,7 +139,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "get-experiment-file", Method: "GET", Path: "/projects/{id}/experiment-file",
 		Summary: "Read what a repository's experiment file states", Tags: []string{"platform-experiments"},
 		Description: "What " + domain.ExperimentFile + " at the head of the default branch of repository states of a platform experiment: name, description, metrics, " +
-			"report_interval_seconds, stages and the submit policies, as POST /platform-experiments with from_repo would take them. Nothing is created. " +
+			"report_interval_seconds and stages, as POST /platform-experiments with from_repo would take them. Nothing is created. " +
 			"The org of the project must reach the repository, with the refusals of that create: 422 no_experiment_file when the repository has none, " +
 			"invalid_experiment_file when it cannot be used, and why.",
 	}, func(ctx context.Context, in *struct {

@@ -24,7 +24,7 @@ func TestActorsAreNamedByWhatTheyCarryNow(t *testing.T) {
 		t.Fatalf("create key: %v", err)
 	}
 	agentID := "agent-" + uuid.New().String()
-	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
+	createTestAgent(t, pool, agentID)
 	if _, err := pool.pool.Exec(ctx, `UPDATE agents SET name = 'Rosalind' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("name an agent: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestACommentKeepsWhoseItIsAndWhoWroteIt(t *testing.T) {
 	hyps := NewHypothesesStore(pool)
 	peID, agentID := "pe-"+uuid.New().String(), "agent-"+uuid.New().String()
 	createTestPE(t, pool, peID, 10)
-	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
+	createTestAgent(t, pool, agentID)
 	hypothesisID := "hyp-" + uuid.New().String()
 
 	written := []struct {
@@ -120,7 +120,7 @@ func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
 	experiments, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
 	peID, agentID := "pe-"+uuid.New().String(), "agent-"+uuid.New().String()
 	createTestPE(t, pool, peID, 10)
-	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
+	createTestAgent(t, pool, agentID)
 	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
 	person := domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 

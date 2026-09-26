@@ -28,60 +28,27 @@ func setAPIURL(t *testing.T, url string) {
 	t.Setenv("HL_TOKEN", "test-token")
 }
 
-func TestRegister(t *testing.T) {
-	var gotMethod, gotPath string
-	var gotBody map[string]string
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": gotBody["id"], "kind": gotBody["kind"]})
-	})
-	setAPIURL(t, url)
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"register", "--id", "jane", "--kind", "human"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if gotMethod != "POST" || gotPath != "/agents" {
-		t.Fatalf("got %s %s", gotMethod, gotPath)
-	}
-	if gotBody["id"] != "jane" || gotBody["name"] != "jane" || gotBody["kind"] != "human" {
-		t.Fatalf("unexpected body: %+v", gotBody)
-	}
-	if !strings.Contains(stdout.String(), `"jane"`) {
-		t.Fatalf("stdout missing echoed id: %s", stdout.String())
-	}
-}
-
 func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 	var gotAuthorization string
-	var gotBody map[string]string
 	calls := 0
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		gotAuthorization = r.Header.Get("Authorization")
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{}`))
 	})
 	setAPIURL(t, url)
-	t.Setenv("HL_ORG", "org-1")
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"register", "--id", "jane"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	if gotAuthorization != "Bearer test-token" {
 		t.Errorf("Authorization: got = %q, want = %q", gotAuthorization, "Bearer test-token")
 	}
-	if gotBody["org_id"] != "org-1" {
-		t.Errorf("org_id: got = %q, want $HL_ORG", gotBody["org_id"])
-	}
 
 	t.Setenv("HL_TOKEN", "")
 	stderr.Reset()
-	if code := run([]string{"register", "--id", "jane"}, &stdout, &stderr); code == 0 {
+	if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code == 0 {
 		t.Fatal("exit code with no HL_TOKEN: got = 0, want a failure")
 	}
 	if !strings.Contains(stderr.String(), "HL_TOKEN") || calls != 1 {
@@ -112,14 +79,6 @@ func TestPlatformExperimentsCreateNeedsAProject(t *testing.T) {
 	}
 	if code := run([]string{"platform-experiments", "create", "--project", "prj-flag", file}, &stdout, &stderr); code != 0 || gotBody["project_id"] != "prj-flag" {
 		t.Fatalf("with --project: exit code = %d, project_id = %v", code, gotBody["project_id"])
-	}
-}
-
-func TestRegisterMissingID(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"register"}, &stdout, &stderr)
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
 	}
 }
 
@@ -567,16 +526,16 @@ func TestJobListWithoutAgentListsWholePlatformExperiment(t *testing.T) {
 func TestHTTPErrorSurfacesPlatformMessage(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"$schema":"http://api/schemas/ErrorModel.json", "error":"agent already exists"}`))
+		_, _ = w.Write([]byte(`{"$schema":"http://api/schemas/ErrorModel.json", "error":"already closed"}`))
 	})
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"register", "--id", "jane"}, &stdout, &stderr)
+	code := run([]string{"platform-experiments", "close", "pe-1"}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	if want := "hl: POST /agents -> HTTP 409: {\"error\":\"agent already exists\"}\n"; stderr.String() != want {
+	if want := "hl: POST /platform-experiments/pe-1/close -> HTTP 409: {\"error\":\"already closed\"}\n"; stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }

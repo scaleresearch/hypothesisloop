@@ -18,9 +18,6 @@ var (
 	// ErrHypothesisNotFound and ErrHypothesisNotOwner let the HTTP layer answer 404 and 403.
 	ErrHypothesisNotFound = graphdb.ErrNotFound
 	ErrHypothesisNotOwner = graphdb.ErrNotOwner
-	// ErrHypothesisSubmitterNotAllowed is returned by RegisterHypothesis when the platform
-	// experiment's HypothesisSubmitPolicy forbids the submission's source (human or agent).
-	ErrHypothesisSubmitterNotAllowed = errors.New("hypothesis submitter not allowed by platform experiment's hypothesis_submit_policy")
 	// ErrUnknownPlatformExperiment is a registration naming a platform experiment that does not exist.
 	ErrUnknownPlatformExperiment = errors.New("unknown platform_experiment_id")
 )
@@ -32,26 +29,17 @@ var (
 // hypotheses not named in distinctFrom or a contradicts/related link, nothing is created and the
 // error wraps a *graphdb.SimilarError listing them.
 //
-// agentID is the agent whose hypothesis it is, empty for one no agent owns, which the submit
-// policy reads as a human's. actor is the credential registering it.
+// agentID is the agent whose hypothesis it is, empty for one no agent owns. actor is the
+// credential registering it.
 func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, err error) {
-	hypothesisPolicy, _, found, err := s.store.GetPlatformExperimentSubmitPolicies(ctx, platformExperimentID)
+	found, err := s.store.PlatformExperimentExists(ctx, platformExperimentID)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 	}
 	if !found {
 		return nil, nil, false, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
-	if agentID == "" {
-		if !hypothesisPolicy.AllowsHuman() {
-			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from agents only — this one names no agent_id, which makes it a human submission; read the experiment's hypothesis_submit_policy before retrying, a human identity cannot submit hypotheses here",
-				ErrHypothesisSubmitterNotAllowed, platformExperimentID)
-		}
-	} else {
-		if !hypothesisPolicy.AllowsAgent() {
-			return nil, nil, false, fmt.Errorf("%w: platform experiment %s accepts hypotheses from humans only — this is an autonomous-agent submission (agent_id=%s); read the experiment's hypothesis_submit_policy before retrying, an agent identity cannot submit hypotheses here",
-				ErrHypothesisSubmitterNotAllowed, platformExperimentID, agentID)
-		}
+	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
 			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 		}

@@ -263,7 +263,7 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 				t.Errorf("agent %d %s = %v, want %v", i, key, a[key], value)
 			}
 		}
-		if store.agents[id].Kind != domain.AgentKindAgent || store.agents[id].OrgID != "org-a" {
+		if store.agents[id].OrgID != "org-a" {
 			t.Errorf("created agent row = %+v", store.agents[id])
 		}
 	}
@@ -309,7 +309,7 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 
 func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNothing(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 
 	code, first := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"baseline","quota_tier":"burst_only","flavor":"generalist"}`)
@@ -344,28 +344,24 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		wantCode   int
 		wantReason string
 	}{
-		"running":                 {domain.PlatformExpRunning, "pe-1", `{}`, 400, "signup_closed"},
-		"closed":                  {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 400, "signup_closed"},
-		"registered, running":     {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 400, "signup_closed"},
-		"field full":              {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 400, "max_agents_reached"},
-		"registered, full":        {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 400, "max_agents_reached"},
-		"no such experiment":      {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
-		"no such agent":           {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
-		"unknown role":            {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
-		"unknown tier":            {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
-		"unknown kind":            {domain.PlatformExpOpen, "pe-1", `{"kind":"robot"}`, 400, "invalid_request"},
-		"hosted human":            {domain.PlatformExpOpen, "pe-1", `{"kind":"human","hosted":true}`, 400, "invalid_request"},
-		"hosted registered human": {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","hosted":true}`, 400, "invalid_request"},
-		"kind with agent_id":      {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","kind":"human"}`, 400, "invalid_request"},
-		"name with agent_id":      {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
-		"flavor not an id":        {domain.PlatformExpOpen, "pe-1", `{"flavor":"../x"}`, 400, "invalid_request"},
-		"unknown flavor":          {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search"}`, 400, "invalid_request"},
-		"unknown flavor, hosted":  {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true}`, 400, "invalid_request"},
-		"model with a space":      {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
+		"running":                {domain.PlatformExpRunning, "pe-1", `{}`, 400, "signup_closed"},
+		"closed":                 {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 400, "signup_closed"},
+		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 400, "signup_closed"},
+		"field full":             {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 400, "max_agents_reached"},
+		"registered, full":       {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 400, "max_agents_reached"},
+		"no such experiment":     {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
+		"no such agent":          {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
+		"unknown role":           {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
+		"unknown tier":           {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
+		"name with agent_id":     {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
+		"flavor not an id":       {domain.PlatformExpOpen, "pe-1", `{"flavor":"../x"}`, 400, "invalid_request"},
+		"unknown flavor":         {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search"}`, 400, "invalid_request"},
+		"unknown flavor, hosted": {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true}`, 400, "invalid_request"},
+		"model with a space":     {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
-			store.agents["dana"] = &domain.Agent{ID: "dana", Name: "Dana", Kind: domain.AgentKindHuman, OrgID: "org-a"}
+			store.agents["dana"] = &domain.Agent{ID: "dana", Name: "Dana", OrgID: "org-a"}
 			r := agentsRouter(t, store, staff)
 			bodies := strings.Split(tc.body, "\x00")
 			body := bodies[len(bodies)-1]
@@ -405,7 +401,7 @@ func TestBaselinesAndReviewersJoinAFullField(t *testing.T) {
 func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 1)
 	store.pe.CoordinatorHosted = true
-	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 	addEach(t, r, 3, `{"hosted":true,"role":"baseline"}`)
 	addEach(t, r, 2, `{"hosted":true,"role":"reviewer"}`)
@@ -428,7 +424,7 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.unregistered = true
-	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
@@ -541,7 +537,7 @@ func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 
 func TestACallerMayOnlyJoinARegisteredAgentOfItsOwnOrg(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.agents["outsider"] = &domain.Agent{ID: "outsider", Kind: domain.AgentKindAgent, OrgID: "org-b"}
+	store.agents["outsider"] = &domain.Agent{ID: "outsider", OrgID: "org-b"}
 	r := agentsRouter(t, store, auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}})
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
 	if code != http.StatusNotFound || len(store.signups) != 0 {
@@ -566,7 +562,7 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.pe.Repository = ""
-	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
@@ -622,7 +618,7 @@ func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 // an experiment of org A: the store is what keeps the two apart.
 func TestARegisteredAgentOfAnotherOrgIsNotFoundEvenForACallerOfBothOrgs(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.agents["outsider"] = &domain.Agent{ID: "outsider", Kind: domain.AgentKindAgent, OrgID: "org-b"}
+	store.agents["outsider"] = &domain.Agent{ID: "outsider", OrgID: "org-b"}
 	r := agentsRouter(t, store, auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a", "org-b"}})
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
 	if code != http.StatusNotFound || out["reason"] != "agent_not_found" || len(store.signups) != 0 {
@@ -652,14 +648,10 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 	call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
 	_, second := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
 	_, named := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`)
-	_, person := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"kind":"human"}`)
 	if got := joined(t, second)[0]["name"]; got != "Researcher 2" {
 		t.Errorf("the second agent is named %v, want Researcher 2", got)
 	}
 	if got := joined(t, named)[0]["name"]; got != "ablation" {
 		t.Errorf("a stated name became %v", got)
-	}
-	if p := joined(t, person)[0]; p["name"] != p["agent_id"] {
-		t.Errorf("a person joined as %v, want their id as the name", p)
 	}
 }

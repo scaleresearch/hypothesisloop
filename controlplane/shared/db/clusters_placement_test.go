@@ -32,7 +32,7 @@ func newTwoOrgs(t *testing.T) *twoOrgs {
 	_, w.orgB = newTestUserHome(t, accounts)
 	w.ofA, w.ofB, w.unregisteredName = "of-a-"+w.suffix, "of-b-"+w.suffix, "nobodys-"+w.suffix
 	w.peA, w.peB, w.agent = "pe-a-"+w.suffix, "pe-b-"+w.suffix, "agent-"+w.suffix
-	createTestAgent(t, pool, w.agent, domain.AgentKindHuman)
+	createTestAgent(t, pool, w.agent)
 	createTestPEIn(t, pool, w.peA, defaultProjectOf(t, accounts, w.orgA).ID)
 	createTestPEIn(t, pool, w.peB, defaultProjectOf(t, accounts, w.orgB).ID)
 	for name, org := range map[string]string{w.ofA: w.orgA, w.ofB: w.orgB} {
@@ -130,7 +130,7 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 	clusters, exps := NewClustersStore(pool), NewExperimentsStore(pool)
 	suffix := uuid.New().String()[:8]
 	agent, pe := "agent-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, agent, domain.AgentKindHuman)
+	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
 	for i, name := range []string{"local-" + suffix, "second-" + suffix} {
 		if _, err := clusters.RegisterCluster(context.Background(), name, "default"); err != nil {

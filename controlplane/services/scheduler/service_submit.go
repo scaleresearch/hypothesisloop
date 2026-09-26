@@ -83,30 +83,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	// 2a. job_submit_policy gate: independent of hypothesis_submit_policy (registry package),
-	// this governs who may submit a JOB — never who may register a hypothesis. Runs before
-	// hypothesis binding so an agent/human blocked from submitting jobs here never reaches (or
-	// depends on) the hypothesis lookup below.
-	if pe.JobSubmitPolicy != "" {
-		agent, err := s.store.GetAgent(ctx, exp.AgentID)
-		if err != nil {
-			return fmt.Errorf("scheduler: get agent: %w", err)
-		}
-		var allowed bool
-		switch {
-		case agent != nil && agent.Kind == domain.AgentKindHuman:
-			allowed = pe.JobSubmitPolicy.AllowsHuman()
-		default:
-			allowed = pe.JobSubmitPolicy.AllowsAgent()
-		}
-		if !allowed {
-			return &AdmissionError{
-				Reason:  ReasonSubmitterNotAllowed,
-				Message: fmt.Sprintf("platform experiment %s's job_submit_policy is %q and does not allow this submitter — read the experiment's job_submit_policy before retrying", exp.PlatformExperimentID, pe.JobSubmitPolicy),
-			}
-		}
-	}
-
 	// 3ab. Durable-data ceiling.
 	if err := s.enforceDataCeiling(ctx, exp); err != nil {
 		return err

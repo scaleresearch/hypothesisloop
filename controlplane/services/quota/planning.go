@@ -94,14 +94,12 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		Status:                 domain.PlatformExpDraft,
 		Stages:                 s.cfg.DefaultStages,
 		CurrentStage:           1,
-		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed,
-		JobSubmitPolicy:        domain.SubmitterPolicyMixed,
 		DefaultQuotaTier:       domain.QuotaTierGuaranteed,
 		MaxHosted:              launch.MaxHosted,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
-	planner := &domain.Agent{ID: plannerID, Name: "Planner", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
+	planner := &domain.Agent{ID: plannerID, Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{
 		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,

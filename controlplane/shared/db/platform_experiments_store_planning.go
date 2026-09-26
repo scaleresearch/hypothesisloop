@@ -54,8 +54,8 @@ WHERE p.org_id = $1 AND pe.goal <> ''`, planner.OrgID).Scan(&open, &today); err 
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO agents (id, name, org_id, kind, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)`, planner.ID, planner.Name, planner.OrgID, planner.Kind, planner.PerformanceScore, planner.CreatedAt); err != nil {
+INSERT INTO agents (id, name, org_id, performance_score, created_at)
+VALUES ($1, $2, $3, $4, $5)`, planner.ID, planner.Name, planner.OrgID, planner.PerformanceScore, planner.CreatedAt); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: create planner: %w", err)
 	}
 	hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
@@ -180,10 +180,10 @@ func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.P
 UPDATE platform_experiments
 SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = now(), ends_at = $8, stages = $9, current_stage = 1,
-    hypothesis_submit_policy = $10, job_submit_policy = $11, default_quota_tier = $12, max_concurrent_accelerators = $13,
-    coordinator_hosted = true, coordinator_launcher = $14, coordinator_model = $15, updated_at = now()
+    default_quota_tier = $10, max_concurrent_accelerators = $11,
+    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, updated_at = now()
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
-		pe.ReportIntervalSeconds, pe.EndsAt, stages, string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
+		pe.ReportIntervalSeconds, pe.EndsAt, stages,
 		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}

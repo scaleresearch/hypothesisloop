@@ -69,14 +69,6 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := domain.ValidateStages(stages); err != nil {
 		return nil, invalidPlatformExperiment(err)
 	}
-	hypothesisPolicy, err := domain.ParseSubmitterPolicy(req.HypothesisSubmitPolicy)
-	if err != nil {
-		return nil, invalidPlatformExperiment(fmt.Errorf("hypothesis_submit_policy: %w", err))
-	}
-	jobPolicy, err := domain.ParseSubmitterPolicy(req.JobSubmitPolicy)
-	if err != nil {
-		return nil, invalidPlatformExperiment(fmt.Errorf("job_submit_policy: %w", err))
-	}
 	defaultQuotaTier := domain.QuotaTier(req.DefaultQuotaTier)
 	if defaultQuotaTier == "" {
 		defaultQuotaTier = domain.QuotaTierGuaranteed
@@ -114,8 +106,6 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Status:                    domain.PlatformExpOpen,
 		Stages:                    stages,
 		CurrentStage:              1,
-		HypothesisSubmitPolicy:    hypothesisPolicy,
-		JobSubmitPolicy:           jobPolicy,
 		DefaultQuotaTier:          defaultQuotaTier,
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
@@ -207,20 +197,6 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 			return nil, invalid("ends_at must be a time: a platform experiment always has an end")
 		}
 		pe.EndsAt = *patch.EndsAt
-	}
-	if patch.HypothesisSubmitPolicy != nil {
-		policy, err := domain.ParseSubmitterPolicy(*patch.HypothesisSubmitPolicy)
-		if err != nil {
-			return nil, invalid("hypothesis_submit_policy: %s", err)
-		}
-		pe.HypothesisSubmitPolicy = policy
-	}
-	if patch.JobSubmitPolicy != nil {
-		policy, err := domain.ParseSubmitterPolicy(*patch.JobSubmitPolicy)
-		if err != nil {
-			return nil, invalid("job_submit_policy: %s", err)
-		}
-		pe.JobSubmitPolicy = policy
 	}
 	if patch.MaxConcurrentAccelerators != nil {
 		if *patch.MaxConcurrentAccelerators <= 0 {

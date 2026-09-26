@@ -337,7 +337,7 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	suffix := uuid.New().String()[:8]
 	peID, agentID, jobID := "pe-ten-"+suffix, "agent-ten-"+suffix, "job-ten-"+suffix
 	createTestPEIn(t, pool, peID, project.ID)
-	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
+	createTestAgent(t, pool, agentID)
 	seedExperimentForCapTest(t, pool, jobID, agentID, peID, 1, domain.StatusQueued)
 
 	want := domain.Tenancy{PlatformExperimentID: peID, ProjectID: project.ID, OrgID: orgID}
@@ -439,7 +439,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	agents := NewAgentsStore(pool)
 	agentA, agentB := "agent-a-"+suffix, "agent-b-"+suffix
 	for id, org := range map[string]string{agentA: orgA, agentB: orgB} {
-		if err := agents.CreateAgent(ctx, &domain.Agent{ID: id, Name: id, OrgID: org, Kind: domain.AgentKindAgent}); err != nil {
+		if err := agents.CreateAgent(ctx, &domain.Agent{ID: id, Name: id, OrgID: org}); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
 	}
@@ -555,7 +555,7 @@ func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	projectID := defaultProjectOf(t, accounts, orgID).ID
 	suffix := uuid.New().String()
 	agentID, peID := "agent-jp-"+suffix, "pe-jp-"+suffix
-	if err := NewAgentsStore(pool).CreateAgent(ctx, &domain.Agent{ID: agentID, Name: agentID, OrgID: orgID, Kind: domain.AgentKindAgent}); err != nil {
+	if err := NewAgentsStore(pool).CreateAgent(ctx, &domain.Agent{ID: agentID, Name: agentID, OrgID: orgID}); err != nil {
 		t.Fatalf("create agent: got = %v, want = nil", err)
 	}
 	createTestPEIn(t, pool, peID, projectID)

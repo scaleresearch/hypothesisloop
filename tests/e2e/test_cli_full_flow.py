@@ -66,22 +66,12 @@ def _finish_popen(proc: subprocess.Popen, *, timeout: float) -> tuple[int, str, 
             proc.communicate()
 
 
-def test_hl_register_returns_the_registered_agent_id(api, run_id):
-    # -- hl register --
-    agent = f"human-cli-{uuid.uuid4().hex[:8]}-{run_id}"
-    out = api.hl("register", "--id", agent, "--name", "CLI Flow Human", "--kind", "human")
-    register_id = json.loads(out)["id"]
-    assert register_id == agent, f"hl register: expected id {agent}, got {register_id}"
-
-
 def test_cli_full_flow_happy_path(api, run_id, tmp_path):
-    """register -> platform-experiments create/start -> signup -> hypothesis submit --file/list ->
+    """A person with their own credential: platform-experiments create -> agents add, which creates
+    the agent and answers with its id -> start -> hypothesis submit --file/list ->
     job submit -> job list/status -> watch --until a terminal status -> hypothesis dedup. Ported as
     one sequential test since each step consumes state (pe_id, hyp_id, job_id) produced by the one
     before it -- the same reason the bash scenario runs it as a single script."""
-    agent = f"human-cli-{uuid.uuid4().hex[:8]}-{run_id}"
-    api.hl("register", "--id", agent, "--name", "CLI Flow Human", "--kind", "human")
-
     # -- hl platform-experiments create / start --
     pe_body = {
         "name": f"cli-full-flow-{run_id}",
@@ -97,8 +87,9 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     assert pe_id, f"hl platform-experiments create: no id in response: {pe_create_out}"
 
     # -- hl platform-experiments agents add --
-    signup_out = api.hl("platform-experiments", "agents", "add", pe_id, "--agent", agent)
-    assert json.loads(signup_out)["agent_id"] == agent  # one joined agent per line, as valid JSON
+    signup_out = api.hl("platform-experiments", "agents", "add", pe_id, "--name", "CLI Flow Agent")
+    agent = json.loads(signup_out)["agent_id"]  # one joined agent per line, as valid JSON
+    assert agent.startswith("ag-"), f"hl platform-experiments agents add: the platform issues the id, got {signup_out}"
 
     api.hl("platform-experiments", "start", "--id", pe_id)  # hl platform-experiments start: succeeded
 
@@ -297,9 +288,9 @@ def test_watch_nonexistent_experiment_is_refused_without_retry(api, run_id):
 
 def test_usage_errors_exit_2(api):
     # -- hl usage errors exit 2 --
-    register_bad = api.hl_expect("register")
-    assert register_bad.returncode == 2, (
-        f"hl register with no --id exited {register_bad.returncode}, want 2"
+    register_gone = api.hl_expect("register", "--id", "jane")
+    assert register_gone.returncode == 2 and "unknown command" in register_gone.stderr, (
+        f"hl register exited {register_gone.returncode}: {register_gone.stderr}"
     )
     watch_bad = api.hl_expect("watch")
     assert watch_bad.returncode == 2, (

@@ -173,10 +173,9 @@ the provider switched on in Supabase.
 go build -o bin/hl ./cli
 export API_URL=http://localhost:8081
 export HL_TOKEN="$(make -s staff-token)"   # every request carries a token; an API key or user token works the same
-export HL_ORG=default HL_PROJECT=default   # where `register` and `platform-experiments create` put what they make
+export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create` puts what it makes
 
-hl register --id jane --name "Jane Doe" --kind human       # register a lasting identity
-hl platform-experiments agents add pe-123 --agent jane     # join a platform experiment as it
+hl platform-experiments agents add pe-123            # create an agent you run yourself; its token is printed
 hl platform-experiments agents add pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get pe-123                         # status, description, metrics, stages
 hl platform-experiments list                               # yours and the ones the platform shares with every account

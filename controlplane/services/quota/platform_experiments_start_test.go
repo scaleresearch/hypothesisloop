@@ -58,8 +58,8 @@ func startWithDefault(t *testing.T, defaultTier domain.QuotaTier, participants .
 	return byAgent
 }
 
-func participant(agentID string, kind domain.AgentKind, override domain.QuotaTier) db.StartParticipant {
-	return db.StartParticipant{AgentID: agentID, AgentExists: true, Kind: kind, QuotaTierOverride: override}
+func participant(agentID string, override domain.QuotaTier) db.StartParticipant {
+	return db.StartParticipant{AgentID: agentID, AgentExists: true, QuotaTierOverride: override}
 }
 
 // The tier is decided at signup and applied exactly once, here, when the allocation is made.
@@ -68,8 +68,8 @@ func participant(agentID string, kind domain.AgentKind, override domain.QuotaTie
 // else's burst — for the whole run.
 func TestStartGuaranteedDefaultAllocatesEqualGuaranteedSharesRegardlessOfKind(t *testing.T) {
 	byAgent := startWith(t,
-		participant("human-1", domain.AgentKindHuman, ""),
-		participant("agent-1", domain.AgentKindAgent, ""),
+		participant("human-1", ""),
+		participant("agent-1", ""),
 	)
 
 	human, agent := byAgent["human-1"], byAgent["agent-1"]
@@ -96,8 +96,8 @@ func TestStartGuaranteedDefaultAllocatesEqualGuaranteedSharesRegardlessOfKind(t 
 // kind on read: one run can mix them however it likes.
 func TestStartLetsASignupOverrideWinOverTheAgentsKind(t *testing.T) {
 	byAgent := startWith(t,
-		participant("agent-guaranteed", domain.AgentKindAgent, domain.QuotaTierGuaranteed),
-		participant("human-burst-only", domain.AgentKindHuman, domain.QuotaTierBurstOnly),
+		participant("agent-guaranteed", domain.QuotaTierGuaranteed),
+		participant("human-burst-only", domain.QuotaTierBurstOnly),
 	)
 
 	if g := byAgent["agent-guaranteed"].GuaranteedAcceleratorHours; g <= 0 {
@@ -112,7 +112,7 @@ func TestStartLetsASignupOverrideWinOverTheAgentsKind(t *testing.T) {
 }
 
 func TestStartBurstOnlyOverrideWinsOverGuaranteedExperimentDefault(t *testing.T) {
-	byAgent := startWith(t, participant("agent-1", domain.AgentKindAgent, domain.QuotaTierBurstOnly))
+	byAgent := startWith(t, participant("agent-1", domain.QuotaTierBurstOnly))
 	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g != 0 {
 		t.Errorf("agent guaranteed = %v, want 0 with explicit burst_only override", g)
 	}
@@ -122,7 +122,7 @@ func TestStartBurstOnlyOverrideWinsOverGuaranteedExperimentDefault(t *testing.T)
 // same fixed guaranteed default as any other experiment — ResolveQuotaTier has no kind-based
 // fallback left to apply, by design (quota tier never depends on AgentKind).
 func TestStartLegacyExperimentDefaultsToGuaranteedWithNoKindInvolved(t *testing.T) {
-	byAgent := startWithDefault(t, "", participant("agent-1", domain.AgentKindAgent, ""))
+	byAgent := startWithDefault(t, "", participant("agent-1", ""))
 	if g := byAgent["agent-1"].GuaranteedAcceleratorHours; g <= 0 {
 		t.Errorf("legacy agent, no override: guaranteed = %v, want > 0", g)
 	}
@@ -138,7 +138,7 @@ func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *tes
 			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		},
 		participants: []db.StartParticipant{
-			participant("agent-1", domain.AgentKindAgent, ""),
+			participant("agent-1", ""),
 			{AgentID: "ghost", AgentExists: false},
 		},
 	}
@@ -154,7 +154,7 @@ func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *tes
 // figure can be read off the guaranteed column directly. Burst is headroom derived from it
 // (BurstFraction), not a second slice of the budget, so it is deliberately not counted.
 func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
-	byAgent := startWith(t, participant("human-1", domain.AgentKindHuman, ""))
+	byAgent := startWith(t, participant("human-1", ""))
 
 	if got, want := byAgent["human-1"].GuaranteedAcceleratorHours, 100.0*0.5; got != want {
 		t.Errorf("sole participant's guaranteed = %v, want the first stage's share (%v) of a 100-hour budget — releasing more lets one agent spend the whole run's budget before anyone is cut", got, want)

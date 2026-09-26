@@ -99,7 +99,7 @@ func hypothesisWriteError(err error) error {
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
 		return huma.Error400BadRequest(err.Error())
-	case errors.Is(err, ErrHypothesisNotOwner), errors.Is(err, ErrHypothesisSubmitterNotAllowed):
+	case errors.Is(err, ErrHypothesisNotOwner):
 		return huma.Error403Forbidden(err.Error())
 	case errors.Is(err, ErrHypothesisNotFound):
 		return huma.Error404NotFound(err.Error())

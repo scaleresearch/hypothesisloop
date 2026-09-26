@@ -25,7 +25,7 @@ import (
 type Proposal struct {
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
 	// brief every agent works from), metrics, report_interval_seconds, stages and the policies.
-	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, report_interval_seconds, and optionally stages, hypothesis_submit_policy, job_submit_policy, default_quota_tier, max_concurrent_accelerators."`
+	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, report_interval_seconds, and optionally stages, default_quota_tier, max_concurrent_accelerators."`
 
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, from its start."`
@@ -88,11 +88,6 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 	if len(experiment.Stages) > 0 {
 		if err := domain.ValidateStages(experiment.Stages); err != nil {
 			return experiment, refusedProposal("invalid_stages", "experiment.stages: %s", err)
-		}
-	}
-	for name, policy := range map[string]string{"hypothesis_submit_policy": experiment.HypothesisSubmitPolicy, "job_submit_policy": experiment.JobSubmitPolicy} {
-		if _, err := domain.ParseSubmitterPolicy(policy); err != nil {
-			return experiment, refusedProposal("invalid_experiment", "experiment.%s: %s", name, err)
 		}
 	}
 	if experiment.DefaultQuotaTier != "" && !domain.ValidQuotaTierOverride(experiment.DefaultQuotaTier) {
@@ -335,9 +330,6 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if len(pe.Stages) == 0 {
 		pe.Stages = h.svc.cfg.DefaultStages
 	}
-	// checkProposal parsed both, so neither fails here.
-	pe.HypothesisSubmitPolicy, _ = domain.ParseSubmitterPolicy(experiment.HypothesisSubmitPolicy)
-	pe.JobSubmitPolicy, _ = domain.ParseSubmitterPolicy(experiment.JobSubmitPolicy)
 	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
 	if experiment.DefaultQuotaTier != "" {
 		pe.DefaultQuotaTier = domain.QuotaTier(experiment.DefaultQuotaTier)
@@ -359,7 +351,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		if err != nil {
 			return nil, h.refusal("accept", err)
 		}
-		agents = append(agents, &domain.Agent{ID: agentID, Name: fmt.Sprintf("Researcher %d", i+1), Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now})
+		agents = append(agents, &domain.Agent{ID: agentID, Name: fmt.Sprintf("Researcher %d", i+1), PerformanceScore: 0.5, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
 			AgentID: agentID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher,
 			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters,

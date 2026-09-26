@@ -16,7 +16,7 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 	pool := eventsTestDB(t)
 	suffix := uuid.New().String()[:8]
 	agent, pe := "datakey-agent-"+suffix, "datakey-pe-"+suffix
-	createTestAgent(t, pool, agent, domain.AgentKindAgent)
+	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
 	store := NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 1))
 	if _, err := pool.pool.Exec(context.Background(), upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{

@@ -57,8 +57,8 @@ func (s *poolStore) GetExperiment(_ context.Context, id string) (*domain.Experim
 
 func newPoolStore() *poolStore { return &poolStore{} }
 
-func (s *poolStore) GetPlatformExperimentSubmitPolicies(_ context.Context, _ string) (domain.SubmitterPolicy, domain.SubmitterPolicy, bool, error) {
-	return domain.SubmitterPolicyMixed, domain.SubmitterPolicyMixed, true, nil
+func (s *poolStore) PlatformExperimentExists(_ context.Context, _ string) (bool, error) {
+	return true, nil
 }
 
 func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
@@ -528,8 +528,8 @@ func TestAddHypothesisCommentCarriesTheHypothesisPlatformExperimentAndRefusesAnU
 
 type missingExperimentStore struct{ poolStore }
 
-func (missingExperimentStore) GetPlatformExperimentSubmitPolicies(context.Context, string) (domain.SubmitterPolicy, domain.SubmitterPolicy, bool, error) {
-	return "", "", false, nil
+func (missingExperimentStore) PlatformExperimentExists(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 func (missingExperimentStore) GetPlatformExperimentMetrics(context.Context, string) ([]domain.MetricDefinition, bool, error) {

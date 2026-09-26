@@ -21,10 +21,8 @@ type Store interface {
 	GetLineage(ctx context.Context, experimentID string) ([]*domain.Experiment, error)
 	// GetAgent resolves an agent id, nil when no such agent ever signed up.
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
-	// GetPlatformExperimentSubmitPolicies is a narrow read of a platform experiment's
-	// HypothesisSubmitPolicy/JobSubmitPolicy, used to gate RegisterHypothesis without pulling
-	// the full row through this interface. found=false means id does not exist.
-	GetPlatformExperimentSubmitPolicies(ctx context.Context, platformExperimentID string) (hypothesisPolicy, jobPolicy domain.SubmitterPolicy, found bool, err error)
+	// PlatformExperimentExists says whether a hypothesis has a platform experiment to be in.
+	PlatformExperimentExists(ctx context.Context, platformExperimentID string) (bool, error)
 	// GetPlatformExperimentMetrics is a narrow read of a platform experiment's declared
 	// MetricDefinitions, used by the underperformance check to find the ranking metric's
 	// direction without pulling the full row through this interface.

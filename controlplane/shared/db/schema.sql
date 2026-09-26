@@ -76,27 +76,14 @@ END $$;
 CREATE TABLE IF NOT EXISTS agents (
     id                TEXT             PRIMARY KEY,
     name              TEXT             NOT NULL,
-    -- domain.AgentKind. Scheduling and standings never branch on it; quota does, via
-    -- domain.ResolveQuotaTier. 'agent' is the default so every row that predates this column
-    -- keeps the burst-only tier an autonomous participant gets.
-    kind              TEXT             NOT NULL DEFAULT 'agent',
     performance_score DOUBLE PRECISION NOT NULL DEFAULT 0.5,
-    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    CONSTRAINT agents_kind CHECK (kind IN ('agent', 'human'))
+    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
 
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'agent';
 ALTER TABLE agents DROP COLUMN IF EXISTS top3_count;
-
--- The inline CONSTRAINT above only ever runs on a database that does not have this table yet:
--- CREATE TABLE IF NOT EXISTS is a no-op otherwise, and ADD COLUMN IF NOT EXISTS adds a column,
--- not a check. Without this an existing deployment silently accepts any kind string while a fresh
--- one rejects it — the same schema.sql producing two different schemas.
-DO $$ BEGIN
-    ALTER TABLE agents ADD CONSTRAINT agents_kind CHECK (kind IN ('agent', 'human'));
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
+-- An agent row once said whether it stood for a person (kind 'human'). A person acts with their
+-- own credential now and each record's actor says who wrote it, so the column and its check go.
+ALTER TABLE agents DROP COLUMN IF EXISTS kind;
 
 -- ---------------------------------------------------------------------------
 -- platform_experiments — operator-defined compute envelopes
@@ -130,23 +117,18 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
     -- themselves are never stored here, they are derived from the metrics store on read (see
     -- GET /platform-experiments/{id}/results), so there is one source of truth for a number.
     summary              TEXT                       NOT NULL DEFAULT '',
-    -- domain.SubmitterPolicy: who may register a hypothesis / submit a job within this platform
-    -- experiment (human/agent identity), gated independently. 'mixed' (the default) is today's
-    -- behavior — both may submit — unchanged for every row that predates this column.
-    hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed',
-    job_submit_policy        TEXT NOT NULL DEFAULT 'mixed',
     -- Empty marks experiments created before this policy existed; new API-created experiments
-    -- explicitly store 'guaranteed'. ResolveQuotaTier has no kind-based fallback for empty rows
-    -- either (quota tier never depends on AgentKind) — an empty row simply resolves to guaranteed.
+    -- explicitly store 'guaranteed'. An empty row resolves to guaranteed (domain.ResolveQuotaTier).
     default_quota_tier TEXT NOT NULL DEFAULT '',
     CONSTRAINT platform_experiments_default_quota_tier CHECK (default_quota_tier IN ('', 'guaranteed', 'burst_only')),
-    CONSTRAINT platform_experiments_hypothesis_submit_policy CHECK (hypothesis_submit_policy IN ('mixed', 'human_only', 'agent_only')),
-    CONSTRAINT platform_experiments_job_submit_policy CHECK (job_submit_policy IN ('mixed', 'human_only', 'agent_only')),
     created_at           TIMESTAMPTZ                NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ                NOT NULL DEFAULT now()
 );
 
-ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed';
+-- Who may register a hypothesis or submit a job was once gated per platform experiment on
+-- whether the submitter was a person or an agent. Both columns go, and their checks with them.
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS hypothesis_submit_policy;
+ALTER TABLE platform_experiments DROP COLUMN IF EXISTS job_submit_policy;
 -- The sentence a draft was created from (domain.PlatformExpDraft), and whose credential created
 -- the platform experiment (domain.Actor: kind and id). Both empty on a row from before either.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS goal            TEXT NOT NULL DEFAULT '';
@@ -174,7 +156,6 @@ CREATE TABLE IF NOT EXISTS planning_requests (
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS planning_requests_by_experiment ON planning_requests (platform_experiment_id, id);
-ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS default_quota_tier TEXT NOT NULL DEFAULT '';
 
 DO $$ BEGIN
@@ -524,7 +505,8 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress TEXT N
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_end_reason TEXT NOT NULL DEFAULT '';
 
--- Same reason as agents_kind: the inline CONSTRAINT never runs on an existing database.
+-- The inline CONSTRAINT runs only where the table does not exist yet, so an existing database
+-- gets the check here.
 DO $$ BEGIN
     ALTER TABLE experiment_signups ADD CONSTRAINT experiment_signups_quota_tier
         CHECK (quota_tier IN ('', 'guaranteed', 'burst_only'));

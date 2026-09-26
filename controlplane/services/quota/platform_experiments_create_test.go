@@ -29,7 +29,6 @@ func TestCreatePlatformExperimentMarksRequestErrorsInvalid(t *testing.T) {
 		"no ranking metric":       func(r *CreatePlatformExperimentRequest) { r.Metrics = nil },
 		"bad stages":              func(r *CreatePlatformExperimentRequest) { r.Stages = []domain.Stage{{LengthPct: 50}} },
 		"bad quota tier":          func(r *CreatePlatformExperimentRequest) { r.DefaultQuotaTier = "gold" },
-		"bad job policy":          func(r *CreatePlatformExperimentRequest) { r.JobSubmitPolicy = "anyone" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

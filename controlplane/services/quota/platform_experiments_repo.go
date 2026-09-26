@@ -71,8 +71,6 @@ type ExperimentFile struct {
 	Metrics                   []domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty"`
 	Stages                    []domain.Stage            `json:"stages,omitempty"`
-	HypothesisSubmitPolicy    string                    `json:"hypothesis_submit_policy,omitempty"`
-	JobSubmitPolicy           string                    `json:"job_submit_policy,omitempty"`
 	DefaultQuotaTier          string                    `json:"default_quota_tier,omitempty"`
 	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
 }
@@ -95,7 +93,6 @@ func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, project
 	return &ExperimentFile{
 		Repository: named, Name: base.Name, Description: base.Description, Metrics: base.Metrics,
 		ReportIntervalSeconds: base.ReportIntervalSeconds, Stages: base.Stages,
-		HypothesisSubmitPolicy: base.HypothesisSubmitPolicy, JobSubmitPolicy: base.JobSubmitPolicy,
 		DefaultQuotaTier: base.DefaultQuotaTier, MaxConcurrentAccelerators: base.MaxConcurrentAccelerators,
 	}, nil
 }

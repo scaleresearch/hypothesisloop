@@ -191,9 +191,8 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "n", Description: "the brief", Status: domain.PlatformExpOpen,
 			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 30, StartsAt: starts, EndsAt: ends,
-			Metrics:                []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize", Role: "ranking"}},
-			Stages:                 []domain.Stage{{LengthPct: 100}},
-			HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
+			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize", Role: "ranking"}},
+			Stages:  []domain.Stage{{LengthPct: 100}},
 		}
 	}
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {

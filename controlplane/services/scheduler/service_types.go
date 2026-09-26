@@ -30,9 +30,6 @@ type Store interface {
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// GetAgent resolves the submitting agent's Kind, to gate submission against
-	// PlatformExperiment.JobSubmitPolicy (see domain.SubmitterPolicy).
-	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// IsAgentCut reports whether the agent was cut at a stage boundary (see
 	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)

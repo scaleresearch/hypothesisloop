@@ -2,17 +2,13 @@ package domain
 
 import "time"
 
-// Agent represents a registered platform participant — the identity that owns quota, submits
-// hypotheses, and runs jobs. Despite the name, a row is not necessarily an AI: Kind says which it
-// is. Whoever reaches the project may register one and pick its id and kind. What matters is that once registered,
-// a human participant is a first-class Agent row like any other: it can own quota, appear in
-// standings, and be the AgentID referenced by hypotheses and jobs, letting a person submit ideas
-// and jobs through the exact same endpoints an AI agent uses.
+// Agent is a participant of platform experiments: the identity that owns quota, submits jobs and
+// holds standings. The platform creates one when it is added to a platform experiment. Whether a
+// person or an agent wrote a record is that record's actor, and no property of an agent.
 type Agent struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
 	OrgID            string    `json:"org_id"`
-	Kind             AgentKind `json:"kind"`
 	PerformanceScore float64   `json:"performance_score"`
 	Top3Count        int       `json:"top3_count"` // number of top-3 placements ever
 	CreatedAt        time.Time `json:"created_at"`
@@ -28,36 +24,9 @@ type AgentStats struct {
 	AvgPerformanceScore float64 `json:"avg_performance_score"`
 }
 
-// AgentKind distinguishes a human participant from an AI agent. Scheduling, standings, and quota
-// (see ResolveQuotaTier) never branch on it — it exists for identity/display and submitter-policy
-// checks only. A human and an agent get exactly the same quota treatment.
-type AgentKind string
-
-const (
-	// AgentKindAgent is the default: an autonomous (typically AI) research agent.
-	AgentKindAgent AgentKind = "agent"
-	// AgentKindHuman is a real person registered as a participant, submitting hypotheses and
-	// jobs through the same API an AI agent uses.
-	AgentKindHuman AgentKind = "human"
-)
-
-// ValidAgentKind reports whether k is a recognized kind, or empty (callers default empty to
-// AgentKindAgent). An unrecognized value must be rejected at registration, not stored: it would
-// otherwise reach a Postgres row and every reader would have to defend against a third,
-// unnamed kind forever after.
-func ValidAgentKind(k AgentKind) bool {
-	switch k {
-	case "", AgentKindAgent, AgentKindHuman:
-		return true
-	default:
-		return false
-	}
-}
-
 // QuotaTier is which column of an experiment's budget a participant's share lands in: the normal
-// guaranteed+burst split, or burst-only. It is decided per signup (see ResolveQuotaTier),
-// independent of AgentKind — one experiment can mix guaranteed and burst-only participants of
-// either kind, all at once.
+// guaranteed+burst split, or burst-only. It is decided per signup (see ResolveQuotaTier):
+// one experiment can mix guaranteed and burst-only participants.
 type QuotaTier string
 
 const (
@@ -80,13 +49,8 @@ func ValidQuotaTierOverride(s string) bool {
 }
 
 // ResolveQuotaTier applies a signup's explicit override, then the experiment's default_quota_tier
-// policy, then a fixed guaranteed default. Deliberately independent of AgentKind: a human and an
-// agent with no override on the same (or an unset-policy legacy) experiment get identical
-// treatment. An experiment created before default_quota_tier existed (empty policy, no override)
-// now also resolves to guaranteed — this intentionally changes what a future quota-affecting event
-// (a stage-boundary credit, a donation) on such an experiment would compute, since the platform no
-// longer has any kind-based tier to fall back to; it does not rewrite quota already materialized
-// by an earlier ResolveQuotaTier call (see AllocateQuota/ApplyQuotaTier call sites).
+// policy, then a fixed guaranteed default, which is also what an experiment created before
+// default_quota_tier existed resolves to.
 func ResolveQuotaTier(override, experimentDefault QuotaTier) QuotaTier {
 	if override != "" {
 		return override

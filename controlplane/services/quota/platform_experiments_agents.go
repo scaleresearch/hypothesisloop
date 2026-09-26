@@ -19,8 +19,7 @@ import (
 // joins a platform experiment.
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Omitted, an agent is named by its place in the platform experiment, \"Researcher 2\", and a human by the generated id."`
-	Kind            string         `json:"kind,omitempty" doc:"Kind of a created agent: \"agent\" (default) or \"human\"."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Omitted, it is named by its place in the platform experiment, \"Researcher 2\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
@@ -131,8 +130,8 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 }
 
 func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
-	if req.Name != "" || req.Kind != "" {
-		return nil, refuseSignup(400, "invalid_request", "name and kind describe an agent to create and cannot be set with agent_id")
+	if req.Name != "" {
+		return nil, refuseSignup(400, "invalid_request", "name describes an agent to create and cannot be set with agent_id")
 	}
 	agent, err := s.store.GetAgent(ctx, req.AgentID)
 	if err != nil {
@@ -140,9 +139,6 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	}
 	if agent == nil {
 		return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
-	}
-	if signup.Hosted && agent.Kind != domain.AgentKindAgent {
-		return nil, refuseSignup(400, "invalid_request", "only an agent of kind \"agent\" can be hosted, and %s is %s", agent.ID, agent.Kind)
 	}
 	if err := s.Signup(ctx, platformExpID, signup); err != nil {
 		return nil, err
@@ -159,12 +155,9 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 
 // nextAgentName is what a created agent is called when the caller named none: "Researcher 3"
 // for the third agent of the experiment, which is what a person reads in every list in place of
-// a generated id. A person joining as themselves keeps the id. Two agents added at the same
+// a generated id. Two agents added at the same
 // moment, or one added after another left, may share a name; the id is what tells them apart.
-func (s *PlatformExperimentsService) nextAgentName(ctx context.Context, platformExpID string, kind domain.AgentKind, id string) (string, error) {
-	if kind != domain.AgentKindAgent {
-		return id, nil
-	}
+func (s *PlatformExperimentsService) nextAgentName(ctx context.Context, platformExpID string) (string, error) {
 	joined, err := s.store.ListSignups(ctx, platformExpID)
 	if err != nil {
 		return "", fmt.Errorf("platform_experiments.AddAgent: %w", err)
@@ -173,16 +166,6 @@ func (s *PlatformExperimentsService) nextAgentName(ctx context.Context, platform
 }
 
 func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
-	kind := domain.AgentKind(req.Kind)
-	if kind == "" {
-		kind = domain.AgentKindAgent
-	}
-	if !domain.ValidAgentKind(kind) {
-		return nil, refuseSignup(400, "invalid_request", "kind must be \"agent\" or \"human\", got %s", req.Kind)
-	}
-	if signup.Hosted && kind != domain.AgentKindAgent {
-		return nil, refuseSignup(400, "invalid_request", "only an agent of kind \"agent\" can be hosted")
-	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
@@ -196,12 +179,12 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	}
 	name := req.Name
 	if name == "" {
-		if name, err = s.nextAgentName(ctx, platformExpID, kind, id); err != nil {
+		if name, err = s.nextAgentName(ctx, platformExpID); err != nil {
 			return nil, err
 		}
 	}
 	signup.AgentID = id
-	agent := &domain.Agent{ID: id, Name: name, Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	agent := &domain.Agent{ID: id, Name: name, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 	err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
 	switch {
 	case errors.Is(err, db.ErrSignupClosed):

@@ -25,7 +25,6 @@
 // --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, which the
 // experimentator harness sets in an agent's container.
 //
-//	hl register --id jane --name "Jane Doe" --kind human
 //	hl platform-experiments agents add pe-123 --hosted --flavor generalist
 //	hl platform-experiments agents add pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
@@ -85,8 +84,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "register":
-		return cmdRegister(client, rest, stdout, stderr)
 	case "platform-experiments":
 		return cmdPlatformExperiments(client, rest, stdout, stderr)
 	case "quota":
@@ -125,7 +122,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage: hl <command> ...
 
-  register              --id ID --kind agent|human
   platform-experiments  [list] | get [PE] | create [FILE] | start PE | update [PE] --description-file F | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
@@ -480,35 +476,6 @@ func writeString(b *bytes.Buffer, s string) {
 }
 
 // --- register ----------------------------------------------------------------------------------
-
-func cmdRegister(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("register", "usage: hl register --id ID [--name NAME] [--kind agent|human] [--org ORG]", stderr)
-	org := fs.String("org", "", "org the agent belongs to, needed only when the token spans several orgs (default $HL_ORG)")
-	id := fs.String("id", "", "stable unique agent id (required)")
-	name := fs.String("name", "", "human-readable display name; defaults to id")
-	kind := fs.String("kind", "human", "agent or human")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
-	}
-	if *id == "" {
-		return parseExit(misuse(fs, "--id is required"))
-	}
-	body := map[string]string{"id": *id, "name": *name, "kind": *kind}
-	if body["name"] == "" {
-		body["name"] = *id
-	}
-	if *org = orEnv(*org, orgEnv); *org != "" {
-		body["org_id"] = *org
-	}
-	var out json.RawMessage
-	if err := c.Do("POST", "/agents", body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	if err := printLine(stdout, out); err != nil {
-		return fail(stderr, err)
-	}
-	return 0
-}
 
 func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("data-key", `usage: hl data-key [--platform-experiment PE] [--agent A]
