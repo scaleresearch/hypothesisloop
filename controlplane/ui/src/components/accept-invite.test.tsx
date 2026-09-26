@@ -132,7 +132,7 @@ describe('accepting', () => {
     await accept()
     expect(await screen.findByText('The organization has no project yet.')).toBeTruthy()
     expect(router.replace).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Go to the console' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Go to experiments' }))
     expect(router.replace).toHaveBeenCalledExactlyOnceWith('/console')
   })
 

@@ -90,7 +90,7 @@ export function AcceptInvite() {
     }
   }
 
-  const home = <Button onClick={() => router.replace(HOME_PATH)}>Go to the console</Button>
+  const home = <Button onClick={() => router.replace(HOME_PATH)}>Go to experiments</Button>
 
   switch (step.at) {
     case 'reading':
