@@ -12,7 +12,7 @@ import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
 import { statusColor } from '@/lib/colors'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
@@ -26,7 +26,7 @@ function StatusBadge({ status }: { status: string }) {
 // The primary metric ranks the leaderboard, so its pill carries the accent ring.
 function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) {
   return (
-    <Pill tone={m.direction === 'maximize' ? 'success' : 'warning'} active={primary} title={primary ? 'Primary metric — used for ranking' : undefined}>
+    <Pill active={primary} title={primary ? 'Primary metric — used for ranking' : undefined}>
       {primary && <span className="opacity-80">★</span>}
       {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
     </Pill>
@@ -82,7 +82,7 @@ export function PlatformExperimentCard({
       >
         <div className="flex items-center gap-2.5">
           <StatusBadge status={pe.status} />
-          <span className="text-base font-bold">{pe.name}</span>
+          <CardTitle>{pe.name}</CardTitle>
           <SharedBadge pe={pe} />
         </div>
         <div className="flex items-center gap-3 font-normal">

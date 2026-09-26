@@ -13,10 +13,10 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { Dot } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import { Select } from '@/components/ui/select'
 import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
@@ -124,11 +124,11 @@ function PlatformExperimentsPageContent() {
       <LiveStrip />
 
       <Card className="mb-6 max-w-[720px]">
-        <CardHeader>New experiment in {org.name} / {project.name}</CardHeader>
+        <CardHeader><CardTitle>New experiment in {org.name} / {project.name}</CardTitle></CardHeader>
         <CardContent className="grid gap-3">
           {clusters && clustersInUse(clusters).online === 0 && (
             <Callout tone="warning" className="mb-0">
-              No cluster this org can use is online, so a plan&apos;s baseline job would wait. <Link href="/cluster" className="text-accent hover:underline">Compute resources</Link> shows what is connected.
+              No cluster this org can use is online, so a plan&apos;s baseline job would wait. <TextLink href="/cluster">Compute resources</TextLink> shows what is connected.
             </Callout>
           )}
           <GoalInput projectID={project.id} onCreated={open} />
