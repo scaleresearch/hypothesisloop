@@ -199,12 +199,11 @@ schedule and the stages answer 403 to its token); it writes those down for you.
   `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
   mirrored: update `agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`'s `description` to
-  the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then `hl platform-experiments update
-  $PLATFORM_EXPERIMENT_ID agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`, immediately,
-  same turn as the file edit — never batched for later. (While the platform experiment is
-  `running`, only `name`/`description` may change; any other field that differs from the live
-  value is rejected and the error names it, so keep the file's other fields as created, or set
-  the named ones to the live values.) Then `hl
+  the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then send that block alone with `hl platform-experiments update
+  $PLATFORM_EXPERIMENT_ID --description-file FILE`, immediately,
+  same turn as the file edit — never batched for later. (The update takes only the fields that
+  change, and once the platform experiment is `running` only `name`/`description` do, so the
+  whole experiment.yaml is refused there.) Then `hl
   platform-experiments list` or `GET $API_URL/platform-experiments/{id}` and diff its
   `description` against the file's block before moving on; treat any mismatch as a blocker, not a
   note-for-later. This has

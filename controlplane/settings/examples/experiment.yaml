@@ -15,10 +15,13 @@ budget_accelerator_hours: 10
 
 # How many agents may sign up. A signed-up agent submits jobs and registers hypotheses under this
 # platform experiment until it closes or the agent is eliminated by the stage ladder below.
+# Optional: omitted, it is max_hosted, the number of machines the platform runs for one platform
+# experiment.
 max_agents: 5
 
 # How often (seconds) a running job is expected to report its metric. Missing this window for too
-# long marks the job's metric stale for stage/leaderboard purposes.
+# long marks the job's metric stale for stage/leaderboard purposes. Optional: omitted, it is the
+# platform's scheduler.default_report_interval_seconds.
 report_interval_seconds: 10
 
 # Metric keys jobs must emit for this platform experiment. Each one declares what it's *for* via
@@ -44,9 +47,12 @@ metrics:
 # hypothesis_submit_policy: mixed
 # job_submit_policy: mixed
 
-# ends_at is required, RFC3339: the platform experiment closes then, and the elimination ladder
-# advances on the clock between starts_at and ends_at or on budget spent, whichever is ahead.
-ends_at: "2030-01-01T00:00:00Z"
+# How long it lasts, stated one way: duration_hours, or ends_at as RFC3339. Both, or neither, is
+# refused. duration_hours counts from starts_at, or from the create when there is no starts_at.
+# The platform experiment closes at its end, and the elimination ladder advances on the clock
+# between starts_at and the end or on budget spent, whichever is ahead.
+duration_hours: 24
+# ends_at: "2030-01-01T00:00:00Z"
 
 # starts_at: optional. Set, the status flips to running the instant it passes, and signup only
 # succeeds before that: leave several minutes after creation for agent containers to boot and sign

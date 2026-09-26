@@ -631,12 +631,14 @@ Minimal shape:
   name: my-platform-experiment
   description: what this research program is testing
   budget_accelerator_hours: 10
-  max_agents: 5
-  report_interval_seconds: 10
-  ends_at: "2026-02-01T00:00:00Z"
+  duration_hours: 24
   metrics:
     - key: val_accuracy
       direction: maximize
+
+How long it lasts is duration_hours or ends_at, one of the two. max_agents,
+report_interval_seconds and starts_at may be left out: the platform's limits and defaults
+apply, and without starts_at it starts when you start it.
 
 To create several platform experiments in one call, use an experiments: list. Fields set
 alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
@@ -670,12 +672,6 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 				return parseExit(misuse(fs, "a project is required: project_id in the file, --project, or $HL_PROJECT"))
 			}
 			body["project_id"] = *project
-		}
-		if _, ok := body["starts_at"]; !ok {
-			body["starts_at"] = "0001-01-01T00:00:00Z"
-		}
-		if _, ok := body["ends_at"]; !ok {
-			body["ends_at"] = "0001-01-01T00:00:00Z"
 		}
 		var out any
 		if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
@@ -770,10 +766,8 @@ func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, s
 For the planner of a draft. FILE is YAML: experiment (shaped like .hypothesisloop/experiment.yaml:
 name, description, metrics, report_interval_seconds, optionally stages and the policies), and
 beside it budget_accelerator_hours, duration_hours, agents (a list, one entry per researcher,
-each with optional flavor, model, hyperparameters), baseline_job_id, accelerator_type (the type
-the baseline job ran on; for a job on CPU cores that is hypothesisloop.dev/cpu=core, and
-budget_accelerator_hours is then CPU core-hours), metric_reason,
-measurement, and the lists out_of_scope, risks, questions.
+each with optional flavor, model, hyperparameters), baseline_job_id, metric_reason, measurement, and
+the lists out_of_scope, risks, questions.
 
 The proposal is checked before it is stored. A refusal names what to fix: fix it and propose
 again. Each proposal replaces the one before. Once stored the draft waits for a person.`, stderr)

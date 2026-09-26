@@ -64,14 +64,9 @@ never read the whole listing into your context, which costs real tokens on every
 
 The description is the only place the question exists for an agent. Whenever something the
 agents work from changes (a resolved question, a redirect, a recommended direction, a baseline),
-change the description in the same turn:
-
-  1. Write a file shaped like the create body with every field at its live value from
-     `hl platform-experiments get` and the new `description`. Once the experiment is running only
-     `name` and `description` may differ from the live values.
-  2. `hl platform-experiments update {platform_experiment_id} FILE`.
-  3. `hl platform-experiments get` and compare the description with what you wrote. An update
-     you did not read back is one you do not know happened.
+change the description in the same turn: write the whole new description to a file and run
+`hl platform-experiments update {platform_experiment_id} --description-file FILE`. It answers
+with the experiment as it now is; check the description there is yours.
 
 The update emits an event that every agent is handed, and agents are told to re-read the
 description when it arrives. The event carries no text, so an agent that is mid-job or

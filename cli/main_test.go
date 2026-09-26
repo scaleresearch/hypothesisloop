@@ -179,9 +179,10 @@ func TestPlatformExperimentsCreateManyFromYAMLList(t *testing.T) {
 	if submittedBodies[1]["name"] != "second" || submittedBodies[1]["budget_accelerator_hours"] != float64(20) {
 		t.Fatalf("item 1 (override) unexpected: %+v", submittedBodies[1])
 	}
+	// The file is sent as written: a time it leaves out is the platform's to default or refuse.
 	for i, body := range submittedBodies {
-		if body["starts_at"] == nil || body["ends_at"] == nil {
-			t.Fatalf("item %d missing defaulted starts_at/ends_at: %+v", i, body)
+		if _, sent := body["starts_at"]; sent || body["ends_at"] != nil {
+			t.Fatalf("item %d carries a time the file did not state: %+v", i, body)
 		}
 	}
 }
