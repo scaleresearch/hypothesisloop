@@ -227,6 +227,13 @@ accelerator_types:
     kind:      cpu
     acch_rate: 0.01
 
+  # The host CPUs of the Tenstorrent machines: box-a (the chart's cpuClass=tt-host) and
+  # box-b (bare-agent install --cpu-class tt-host). One class, so a job on cores places on
+  # either. 50 core-hours cost what one Blackhole chip-hour does.
+  - name:      cpu.hypothesisloop.dev/class=tt-host
+    kind:      cpu
+    acch_rate: 0.01
+
   - name:      nvidia.com/gpu.product=Tesla-T4
     acch_rate: 0.125
 
