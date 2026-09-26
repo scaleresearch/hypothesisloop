@@ -35,6 +35,10 @@ def _env_json_object(name: str, default: str = "{}") -> dict:
 # coordinator is not in the experiment, so it has no AGENT_ID, and HL_TOKEN is the platform
 # experiment's coordinator token.
 COORDINATOR_FLAVOR = "coordinator"
+# What the agent of a draft is started as. It is an agent of the platform experiment like any
+# other, with its own AGENT_ID and token, and its briefing is its own: it plans the experiment
+# the others will later run in.
+PLANNER_FLAVOR = "planner"
 
 
 def _agent_id() -> str:
@@ -89,6 +93,10 @@ class Config:
 
 def coordinates(cfg) -> bool:
     return cfg.flavor == COORDINATOR_FLAVOR
+
+
+def plans(cfg) -> bool:
+    return cfg.flavor == PLANNER_FLAVOR
 
 
 def watched_agent_id(cfg) -> str:

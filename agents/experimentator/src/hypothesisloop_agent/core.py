@@ -21,16 +21,19 @@ log = logging.getLogger("llm_agent")
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
+# A planner pushes the seed code and proposes, which no other agent does.
+_HL_HELP_PLANNER = ([], ["job"], ["hypothesis"], ["code"], ["platform-experiments", "propose"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
 
 
-def hl_commands(coordinates: bool = False) -> str:
+def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
     """hl's own listing of its commands and of the subcommands the briefing leans on."""
+    groups = _HL_HELP_COORDINATOR if coordinates else _HL_HELP_PLANNER if plans else _HL_HELP
     return "\n\n".join(
         subprocess.run(["hl", *group, "--help"], check=True, capture_output=True, text=True).stdout.strip()
-        for group in (_HL_HELP_COORDINATOR if coordinates else _HL_HELP))
+        for group in groups)
 
 
 def _code_sections(repository_url: str) -> dict[str, str]:
@@ -48,7 +51,10 @@ def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url:
     values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
                   repository_url=repository_url)
     template, sections = "coordinator.md", ("repository_line", "start_code")
-    if not config.coordinates(cfg):
+    if config.plans(cfg):
+        template, sections = "planner.md", ("code_submit", "code_access")
+        values.update(agent_id=cfg.agent_id)
+    elif not config.coordinates(cfg):
         template, sections = "system_prompt.md", ("workspace", "code_submit", "code_access")
         values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
                       flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip())
@@ -112,7 +118,8 @@ def prepare() -> RunSetup:
     # named, the agent starts in an empty directory and the platform keeps what it pushes.
     repository_url = platform_experiment.get("repository_url") or ""
 
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), hl_commands(config.coordinates(cfg)), repository_url)
+    commands = hl_commands(plans=True) if config.plans(cfg) else hl_commands(config.coordinates(cfg))
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url)
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, repository_url=repository_url)
 
 
@@ -133,6 +140,10 @@ def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | No
         pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
         if pe["status"] == "closed":
             return "platform experiment closed"
+        # A planner's work is the proposal: once it is stored, or the draft was accepted, the
+        # platform releases its machine, and a revision starts it again with its session.
+        if config.plans(cfg) and (pe["status"] != "draft" or pe.get("proposed_at")):
+            return "the draft is proposed"
     except api_client.APIError as e:
         log.warning("could not check platform experiment status (%s) — continuing", e)
     return None
