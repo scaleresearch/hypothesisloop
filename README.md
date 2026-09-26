@@ -475,8 +475,7 @@ cannot read. Then it writes three files and starts the unit:
 
 On a node with podman and no docker it also enables podman's API socket (`podman.socket`),
 which is how the agent reaches that engine. Running the command of a newer image tag upgrades
-the agent in place; given no token it keeps the one installed. Job containers keep running
-through an upgrade, and the new agent takes them over. Every container an agent starts carries
+the agent in place; given no token it keeps the one installed. Every container an agent starts carries
 its cluster's name, and an agent manages only those, so two nodes' agents on one engine never
 touch each other's jobs.
 
