@@ -8,6 +8,7 @@ import { useProjectRouter } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import type { PlatformExperiment } from '@/types'
 import { semantic } from '@/lib/colors'
+import { GoalInput } from '@/components/goal-input'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { PlatformExperimentDialog, PlatformExperimentForm } from '@/components/platform-experiment-form'
 import { Dot } from '@/components/ui/badge'
@@ -89,6 +90,12 @@ function Experiments() {
   const experiments = listed.data.items
   return (
     <section aria-label="Platform experiments">
+      <Card className="max-w-[720px]">
+        <CardHeader>Start from one sentence</CardHeader>
+        <CardContent>
+          <GoalInput projectID={project.id} onCreated={open} />
+        </CardContent>
+      </Card>
       {none ? (
         <Card className="max-w-[720px]">
           <CardHeader>New platform experiment in {org.name} / {project.name}</CardHeader>

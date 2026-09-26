@@ -698,6 +698,79 @@ async function scenarios(browser) {
   await page.unroute(runRepositories)
   await page.unroute(runInstallations)
 
+  section('home: one sentence makes a draft, and its proposal is accepted at the cost the person states')
+  // A real draft has the platform rent a machine for its planner, so the API's side of a draft
+  // is stood in for here: what the page sends is asserted as sent. The API's own behaviour is
+  // tests/e2e/test_experiment_draft.py.
+  const draftID = `pe-draft-${run}`
+  const draftProposal = {
+    experiment: {
+      name: 'Cosine or constant', description: 'Train the small transformer in train.py and report val_loss.',
+      metrics: [{ key: 'val_loss', direction: 'minimize' }], report_interval_seconds: 30,
+    },
+    budget_accelerator_hours: 6, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}],
+    baseline_job_id: 'job-baseline', accelerator_type: 'rtx-4090',
+    metric_reason: 'Validation loss on held-out text is the goal itself.',
+    measurement: 'bench.py scores a split the training never reads.',
+    questions: ['Is four hours enough?'],
+  }
+  const draftGoal = 'Does a cosine learning-rate schedule beat a constant one?'
+  let draftNow = {
+    id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', shared: false,
+    budget_accelerator_hours: 0.5, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
+    ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
+  }
+  const draftWrites = []
+  const draftAPI = url => url.href === `${API}/platform-experiments/drafts` || url.pathname.startsWith(`/platform-experiments/${draftID}`) || url.pathname === '/experiments/job-baseline/metrics'
+  await page.route(draftAPI, route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    const json = body => route.fulfill({ headers: runCors, json: body })
+    if (request.method() === 'OPTIONS') return route.fallback()
+    if (request.method() === 'POST') {
+      draftWrites.push({ path, body: request.postDataJSON() })
+      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, revisions: [{ message: request.postDataJSON().message, by: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
+      return json(draftNow)
+    }
+    if (path === `/platform-experiments/${draftID}`) return json(draftNow)
+    if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
+    if (path.endsWith('/metrics')) return json([{ experiment_id: 'job-baseline', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.8, metric_basis: 'raw' }])
+    return json([])
+  })
+  await page.goto(`${UI}/console`)
+  await page.getByLabel('What do you want to find out?').fill(draftGoal)
+  await page.getByRole('button', { name: 'Plan this experiment' }).click()
+  await page.waitForURL(u => u.pathname === `/platform-experiments/${draftID}`)
+  assert.deepEqual(draftWrites, [{ path: '/platform-experiments/drafts', body: { project_id: adaMe.projects[0].id, goal: draftGoal } }], 'the sentence and the project, and nothing else')
+  await page.getByRole('status').filter({ hasText: 'The planner is working out how to measure this' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
+
+  // The planner proposed: the card shows the baseline the job reported, and the questions first.
+  draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString() }
+  await page.reload()
+  await page.getByText('Proposed experiment: Cosine or constant').waitFor()
+  await page.getByText('val_loss, lower is better, baseline 1.8').waitFor()
+  await page.getByText('Is four hours enough?').waitFor()
+  draftWrites.length = 0
+  await page.getByLabel('What should be different?').fill('It must fit one RTX 4090.')
+  await page.getByRole('button', { name: 'Revise', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: 'The planner is changing its proposal' }).waitFor()
+  await page.getByText('It must fit one RTX 4090.').waitFor()
+  assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}/revise`, body: { message: 'It must fit one RTX 4090.' } }])
+
+  draftNow = { ...draftNow, proposed_at: new Date().toISOString() }
+  await page.reload()
+  draftWrites.length = 0
+  await page.getByLabel('Budget (accelerator-hours)').fill('3')
+  const draftStarted = page.waitForResponse(response => response.url().endsWith(`/platform-experiments/${draftID}/start`) && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Accept and run' }).click()
+  await draftStarted
+  assert.deepEqual(draftWrites, [
+    { path: `/platform-experiments/${draftID}/accept`, body: { budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}] } },
+    { path: `/platform-experiments/${draftID}/start`, body: null },
+  ], 'the budget the person typed, the proposal\'s duration and researchers, then the start')
+  await page.unroute(draftAPI)
+
   section('the idea form has no name field and the idea is filed under the signed-in name')
   await page.goto(`${UI}/hypotheses?pe=${experimentID}`)
   await page.getByRole('button', { name: '+ Add idea under the objective' }).click()

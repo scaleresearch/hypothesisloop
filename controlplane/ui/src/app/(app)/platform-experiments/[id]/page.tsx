@@ -30,6 +30,8 @@ import {
 import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
+import { PlatformExperimentStatus } from '@/types'
+import { DraftView } from '@/components/draft'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
 import { AgentLabel, AgentNames, useAgentName } from '@/components/agent-label'
@@ -627,6 +629,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
 
   if (peLoading) return <Loading />
   if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
+  if (pe?.status === PlatformExperimentStatus.DRAFT) return <DraftView draft={pe} readOnly={isReadOnly(me, pe)} />
   if (failed.length > 0) return <ErrorMessage>Could not load {failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
 

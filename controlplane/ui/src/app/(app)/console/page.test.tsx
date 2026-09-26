@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubInstallations, fetchOrgClusters, fetchPlatformExperimentsPage,
+  apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubInstallations, fetchOrgClusters, fetchPlatformExperimentsPage,
 } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import Home from '@/app/(app)/console/page'
@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubInstallations: vi.fn(),
+  apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubInstallations: vi.fn(),
   fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-card', () => ({
@@ -92,6 +92,26 @@ describe('the home page of a project with no platform experiment of its own', ()
     expect(screen.getByText('Shared by the platform')).toBeTruthy()
     expect(screen.getByText('pe-shared (shared)')).toBeTruthy()
     expect(fetchPlatformExperimentsPage).toHaveBeenCalledWith({ project_id: 'prj_1', shared: false, limit: 1 })
+  })
+})
+
+// The form asks for metrics, a budget and dates before anything exists. One sentence is enough
+// to start, whether or not the project has experiments.
+describe('the home page takes one sentence', () => {
+  it('makes a draft from it and opens the draft, with the form still there for who wants it', async () => {
+    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
+    for (const existing of [[], [experiment('pe-0')]]) {
+      own = existing
+      navigation.push.mockReset()
+      vi.mocked(apiSend).mockClear()
+      const { unmount } = show()
+      await userEvent.type(await screen.findByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+      await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
+      expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
+      await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-draft?project=prj_1'))
+      expect(createPlatformExperiment).not.toHaveBeenCalled()
+      unmount()
+    }
   })
 })
 

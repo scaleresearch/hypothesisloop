@@ -82,3 +82,8 @@ export function draftState(draft: Draft): 'planning' | 'revising' | 'proposed' {
   if (draft.proposed_at) return 'proposed'
   return draft.proposal ? 'revising' : 'planning'
 }
+
+/** Abandons a draft: it is closed and its planner's machine released. */
+export async function abandonDraft(id: string): Promise<void> {
+  await apiSend('POST', `/platform-experiments/${id}/close`)
+}
