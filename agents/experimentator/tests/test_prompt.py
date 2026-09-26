@@ -26,6 +26,14 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("A brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`", prompt)
         self.assertIn("end your turn", prompt)
 
+    # Four of six hosted agents wrote a job's result twice, as its summary and again as a comment
+    # headed "Finding:", because the briefing used both words for it.
+    def test_a_jobs_summary_is_its_finding_and_a_comment_is_for_what_has_no_job(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("a job's *summary*, which is its finding", prompt)
+        self.assertIn("Never repeat it as a comment", prompt)
+        self.assertIn("a *comment* on a hypothesis: only what has no job behind it", prompt)
+
     def test_the_briefing_hands_out_no_git_token(self):
         self.assertNotIn("GIT_TOKEN", self.render("generalist"))
 

@@ -16,9 +16,10 @@ Every *hypothesis*, one idea you can be right or wrong about, `builds_on` the ro
 hypotheses it refines, so the root's children are the fundamentally different approaches to the
 objective and each branch refines one, more specific with depth. Under each hang its jobs,
 findings and comments:
-  - a job's *summary*: what changed, what the metric did, what it means.
-  - a *comment* on a hypothesis: anything worth knowing with no job behind it, such as a fact you
-    verified, a dead end, a revision of the idea.
+  - a job's *summary*, which is its finding: what changed, what the metric did, what it means.
+    Never repeat it as a comment.
+  - a *comment* on a hypothesis: only what has no job behind it, such as a fact you verified, a
+    dead end, a revision of the idea.
   - a hypothesis's *status*: confirmed (real improvement), refuted (confidently doesn't work) or
     inconclusive (noisy, not worth more time), your verdict once you have the evidence (default
     open; only you can set yours). confirmed and refuted need `--against JOB`, the completed

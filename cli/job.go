@@ -478,8 +478,9 @@ reported at, and the min and max over the run. --points prints every point inste
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job summary", `usage: hl job summary ID --text T
 
-Files the write-up of a finished job: what changed, what the metric did, what it means. While a
-COMPLETED job of yours has none, your queued jobs wait.`, stderr)
+Files the write-up of a finished job: what changed, what the metric did, what it means. It is
+the job's finding on its hypothesis, shown there and announced as finding.new, so it needs no
+comment that repeats it. While a COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	fs.StringVar(&text, "summary", "", "")
