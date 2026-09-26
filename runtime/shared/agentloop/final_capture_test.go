@@ -31,15 +31,19 @@ type captureExecutor struct {
 	// drifted makes every comparison against desired state report a mismatch, so a pass that
 	// reaches the comparison at all acts on it visibly.
 	drifted bool
-	mu      sync.Mutex
-	deleted []string
-	created int
+	// uncreatable is what creating a job answers, by job, for the ones that cannot be created.
+	uncreatable map[string]error
+	// jobImage is the one image the runtime runs every job in.
+	jobImage string
+	mu       sync.Mutex
+	deleted  []string
+	created  int
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
 
 func (e *captureExecutor) SupportsMultiNodeJobs() bool { return true }
-func (e *captureExecutor) JobImage() string            { return "" }
+func (e *captureExecutor) JobImage() string            { return e.jobImage }
 
 // The same set as ListManagedJobs here: these tests never exercise the delete-and-recreate window
 // the two lists exist to differ across, and leaving it on the embedded nil Executor made every
@@ -58,9 +62,12 @@ func (e *captureExecutor) ReapTerminal(context.Context, map[string]*domain.Exper
 func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *domain.Experiment) (bool, error) {
 	return !e.drifted, nil
 }
-func (e *captureExecutor) CreateWorkload(context.Context, *domain.Experiment) error {
+func (e *captureExecutor) CreateWorkload(_ context.Context, exp *domain.Experiment) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := e.uncreatable[exp.ID]; err != nil {
+		return err
+	}
 	e.created++
 	return nil
 }

@@ -76,6 +76,10 @@ func (c *JobWorkloadClient) createJob(ctx context.Context, exp *domain.Experimen
 		}
 	}
 	_, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).Create(ctx, job, metav1.CreateOptions{})
+	// The API server read the Job and refused what it says: the same Job is refused every pass.
+	if errors.IsInvalid(err) {
+		return &agentexec.Unrunnable{Why: "the cluster's Kubernetes API refuses the job as it is specified: " + err.Error()}
+	}
 	if errors.IsAlreadyExists(err) {
 		// Job names are deterministic per experiment ID, so re-admission after preemption
 		// collides with the prior Job object if its background-propagation

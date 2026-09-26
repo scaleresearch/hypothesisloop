@@ -12,6 +12,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
+// Unrunnable is what CreateWorkload returns for a job this runtime will never run as it is
+// specified: asking again changes nothing, only another spec or another cluster does. Why is the
+// runtime's own words for it. The loop reports such a job to the control plane, which decides
+// what becomes of it, where every other creation error is logged and tried again next pass.
+type Unrunnable struct{ Why string }
+
+func (u *Unrunnable) Error() string { return u.Why }
+
 // Executor is the cluster-local half of the desired-state reconcile loop: given exp's compiled
 // desired state, create/delete/compare it against whatever is actually running, and report
 // phase back. This is deliberately not controlplane/shared/workload.Backend — Backend is the

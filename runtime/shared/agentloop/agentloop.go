@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -52,6 +54,17 @@ type Agent struct {
 	// deadline, so this is never heuristically detected). See autoscaler.md.
 	AutoscalerEnabled bool
 	Log               func(format string, args ...any)
+
+	// unrunnable is what the last reconcile pass found it can never create, by experiment, with
+	// the attempt and the runtime's words. It is that pass's observation and nothing more: every
+	// pass replaces it whole, and a status push reports it beside what exists.
+	unrunnableMu sync.Mutex
+	unrunnable   map[string]refusedCreate
+}
+
+type refusedCreate struct {
+	attempt int
+	why     string
 }
 
 // Run starts the reconcile and status-report loops and blocks until ctx is cancelled.
@@ -127,6 +140,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		actualSet[id] = true
 	}
 	var reconcileErrors []error
+	refused := map[string]refusedCreate{}
 
 	for id, exp := range desiredByID {
 		if actualSet[id] {
@@ -152,10 +166,20 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		}
 		if err := exec.CreateWorkload(ctx, exp); err != nil {
 			a.Log("create workload %s: %v", id, err)
+			// A job that can never be created here is the control plane's to end. It is told
+			// with the next status push, and the pass is not failed for it.
+			var unrunnable *agentexec.Unrunnable
+			if errors.As(err, &unrunnable) {
+				refused[id] = refusedCreate{attempt: exp.AttemptCount, why: unrunnable.Why}
+				continue
+			}
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
 			continue
 		}
 	}
+	a.unrunnableMu.Lock()
+	a.unrunnable = refused
+	a.unrunnableMu.Unlock()
 
 	// Deleting a workload destroys the only copy of why it ended: once the pod is gone, its log
 	// tail and its container's termination reason are unreadable forever. Observe everything once
@@ -372,8 +396,30 @@ func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
 		}
 		reports = append(reports, report)
 	}
+	reports = append(reports, a.refusedReports(ids)...)
 
 	a.pushStatus(ctx, reports)
+}
+
+// refusedReports is the status of every job the last reconcile pass could never create and that
+// has no workload: pending, with the reason the control plane ends a job for without waiting
+// (domain.PhaseReasonConfigError) and the runtime's words as the message its owner reads.
+func (a *Agent) refusedReports(existing []string) []statusReportWire {
+	a.unrunnableMu.Lock()
+	defer a.unrunnableMu.Unlock()
+	var reports []statusReportWire
+	for id, refused := range a.unrunnable {
+		if slices.Contains(existing, id) {
+			continue
+		}
+		attempt := refused.attempt
+		reports = append(reports, statusReportWire{
+			ExperimentID: id, Attempt: &attempt, Phase: workload.JobPhasePending.String(),
+			Reason: domain.PhaseReasonConfigError, Message: refused.why,
+		})
+	}
+	sort.Slice(reports, func(i, j int) bool { return reports[i].ExperimentID < reports[j].ExperimentID })
+	return reports
 }
 
 // statusReportFor observes one job: its phase, where it landed, its log tail and why its

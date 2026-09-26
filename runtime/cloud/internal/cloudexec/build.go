@@ -8,6 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
@@ -23,13 +24,13 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	// exp.ResolvedJob.
 	spec := exp.EffectiveJob()
 	if spec.Nodes() > 1 {
-		return provider.Spec{}, fmt.Errorf("cloudexec: num_nodes=%d requested but a job here is one instance", spec.Nodes())
+		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and a job on this cluster is one rented instance", spec.Nodes())}
 	}
 	// Every instance boots the platform's job image, which carries the wrapper. Running a job
 	// that asked for its own image in another one would be a different job from the one submitted.
 	// No image named is the platform's.
 	if spec.Image != "" && spec.Image != e.jobImage {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s names image %q, and jobs on this cluster run in %q", exp.ID, spec.Image, e.jobImage)
+		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job names image %q, and every job on this cluster runs in %q: leave job.image out", spec.Image, e.jobImage)}
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
@@ -52,13 +53,13 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	// A job that expects a dataset at a host path must not run without it, and a rented instance
 	// has no host of ours to mount from.
 	if len(spec.HostMounts) > 0 {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s requests host_mounts, which a rented instance cannot provide", exp.ID)
+		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has no host of the platform's to mount from"}
 	}
 
 	command, args := workloadenv.Command(spec, group)
 	// The image's own entrypoint cannot be wrapped from outside, so there has to be a command.
 	if len(command) == 0 {
-		return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no command, and a job on a rented instance needs one", exp.ID)
+		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job has no command, and a job on a rented instance needs one: the image's own entrypoint cannot be run under the platform's wrapper"}
 	}
 	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
 	if err != nil {

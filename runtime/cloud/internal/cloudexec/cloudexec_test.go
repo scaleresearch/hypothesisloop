@@ -3,6 +3,8 @@ package cloudexec
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"os"
 	"reflect"
 	"sort"
@@ -515,5 +517,51 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// What a rented instance can never run is said as such, in words for the job's owner, so that
+// the loop hands the job to the control plane instead of asking for it again on every pass. A
+// vendor that refuses a create is not that: the same job may be rented on the next pass.
+func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testing.T) {
+	e, p := newTestExecutor(t)
+	if e.JobImage() != testImage {
+		t.Fatalf("JobImage() = %q, want the image every instance boots", e.JobImage())
+	}
+	for name, c := range map[string]struct {
+		spoil func(*domain.JobSpec)
+		says  string
+	}{
+		"another image": {func(s *domain.JobSpec) { s.Image = "registry.test/mine:1" }, `names image "registry.test/mine:1"`},
+		"host mounts":   {func(s *domain.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
+		"no command":    {func(s *domain.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
+		"two nodes":     {func(s *domain.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
+	} {
+		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
+		c.spoil(exp.ResolvedJob)
+		err := e.CreateWorkload(context.Background(), exp)
+		var unrunnable *agentexec.Unrunnable
+		if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, c.says) {
+			t.Errorf("%s: err = %v, want an Unrunnable that says %q", name, err, c.says)
+		}
+	}
+	if p.Calls("Create") != 0 {
+		t.Fatalf("rented %d instances for jobs that cannot run", p.Calls("Create"))
+	}
+
+	noImage := job(t, "exp-no-image", 0, 0)
+	noImage.ResolvedJob.Image = ""
+	mustCreate(t, e, noImage)
+
+	p.Fail = func(method, _ string) error {
+		if method == "Create" {
+			return errors.New("vendor: HTTP 503")
+		}
+		return nil
+	}
+	err := e.CreateWorkload(context.Background(), job(t, "exp-later", 0, 1))
+	var unrunnable *agentexec.Unrunnable
+	if err == nil || errors.As(err, &unrunnable) {
+		t.Fatalf("a rent the vendor refused: err = %v, want an error that is not Unrunnable", err)
 	}
 }
