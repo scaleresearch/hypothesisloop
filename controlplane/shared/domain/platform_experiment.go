@@ -10,6 +10,10 @@ import (
 type PlatformExperimentStatus string
 
 const (
+	// PlatformExpDraft is a platform experiment being planned from a goal: a planner the platform
+	// runs works out what to measure and proposes the rest, nobody else joins, and nothing but
+	// the planning allowance is spent until a person accepts the proposal, which opens it.
+	PlatformExpDraft   PlatformExperimentStatus = "draft"
 	PlatformExpOpen    PlatformExperimentStatus = "open"
 	PlatformExpRunning PlatformExperimentStatus = "running"
 	PlatformExpClosed  PlatformExperimentStatus = "closed"
@@ -20,7 +24,7 @@ const (
 // bad enum literal and surface as a 500.
 func ValidPlatformExperimentStatus(s PlatformExperimentStatus) bool {
 	switch s {
-	case PlatformExpOpen, PlatformExpRunning, PlatformExpClosed:
+	case PlatformExpDraft, PlatformExpOpen, PlatformExpRunning, PlatformExpClosed:
 		return true
 	default:
 		return false
@@ -221,9 +225,18 @@ type PlatformExperiment struct {
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone, derived from repository."`
 	AgentImage    string `json:"agent_image,omitempty"`
 
+	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
+	// experiment that was created whole.
+	Goal string `json:"goal,omitempty"`
+	// CreatedBy is whose credential created it. Absent on one created before this was kept.
+	CreatedBy *Actor `json:"created_by,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// MaxGoalBytes bounds the sentence a draft is created from.
+const MaxGoalBytes = 2000
 
 // SignupRole is what an agent was signed up to do in one platform experiment. It lives on the
 // signup rather than on the agent — the same agent may compete in one platform experiment and

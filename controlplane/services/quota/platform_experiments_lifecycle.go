@@ -101,6 +101,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Repository:                req.Repository,
 		RepositoryURL:             domain.RepositoryURL(req.Repository),
 		AgentImage:                req.AgentImage,
+		CreatedBy:                 req.createdBy,
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
@@ -419,8 +420,12 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 	if pe == nil {
 		return fmt.Errorf("not_found")
 	}
-	if pe.Status != domain.PlatformExpRunning && pe.Status != domain.PlatformExpOpen {
+	if pe.Status != domain.PlatformExpRunning && pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpDraft {
 		return fmt.Errorf("invalid_transition: experiment is %s", pe.Status)
+	}
+	// A draft never ran: closing it abandons the plan, and there are no standings to record.
+	if pe.Status == domain.PlatformExpDraft {
+		return s.store.UpdatePlatformExperimentStatus(ctx, id, domain.PlatformExpClosed)
 	}
 
 	if len(topResults) == 0 {
@@ -447,10 +452,12 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, topRe
 
 // SweepExpired closes every Open/Running platform experiment whose EndsAt has passed. EndsAt is
 // the zero value when unset (PlatformExperiment.EndsAt is not a pointer), so those are skipped —
-// a platform experiment with no end time runs until someone calls Close explicitly.
+// a platform experiment with no end time runs until someone calls Close explicitly. A draft's
+// EndsAt is its planning limit, and once proposed how long the proposal waits for a person, so
+// the same sweep closes a plan nobody finished or accepted and releases its machine.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
 		if err != nil {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)

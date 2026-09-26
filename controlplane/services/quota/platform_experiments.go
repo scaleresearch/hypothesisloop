@@ -161,6 +161,8 @@ type CreatePlatformExperimentRequest struct {
 	coordinator *domain.HostedCoordinator
 	// maxHosted is how many machines the platform may run for the experiment, from config.
 	maxHosted int
+	// createdBy is whose credential the request came with.
+	createdBy *domain.Actor
 
 	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
 	// one stated as its zero value.

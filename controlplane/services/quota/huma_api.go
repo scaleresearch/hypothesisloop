@@ -234,6 +234,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, peh.refusal("create platform experiment", err)
 		}
+		if caller, ok := auth.FromContext(ctx); ok {
+			by := caller.Actor()
+			hosting.createdBy = &by
+		}
 		pe, err := peh.svc.Create(ctx, hosting)
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())

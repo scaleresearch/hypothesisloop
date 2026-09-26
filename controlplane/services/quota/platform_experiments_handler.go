@@ -26,6 +26,8 @@ type PlatformExperimentsHandler struct {
 
 	// Set via WithAgentLaunch.
 	launch AgentLaunch
+	// What a draft may spend, DefaultPlanning unless WithPlanning set another.
+	planning Planning
 
 	// repos reaches the repositories a project's org connected on GitHub.
 	repos Repositories
@@ -33,7 +35,7 @@ type PlatformExperimentsHandler struct {
 
 // NewPlatformExperimentsHandler constructs the handler.
 func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos Repositories, logger *zap.Logger) *PlatformExperimentsHandler {
-	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger}
+	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: DefaultPlanning}
 }
 
 // WithCatalog attaches the resource catalog served by GET /resource-catalog.
@@ -60,8 +62,9 @@ func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, fresh
 
 // AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only.
 type AcceleratorTypeInfo struct {
-	Name     string  `json:"name"`
-	AccHRate float64 `json:"acch_rate"`
+	Name     string          `json:"name"`
+	Kind     domain.TypeKind `json:"kind" doc:"What one unit of the type is: accelerator for a device, cpu for one core of a CPU class. For a cpu type a job's accelerator_count is its cores."`
+	AccHRate float64         `json:"acch_rate"`
 }
 
 // ResourceCatalog is the full set of resource-pricing reference data served by GET /resource-catalog.
@@ -99,8 +102,10 @@ type ResourceCapacity struct {
 // an agent reads this and submits the same string with nothing in between to get wrong.
 type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
-	Available       int64  `json:"available"`
-	Total           int64  `json:"total"`
+	// Kind is what available and total count: devices, or for cpu the cores of a CPU class.
+	Kind      domain.TypeKind `json:"kind"`
+	Available int64           `json:"available"`
+	Total     int64           `json:"total"`
 	// AccHPerHour is what one accelerator of this type costs per hour of run, in accelerator
 	// hours: the factor between a job's run time and its cost.
 	AccHPerHour float64 `json:"acch_per_hour,omitempty"`
@@ -231,6 +236,7 @@ func buildClusterCapacity(available, total map[string]map[string]int64) []Cluste
 			rate, _ := domain.AcceleratorType(t).LookupCost()
 			accelerators = append(accelerators, AcceleratorCapacity{
 				AcceleratorType: t,
+				Kind:            domain.AcceleratorType(t).Kind(),
 				Available:       available[cluster][t],
 				Total:           total[cluster][t],
 				AccHPerHour:     rate,

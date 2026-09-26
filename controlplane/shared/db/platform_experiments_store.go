@@ -49,8 +49,8 @@ var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coo
 
 func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, agent_image)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, agent_image, goal, created_by_kind, created_by_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -72,6 +72,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	if pe.Coordinator != nil {
 		coordinator = *pe.Coordinator
 	}
+	var createdBy domain.Actor
+	if pe.CreatedBy != nil {
+		createdBy = *pe.CreatedBy
+	}
 	_, err = s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
@@ -81,6 +85,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.AgentImage,
+		pe.Goal, string(createdBy.Kind), createdBy.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -92,7 +97,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
-       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image
+       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -100,6 +105,7 @@ WHERE id = $1`
 	var status, hypothesisPolicy, jobPolicy string
 	var metricsRaw, stagesRaw []byte
 	var coordinator domain.HostedCoordinator
+	var createdBy domain.Actor
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
@@ -110,6 +116,7 @@ WHERE id = $1`
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
+		&pe.Goal, &createdBy.Kind, &createdBy.ID,
 	)
 	pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 	if err != nil {
@@ -120,6 +127,9 @@ WHERE id = $1`
 	}
 	if pe.CoordinatorHosted {
 		pe.Coordinator = &coordinator
+	}
+	if createdBy.Kind != "" {
+		pe.CreatedBy = &createdBy
 	}
 	if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal metrics: %w", err)
@@ -303,7 +313,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.stages, pe.current_stage, pe.summary,
        pe.hypothesis_submit_policy, pe.job_submit_policy,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.agent_image,
+       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.agent_image, pe.goal,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
 LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
@@ -331,7 +341,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&hypothesisPolicy, &jobPolicy,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
+			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.AgentImage, &pe.Goal,
 			&pe.SignupCount,
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)

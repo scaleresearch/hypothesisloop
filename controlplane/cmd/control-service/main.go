@@ -101,6 +101,7 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
+	domain.SetAcceleratorKinds(pcfg.KindByName)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
@@ -190,7 +191,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
 	for _, g := range pcfg.AcceleratorTypes {
-		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, AccHRate: g.AccHRate})
+		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, Kind: pcfg.KindByName[g.Name], AccHRate: g.AccHRate})
 	}
 	resourceCatalog := quota.ResourceCatalog{
 		AcceleratorTypes: acceleratorTypeInfos,
@@ -254,6 +255,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.authenticator, gate.access, logger)
 	quota.RegisterHuma(doc, handler, peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
+	quota.RegisterPlanningHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	quota.RegisterSessionsHuma(doc, dataStore, logger)

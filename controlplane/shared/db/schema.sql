@@ -147,6 +147,11 @@ CREATE TABLE IF NOT EXISTS platform_experiments (
 );
 
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS hypothesis_submit_policy TEXT NOT NULL DEFAULT 'mixed';
+-- The sentence a draft was created from (domain.PlatformExpDraft), and whose credential created
+-- the platform experiment (domain.Actor: kind and id). Both empty on a row from before either.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS goal            TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_id   TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_submit_policy        TEXT NOT NULL DEFAULT 'mixed';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS default_quota_tier TEXT NOT NULL DEFAULT '';
 
