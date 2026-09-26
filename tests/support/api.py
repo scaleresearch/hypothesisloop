@@ -574,7 +574,7 @@ class API:
         return len({v for v in self.metric_values(job_id, metric_name)})
 
     def experiment_stats(self, pe_id: str, agent_id: str) -> dict:
-        return self.get_json(f"/experiments/stats?agent={agent_id}&platform_experiment_id={pe_id}")
+        return self.get_json(f"/experiments/stats?agent_id={agent_id}&platform_experiment_id={pe_id}")
 
     def eviction_class_count(self, pe_id: str, agent_id: str, klass: str) -> int | None:
         by_class = self.experiment_stats(pe_id, agent_id).get("evictions_by_class")

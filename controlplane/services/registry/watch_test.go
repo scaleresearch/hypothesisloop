@@ -453,7 +453,7 @@ func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromTh
 		source.links = map[string][]string{"hyp-c": {"hyp-a"}, "hyp-d": {"hyp-b"}}
 		return source
 	}
-	query := url.Values{"platform_experiment_id": {"pe-1"}, "agent": {"agent-a"}}
+	query := url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}}
 
 	stored := scope(newFakeEvents(events...))
 	replayed := dialWatch(t, watchServer(t, stored), query)
@@ -547,8 +547,8 @@ func runHLWatchEnv(t *testing.T, env []string, serverURL string, args ...string)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, hlBinary, append([]string{"watch", "--url", serverURL}, args...)...)
-	cmd.Env = append(append(os.Environ(), "HL_TOKEN=test"), env...)
+	cmd := exec.CommandContext(ctx, hlBinary, append([]string{"watch"}, args...)...)
+	cmd.Env = append(append(os.Environ(), "HL_TOKEN=test", "API_URL="+serverURL), env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -661,7 +661,7 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
+		"agent_id":               {"agent-a"},
 	})
 
 	source.live <- db.Event{Kind: db.EventAgentCut, Subject: "agent-b", Value: "1",
@@ -682,7 +682,7 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
+		"agent_id":               {"agent-a"},
 	})
 
 	source.live <- db.Event{Kind: db.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced",
@@ -846,7 +846,7 @@ func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidN
 	server := watchServer(t, newFakeEvents())
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
+		"agent_id":               {"agent-a"},
 	})
 
 	client.sendText(t, "{}")
@@ -1030,7 +1030,7 @@ func TestListingSubscriptionsReportsTheLiveConnectionsAndForgetsThemWhenTheyClos
 
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
+		"agent_id":               {"agent-a"},
 		"kinds":                  {"experiment.status"},
 	})
 	client.sendText(t, "{}")
@@ -1066,7 +1066,7 @@ func TestTheDefaultSubscriptionScopedToAnAgentStillNeverCarriesAnotherAgentsOwnE
 	server := watchServer(t, source)
 	client := dialWatch(t, server, url.Values{
 		"platform_experiment_id": {"pe-1"},
-		"agent":                  {"agent-a"},
+		"agent_id":               {"agent-a"},
 	})
 
 	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)

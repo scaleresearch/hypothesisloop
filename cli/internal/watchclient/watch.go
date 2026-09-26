@@ -161,7 +161,7 @@ func (w *watch) run() int {
 		query.Set("platform_experiment_id", w.opts.PlatformExperiment)
 	}
 	if w.opts.Agent != "" {
-		query.Set("agent", w.opts.Agent)
+		query.Set("agent_id", w.opts.Agent)
 	}
 	if w.opts.Decisions {
 		query.Set("decisions", "true")

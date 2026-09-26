@@ -543,7 +543,7 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 	}
 	q := url.Values{"platform_experiment_id": {*pe}}
 	if *agent != "" {
-		q.Set("agent", *agent)
+		q.Set("agent_id", *agent)
 	}
 	if *status != "" {
 		q.Set("status", *status)

@@ -648,7 +648,7 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 
 type listWatchSubscriptionsInput struct {
 	PlatformExperimentID string `query:"platform_experiment_id" doc:"only connections scoped to this platform experiment"`
-	AgentID              string `query:"agent" doc:"only connections narrowed to this agent"`
+	AgentID              string `query:"agent_id" doc:"only connections narrowed to this agent"`
 }
 
 func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
@@ -656,7 +656,10 @@ func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {
 	filter := db.EventFilter{
 		PlatformExperimentID: q.Get("platform_experiment_id"),
 		ExperimentID:         q.Get("experiment_id"),
-		AgentID:              q.Get("agent"),
+		AgentID:              q.Get("agent_id"),
+	}
+	if q.Has("agent") {
+		return filter, 0, errWatch("agent is no parameter of a watch: the agent is agent_id")
 	}
 	if raw := q.Get("decisions"); raw != "" {
 		decisions, err := strconv.ParseBool(raw)

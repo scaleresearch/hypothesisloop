@@ -680,8 +680,8 @@ func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"watch"}, "agent=agent-env&platform_experiment_id=pe-env"},
-		{[]string{"watch", "--agent", "jane"}, "agent=jane&platform_experiment_id=pe-env"},
+		{[]string{"watch"}, "agent_id=agent-env&platform_experiment_id=pe-env"},
+		{[]string{"watch", "--agent", "jane"}, "agent_id=jane&platform_experiment_id=pe-env"},
 		{[]string{"watch", "--experiment", "job-1"}, "experiment_id=job-1"},
 	} {
 		queries = nil

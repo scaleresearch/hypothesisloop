@@ -135,7 +135,7 @@ func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
 	for _, asked := range []string{"agent-b", ""} {
 		query := url.Values{"platform_experiment_id": {"pe-1"}}
 		if asked != "" {
-			query.Set("agent", asked)
+			query.Set("agent_id", asked)
 		}
 		client := dialWatch(t, server, query)
 		client.sendText(t, "{}")

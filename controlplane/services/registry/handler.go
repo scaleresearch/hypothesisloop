@@ -54,9 +54,9 @@ type hypothesisWithJobs struct {
 
 // hypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
 type hypothesisGraph struct {
-	Root  string                       `json:"root"`
-	Nodes []*domain.HypothesisListItem `json:"nodes"`
-	Edges []domain.GraphEdge           `json:"edges"`
+	Root  string             `json:"root"`
+	Nodes []*GraphNode       `json:"nodes"`
+	Edges []domain.GraphEdge `json:"edges"`
 }
 
 // internal logs a failure of the platform's own and answers 500 without it.
@@ -508,7 +508,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-hypothesis-graph", Method: "GET", Path: "/hypotheses/graph",
 		Summary: "Get one platform experiment's whole hypothesis graph", Tags: []string{"hypotheses"},
 		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
-			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. Unpaged, " +
+			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. " +
+			"A node also carries finding, the newest one filed against it, and best_job {id, metric, summary}, the job testing it with the " +
+			"best raw value on the first ranking metric and the summary filed for that job; each is absent when there is none. Unpaged, " +
 			"for drawing the graph.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
@@ -534,7 +536,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "List hypotheses, optionally scoped to one platform experiment", Tags: []string{"hypotheses"},
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
-			"Optional ?agent for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
+			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
 			"for just that status, ?limit (default 20, max 200) and ?offset, most recent first. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
 			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
@@ -543,7 +545,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment. Omitted, every platform experiment's hypotheses are candidates -- the operator-facing global view."`
 		ProjectID            string                  `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
-		Agent                string                  `query:"agent" doc:"Only hypotheses registered by this agent."`
+		Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
 		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
 		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
@@ -580,12 +582,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "hypothesis-stats", Method: "GET", Path: "/hypotheses/stats",
 		Summary: "Count hypotheses by status", Tags: []string{"hypotheses"},
-		Description: "total and by_status over the hypotheses the ?platform_experiment_id and ?agent filters of " +
+		Description: "total and by_status over the hypotheses the ?platform_experiment_id and ?agent_id filters of " +
 			"GET /hypotheses match. A status no hypothesis holds is absent.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Restrict to one platform experiment."`
 		ProjectID            string `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
-		Agent                string `query:"agent" doc:"Only hypotheses registered by this agent."`
+		Agent                string `query:"agent_id" doc:"Only hypotheses registered by this agent."`
 	}) (*struct{ Body *domain.HypothesisStats }, error) {
 		within, restricted, err := access.PlatformExperimentIDs(ctx, in.ProjectID)
 		if err != nil {

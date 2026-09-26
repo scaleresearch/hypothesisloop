@@ -310,7 +310,7 @@ func TestHypothesisList(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	if (*got)[0].Path != "/hypotheses" || (*got)[0].Query != "agent=jane&limit=5&offset=10&platform_experiment_id=pe-1&status=open" {
+	if (*got)[0].Path != "/hypotheses" || (*got)[0].Query != "agent_id=jane&limit=5&offset=10&platform_experiment_id=pe-1&status=open" {
 		t.Fatalf("request = %+v", (*got)[0])
 	}
 	if want := "{\"child_count\":2,\"id\":\"hyp-1\"}\n{\"child_count\":0,\"id\":\"hyp-2\"}\n"; stdout.String() != want {
