@@ -217,6 +217,8 @@ export interface PlatformExperiment {
   repository_url?: string
   // The image its hosted agents and coordinator run. Absent means the platform's own.
   agent_image?: string
+  // Absent when the platform runs no coordinator for it.
+  coordinator?: HostedCoordinator
   created_at: string
 }
 
@@ -550,6 +552,34 @@ export interface RegisteredCluster {
   metrics_url: string
 }
 
+// What became of the machine the platform runs for a hosted agent or a coordinator, as its
+// launcher reported it. Mirrors domain.AgentInstance.
+export interface AgentInstance {
+  // 'requested' until the launcher lists the machine asked for, then as it reports it, and
+  // 'stopped' once no further machine is asked for.
+  state: 'requested' | 'starting' | 'running' | 'stopped'
+  // When the platform last saw the machine's command make progress. Absent until it first did.
+  progress_at?: string
+  // When the launcher first reported the machine now asked for.
+  seen_at?: string
+  // Machines that ended and were asked for again, of domain.MaxAgentInstanceRestarts.
+  restarts: number
+  // The last machine ended with no restart left.
+  stopped: boolean
+  // Why the last machine that ended was given up on, when, and the end of what it wrote. A
+  // machine that was replaced leaves these set while state is running again.
+  end_reason?: 'exited' | 'gone' | 'never_seen' | 'still_starting' | 'silent'
+  exited_at?: string
+  exit_log?: string
+}
+
+// The coordinator the platform runs for a platform experiment. Mirrors domain.HostedCoordinator.
+export interface HostedCoordinator {
+  launcher: string
+  model: string
+  instance: AgentInstance
+}
+
 // One agent's place in a platform experiment and what it was launched with.
 export interface AgentSignup {
   platform_experiment_id: string
@@ -561,6 +591,8 @@ export interface AgentSignup {
   flavor?: string
   model?: string
   signed_up_at: string
+  // Absent for an agent the platform does not run.
+  instance?: AgentInstance
 }
 
 // An agent in the answer to adding it. token is set for one the platform does not run.

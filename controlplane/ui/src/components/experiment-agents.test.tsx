@@ -21,8 +21,8 @@ function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
   return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', hosted, flavor, signed_up_at: at }
 }
 
-function show(status = PlatformExperimentStatus.OPEN) {
-  const pe = { id: 'pe-1', project_id: 'prj_1', status } as PlatformExperiment
+function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {
+  const pe = { id: 'pe-1', project_id: 'prj_1', status, ...more } as PlatformExperiment
   return render(
     <SWRConfig value={{ provider: () => new Map() }}><ExperimentAgents pe={pe} /></SWRConfig>,
   )
@@ -157,5 +157,40 @@ describe('once the experiment has started', () => {
     show(PlatformExperimentStatus.RUNNING)
     await userEvent.click(await screen.findByRole('button', { name: 'Show token' }))
     expect((await screen.findByTestId('secret')).textContent).toContain('HL_TOKEN=hls_token-of-ag-self')
+  })
+})
+
+describe('the machines the platform runs', () => {
+  it('shows each hosted agent\'s machine in its row, and says a self-run agent has none of the platform\'s', async () => {
+    roster = [
+      { ...signup('ag-hosted', true), instance: { state: 'running', restarts: 1, stopped: false, progress_at: new Date().toISOString(), end_reason: 'gone', exited_at: new Date().toISOString(), exit_log: 'lost' } },
+      signup('ag-new', true),
+      signup('ag-own', false),
+    ]
+    show(PlatformExperimentStatus.RUNNING)
+    const hosted = within((await screen.findByRole('cell', { name: 'ag-hosted' })).closest('tr')!)
+    expect(hosted.getByText('running')).toBeTruthy()
+    expect(hosted.getByText('restarts 1 of 3')).toBeTruthy()
+    expect(hosted.getByText(/Replaced: the machine before this one ended .*, its provider no longer lists it\./)).toBeTruthy()
+    expect(hosted.getByRole('button', { name: 'Exit log' })).toBeTruthy()
+    expect(within(screen.getByRole('cell', { name: 'ag-new' }).closest('tr')!).getByText('not reported yet')).toBeTruthy()
+    expect(within(screen.getByRole('cell', { name: 'ag-own' }).closest('tr')!).getByText('not the platform\'s')).toBeTruthy()
+  })
+
+  it('shows the coordinator the platform runs, with its model and its machine', async () => {
+    show(PlatformExperimentStatus.RUNNING, {
+      coordinator: { launcher: 'vast', model: 'claude-opus-4-5', instance: { state: 'starting', restarts: 0, stopped: false } },
+    })
+    const coordinator = within(await screen.findByRole('group', { name: 'Coordinator' }))
+    expect(coordinator.getByText('claude-opus-4-5')).toBeTruthy()
+    expect(coordinator.getByText('starting')).toBeTruthy()
+    expect(coordinator.getByText('no progress seen yet')).toBeTruthy()
+    expect(coordinator.getByText('restarts 0 of 3')).toBeTruthy()
+  })
+
+  it('shows no coordinator for an experiment the platform runs none for', async () => {
+    show()
+    await screen.findByRole('cell', { name: 'ag-old' })
+    expect(screen.queryByRole('group', { name: 'Coordinator' })).toBeNull()
   })
 })

@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
+import { InstanceHealth } from '@/components/instance-health'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
 // The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
@@ -169,6 +170,15 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               onDismiss={() => hide(agent.agent_id)}
             />
           ))}
+          {pe.coordinator && (
+            <div role="group" aria-label="Coordinator" className="grid gap-1.5 rounded border bg-surface-inset px-3 py-2.5">
+              <div className="flex flex-wrap items-baseline gap-x-2.5">
+                <Eyebrow>Coordinator</Eyebrow>
+                <span className="text-xs text-muted">run by the platform · model <span className="font-mono">{pe.coordinator.model}</span></span>
+              </div>
+              <InstanceHealth instance={pe.coordinator.instance} />
+            </div>
+          )}
           {error && <ErrorMessage>Could not load agents: {error.message}</ErrorMessage>}
           {rowError && <ErrorMessage>{rowError}</ErrorMessage>}
           {!agents && !error && <Loading />}
@@ -178,19 +188,24 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {agents && agents.length > 0 && (
             <Table>
               <thead>
-                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Flavor</th><th>Model</th><th>Joined</th><th /></tr>
+                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine</th><th>Flavor</th><th>Model</th><th>Joined</th><th /></tr>
               </thead>
               <tbody>
                 {agents.map(agent => (
                   <tr key={agent.agent_id}>
-                    <td className="font-mono text-xs font-semibold">
+                    <td className="whitespace-nowrap font-mono text-xs font-semibold">
                       {agent.name}
                       {agent.name !== agent.agent_id && <div className="text-2xs font-normal text-muted">{agent.agent_id}</div>}
                     </td>
                     <td className="text-xs">{agent.role}</td>
-                    <td className="text-xs">{agent.hosted ? 'the platform' : 'its operator'}</td>
-                    <td className="font-mono text-xs">{agent.flavor ?? 'default'}</td>
-                    <td className="font-mono text-xs">{agent.model ?? 'default'}</td>
+                    <td className="whitespace-nowrap text-xs">{agent.hosted ? 'the platform' : 'its operator'}</td>
+                    <td>
+                      {agent.instance
+                        ? <InstanceHealth instance={agent.instance} />
+                        : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}
+                    </td>
+                    <td className="whitespace-nowrap font-mono text-xs">{agent.flavor ?? 'default'}</td>
+                    <td className="whitespace-nowrap font-mono text-xs">{agent.model ?? 'default'}</td>
                     <td className="font-mono text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
                     <td>
                       <div className="flex justify-end gap-1.5">
