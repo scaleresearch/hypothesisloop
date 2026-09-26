@@ -17,6 +17,7 @@ import { Table } from '@/components/ui/table'
 import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { InstanceHealth } from '@/components/instance-health'
+import { clearRunFailure, runFailure } from '@/lib/run-experiment'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 
@@ -115,6 +116,12 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [shown, setShown] = useState<JoinedAgent[]>([])
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
   const [starting, setStarting] = useState<'asked' | 'sent' | null>(null)
+  // Set when the create form went on to run this experiment and the API stopped it part way.
+  const [stopped, setStopped] = useState(() => runFailure(pe.id))
+  function forgetStopped() {
+    clearRunFailure(pe.id)
+    setStopped(undefined)
+  }
   const { mutate: reread } = useSWRConfig()
   const readOnly = useReadOnly()
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
@@ -125,6 +132,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
     setRowError('')
     try {
       await startPlatformExperiment(pe.id)
+      forgetStopped()
       // The page reads the experiment under this key, and its status is what just changed.
       await reread(['pe', pe.id])
     } catch (e) {
@@ -169,6 +177,13 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
       <CardHeader>Agents{agents ? ` (${agents.length})` : ''}</CardHeader>
       <CardContent scrollX>
         <div className="grid gap-3.5">
+          {stopped && (
+            <ErrorMessage>
+              This platform experiment was created, but it is not running as asked: {stopped.step} failed. {stopped.message}{' '}
+              Nothing was undone. Finish with the controls below.{' '}
+              <Button variant="link" size="sm" onClick={forgetStopped}>Dismiss</Button>
+            </ErrorMessage>
+          )}
           {readOnly ? null : started
             ? <span className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}

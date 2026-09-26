@@ -453,6 +453,8 @@ export interface CreatePlatformExperimentRequest {
   repository?: string
   /** The image hosted agents and the coordinator run; omitted means the platform's. Read at creation only. */
   agent_image?: string
+  /** true has the platform run the coordinator. It needs `repository`. Read at creation only. */
+  coordinator_hosted?: boolean
 }
 
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {

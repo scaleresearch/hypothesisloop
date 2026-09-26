@@ -593,6 +593,98 @@ async function scenarios(browser) {
   assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'running')
   await shot(page, 'home-experiment-started')
 
+  section('home: Create and run composes create, one call an agent, and start, and nothing is rented')
+  // The stack has no GitHub account connected, and an agent the platform really hosts would
+  // need a launcher that rents. So the repository list is stood in for, and each write goes to
+  // the real API with what would rent taken out of it: the repository and the hosted coordinator
+  // from the create, and hosted from each agent, which then joins as one its operator runs. What
+  // the page sent is asserted as sent, and what exists afterwards is asserted from the real API.
+  const runCors = { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count' }
+  const runInstallations = url => url.href.startsWith(`${API}/orgs/${adaMe.orgs[0].id}/github-installations`)
+  const runRepositories = url => url.href.startsWith(`${API}/orgs/${adaMe.orgs[0].id}/github-repositories`)
+  await page.route(runInstallations, route => route.request().method() === 'GET'
+    ? route.fulfill({
+      headers: { ...runCors, 'X-Total-Count': '1' },
+      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_at: new Date().toISOString() }],
+    })
+    : route.fallback())
+  await page.route(runRepositories, route => route.fulfill({
+    headers: { ...runCors, 'X-Total-Count': '1' }, json: [{ repository: 'acme/widgets', installation_id: 4242, private: false }],
+  }))
+  const runWrites = []
+  let standInAgents = true
+  const runWrite = url => url.href === `${API}/platform-experiments` || /\/platform-experiments\/[^/]+\/(agents|start)$/.test(url.pathname)
+  await page.route(runWrite, route => {
+    const request = route.request()
+    if (request.method() !== 'POST') return route.fallback()
+    const path = new URL(request.url()).pathname
+    const body = request.postDataJSON()
+    runWrites.push({ path, body })
+    if (path === '/platform-experiments') {
+      const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
+      return route.continue({ postData: JSON.stringify(rest) })
+    }
+    if (path.endsWith('/agents') && standInAgents) return route.continue({ postData: JSON.stringify({ ...body, hosted: false }) })
+    return route.continue()
+  })
+
+  // Fills the form in the home dialog for hosted agents and presses Create and run.
+  async function createAndRunFromHome(name, researchers) {
+    await page.goto(`${UI}/console`)
+    await page.getByRole('button', { name: 'New experiment', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
+    await choose(page, dialog.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
+    await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Next: competition settings' }).click()
+    await dialog.getByRole('button', { name: 'Hosted agents' }).click()
+    await dialog.getByText('Choose one under Essentials first.').waitFor()
+    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isDisabled(), 'hosted agents cannot be asked for without a repository')
+    await dialog.getByRole('tab', { name: '1. Essentials' }).click()
+    assert.ok(await dialog.getByLabel('Starts at').isDisabled(), 'the start time is not used when the form starts the experiment')
+    await dialog.getByLabel('Repository').click()
+    await page.getByRole('option', { name: 'acme/widgets' }).click()
+    await dialog.getByRole('tab', { name: '2. Competition settings' }).click()
+    await dialog.getByLabel('Researchers').fill(String(researchers))
+    runWrites.length = 0
+    await dialog.getByRole('button', { name: 'Create and run' }).click()
+    await page.waitForURL(u => /^\/platform-experiments\/[^/]+$/.test(u.pathname))
+    await page.getByRole('heading', { name }).waitFor()
+    return new URL(page.url()).pathname.split('/').pop()
+  }
+
+  const ranID = await createAndRunFromHome(`ui-e2e-run-${run}`, 2)
+  await page.getByText('The experiment is running:').waitFor()
+  assert.deepEqual(runWrites.map(w => w.path), [
+    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/start`,
+  ], 'create, then one call an agent, then the start')
+  assert.equal(runWrites[0].body.repository, 'acme/widgets')
+  assert.equal(runWrites[0].body.coordinator_hosted, true)
+  assert.equal(runWrites[0].body.starts_at, '0001-01-01T00:00:00Z', 'no scheduled start is sent, so nothing starts it between two agents')
+  assert.deepEqual(runWrites.slice(1, 3).map(w => w.body), [{ hosted: true }, { hosted: true }], 'each agent is asked for hosted, with no count')
+  const ranToken = await tokenOf(ada)
+  assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}`)).json()).status, 'running', 'the API says it is running')
+  assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}/agents`)).json()).agents.length, 2, 'and holds the two agents')
+  assert.equal(await page.locator('.error-banner').count(), 0)
+  await shot(page, 'home-create-and-run')
+
+  section('home: a run the API stops part way opens the experiment and says which step failed')
+  // Unchanged, a hosted agent is refused by the real API: the experiment names no repository.
+  standInAgents = false
+  const stoppedID = await createAndRunFromHome(`ui-e2e-stopped-${run}`, 2)
+  const stoppedBanner = page.locator('.error-banner', { hasText: 'it is not running as asked: adding hosted agent 1 of 2 failed.' })
+  await stoppedBanner.getByText('the platform experiment names no repository').waitFor()
+  assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments', `/platform-experiments/${stoppedID}/agents`], 'nothing is called after the refusal, and nothing again')
+  const stoppedExperiment = await (await api(await tokenOf(ada), `/platform-experiments/${stoppedID}`)).json()
+  assert.equal(stoppedExperiment.status, 'open', 'the experiment exists and was not started')
+  await page.getByRole('button', { name: 'Start now' }).waitFor()
+  await shot(page, 'home-run-stopped', stoppedBanner)
+  await stoppedBanner.getByRole('button', { name: 'Dismiss' }).click()
+  await stoppedBanner.waitFor({ state: 'detached' })
+  await page.unroute(runWrite)
+  await page.unroute(runRepositories)
+  await page.unroute(runInstallations)
+
   section('the idea form has no name field and the idea is filed under the signed-in name')
   await page.goto(`${UI}/hypotheses?pe=${experimentID}`)
   await page.getByRole('button', { name: '+ Add idea under the objective' }).click()

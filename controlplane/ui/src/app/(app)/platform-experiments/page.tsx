@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from 'react'
 import useSWR from 'swr'
-import { useQueryParam } from '@/lib/query-state'
+import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { fetchPlatformExperimentsPage } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
@@ -35,6 +35,7 @@ export default function PlatformExperimentsPage() {
 
 function PlatformExperimentsPageContent() {
   const { org, project } = useTenant()
+  const router = useProjectRouter()
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [search, setSearch] = useQueryParam('q')
   const [sort, setSort] = useQueryParam('sort', '-starts_at')
@@ -64,7 +65,8 @@ function PlatformExperimentsPageContent() {
         <PlatformExperimentDialog
           initial={modal.editing}
           onClose={() => setModal({ open: false })}
-          onSaved={() => mutate()}
+          // One the form also ran opens on its page, which shows how the run went.
+          onSaved={(saved, run) => (run ? router.push(`/platform-experiments/${saved.id}`) : void mutate())}
         />
       )}
 

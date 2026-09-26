@@ -4,13 +4,15 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  startPlatformExperiment,
+  startPlatformExperiment, createPlatformExperiment,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
+import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
+  createPlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), startPlatformExperiment: vi.fn(),
 }))
@@ -227,5 +229,38 @@ describe('starting the experiment', () => {
     show(status)
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+  })
+})
+
+describe('an experiment the create form went on to run, and the API stopped part way', () => {
+  beforeEach(async () => {
+    clearRunFailure('pe-1')
+    vi.mocked(createPlatformExperiment).mockResolvedValue({ id: 'pe-1' } as PlatformExperiment)
+    vi.mocked(addPlatformExperimentAgents).mockRejectedValueOnce(new Error('the platform experiment names no repository'))
+    await createAndRun('prj_1', {} as never, 2)
+  })
+
+  it('says which step failed in the API\'s words, and that nothing was undone', async () => {
+    show()
+    const said = await screen.findByText(/it is not running as asked: adding hosted agent 1 of 2 failed\. the platform experiment names no repository/)
+    expect(said.textContent).toContain('Nothing was undone. Finish with the controls below.')
+    expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
+  })
+
+  it('stops saying so once dismissed, and once the experiment is started from the page', async () => {
+    const first = show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText(/is not running as asked/)).toBeNull()
+    expect(runFailure('pe-1')).toBeUndefined()
+    first.unmount()
+
+    vi.mocked(startPlatformExperiment).mockRejectedValueOnce(new Error('no_agents')).mockResolvedValue()
+    await createAndRun('prj_1', {} as never, 0)
+    show()
+    await screen.findByText(/starting it failed\. no_agents/)
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(screen.queryByText(/is not running as asked/)).toBeNull())
   })
 })

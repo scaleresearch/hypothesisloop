@@ -5,6 +5,8 @@ import { clsx } from 'clsx'
 import { createPlatformExperiment, updatePlatformExperiment } from '@/lib/api'
 import type { Stage } from '@/lib/api'
 import { isZeroDate } from '@/lib/format'
+import { createAndRun } from '@/lib/run-experiment'
+import type { RunFailure } from '@/lib/run-experiment'
 import { useTenant } from '@/lib/tenant'
 import { COMMON_ML_METRICS, PlatformExperimentStatus } from '@/types'
 import type { MetricDefinition, PlatformExperiment, SubmitterPolicy } from '@/types'
@@ -17,7 +19,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Segmented, Tabs } from '@/components/ui/tabs'
 import { Eyebrow, Pill } from '@/components/ui/text'
-import { ErrorMessage } from '@/components/ui/status-message'
+import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 
 function localDatetime(offsetDays: number): string {
   const d = new Date()
@@ -46,7 +48,26 @@ interface FormState {
   job_submit_policy: SubmitterPolicy
   repository: string
   agent_image: string
+  run_by: RunBy
+  researchers: number
 }
+
+// Who runs the agents of a new experiment. 'platform' creates it with a hosted coordinator, adds
+// hosted agents and starts it; 'operator' creates it and leaves the rest to its page.
+type RunBy = 'platform' | 'operator'
+
+const RUN_BY_OPTIONS: Array<{ value: RunBy; label: string }> = [
+  { value: 'operator', label: 'I run my own agents' },
+  { value: 'platform', label: 'Hosted agents' },
+]
+
+const RUN_BY_HINTS: Record<RunBy, string> = {
+  operator: 'The experiment is created and nothing else. You add agents on its page, run by you or by the platform, and it starts at its start time or when you start it.',
+  platform: 'The platform runs a coordinator and this many researcher agents on machines of its own, and the experiment starts as soon as they have joined. How many it runs for one experiment is the platform\'s limit, and it says so when it is passed.',
+}
+
+// What the API asks of an experiment whose agents and coordinator the platform runs.
+const HOSTED_NEEDS_REPOSITORY = 'Hosted agents and the coordinator work in the experiment\'s repository. Choose one under Essentials first.'
 
 const POLICY_OPTIONS: Array<{ value: SubmitterPolicy; label: string }> = [
   { value: 'mixed', label: 'Anyone' },
@@ -291,8 +312,11 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
 interface FormProps {
   /** The experiment to edit. Without one the form creates one in the selected project. */
   initial?: PlatformExperiment | null
-  /** Told the experiment the API answered with, once it is saved. */
-  onSaved: (saved: PlatformExperiment) => void
+  /**
+   * Told the experiment the API answered with, once it is saved. `run` is set when the form went
+   * on to add hosted agents and start it, with what stopped that when something did.
+   */
+  onSaved: (saved: PlatformExperiment, run?: { failure?: RunFailure }) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
   onCancel?: () => void
 }
@@ -324,19 +348,25 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     job_submit_policy: initial?.job_submit_policy ?? 'mixed',
     repository: initial?.repository ?? '',
     agent_image: initial?.agent_image ?? '',
+    run_by: 'operator',
+    researchers: 2,
   })
   const [step, setStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy) {
+  function set(field: keyof FormState, value: string | number | MetricDefinition[] | StageDraft[] | SubmitterPolicy | RunBy) {
     setForm(f => ({ ...f, [field]: value }))
   }
 
   const ladderError = stagesError(form.stages)
+  const hosted = !isEdit && form.run_by === 'platform'
+  const hostedError = hosted && !form.repository ? HOSTED_NEEDS_REPOSITORY : null
 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
+    // An experiment the form starts itself has no start time of its own to compare with.
+    if (hosted) return new Date(form.ends_at) <= new Date() ? 'Ends At must be in the future.' : null
     if (new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends At must be after Starts At.'
     return null
   }
@@ -352,7 +382,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     // Both steps are validated here, not just the visible one — a bad ladder on step 2 must not
     // be submittable just because step 1 passed. Tab navigation itself is never gated — only
     // submit is, so the user is free to jump between tabs while filling the form out of order.
-    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError)
+    const err = step1Error() ?? step2BudgetError() ?? (isEdit ? null : ladderError) ?? hostedError
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
@@ -376,9 +406,14 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
         starts_at: new Date(form.starts_at).toISOString(),
         ends_at: new Date(form.ends_at).toISOString(),
       }
-      onSaved(isEdit && initial
-        ? await updatePlatformExperiment(initial.id, payload)
-        : await createPlatformExperiment(project.id, payload))
+      if (hosted) {
+        const { experiment, failure } = await createAndRun(project.id, payload, Number(form.researchers))
+        onSaved(experiment, { failure })
+      } else {
+        onSaved(isEdit && initial
+          ? await updatePlatformExperiment(initial.id, payload)
+          : await createPlatformExperiment(project.id, payload))
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -418,8 +453,13 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                 </FormField>
 
                 <div className="grid grid-cols-2 gap-3.5">
-                  <FormField label="Starts at" hint={lockedWhileRunning ? 'Locked once running.' : 'Signups close and quota is allocated at this moment.'}>
-                    <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
+                  <FormField
+                    label="Starts at"
+                    hint={lockedWhileRunning ? 'Locked once running.'
+                      : hosted ? 'Not used: with hosted agents it starts as soon as they have joined.'
+                        : 'Signups close and quota is allocated at this moment.'}
+                  >
+                    <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning || hosted} onChange={e => set('starts_at', e.target.value)} />
                   </FormField>
                   <FormField label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
                     <Input type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
@@ -546,6 +586,20 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                     Locked once running — who may submit has already shaped who signed up.
                   </p>
                 )}
+
+                {!isEdit && (
+                  <FieldGroup label="Who runs the agents?" hint={RUN_BY_HINTS[form.run_by]}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Segmented label="Who runs the agents?" options={RUN_BY_OPTIONS} value={form.run_by} onChange={v => set('run_by', v)} />
+                      {hosted && (
+                        <FormField inline label="Researchers">
+                          <Input type="number" fieldSize="sm" className="w-20" min={1} step={1} value={form.researchers} onChange={e => set('researchers', Number(e.target.value))} />
+                        </FormField>
+                      )}
+                    </div>
+                  </FieldGroup>
+                )}
+                {hostedError && <InlineError>{hostedError}</InlineError>}
               </>
             )}
 
@@ -558,8 +612,8 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
               ) : (
                 <>
                   <Button type="button" onClick={() => { setError(null); setStep(1) }}>Back</Button>
-                  <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError)}>
-                    {submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Experiment'}
+                  <Button type="submit" variant="primary" disabled={submitting || (!isEdit && !!ladderError) || !!hostedError}>
+                    {submitting ? (hosted ? 'Creating and starting…' : 'Saving…') : isEdit ? 'Save Changes' : hosted ? 'Create and run' : 'Create Experiment'}
                   </Button>
                 </>
               )}
@@ -573,12 +627,12 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
 /** The form in a dialog, which closes once the experiment is saved. */
 export function PlatformExperimentDialog({ initial, onSaved, onClose }: {
   initial?: PlatformExperiment | null
-  onSaved: (saved: PlatformExperiment) => void
+  onSaved: FormProps['onSaved']
   onClose: () => void
 }) {
   return (
     <Dialog open onClose={onClose} title={initial ? 'Edit Platform Experiment' : 'New Platform Experiment'}>
-      <PlatformExperimentForm initial={initial} onCancel={onClose} onSaved={saved => { onSaved(saved); onClose() }} />
+      <PlatformExperimentForm initial={initial} onCancel={onClose} onSaved={(saved, run) => { onSaved(saved, run); onClose() }} />
     </Dialog>
   )
 }
