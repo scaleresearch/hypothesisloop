@@ -174,7 +174,7 @@ describe('the machines the platform runs', () => {
     show(PlatformExperimentStatus.RUNNING)
     const hosted = within((await screen.findByRole('cell', { name: 'ag-hosted' })).closest('tr')!)
     expect(hosted.getByText('running')).toBeTruthy()
-    expect(hosted.getByText('restarts 1 of 3')).toBeTruthy()
+    expect(hosted.getByText('restarted once')).toBeTruthy()
     expect(hosted.getByText(/Replaced: the machine before this one ended .*, its provider no longer lists it\./)).toBeTruthy()
     expect(hosted.getByRole('button', { name: 'Exit log' })).toBeTruthy()
     expect(within(screen.getByRole('cell', { name: 'ag-new' }).closest('tr')!).getByText('not reported yet')).toBeTruthy()
@@ -189,7 +189,7 @@ describe('the machines the platform runs', () => {
     expect(coordinator.getByText('claude-opus-4-5')).toBeTruthy()
     expect(coordinator.getByText('starting')).toBeTruthy()
     expect(coordinator.getByText('no progress seen yet')).toBeTruthy()
-    expect(coordinator.getByText('restarts 0 of 3')).toBeTruthy()
+    expect(coordinator.queryByText(/restarted/)).toBeNull()
   })
 
   it('shows no coordinator for an experiment the platform runs none for', async () => {

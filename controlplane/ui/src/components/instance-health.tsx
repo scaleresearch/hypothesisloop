@@ -7,9 +7,6 @@ import { relTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Disclosure } from '@/components/ui/disclosure'
 
-// domain.MaxAgentInstanceRestarts: an exited machine is asked for again this many times.
-export const MAX_RESTARTS = 3
-
 const STATE_TONE: Record<AgentInstance['state'], Tone> = {
   requested: 'neutral',
   starting: 'warning',
@@ -37,7 +34,7 @@ function useTick(everyMs: number) {
 
 /**
  * The health of the machine the platform runs for a hosted agent or a coordinator: what it is
- * doing now, when it last made progress, the restarts it has used, and what became of the last
+ * doing now, when it last made progress, how often it was restarted, and what became of the last
  * machine that ended, with the end of its log folded away.
  */
 export function InstanceHealth({ instance }: { instance: AgentInstance }) {
@@ -52,7 +49,9 @@ export function InstanceHealth({ instance }: { instance: AgentInstance }) {
             {instance.progress_at ? `last progress ${relTime(instance.progress_at)}` : 'no progress seen yet'}
           </span>
         )}
-        <span className="text-xs text-subtle">restarts {instance.restarts} of {MAX_RESTARTS}</span>
+        {instance.restarts > 0 && (
+          <span className="text-xs text-subtle">restarted {instance.restarts === 1 ? 'once' : `${instance.restarts} times`}</span>
+        )}
       </div>
       {ended && (
         <p className="text-xs text-subtle">

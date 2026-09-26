@@ -549,7 +549,7 @@ async function scenarios(browser) {
   await page.reload()
   const runningRow = agentRows.filter({ hasText: 'ag-hosted-running' })
   await runningRow.getByText('running', { exact: true }).waitFor()
-  await runningRow.getByText('restarts 1 of 3').waitFor()
+  await runningRow.getByText('restarted once').waitFor()
   await runningRow.getByText(/^last progress /).waitFor()
   await runningRow.getByText(/^Replaced: the machine before this one ended .*, its command ended\.$/).waitFor()
   assert.equal(await runningRow.getByRole('button', { name: 'Show token' }).count(), 0, 'a hosted agent has no token to show')

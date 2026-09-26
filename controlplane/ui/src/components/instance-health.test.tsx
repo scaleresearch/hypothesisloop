@@ -21,11 +21,11 @@ afterEach(() => {
 })
 
 describe('the health of a hosted machine', () => {
-  it('shows its state, when it last made progress and the restarts it has used', () => {
+  it('shows its state and when it last made progress, and no restarts while it has had none', () => {
     render(<InstanceHealth instance={instance({ progress_at: ago(120), seen_at: ago(900) })} />)
     expect(screen.getByText('running')).toBeTruthy()
     expect(screen.getByText('last progress 2m ago')).toBeTruthy()
-    expect(screen.getByText('restarts 0 of 3')).toBeTruthy()
+    expect(screen.queryByText(/restarted/)).toBeNull()
     expect(screen.queryByText(/Replaced|Stopped for good/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Exit log' })).toBeNull()
   })
@@ -48,7 +48,7 @@ describe('the health of a hosted machine', () => {
       restarts: 1, progress_at: ago(10), end_reason: 'silent', exited_at: ago(600), exit_log: 'Traceback: out of memory',
     })} />)
     expect(screen.getByText('running')).toBeTruthy()
-    expect(screen.getByText('restarts 1 of 3')).toBeTruthy()
+    expect(screen.getByText('restarted once')).toBeTruthy()
     expect(screen.getByText('Replaced: the machine before this one ended 10m ago, it ran and made no progress.')).toBeTruthy()
     expect(screen.queryByText('Traceback: out of memory')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Exit log' }))
@@ -71,7 +71,7 @@ describe('the health of a hosted machine', () => {
       state: 'stopped', stopped: true, restarts: 3, progress_at: ago(4000), end_reason: 'exited', exited_at: ago(3600), exit_log: 'exit 1',
     })} />)
     expect(screen.getByText('stopped')).toBeTruthy()
-    expect(screen.getByText('restarts 3 of 3')).toBeTruthy()
+    expect(screen.getByText('restarted 3 times')).toBeTruthy()
     expect(screen.getByText('Stopped for good: its last machine ended 1h ago, its command ended.')).toBeTruthy()
     expect(screen.queryByText(/last progress/)).toBeNull()
   })
