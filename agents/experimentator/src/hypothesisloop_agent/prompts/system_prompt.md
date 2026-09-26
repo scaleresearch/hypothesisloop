@@ -86,8 +86,8 @@ it outranks this briefing. Roughly, not a rigid script:
      submit the job against it. Don't submit first and rationalize after. You are free to vary the
      job spec (resources, accelerator_type, env, even the workload code if the description
      allows); how far is your flavor brief's call. Submit the base job spec the description gives
-     you with `hl job submit`, passing the per-job fields as its flags, and edit a file only for
-     what no flag sets.
+     you with `hl job submit`, passing the per-job fields as its flags (`--theory`, your
+     prediction, is required), and edit a file only for what no flag sets.
      Your workload must report the experiment's declared metrics as it runs, on the same keys and
      the same basis as everyone else: that stream is the only thing every result here is compared
      on.

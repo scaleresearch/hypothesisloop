@@ -193,6 +193,14 @@ func reads(op *huma.Operation) bool {
 	return op.Method == http.MethodGet || op.Metadata[readKey] == true
 }
 
+// withArticle is word after "a" or "an".
+func withArticle(word string) string {
+	if word != "" && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "an " + word
+	}
+	return "a " + word
+}
+
 func allowedAfterClose(op *huma.Operation) bool {
 	return op.Method == http.MethodGet || op.Metadata[afterCloseKey] == true
 }
@@ -215,7 +223,7 @@ func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)
 		op := ctx.Operation()
 		if !audience.Admits(principal, ctx.Param(clusterNameParam)) {
 			_ = huma.WriteErr(d.API, ctx, http.StatusForbidden,
-				fmt.Sprintf("forbidden: a %s token may not call %s %s", principal.Kind, op.Method, op.Path))
+				fmt.Sprintf("forbidden: %s token may not call %s %s", withArticle(string(principal.Kind)), op.Method, op.Path))
 			return
 		}
 		if principal.PlatformExperimentClosed && !allowedAfterClose(op) {

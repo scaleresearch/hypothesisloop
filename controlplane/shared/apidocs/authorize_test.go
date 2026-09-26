@@ -198,3 +198,11 @@ func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 		t.Fatalf("agent digest:\n%s", digest)
 	}
 }
+
+func TestARefusedKindIsNamedWithItsArticle(t *testing.T) {
+	for kind, want := range map[auth.Kind]string{auth.KindAgent: "an agent", auth.KindCoordinator: "a coordinator"} {
+		if got := withArticle(string(kind)); got != want {
+			t.Errorf("withArticle(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}

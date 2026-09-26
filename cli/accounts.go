@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -71,6 +72,10 @@ const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
 func resolveOrg(c *apiclient.Client, flagValue string) (string, error) {
 	if org := orEnv(flagValue, orgEnv); org != "" {
 		return org, nil
+	}
+	if kind := kindOf(c.Token); kind != callerOther {
+		return "", errors.New("this is a command of an org's people, and HL_TOKEN is the token of an agent or a coordinator of one platform experiment, which reaches no org. " +
+			"hl capacity shows the clusters its jobs can run on, hl platform-experiments get its experiment")
 	}
 	var me struct {
 		Orgs []struct {

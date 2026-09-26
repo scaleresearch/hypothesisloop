@@ -229,12 +229,39 @@ func printJSON(stdout io.Writer, v any) {
 func fail(stderr io.Writer, err error) int {
 	var refused *apiclient.HTTPError
 	if errors.As(err, &refused) {
-		if body, jsonErr := compactJSON([]byte(refused.Body)); jsonErr == nil {
+		if invalid := invalidFields([]byte(refused.Body)); invalid != "" {
+			refused.Body = invalid
+		} else if body, jsonErr := compactJSON([]byte(refused.Body)); jsonErr == nil {
 			refused.Body = string(body)
 		}
 	}
 	fmt.Fprintf(stderr, "hl: %s\n", err)
 	return 1
+}
+
+// invalidFields is what a request refused for its shape got wrong, one clause per field: where
+// and what. The API's answer also carries the whole value it read at each place, which for a
+// missing field is the request itself and buries the one line that matters. Empty for an answer
+// that lists no fields.
+func invalidFields(body []byte) string {
+	var problem struct {
+		Errors []struct {
+			Message  string `json:"message"`
+			Location string `json:"location"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &problem) != nil || len(problem.Errors) == 0 {
+		return ""
+	}
+	clauses := make([]string, 0, len(problem.Errors))
+	for _, e := range problem.Errors {
+		clause := e.Message
+		if e.Location != "" {
+			clause = strings.TrimPrefix(e.Location, "body.") + ": " + e.Message
+		}
+		clauses = append(clauses, clause)
+	}
+	return strings.Join(clauses, "; ")
 }
 
 // flagSet answers -h with the command's help and any misuse with one error line and the synopsis,

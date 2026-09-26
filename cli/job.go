@@ -43,6 +43,7 @@ nothing to edit and nothing to commit. Prints the accepted job's id, status, cod
 capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
+metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
 --secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
 the job gets it as an environment variable and no read of the job shows it. FILE may not carry
 job.secret_env, since a job spec is a committed file.

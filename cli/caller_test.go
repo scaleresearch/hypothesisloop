@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -146,5 +147,45 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	}
 	if len(*got) != 3 {
 		t.Errorf("a refused summary was sent: %+v", *got)
+	}
+}
+
+// A hosted agent asked `hl cluster list` and was answered "403: a agent token may not call GET
+// /me", which says neither what the command is for nor what to use.
+func TestAnAgentTokenAskingForAnOrgsCommandIsToldWhatItCanUse(t *testing.T) {
+	for _, scope := range []string{"agent:pe-1:ag-1", "coordinator:pe-1"} {
+		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
+		t.Setenv("HL_TOKEN", derivedToken(scope))
+		t.Setenv("HL_ORG", "")
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"cluster", "list"}, &stdout, &stderr); code != 1 || len(*got) != 0 {
+			t.Fatalf("%s: exit %d with %d requests, want 1 and none. stderr: %s", scope, code, len(*got), stderr.String())
+		}
+		if said := stderr.String(); !strings.Contains(said, "reaches no org") || !strings.Contains(said, "hl capacity") || strings.Count(said, "\n") != 1 {
+			t.Errorf("%s: stderr = %q, want one line saying why and naming hl capacity", scope, said)
+		}
+	}
+}
+
+// A request refused for its shape is answered by the API with every field it read. Seen by an
+// agent that left one field out: a page of its own request around the one line that mattered.
+func TestARequestRefusedForItsShapeIsOneLineNamingTheFields(t *testing.T) {
+	problem := `{"title":"Unprocessable Entity","status":422,"detail":"validation failed","errors":[` +
+		`{"message":"expected required property budget_accelerator_hours to be present","location":"body","value":{"name":"x","description":"` + strings.Repeat("long ", 200) + `"}},` +
+		`{"message":"expected number >= 1","location":"body.max_agents","value":0}]}`
+	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(problem))
+	})
+	setAPIURL(t, url)
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1:ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "comment", "h-1", "--agent", "ag-1", "--text", "t"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := "HTTP 422: body: expected required property budget_accelerator_hours to be present; max_agents: expected number >= 1\n"
+	if said := stderr.String(); !strings.HasSuffix(said, want) || strings.Contains(said, "long") {
+		t.Errorf("stderr = %q, want it to end with %q and carry no value", said, want)
 	}
 }
