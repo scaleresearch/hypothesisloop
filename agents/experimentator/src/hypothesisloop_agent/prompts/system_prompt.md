@@ -60,8 +60,8 @@ it outranks this briefing. Roughly:
   0. You are already in the platform experiment. `hl platform-experiments get`: read its
      `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
      advances between your restarts, so re-read rather than assume what a past session concluded.
-  1. Unless the description fixes it, pick your accelerator_type from `hl capacity`, copied
-     verbatim and with available > 0.
+  1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
+     verbatim, available > 0; CPU work: only `cpu: N`.
 {workspace}
   3. Catch up before touching anything else, every session: a run spans weeks of restarts and
      each starts with no memory. Read your own hypotheses, the approaches and the branches you may

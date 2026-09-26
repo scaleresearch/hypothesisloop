@@ -29,7 +29,7 @@ import uuid
 
 import pytest
 
-from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, TEST_CPU_CLASS
+from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, TEST_CPU_TYPE
 from support import admin
 from support.wait import eventually
 
@@ -48,13 +48,13 @@ if CONTAINER_ENGINE_BIN is None:
 JOB_OVERRIDE_BASE: dict = {
     "image": "busybox",
     "command": ["sh", "-c"],
-    # One core of the CPU class the agent below is started with. The count is the job's cpu.
-    "cpu": None,
+    # One core and no accelerator: the node offers its cores with nothing configured.
+    "cpu": "1",
     "memory": "64Mi",
     "storage": "128Mi",
     "max_retries": 0,
-    "accelerator_count": 1,
-    "accelerator_type": TEST_CPU_CLASS,
+    "accelerator_count": None,
+    "accelerator_type": None,
     "acceptable_accelerator_types": None,
     "accelerator_tolerations": None,
     "extra_resources": None,
@@ -63,7 +63,7 @@ JOB_OVERRIDE_BASE: dict = {
 
 
 def job_override(sleep_seconds: int) -> dict:
-    """A busybox job body on one core of the node's CPU class, with every k8s-only field the bare executor rejects
+    """A busybox job body on one of the node's cores, with every k8s-only field the bare executor rejects
     (podexec.BuildContainerSpec -- accelerator_tolerations/extra_resources/
     accelerator_pod_resources) explicitly nulled out per different-backend.md's coupling-2 table,
     rather than relying on job.yaml's defaults."""
@@ -96,8 +96,6 @@ def bare_agent(tmp_path, run_id: str):
         "RUNTIME_TOKEN": admin.add_cluster(cluster_name, DEFAULT_ORG),
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"bare-e2e-node-{run_id}",
-        # The node offers its cores as the class the settings price, beside any accelerator.
-        "CPU_CLASS": TEST_CPU_CLASS.split("=", 1)[1],
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
     }
     log_file = open(log_path, "w")
@@ -161,7 +159,7 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
     assert engine is not None, f"could not determine which container engine the bare-agent resolved to (see {log_path})"
 
     api.register_agent(agent)
-    pe_id = api.create_platform_experiment(f"bare-e2e-{run_id}", 0.01, 1, report_interval_seconds=10)
+    pe_id = api.create_platform_experiment(f"bare-e2e-{run_id}", 1.0, 1, report_interval_seconds=10)
     api.signup_and_start(pe_id, [agent])
 
     # A job left RUNNING forever (e.g. this test asserting out early) would outlive its bare-agent
@@ -205,14 +203,14 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
         f"job landed on cluster_name={exp.get('cluster_name')!r}, expected {cluster_name}"
     )
 
-    assert exp["accelerator_type"] == TEST_CPU_CLASS and exp["resolved_job"]["cpu"] == "1", (
-        f"the job does not hold one core of the class: {exp}"
+    assert exp["accelerator_type"] == TEST_CPU_TYPE and exp["accelerator_count"] == 1 and exp["resolved_job"]["cpu"] == "1", (
+        f"the job does not hold one core: {exp}"
     )
     assert any(
-        a["accelerator_type"] == TEST_CPU_CLASS and a["kind"] == "cpu" and a["total"] >= 1
+        a["accelerator_type"] == TEST_CPU_TYPE and a["kind"] == "cpu" and a["total"] >= 1
         for c in api.capacity(DEFAULT_ORG)["clusters"] if c["cluster_name"] == cluster_name
         for a in c["accelerators"]
-    ), f"the bare-metal node does not report its cores as {TEST_CPU_CLASS}"
+    ), f"the bare-metal node does not report its cores as {TEST_CPU_TYPE}"
 
     eventually(
         f"a real {engine} container for {job} exists on this host",

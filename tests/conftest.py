@@ -42,17 +42,18 @@ DEFAULT_PROJECT = "default"
 TEST_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-L40"
 # Must match TEST_ACCELERATOR_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml.
 TEST_ACCH_RATE = 0.25
-# The CPU class every local dev node publishes (localdev/lib/fake-gpu-node.sh), a catalog type of
-# kind cpu: its count is the job's cores. A job that holds no priced unit is refused.
-TEST_CPU_CLASS = "cpu.hypothesisloop.dev/class=dev-node"
-# Must match TEST_CPU_CLASS's acch_rate in controlplane/settings/hypothesisloop.yaml.
-TEST_CPU_ACCH_RATE = 0.01
+# The type every cluster offers its cores as. A job that states cpu and no accelerator holds that
+# many units of it. A job that holds no priced unit is refused.
+TEST_CPU_TYPE = "hypothesisloop.dev/cpu=core"
+# Must match TEST_CPU_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml: a budget
+# spent on cores reads as CPU core-hours.
+TEST_CPU_ACCH_RATE = 1.0
 
 
 def cpu_job(cores: int = 1) -> dict:
-    """Job overrides for `cores` cores of the CPU class and no accelerator. cpu is left to the
-    count, which sets it; memory and storage stay those of the default job."""
-    return {"accelerator_type": TEST_CPU_CLASS, "accelerator_count": cores, "acceptable_accelerator_types": None, "cpu": None}
+    """Job overrides for `cores` cores and no accelerator, asked for the plain way: cpu alone.
+    Memory and storage stay those of the default job."""
+    return {"accelerator_type": None, "accelerator_count": None, "acceptable_accelerator_types": None, "cpu": str(cores)}
 
 
 @pytest.fixture(scope="session")

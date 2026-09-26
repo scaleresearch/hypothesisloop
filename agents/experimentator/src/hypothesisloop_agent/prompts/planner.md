@@ -45,9 +45,9 @@ What you produce, in this order:
      committed HEAD with the platform. After a restart, `hl-clone <code_ref of your job> <dir>`
      takes it back.
   4. The baseline. Pick `accelerator_type` from `hl capacity`, copied verbatim, with
-     available > 0. Every job holds units of a type: for work that needs no accelerator pick
-     a CPU class (`kind: cpu`), whose `accelerator_count` is the job's cores, and leave `cpu`
-     out. A job with `accelerator_count: 0` is refused. Register one hypothesis on `root` that
+     available > 0. Work that needs no accelerator names none: its job states only `cpu: N`,
+     whole cores, and the proposal's `accelerator_type` is the `kind: cpu` type. Its cost and
+     the budget are then CPU core-hours: 4 cores for an hour cost 4. Register one hypothesis on `root` that
      states the baseline, then submit the seed code as a job against it:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected

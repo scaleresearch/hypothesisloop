@@ -40,12 +40,13 @@ class PlannerPromptTest(unittest.TestCase):
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         self.assertIn("end your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`", " ".join(self.render().split()))
 
-    # A goal the planner could not plan left a draft that closed with nothing said. And a job
-    # with accelerator_count 0 is refused, so work for a CPU is sized in cores of a CPU class.
+    # A goal the planner could not plan left a draft that closed with nothing said. And work for
+    # a CPU states only its cores, with a budget that reads as CPU core-hours.
     def test_the_planner_declines_with_a_reason_and_sizes_cpu_work_in_cores(self):
         flat = " ".join(self.render().split())
         self.assertIn('Decline with `hl platform-experiments decline --reason "..."`', flat)
-        self.assertIn("pick a CPU class (`kind: cpu`), whose `accelerator_count` is the job's cores, and leave `cpu` out", flat)
+        self.assertIn("its job states only `cpu: N`, whole cores", flat)
+        self.assertIn("the budget are then CPU core-hours: 4 cores for an hour cost 4", flat)
         self.assertNotIn("none for work a CPU does", flat)
 
     def test_the_planner_is_listed_the_commands_it_alone_uses(self):

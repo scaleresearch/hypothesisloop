@@ -182,7 +182,7 @@ hl platform-experiments get pe-123                         # status, description
 hl platform-experiments list                               # yours and the ones the platform shares with every account
 hl quota                                                   # your accelerator-hours, used and granted
 hl results                                                 # standings on the declared metrics
-hl capacity                                                # live accelerators and CPU class cores per cluster
+hl capacity                                                # live accelerators and CPU cores per cluster
 hl hypothesis submit --builds-on root --text "..."
 hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
 hl hypothesis get h-1                                      # links, jobs, findings and comments
@@ -294,33 +294,29 @@ metadata:
   estimated_duration_hours: 6.0
 ```
 
-Every job asks for units of a type the catalog prices (`GET /resource-catalog`, `hl capacity`).
-A type is an accelerator or a CPU class, a type of `kind: cpu` whose unit is one core. A job
-that needs no accelerator asks for cores of a CPU class:
+Every job holds units of a type the catalog prices (`GET /resource-catalog`, `hl capacity`): an
+accelerator, or CPU cores. A job that needs no accelerator states only its cores:
 
 ```yaml
 job:
-  accelerator_type: cpu.hypothesisloop.dev/class=epyc-9354
-  accelerator_count: 8        # 8 cores
+  cpu: 4        # 4 cores, no accelerator_type and no accelerator_count
 ```
 
-The count is then the job's cpu: `cpu` is left out or equals it, and `memory` and `storage`
-left out are the job's share of the node, one part per core. Its alternatives
-(`acceptable_accelerator_types`) are CPU classes too. Budget, quota, fairness, the concurrency
-cap and settlement count those cores at the class's rate, `acch_rate` per core-hour, as they
-count accelerators. A job with `accelerator_count: 0` is refused with 400: it would run outside
-all of them. Sums show cores apart from accelerators (`in_flight_cores`, `core_busy` and
+Submission reads that as 4 units of the one built-in type `hypothesisloop.dev/cpu=core`. Naming
+the type with `accelerator_count: 4` means the same. Cores are whole: `500m` or `1.5` is refused
+with 400, and so is a job with neither an accelerator nor cores. `memory` and `storage` left out
+are the cores' share of the node, one part per core. Budget, quota, fairness, the concurrency cap
+and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
+hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels
+it CPU hours. Sums show cores apart from accelerators (`in_flight_cores`, `core_busy` and
 `core_total` of a cluster, `cores_available` in `hl capacity`), while
 `max_concurrent_accelerators` caps the two together.
 
-A cluster offers a CPU class when its owner names one: `hl cluster add my-cluster --cpu-class
-epyc-9354` prints the install command with it. A Kubernetes cluster gets the chart value
-`cpuClass=epyc-9354`, and its agent labels each schedulable node and publishes one unit per
-whole allocatable core. A bare-metal node gets `bare-agent install --cpu-class epyc-9354` and
-offers one unit per core beside its accelerators, so a job on cores and a job on a chip share
-the node within its cores and memory. The control plane prices the type in `accelerator_types`
-with `kind: cpu`. The local dev nodes publish `cpu.hypothesisloop.dev/class=dev-node`. A rented
-cluster publishes no CPU class yet and takes jobs on its accelerators only.
+Every attached cluster offers its whole cores with nothing to configure. The Kubernetes agent
+counts them from each schedulable node's allocatable cpu and writes nothing to the node: a job on
+cores is a pod that requests its cpu. A bare-metal node offers its cores beside its accelerators.
+On either, the cores an accelerator job holds are not free for a job on cores, so the two share a
+node within its cores and memory. A rented cluster takes jobs on its accelerators only.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
@@ -512,7 +508,7 @@ newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-
 shows the command to run on the node and below it the cluster's runtime token.
 
 ```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4" ${5:+--cpu-class "$5"}' \
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' \
   sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed' \
   'registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
 ```

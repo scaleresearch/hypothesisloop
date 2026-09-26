@@ -459,7 +459,7 @@ def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
         assert a.api.as_caller(admin.token(scope)).post("/experiments/reprioritize").status_code == 403, scope
 
 
-# One core of the CPU class, which every local node publishes.
+# One CPU core, which every cluster offers.
 HOSTLESS_JOB = cpu_job()
 
 
