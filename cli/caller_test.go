@@ -196,9 +196,6 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	if code := run([]string{"platform-experiments", "close"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("close: exit %d, stderr %s", code, stderr.String())
 	}
-	want := []recorded{
-		{Method: "POST", Path: "/platform-experiments/pe-env/summary", Body: map[string]any{"summary": "what was found"}},
-		{Method: "POST", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
 	// The brief is changed by naming it, and nothing else of the experiment is sent.
 	if code := run([]string{"platform-experiments", "update", "--description-file", file}, &stdout, &stderr); code != 0 {
 		t.Fatalf("update the description: exit %d, stderr %s", code, stderr.String())
@@ -210,12 +207,15 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	if code := run([]string{"platform-experiments", "update"}, &stdout, &stderr); code != 2 {
 		t.Errorf("an update that names no field: exit %d, want 2", code)
 	}
+	want := []recorded{
+		{Method: "POST", Path: "/platform-experiments/pe-env/summary", Body: map[string]any{"summary": "what was found"}},
+		{Method: "POST", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
 		{Method: "POST", Path: "/platform-experiments/pe-env/close", Body: map[string]any{}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-env", Body: map[string]any{"description": "from a file\n"}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
 	}
 	if !reflect.DeepEqual(*got, want) {
 		t.Fatalf("requests = %+v\nwant %+v", *got, want)
-		{Method: "PATCH", Path: "/platform-experiments/pe-env", Body: map[string]any{"description": "from a file\n"}},
-		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
 	}
 	for name, args := range map[string][]string{
 		"neither text nor file": {"platform-experiments", "summary"},
