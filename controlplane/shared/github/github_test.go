@@ -42,7 +42,9 @@ type fakeRepo struct {
 type fakeInstallation struct {
 	account string
 	// owner is the user whose own account the installation is on, empty for an organisation's.
-	owner     string
+	owner string
+	// creates says the installation granted the App the creation of repositories.
+	creates   bool
 	suspended bool
 	repos     map[int64]bool
 }
@@ -76,9 +78,6 @@ type fakeGitHub struct {
 	// foreign makes the user's listing hold an installation of another App.
 	foreign bool
 
-	// collaborators holds who was invited to a repository, and with what permission.
-	collaborators map[string]map[string]string
-
 	tokens     map[string]mintedToken
 	userTokens map[string]string
 	sequence   int
@@ -107,9 +106,9 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 	f := &fakeGitHub{
 		t: t, key: &key.PublicKey, now: time.Now,
 		installations: map[int64]*fakeInstallation{
-			100: {account: "Acme", repos: map[int64]bool{1: true, 2: true}},
+			100: {account: "Acme", creates: true, repos: map[int64]bool{1: true, 2: true}},
 			200: {account: "rival", repos: map[int64]bool{3: true}},
-			300: {account: "carol", owner: "carol", repos: map[int64]bool{}},
+			300: {account: "carol", owner: "carol", creates: true, repos: map[int64]bool{}},
 		},
 		repos: map[string]*fakeRepo{
 			"acme/model":    {id: 1, fullName: "Acme/Model", defaultBranch: "main", files: map[string]string{".hypothesisloop/experiment.yaml": "name: from the repo\n"}, directories: map[string]bool{".hypothesisloop": true}},
@@ -122,7 +121,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		readers: map[string]map[int64]bool{"reader": {1: true}},
 		reaches: map[string][]int64{"alice": {100}, "reader": {100, 200}, "carol": {100, 300}},
 		roles:   map[string]map[int64]string{"alice": {100: "admin"}, "reader": {100: "admin"}, "carol": {100: "member"}},
-		tokens:  map[string]mintedToken{}, userTokens: map[string]string{}, collaborators: map[string]map[string]string{},
+		tokens:  map[string]mintedToken{}, userTokens: map[string]string{},
 		kinds: map[string]string{"link": "symlink", "vendored": "submodule"},
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
@@ -320,45 +319,12 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.refuse(w, http.StatusNotFound, "Not Found")
 			return
 		}
-		body := map[string]any{"id": id, "suspended_at": nil, "account": map[string]string{"login": installation.account}}
+		body := map[string]any{"id": id, "suspended_at": nil, "account": f.accountOf(id)}
 		if installation.suspended {
 			body["suspended_at"] = "2026-01-01T00:00:00Z"
 		}
 		f.answer(w, http.StatusOK, body)
-	case len(segments) == 3 && segments[0] == "orgs" && segments[2] == "installation":
-		if !f.appAuthenticated(bearer) {
-			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
-			return
-		}
-		for id, installation := range f.installations {
-			if strings.EqualFold(installation.account, segments[1]) {
-				f.answer(w, http.StatusOK, map[string]any{"id": id, "suspended_at": nil})
-				return
-			}
-		}
-		f.refuse(w, http.StatusNotFound, "Not Found")
-	case len(segments) == 2 && segments[0] == "users":
-		if _, known := f.pushers[segments[1]]; !known || f.tokens[bearer].permissions == nil {
-			f.refuse(w, http.StatusNotFound, "Not Found")
-			return
-		}
-		f.answer(w, http.StatusOK, map[string]any{"login": segments[1]})
-	case len(segments) == 5 && segments[0] == "repos" && segments[3] == "collaborators" && r.Method == http.MethodPut:
-		var body struct {
-			Permission string `json:"permission"`
-		}
-		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
-		name := strings.ToLower(segments[1] + "/" + segments[2])
-		if f.tokens[bearer].permissions["administration"] != "write" || f.repos[name] == nil {
-			f.refuse(w, http.StatusForbidden, "Resource not accessible by integration")
-			return
-		}
-		if f.collaborators[name] == nil {
-			f.collaborators[name] = map[string]string{}
-		}
-		f.collaborators[name][segments[4]] = body.Permission
-		f.answer(w, http.StatusCreated, map[string]any{"id": 1})
-	case len(segments) == 3 && segments[0] == "orgs" && segments[2] == "repos" && r.Method == http.MethodPost:
+	case r.Method == http.MethodPost && (r.URL.Path == "/user/repos" || (len(segments) == 3 && segments[0] == "orgs" && segments[2] == "repos")):
 		var body struct {
 			Name     string `json:"name"`
 			Private  bool   `json:"private"`
@@ -366,20 +332,27 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 		token, ok := f.tokens[bearer]
-		switch {
-		case !ok:
+		if !ok {
 			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
-		case token.permissions["administration"] != "write" || !strings.EqualFold(f.installations[token.installation].account, segments[1]):
+			return
+		}
+		installation := f.installations[token.installation]
+		// Each kind of account has its own address, and the other one answers as if nothing were there.
+		onItsAccount := (installation.owner != "") == (r.URL.Path == "/user/repos") && (installation.owner != "" || strings.EqualFold(installation.account, segments[1]))
+		switch {
+		case !onItsAccount:
+			f.refuse(w, http.StatusNotFound, "Not Found")
+		case !installation.creates || len(token.permissions) != 0:
 			f.refuse(w, http.StatusForbidden, "Resource not accessible by integration")
-		case f.repos[strings.ToLower(segments[1]+"/"+body.Name)] != nil:
+		case f.repos[strings.ToLower(installation.account+"/"+body.Name)] != nil:
 			f.refuse(w, http.StatusUnprocessableEntity, "Repository creation failed.")
 		case !body.Private || !body.AutoInit:
 			f.t.Errorf("a repository was asked for with private %v and auto_init %v", body.Private, body.AutoInit)
 		default:
 			f.sequence++
-			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: f.installations[token.installation].account + "/" + body.Name, defaultBranch: "main"}
+			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: installation.account + "/" + body.Name, defaultBranch: "main"}
 			f.repos[strings.ToLower(repo.fullName)] = repo
-			f.installations[token.installation].repos[repo.id] = true
+			installation.repos[repo.id] = true
 			f.answer(w, http.StatusCreated, map[string]any{"id": repo.id, "full_name": repo.fullName, "private": true})
 		}
 	case r.URL.Path == "/installation/repositories":
@@ -475,9 +448,9 @@ func (f *fakeGitHub) mint(w http.ResponseWriter, r *http.Request, bearer, instal
 		f.refuse(w, http.StatusBadRequest, "bad body")
 		return
 	}
-	// Only a token that reads names, or one that creates a repository, and nothing else may
-	// reach a whole installation.
-	if len(body.Repositories) == 0 && !maps.Equal(body.Permissions, map[string]string{"metadata": "read"}) && !maps.Equal(body.Permissions, map[string]string{"administration": "write"}) {
+	// Only a token that reads names and nothing else, or the one a repository is created with,
+	// which is asked for whole, may reach a whole installation.
+	if len(body.Repositories) == 0 && len(body.Permissions) != 0 && !maps.Equal(body.Permissions, map[string]string{"metadata": "read"}) {
 		f.t.Errorf("a token for a whole installation was asked with %v", body.Permissions)
 	}
 	if f.ungranted {
@@ -634,42 +607,41 @@ func TestInstallationIsReadAsTheApp(t *testing.T) {
 	}
 }
 
-func TestARepositoryIsCreatedPrivateOnAnOrganisationWithItsOneCollaborator(t *testing.T) {
+func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	created, err := client.CreateRepository(ctx, "acme", "lr-sweep-1a2b3c4d", "what it is for", "alice")
-	if err != nil || *created != (Repository{FullName: "Acme/lr-sweep-1a2b3c4d", Private: true}) {
-		t.Fatalf("CreateRepository = %+v, %v", created, err)
-	}
-	if got := f.collaborators["acme/lr-sweep-1a2b3c4d"]; !maps.Equal(got, map[string]string{"alice": "push"}) {
-		t.Fatalf("collaborators = %v, want alice alone, to push", got)
-	}
-	token, err := client.OrganisationToken(ctx, created.FullName, Write)
-	if err != nil || token.Repository != created.FullName {
-		t.Fatalf("a token for the new repository: got = %+v, %v", token, err)
-	}
-	if minted := f.lastToken(); len(minted.repos) != 1 || !maps.Equal(minted.permissions, map[string]string{"contents": "write", "metadata": "read"}) {
-		t.Fatalf("the token reaches %v with %v, want the one repository and its contents", minted.repos, minted.permissions)
+	// Installation 100 is on an organisation, 300 on a person's own account. Neither covers
+	// every repository of its account, and each covers the one it creates.
+	for installation, want := range map[int64]string{100: "Acme/lr-sweep-1a2b3c4d", 300: "carol/lr-sweep-1a2b3c4d"} {
+		created, err := client.CreateRepository(ctx, installation, "lr-sweep-1a2b3c4d", "what it is for")
+		if err != nil || *created != (Repository{FullName: want, Private: true}) {
+			t.Fatalf("CreateRepository on %d = %+v, %v, want %s", installation, created, err, want)
+		}
+		token, err := client.Token(ctx, installation, want, Write)
+		if err != nil || token.Repository != want {
+			t.Fatalf("a token for the new repository: got = %+v, %v", token, err)
+		}
 	}
 	for name, tc := range map[string]struct {
-		org, repo, login string
-		arrange          func()
-		want             error
+		installation int64
+		repo         string
+		arrange      func()
+		want         error
 	}{
-		"a name the organisation has":        {"acme", "lr-sweep-1a2b3c4d", "", nil, ErrRepositoryExists},
-		"a name with an owner in it":         {"acme", "a/b", "", nil, ErrInvalidRepository},
-		"a login nobody has":                 {"acme", "fresh", "nobody", nil, ErrNoSuchLogin},
-		"an organisation without the App":    {"elsewhere", "fresh", "", nil, ErrCannotCreateRepositories},
-		"an installation without the access": {"acme", "fresh", "", func() { f.ungranted = true }, ErrCannotCreateRepositories},
+		"a name the account has":                 {100, "lr-sweep-1a2b3c4d", nil, ErrRepositoryExists},
+		"a name with an owner in it":             {100, "a/b", nil, ErrInvalidRepository},
+		"an installation that is gone":           {999, "fresh", nil, ErrInstallationGone},
+		"an installation that may not create":    {200, "fresh", nil, ErrCannotCreateRepositories},
+		"an installation that granted no access": {100, "fresh", func() { f.ungranted = true }, ErrPermissionNotGranted},
 	} {
 		if tc.arrange != nil {
 			tc.arrange()
 		}
-		if _, err := client.CreateRepository(ctx, tc.org, tc.repo, "", tc.login); !errors.Is(err, tc.want) {
+		if _, err := client.CreateRepository(ctx, tc.installation, tc.repo, ""); !errors.Is(err, tc.want) {
 			t.Errorf("%s: got = %v, want %v", name, err, tc.want)
 		}
 		f.ungranted = false
 	}
-	if f.repos["acme/fresh"] != nil {
+	if f.repos["acme/fresh"] != nil || f.repos["rival/fresh"] != nil {
 		t.Fatal("a refused create left a repository behind")
 	}
 }

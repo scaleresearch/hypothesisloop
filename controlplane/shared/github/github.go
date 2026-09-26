@@ -66,14 +66,11 @@ var (
 	ErrPermissionNotGranted = errors.New("the installation has not granted the App the access it asks for")
 	// ErrInvalidRepository reports a name that is not owner/name.
 	ErrInvalidRepository = errors.New("a repository is named owner/name")
-	// ErrCannotCreateRepositories reports an organisation the App cannot create repositories on:
-	// it is not installed there, the installation has not granted Administration, or the
-	// organisation forbids it.
-	ErrCannotCreateRepositories = errors.New("the GitHub App cannot create repositories on the organisation")
-	// ErrRepositoryExists reports that the organisation already holds a repository of that name.
-	ErrRepositoryExists = errors.New("the GitHub organisation already has a repository of that name")
-	// ErrNoSuchLogin reports a login that is no GitHub user's.
-	ErrNoSuchLogin = errors.New("no GitHub user has that login")
+	// ErrCannotCreateRepositories reports an installation that does not let the App create a
+	// repository on its account: it has not granted the permission, or the account forbids it.
+	ErrCannotCreateRepositories = errors.New("the installation does not let the GitHub App create repositories")
+	// ErrRepositoryExists reports that the account already holds a repository of that name.
+	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
 )
 
 // Access is what an installation token may do to the repository's contents.
@@ -346,79 +343,62 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 	}
 }
 
-var (
-	newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
-	loginName         = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
-)
+var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
-// ValidLogin reports whether login has the form of a GitHub account's name.
-func ValidLogin(login string) bool { return loginName.MatchString(login) }
-
-// organisationInstallation returns the App's installation on an organisation.
-func (c *Client) organisationInstallation(ctx context.Context, org string) (int64, error) {
-	if !loginName.MatchString(org) {
-		return 0, ErrInvalidRepository
-	}
-	jwt, err := c.appJWT()
-	if err != nil {
-		return 0, err
-	}
-	var out struct {
-		ID          int64   `json:"id"`
-		SuspendedAt *string `json:"suspended_at"`
-	}
-	switch err := c.call(ctx, http.MethodGet, "/orgs/"+org+"/installation", jwt, nil, &out); {
-	case errors.Is(err, errNotFound):
-		return 0, ErrCannotCreateRepositories
-	case errors.Is(err, errUnauthorized):
-		return 0, ErrAppCredentials
-	case err != nil:
-		return 0, err
-	}
-	if out.ID <= 0 || out.SuspendedAt != nil {
-		return 0, ErrCannotCreateRepositories
-	}
-	return out.ID, nil
-}
-
-// CreateRepository creates a private repository of that name on an organisation the App is
-// installed on, with one commit so that it can be cloned at once, and invites collaborator, a
-// GitHub login, to push to that repository and to nothing else of the organisation. An empty
-// collaborator invites nobody. The token it works with administers the installation's
-// repositories and does not leave here.
-func (c *Client) CreateRepository(ctx context.Context, org, name, description, collaborator string) (*Repository, error) {
+// CreateRepository creates a private repository of that name on the account an installation is
+// on, an organisation or a person's own, with one commit so that it can be cloned at once.
+// GitHub then counts it among the repositories the installation covers, whichever ones its
+// owner selected. The token it creates with holds everything the installation granted and does
+// not leave here.
+func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
 	}
-	if collaborator != "" && !loginName.MatchString(collaborator) {
-		return nil, ErrNoSuchLogin
-	}
-	installationID, err := c.organisationInstallation(ctx, org)
+	jwt, err := c.appJWT()
 	if err != nil {
 		return nil, err
 	}
-	token, err := c.mint(ctx, installationID, map[string]any{"permissions": map[string]string{"administration": "write"}})
-	if errors.Is(err, ErrPermissionNotGranted) {
-		return nil, ErrCannotCreateRepositories
+	var installation struct {
+		SuspendedAt *string `json:"suspended_at"`
+		Account     struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"account"`
 	}
-	if err != nil {
+	switch err := c.call(ctx, http.MethodGet, "/app/installations/"+strconv.FormatInt(installationID, 10), jwt, nil, &installation); {
+	case errors.Is(err, errNotFound):
+		return nil, ErrInstallationGone
+	case errors.Is(err, errUnauthorized):
+		return nil, ErrAppCredentials
+	case err != nil:
 		return nil, err
 	}
-	// Asked before anything is created, so that a login nobody has leaves no repository behind.
-	if collaborator != "" {
-		switch err := c.call(ctx, http.MethodGet, "/users/"+collaborator, token.Token, nil, nil); {
-		case errors.Is(err, errNotFound):
-			return nil, ErrNoSuchLogin
-		case err != nil:
-			return nil, err
-		}
+	if installation.SuspendedAt != nil {
+		return nil, ErrInstallationGone
+	}
+	owner := installation.Account.Login
+	var path string
+	switch installation.Account.Type {
+	case "Organization":
+		path = "/orgs/" + url.PathEscape(owner) + "/repos"
+	case "User":
+		path = "/user/repos"
+	}
+	if owner == "" || path == "" {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation's account or its type")
+	}
+	// GitHub documents no name by which a token is narrowed to creating repositories, so the
+	// token is asked for whole.
+	token, err := c.mint(ctx, installationID, map[string]any{})
+	if err != nil {
+		return nil, err
 	}
 	var out struct {
 		FullName string `json:"full_name"`
 		Private  bool   `json:"private"`
 	}
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
-	switch err := c.call(ctx, http.MethodPost, "/orgs/"+org+"/repos", token.Token, body, &out); {
+	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
 	case errors.Is(err, errUnprocessable):
 		return nil, ErrRepositoryExists
 	case errors.Is(err, errForbidden), errors.Is(err, errNotFound):
@@ -426,33 +406,10 @@ func (c *Client) CreateRepository(ctx context.Context, org, name, description, c
 	case err != nil:
 		return nil, err
 	}
-	if !out.Private || !strings.EqualFold(out.FullName, org+"/"+name) {
-		return nil, fmt.Errorf("github: POST /orgs/{org}/repos answered without the private repository asked for")
-	}
-	if collaborator != "" {
-		path := "/repos/" + out.FullName + "/collaborators/" + collaborator
-		if err := c.call(ctx, http.MethodPut, path, token.Token, map[string]string{"permission": "push"}, nil); err != nil {
-			return nil, fmt.Errorf("github: %s was created and %s could not be invited to it: %w", out.FullName, collaborator, err)
-		}
+	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
+		return nil, fmt.Errorf("github: POST %s answered without the private repository asked for", path)
 	}
 	return &Repository{FullName: out.FullName, Private: true}, nil
-}
-
-// OrganisationToken is Token through the App's installation on the organisation that owns the
-// repository.
-func (c *Client) OrganisationToken(ctx context.Context, fullName string, access Access) (*Token, error) {
-	if err := ValidRepository(fullName); err != nil {
-		return nil, err
-	}
-	org, _, _ := strings.Cut(fullName, "/")
-	installationID, err := c.organisationInstallation(ctx, org)
-	if errors.Is(err, ErrCannotCreateRepositories) {
-		return nil, ErrInstallationGone
-	}
-	if err != nil {
-		return nil, err
-	}
-	return c.Token(ctx, installationID, fullName, access)
 }
 
 // revoke ends a person's token at GitHub, so that nothing of theirs outlives the question it
