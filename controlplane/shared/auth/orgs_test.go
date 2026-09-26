@@ -20,7 +20,7 @@ func orgsWithAMember() *auth.Access {
 		Keys: map[string]domain.APIKey{
 			"key-a": {ID: "key-a", OrgID: "org-a"}, "key-a-prj": {ID: "key-a-prj", OrgID: "org-a", ProjectID: "prj-a"},
 			"key-a-prj2": {ID: "key-a-prj2", OrgID: "org-a", ProjectID: "prj-a2"}, "key-b": {ID: "key-b", OrgID: "org-b"},
-			"k": {ID: "k", OrgID: "org-a", CreatedBy: "u-owner"},
+			"k": {ID: "k", OrgID: "org-a", Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}},
 		},
 		Members: map[string]bool{"org-a/u-member": true},
 	})
@@ -82,10 +82,10 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 		"mint a key of project prj-a":          func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-a", "prj-a"); return err },
 		"mint a key in an org that is missing": func(ctx context.Context) error { _, err := access.KeyMinter(ctx, "org-missing", "prj-a"); return err },
 		"end a key the owner made": func(ctx context.Context) error {
-			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", CreatedBy: "u-owner"})
+			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}})
 		},
 		"end a key the member made": func(ctx context.Context) error {
-			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", ProjectID: "prj-a", CreatedBy: "u-member"})
+			return access.KeyEnd(ctx, &domain.APIKey{OrgID: "org-a", ProjectID: "prj-a", Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-member"}})
 		},
 	}
 	//                                            owner member outsider org-key prj-key agent coord job runtime launcher staff

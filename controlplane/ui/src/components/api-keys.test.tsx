@@ -42,10 +42,10 @@ async function create(name: string) {
 }
 
 beforeEach(() => {
-  stored = [{ id: 'k1', org_id: 'org_a', created_by: 'u1', name: 'ci', created_at: at }]
+  stored = [{ id: 'k1', org_id: 'org_a', actor: { kind: 'user', id: 'u1', name: 'Ada' }, name: 'ci', created_at: at }]
   vi.mocked(fetchAPIKeys).mockImplementation(async () => [...stored])
   vi.mocked(createAPIKey).mockImplementation(async (orgID, name, projectID) => {
-    const key: APIKey = { id: 'k2', org_id: orgID, project_id: projectID, created_by: 'u1', name, created_at: at }
+    const key: APIKey = { id: 'k2', org_id: orgID, project_id: projectID, actor: { kind: 'user', id: 'u1', name: 'Ada' }, name, created_at: at }
     stored = [key, ...stored]
     return { ...key, token: TOKEN }
   })

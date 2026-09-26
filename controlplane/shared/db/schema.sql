@@ -1121,6 +1121,28 @@ CREATE TABLE IF NOT EXISTS org_github_installations (
     connected_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, installation_id)
 );
+-- Who connected it is an actor: connected_by_kind says whether connected_by is a user's id or
+-- an API key's, or 'staff' for one an operator connected with hl-admin. A row from before the
+-- kind was kept gets it from what its connected_by names, and the schema refuses to load while
+-- one names neither a user nor a key, or both: nothing is guessed.
+ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS connected_by_kind TEXT NOT NULL DEFAULT '';
+UPDATE org_github_installations i SET connected_by_kind = CASE
+    WHEN i.connected_by = 'hl-admin' THEN 'staff'
+    WHEN EXISTS (SELECT 1 FROM users u WHERE u.id = i.connected_by)
+         AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.id = i.connected_by) THEN 'user'
+    WHEN EXISTS (SELECT 1 FROM api_keys k WHERE k.id = i.connected_by)
+         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = i.connected_by) THEN 'key'
+    ELSE '' END
+WHERE i.connected_by_kind = '';
+DO $$
+DECLARE unresolved TEXT;
+BEGIN
+    SELECT string_agg(org_id || '/' || installation_id || ' by ' || quote_literal(connected_by), ', ')
+      INTO unresolved FROM org_github_installations WHERE connected_by_kind NOT IN ('user', 'key', 'staff');
+    IF unresolved IS NOT NULL THEN
+        RAISE EXCEPTION 'org_github_installations: who connected these is neither one user nor one API key: %', unresolved;
+    END IF;
+END $$;
 -- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
 -- and coordinator run. An empty image is the platform's own (config agents.image). Both are
 -- fixed at creation.

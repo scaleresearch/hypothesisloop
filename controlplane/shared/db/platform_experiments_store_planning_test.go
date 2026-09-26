@@ -16,7 +16,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	now := time.Now().UTC()
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	pe := &domain.PlatformExperiment{
-		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", CreatedBy: &by,
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
 		BudgetAcceleratorHours: 0.5, MaxAgents: 1, EndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 		Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}},
 		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
@@ -42,8 +42,8 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
 	if err != nil || got.Status != domain.PlatformExpDraft || got.Goal != "a goal, in a sentence" ||
-		got.CreatedBy == nil || got.CreatedBy.Kind != domain.ActorUser || got.CreatedBy.ID != "u-planning" {
-		t.Fatalf("got = %+v (created by %+v), %v", got, got.CreatedBy, err)
+		got.Actor == nil || got.Actor.Kind != domain.ActorUser || got.Actor.ID != "u-planning" {
+		t.Fatalf("got = %+v (created by %+v), %v", got, got.Actor, err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, planner)
 	if err != nil || signup == nil || signup.Name != "Planner" || signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || !signup.Hosted {
@@ -157,7 +157,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 	revised, err := pes.GetPlatformExperiment(ctx, pe)
 	if err != nil || revised.ProposedAt != nil || len(revised.Revisions) != 1 || revised.Revisions[0].Message != "it must fit one accelerator" ||
-		revised.Revisions[0].By.Kind != domain.ActorUser || revised.Revisions[0].By.ID != "u-planning" || revised.EndsAt.Sub(until).Abs() > time.Second {
+		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.EndsAt.Sub(until).Abs() > time.Second {
 		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
 	if found, ending := listed(); !found || ending {

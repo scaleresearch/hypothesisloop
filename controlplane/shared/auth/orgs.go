@@ -136,7 +136,7 @@ func (a *Access) Inviter(ctx context.Context, orgID string) (userID string, err 
 		if key == nil {
 			return "", fmt.Errorf("the calling api key %s has no row", p.KeyID)
 		}
-		return key.CreatedBy, nil
+		return key.Actor.ID, nil
 	}
 	if p.UserID == "" {
 		return "", forbidden("forbidden: an invite is made by a signed-in person or with an API key of the org")
@@ -191,7 +191,7 @@ func (a *Access) KeyEnd(ctx context.Context, key *domain.APIKey) error {
 	if err != nil {
 		return err
 	}
-	if p.Kind == KindUser && p.UserID == key.CreatedBy {
+	if p.Kind == KindUser && p.UserID == key.Actor.ID {
 		return nil
 	}
 	return a.administers(ctx, p, key.OrgID)

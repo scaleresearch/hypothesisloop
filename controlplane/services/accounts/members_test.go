@@ -29,7 +29,7 @@ func TestAnInviteBringsAPersonIntoTheOrgOnce(t *testing.T) {
 	var created CreatedInvite
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/invites", name{"role": "member"}, http.StatusCreated, &created)
 	if !strings.HasPrefix(created.ID, "inv-") || !strings.HasPrefix(created.Token, "hli_") || created.OrgID != w.orgA ||
-		created.Role != domain.OrgRoleMember || created.CreatedBy != "u-owner" {
+		created.Role != domain.OrgRoleMember || created.Actor.ID != "u-owner" {
 		t.Fatalf("created invite: got = %+v, want id inv-..., token hli_..., made by the owner for a member of %s", created, w.orgA)
 	}
 	if got := created.ExpiresAt.Sub(time.Now()); got < domain.InviteLifetime-time.Minute || got > domain.InviteLifetime {
@@ -141,7 +141,7 @@ func TestAMemberMintsProjectKeysAndEndsTheirOwn(t *testing.T) {
 	w := newWorld(t)
 	var created CreatedAPIKey
 	w.ok("member", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": "mine", "project_id": w.projectA2}, http.StatusCreated, &created)
-	if created.CreatedBy != "u-member" || created.ProjectID != w.projectA2 {
+	if created.Actor.ID != "u-member" || created.ProjectID != w.projectA2 {
 		t.Fatalf("a member's key: got = %+v, want it made by u-member for %s", created.APIKey, w.projectA2)
 	}
 	if rec := w.call("member", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": "wide"}); rec.Code != http.StatusForbidden {

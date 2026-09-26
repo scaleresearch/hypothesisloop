@@ -130,21 +130,28 @@ var orgInviteColumns = `id, org_id, role, created_by, ` + userName("created_by")
 
 func scanOrgInvite(row rowScanner) (*domain.OrgInvite, error) {
 	i := &domain.OrgInvite{}
-	if err := row.Scan(&i.ID, &i.OrgID, &i.Role, &i.CreatedBy, &i.CreatedByName, &i.CreatedAt, &i.ExpiresAt, &i.AcceptedBy, &i.AcceptedByName, &i.AcceptedAt, &i.RevokedAt); err != nil {
+	var acceptedBy, acceptedByName string
+	i.Actor.Kind = domain.ActorUser
+	if err := row.Scan(&i.ID, &i.OrgID, &i.Role, &i.Actor.ID, &i.Actor.Name, &i.CreatedAt, &i.ExpiresAt, &acceptedBy, &acceptedByName, &i.AcceptedAt, &i.RevokedAt); err != nil {
 		return nil, err
+	}
+	if acceptedBy != "" {
+		accepted := userActor(acceptedBy, acceptedByName)
+		i.AcceptedActor = &accepted
 	}
 	return i, nil
 }
 
 // CreateOrgInvite stores an invite under the hash of its token. invite.ID, OrgID, Role,
-// CreatedBy and ExpiresAt are required.
+// Actor.ID and ExpiresAt are required.
 func (s *AccountsStore) CreateOrgInvite(ctx context.Context, invite *domain.OrgInvite, tokenHash string) error {
 	if !domain.ValidOrgRole(invite.Role) {
 		return fmt.Errorf("accounts_store.CreateOrgInvite: unknown role %q", invite.Role)
 	}
 	err := s.pool.pool.QueryRow(ctx, `
 INSERT INTO org_invites (id, org_id, role, token_hash, created_by, expires_at) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING created_at, `+userName("created_by"), invite.ID, invite.OrgID, string(invite.Role), tokenHash, invite.CreatedBy, invite.ExpiresAt).Scan(&invite.CreatedAt, &invite.CreatedByName)
+RETURNING created_at, `+userName("created_by"), invite.ID, invite.OrgID, string(invite.Role), tokenHash, invite.Actor.ID, invite.ExpiresAt).Scan(&invite.CreatedAt, &invite.Actor.Name)
+	invite.Actor.Kind = domain.ActorUser
 	if err != nil {
 		return fmt.Errorf("accounts_store.CreateOrgInvite: %w", err)
 	}

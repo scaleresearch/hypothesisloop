@@ -134,7 +134,7 @@ func (w *world) ClusterByReportedID(ctx context.Context, reportedID string) (*do
 // GetAPIKey knows one key of each org, key-of-<org>, made by a person, and the org key that calls.
 func (w *world) GetAPIKey(_ context.Context, id string) (*domain.APIKey, error) {
 	if id == "key-a" {
-		return &domain.APIKey{ID: id, OrgID: "org-a", CreatedBy: "user-a"}, nil
+		return &domain.APIKey{ID: id, OrgID: "org-a", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-a"}}, nil
 	}
 	org, ok := strings.CutPrefix(id, "key-of-")
 	if !ok || (org != "org-a" && org != "org-b") {

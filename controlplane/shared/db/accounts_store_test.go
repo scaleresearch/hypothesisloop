@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,29 +89,60 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 	if err != nil || len(members) != 1 || members[0].Name != "Ada King" {
 		t.Fatalf("members: got = %+v, %v, want the owner under their name", members, err)
 	}
-	key := &domain.APIKey{ID: "key-" + uuid.New().String(), OrgID: orgID, CreatedBy: userID, Name: "laptop"}
-	if err := accounts.CreateAPIKey(ctx, key, "hash-"+key.ID); err != nil || key.CreatedByName != "Ada King" {
+	key := &domain.APIKey{ID: "key-" + uuid.New().String(), OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "laptop"}
+	if err := accounts.CreateAPIKey(ctx, key, "hash-"+key.ID); err != nil || key.Actor.Name != "Ada King" {
 		t.Fatalf("created key: got = %+v, %v, want its creator's name", key, err)
 	}
-	if read, err := accounts.GetAPIKey(ctx, key.ID); err != nil || read.CreatedByName != "Ada King" {
+	if read, err := accounts.GetAPIKey(ctx, key.ID); err != nil || read.Actor.Name != "Ada King" {
 		t.Fatalf("read key: got = %+v, %v, want its creator's name", read, err)
 	}
-	invite := &domain.OrgInvite{ID: "inv-" + uuid.New().String(), OrgID: orgID, Role: domain.OrgRoleMember, CreatedBy: userID, ExpiresAt: time.Now().Add(time.Hour)}
-	if err := accounts.CreateOrgInvite(ctx, invite, "hash-"+invite.ID); err != nil || invite.CreatedByName != "Ada King" {
+	invite := &domain.OrgInvite{ID: "inv-" + uuid.New().String(), OrgID: orgID, Role: domain.OrgRoleMember, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, ExpiresAt: time.Now().Add(time.Hour)}
+	if err := accounts.CreateOrgInvite(ctx, invite, "hash-"+invite.ID); err != nil || invite.Actor.Name != "Ada King" {
 		t.Fatalf("created invite: got = %+v, %v, want its creator's name", invite, err)
 	}
-	if read, err := accounts.GetOrgInvite(ctx, invite.ID); err != nil || read.CreatedByName != "Ada King" || read.AcceptedByName != "" {
+	if read, err := accounts.GetOrgInvite(ctx, invite.ID); err != nil || read.Actor != userActor(userID, "Ada King") || read.AcceptedActor != nil {
 		t.Fatalf("read invite: got = %+v, %v, want its creator's name and nobody's as the one who accepted", read, err)
 	}
-	for by, want := range map[string]string{userID: "Ada King", key.ID: "laptop", "operator": ""} {
-		installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: int64(len(by)), AccountLogin: "acme-" + want, ConnectedBy: by}
-		if err := accounts.ConnectGitHubInstallation(ctx, installation); err != nil || installation.ConnectedByName != want {
-			t.Fatalf("installation connected by %s: got = %+v, %v, want name %q", by, installation, err, want)
+	connectors := []domain.Actor{userActor(userID, "Ada King"), {Kind: domain.ActorKey, ID: key.ID, Name: "laptop"}, {Kind: domain.ActorStaff, Name: "staff"}}
+	for n, want := range connectors {
+		by := domain.Actor{Kind: want.Kind, ID: want.ID}
+		installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: int64(n + 1), AccountLogin: "acme-" + string(want.Kind), ConnectedActor: by}
+		if err := accounts.ConnectGitHubInstallation(ctx, installation); err != nil || installation.ConnectedActor != want {
+			t.Fatalf("installation connected by %+v: got = %+v, %v, want %+v", by, installation, err, want)
 		}
 		read, err := accounts.GitHubInstallationOfAccount(ctx, orgID, installation.AccountLogin)
-		if err != nil || read == nil || read.ConnectedByName != want {
-			t.Fatalf("read installation connected by %s: got = %+v, %v, want name %q", by, read, err, want)
+		if err != nil || read == nil || read.ConnectedActor != want {
+			t.Fatalf("read installation connected by %+v: got = %+v, %v, want %+v", by, read, err, want)
 		}
+	}
+
+	// A database from before the kind was kept: loading the schema reads it off what
+	// connected_by names, and refuses to load while one row names neither a user nor a key.
+	if _, err := pool.pool.Exec(ctx, `
+UPDATE org_github_installations SET connected_by_kind = '', connected_by = CASE installation_id WHEN 3 THEN 'hl-admin' ELSE connected_by END WHERE org_id = $1`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HYPOTHESISLOOP_SCHEMA_SQL", "schema.sql")
+	if err := ApplySchema(ctx, pool); err != nil {
+		t.Fatalf("ApplySchema over rows with no kind: got = %v, want nil", err)
+	}
+	listed, err := accounts.ListGitHubInstallations(ctx, orgID)
+	if err != nil || len(listed) != len(connectors) {
+		t.Fatalf("installations after the schema loaded: got = %+v, %v", listed, err)
+	}
+	for n, in := range listed {
+		if in.ConnectedActor != connectors[n] {
+			t.Errorf("installation %d after the schema loaded: got = %+v, want %+v", in.InstallationID, in.ConnectedActor, connectors[n])
+		}
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE org_github_installations SET connected_by_kind = '', connected_by = 'nobody-known' WHERE org_id = $1 AND installation_id = 1`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.pool.Exec(context.Background(), `DELETE FROM org_github_installations WHERE org_id = $1`, orgID) //nolint:errcheck
+	})
+	if err := ApplySchema(ctx, pool); err == nil || !strings.Contains(err.Error(), "nobody-known") {
+		t.Fatalf("ApplySchema over a row that names nobody: got = %v, want a refusal naming it", err)
 	}
 }
 
@@ -239,19 +271,19 @@ func TestAPIKeyIsFoundByHashUntilRevoked(t *testing.T) {
 	foreign := defaultProjectOf(t, accounts, otherOrg)
 	suffix := uuid.New().String()[:8]
 
-	orgKey := &domain.APIKey{ID: "k1" + suffix, OrgID: orgID, CreatedBy: userID, Name: "ci"}
+	orgKey := &domain.APIKey{ID: "k1" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "ci"}
 	if err := accounts.CreateAPIKey(ctx, orgKey, "hash-org-"+suffix); err != nil {
 		t.Fatalf("create org key: got = %v, want = nil", err)
 	}
-	projectKey := &domain.APIKey{ID: "k2" + suffix, OrgID: orgID, ProjectID: project.ID, CreatedBy: userID, Name: "one project"}
+	projectKey := &domain.APIKey{ID: "k2" + suffix, OrgID: orgID, ProjectID: project.ID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "one project"}
 	if err := accounts.CreateAPIKey(ctx, projectKey, "hash-project-"+suffix); err != nil {
 		t.Fatalf("create project key: got = %v, want = nil", err)
 	}
-	crossing := &domain.APIKey{ID: "k3" + suffix, OrgID: orgID, ProjectID: foreign.ID, CreatedBy: userID, Name: "crossing"}
+	crossing := &domain.APIKey{ID: "k3" + suffix, OrgID: orgID, ProjectID: foreign.ID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "crossing"}
 	if err := accounts.CreateAPIKey(ctx, crossing, "hash-crossing-"+suffix); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("key bound to another org's project: got = %v, want = %v", err, ErrProjectNotFound)
 	}
-	duplicate := &domain.APIKey{ID: "k4" + suffix, OrgID: orgID, CreatedBy: userID, Name: "same hash"}
+	duplicate := &domain.APIKey{ID: "k4" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "same hash"}
 	if err := accounts.CreateAPIKey(ctx, duplicate, "hash-org-"+suffix); err == nil {
 		t.Fatal("a second key under the same hash: got = nil, want an error")
 	}

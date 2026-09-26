@@ -129,7 +129,7 @@ describe('a proposed draft', () => {
   })
 
   it('keeps the proposal readable while it is revised, with what was asked, and takes no acceptance', async () => {
-    show(draft({ proposal, revisions: [{ message: 'It must fit one RTX 4090.', by: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
+    show(draft({ proposal, revisions: [{ message: 'It must fit one RTX 4090.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
     expect(screen.getByText('It must fit one RTX 4090.')).toBeTruthy()
     expect(screen.getByText(/Ada asked/)).toBeTruthy()
     expect(screen.getByText('Proposed experiment: Cosine or constant')).toBeTruthy()

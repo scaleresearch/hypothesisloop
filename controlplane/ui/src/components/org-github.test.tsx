@@ -25,8 +25,8 @@ const owner: Me = {
 }
 const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member' }] }
 const app = { slug: 'hl', client_id: 'app', install_url: 'https://github.test/apps/hl/installations/new', authorize_url: 'https://github.test/login/oauth/authorize?client_id=app' }
-const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u1', connected_by_name: 'Ada Lovelace', connected_at: at }
-const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_by: 'key_3', connected_by_name: 'ci', connected_at: at }
+const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, connected_at: at }
+const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_actor: { kind: 'key', id: 'key_3', name: 'ci' }, connected_at: at }
 
 let installations: GitHubInstallation[]
 
@@ -78,7 +78,7 @@ describe('the connected GitHub accounts', () => {
   it('say that experiments run without a repository when there are none', async () => {
     installations = []
     show()
-    expect(await screen.findByText(/No GitHub account is connected to Lab, so its platform experiments run without a repository\./)).toBeTruthy()
+    expect(await screen.findByText(/No GitHub account is connected to Lab, so its experiments run without a repository\./)).toBeTruthy()
   })
 
   it('say why they could not be read', async () => {

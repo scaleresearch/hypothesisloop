@@ -17,7 +17,7 @@ func TestRevokingAKeyRevokesEveryKeyMintedFromIt(t *testing.T) {
 	userID, orgID := newTestUserHome(t, accounts)
 	suffix := uuid.New().String()[:8]
 	key := func(name, mintedBy string) *domain.APIKey {
-		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, CreatedBy: userID, MintedBy: mintedBy, Name: name}
+		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, MintedBy: mintedBy, Name: name}
 		if err := accounts.CreateAPIKey(ctx, k, "hash-"+name+suffix); err != nil {
 			t.Fatalf("create key %s: got = %v, want = nil", name, err)
 		}
@@ -29,11 +29,11 @@ func TestRevokingAKeyRevokesEveryKeyMintedFromIt(t *testing.T) {
 	sibling := key("sibling", root.ID)
 	unrelated := key("unrelated", "")
 
-	orphan := &domain.APIKey{ID: "orphan" + suffix, OrgID: orgID, CreatedBy: userID, MintedBy: "missing" + suffix, Name: "orphan"}
+	orphan := &domain.APIKey{ID: "orphan" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, MintedBy: "missing" + suffix, Name: "orphan"}
 	if err := accounts.CreateAPIKey(ctx, orphan, "hash-orphan"+suffix); err == nil {
 		t.Fatal("a key minted from a key that does not exist: got = nil, want an error")
 	}
-	if got, err := accounts.GetAPIKey(ctx, grandchild.ID); err != nil || got == nil || got.MintedBy != child.ID || got.CreatedBy != userID {
+	if got, err := accounts.GetAPIKey(ctx, grandchild.ID); err != nil || got == nil || got.MintedBy != child.ID || got.Actor.ID != userID {
 		t.Fatalf("read a minted key: got = %+v, %v, want it minted by %s", got, err, child.ID)
 	}
 
@@ -76,7 +76,7 @@ func TestAKeyMintedWhileItsParentIsRevokedNeverWorks(t *testing.T) {
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 	suffix := uuid.New().String()[:8]
-	parent := &domain.APIKey{ID: "parent" + suffix, OrgID: orgID, CreatedBy: userID, Name: "parent"}
+	parent := &domain.APIKey{ID: "parent" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "parent"}
 	if err := accounts.CreateAPIKey(ctx, parent, "hash-parent"+suffix); err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func TestAKeyMintedWhileItsParentIsRevokedNeverWorks(t *testing.T) {
 	if err := accounts.RevokeAPIKey(ctx, parent.ID); err != nil {
 		t.Fatal(err)
 	}
-	child := &domain.APIKey{ID: "child" + suffix, OrgID: orgID, CreatedBy: minter.CreatedBy, MintedBy: minter.ID, Name: "child"}
+	child := &domain.APIKey{ID: "child" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: minter.Actor.ID}, MintedBy: minter.ID, Name: "child"}
 	if err := accounts.CreateAPIKey(ctx, child, "hash-child"+suffix); err != nil {
 		t.Fatalf("the late mint: got = %v, want it written, as the race writes it", err)
 	}
-	grandchild := &domain.APIKey{ID: "grandchild" + suffix, OrgID: orgID, CreatedBy: userID, MintedBy: child.ID, Name: "grandchild"}
+	grandchild := &domain.APIKey{ID: "grandchild" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, MintedBy: child.ID, Name: "grandchild"}
 	if err := accounts.CreateAPIKey(ctx, grandchild, "hash-grandchild"+suffix); err != nil {
 		t.Fatal(err)
 	}
@@ -131,13 +131,13 @@ func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
 	}
 	key := func(name, createdBy, mintedBy string) {
 		t.Helper()
-		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, CreatedBy: createdBy, MintedBy: mintedBy, Name: name}
+		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: createdBy}, MintedBy: mintedBy, Name: name}
 		if err := accounts.CreateAPIKey(ctx, k, "hash-"+name+suffix); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	early := &domain.APIKey{ID: "early" + suffix, OrgID: orgID, CreatedBy: staffID, Name: "early"}
+	early := &domain.APIKey{ID: "early" + suffix, OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: staffID}, Name: "early"}
 	if err := accounts.CreateAPIKey(ctx, early, "hash-early"+suffix); !errors.Is(err, ErrAPIKeyCreatorLacksOrg) {
 		t.Fatalf("a key in the name of a user who neither owns the org nor is staff: got = %v, want = %v", err, ErrAPIKeyCreatorLacksOrg)
 	}
@@ -179,7 +179,7 @@ func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range listed {
-		if want := k.CreatedBy == ownerID; k.Orphaned != want {
+		if want := k.Actor.ID == ownerID; k.Orphaned != want {
 			t.Errorf("key %s listed orphaned = %v, want = %v", k.ID, k.Orphaned, want)
 		}
 	}

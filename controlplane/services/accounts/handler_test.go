@@ -105,18 +105,18 @@ func newWorld(t *testing.T) *world {
 	w.projectA2 = second.ID
 	w.personKey, w.parentKey, w.memberKey = "k-person", "k-org", "k-member"
 	w.inviteA, w.inviteToken = "inv-a", "hli_token-of-inv-a"
-	seeded := &domain.OrgInvite{ID: w.inviteA, OrgID: w.orgA, Role: domain.OrgRoleMember, CreatedBy: "u-owner", ExpiresAt: w.store.clock.Add(domain.InviteLifetime)}
+	seeded := &domain.OrgInvite{ID: w.inviteA, OrgID: w.orgA, Role: domain.OrgRoleMember, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}, ExpiresAt: w.store.clock.Add(domain.InviteLifetime)}
 	if err := w.store.CreateOrgInvite(ctx, seeded, auth.HashAPIKey(w.inviteToken)); err != nil {
 		t.Fatalf("seed invite: %v", err)
 	}
 	for _, key := range []*domain.APIKey{
-		{ID: "k-person", OrgID: w.orgA, CreatedBy: "u-owner", Name: "made by the owner"},
-		{ID: "k-org", OrgID: w.orgA, CreatedBy: "u-owner", Name: "org-wide"},
-		{ID: "k-prj", OrgID: w.orgA, ProjectID: w.projectA, CreatedBy: "u-owner", Name: "one project"},
-		{ID: "k-foreign", OrgID: w.orgB, CreatedBy: "u-other", Name: "of org b"},
+		{ID: "k-person", OrgID: w.orgA, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}, Name: "made by the owner"},
+		{ID: "k-org", OrgID: w.orgA, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}, Name: "org-wide"},
+		{ID: "k-prj", OrgID: w.orgA, ProjectID: w.projectA, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"}, Name: "one project"},
+		{ID: "k-foreign", OrgID: w.orgB, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-other"}, Name: "of org b"},
 	} {
 		if key.ID == "k-prj" {
-			member := &domain.APIKey{ID: "k-member", OrgID: w.orgA, ProjectID: w.projectA, CreatedBy: "u-member", Name: "made by the member"}
+			member := &domain.APIKey{ID: "k-member", OrgID: w.orgA, ProjectID: w.projectA, Actor: domain.Actor{Kind: domain.ActorUser, ID: "u-member"}, Name: "made by the member"}
 			if err := w.store.CreateAPIKey(ctx, member, "hash-k-member"); err != nil {
 				t.Fatalf("seed key k-member: %v", err)
 			}
@@ -505,7 +505,7 @@ func TestAKeysSecretIsReturnedOnceAndNeverListed(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(created.Token, "hlk_"+created.ID+"_") || created.CreatedBy != "u-owner" || created.ProjectID != w.projectA2 || created.MintedBy != "" {
+	if !strings.HasPrefix(created.Token, "hlk_"+created.ID+"_") || created.Actor.ID != "u-owner" || created.ProjectID != w.projectA2 || created.MintedBy != "" {
 		t.Fatalf("created key: got = %+v, want an hlk_ token of u-owner bound to %s", created, w.projectA2)
 	}
 	if w.store.hashes[created.ID] != auth.HashAPIKey(created.Token) {
@@ -571,8 +571,8 @@ func TestAKeyReachesOnlyTheKeysMintedFromIt(t *testing.T) {
 	if child.MintedBy != "k-org" || grandchild.MintedBy != child.ID {
 		t.Fatalf("minted_by: got = %q, %q, want k-org and %s", child.MintedBy, grandchild.MintedBy, child.ID)
 	}
-	if child.CreatedBy != "u-owner" || grandchild.CreatedBy != "u-owner" {
-		t.Fatalf("created_by of minted keys: got = %q, %q, want the person behind the first key", child.CreatedBy, grandchild.CreatedBy)
+	if child.Actor.ID != "u-owner" || grandchild.Actor.ID != "u-owner" {
+		t.Fatalf("created_by of minted keys: got = %q, %q, want the person behind the first key", child.Actor.ID, grandchild.Actor.ID)
 	}
 
 	for caller, want := range map[string][]string{

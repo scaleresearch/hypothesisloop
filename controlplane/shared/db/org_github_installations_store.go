@@ -14,19 +14,34 @@ import (
 // ErrGitHubInstallationNotFound reports an installation the org has not connected.
 var ErrGitHubInstallationNotFound = errors.New("the org has not connected that GitHub installation")
 
-// connectedByName is the SQL of the name of who connected an installation: the user, or the API
-// key it was connected with.
-const connectedByName = `COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''),
-                (SELECT named.name FROM api_keys named WHERE named.id = connected_by), '')`
+// installationColumns reads an installation with who connected it: a user or the API key it was
+// connected with, under the name each carries now or its id while it carries none, or staff.
+const installationColumns = `org_id, installation_id, account_login, connected_by_kind,
+       CASE connected_by_kind WHEN 'staff' THEN '' ELSE connected_by END,
+       CASE connected_by_kind
+         WHEN 'user' THEN COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''), connected_by)
+         WHEN 'key' THEN COALESCE((SELECT named.name FROM api_keys named WHERE named.id = connected_by AND named.name <> ''), connected_by)
+         ELSE connected_by_kind END,
+       connected_at`
 
-// ConnectGitHubInstallation records an installation as connected to an org. One that is already
-// connected keeps who connected it and when, and takes the account's name as it stands now.
+func scanInstallation(row rowScanner, in *domain.OrgGitHubInstallation) error {
+	return row.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedActor.Kind, &in.ConnectedActor.ID, &in.ConnectedActor.Name, &in.ConnectedAt)
+}
+
+// ConnectGitHubInstallation records an installation as connected to an org by in.ConnectedActor:
+// a user, a key or staff. One that is already connected keeps who connected it and when, and
+// takes the account's name as it stands now.
 func (s *AccountsStore) ConnectGitHubInstallation(ctx context.Context, in *domain.OrgGitHubInstallation) error {
-	err := s.pool.pool.QueryRow(ctx, `
-INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by)
-VALUES ($1, $2, $3, $4)
+	switch in.ConnectedActor.Kind {
+	case domain.ActorUser, domain.ActorKey, domain.ActorStaff:
+	default:
+		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: an installation is connected by a user, a key or staff, got %q", in.ConnectedActor.Kind)
+	}
+	err := scanInstallation(s.pool.pool.QueryRow(ctx, `
+INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by_kind, connected_by)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login
-RETURNING connected_by, `+connectedByName+`, connected_at`, in.OrgID, in.InstallationID, in.AccountLogin, in.ConnectedBy).Scan(&in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt)
+RETURNING `+installationColumns, in.OrgID, in.InstallationID, in.AccountLogin, string(in.ConnectedActor.Kind), in.ConnectedActor.ID), in)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 		return ErrOrgNotFound
@@ -40,7 +55,7 @@ RETURNING connected_by, `+connectedByName+`, connected_at`, in.OrgID, in.Install
 // ListGitHubInstallations returns the installations an org connected, oldest first.
 func (s *AccountsStore) ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT org_id, installation_id, account_login, connected_by, `+connectedByName+`, connected_at
+SELECT `+installationColumns+`
 FROM org_github_installations WHERE org_id = $1
 ORDER BY connected_at, installation_id`, orgID)
 	if err != nil {
@@ -50,7 +65,7 @@ ORDER BY connected_at, installation_id`, orgID)
 	out := []*domain.OrgGitHubInstallation{}
 	for rows.Next() {
 		in := &domain.OrgGitHubInstallation{}
-		if err := rows.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt); err != nil {
+		if err := scanInstallation(rows, in); err != nil {
 			return nil, fmt.Errorf("accounts_store.ListGitHubInstallations: scan: %w", err)
 		}
 		out = append(out, in)
@@ -62,11 +77,10 @@ ORDER BY connected_at, installation_id`, orgID)
 // named, whatever its casing, or nil. GitHub allows one installation of an App per account.
 func (s *AccountsStore) GitHubInstallationOfAccount(ctx context.Context, orgID, accountLogin string) (*domain.OrgGitHubInstallation, error) {
 	in := &domain.OrgGitHubInstallation{}
-	err := s.pool.pool.QueryRow(ctx, `
-SELECT org_id, installation_id, account_login, connected_by, `+connectedByName+`, connected_at
+	err := scanInstallation(s.pool.pool.QueryRow(ctx, `
+SELECT `+installationColumns+`
 FROM org_github_installations WHERE org_id = $1 AND lower(account_login) = lower($2)
-ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin).
-		Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedBy, &in.ConnectedByName, &in.ConnectedAt)
+ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin), in)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -68,9 +68,9 @@ function Credential({ actor }: { actor: ActorRecord }) {
 /**
  * Who made a record: the credential the request came with. agentID is the agent whose record it
  * is, shown first when another credential wrote for it. `compact` is one truncated line of text,
- * for a graph node or an outline row.
+ * for a graph node or an outline row. `self` marks the signed-in person's own.
  */
-export function Actor({ actor, agentID = '', compact = false }: { actor: ActorRecord; agentID?: string; compact?: boolean }) {
+export function Actor({ actor, agentID = '', compact = false, self = false }: { actor: ActorRecord; agentID?: string; compact?: boolean; self?: boolean }) {
   const agentName = useAgentName()(agentID)
   if (compact) {
     const label = actorLabel(actor, agentID, agentName)
@@ -82,6 +82,7 @@ export function Actor({ actor, agentID = '', compact = false }: { actor: ActorRe
     <span className="inline-flex items-center gap-1.5">
       {agent && <>{agent}<span className="text-subtle">by</span></>}
       <Credential actor={actor} />
+      {self && <Badge tone="accent">you</Badge>}
     </span>
   )
 }

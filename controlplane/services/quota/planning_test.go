@@ -85,8 +85,8 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if !strings.HasSuffix(pe.Name, "…") || len([]rune(pe.Name)) > draftNameLength+1 || !strings.HasPrefix(goal, strings.TrimSuffix(pe.Name, "…")) {
 		t.Errorf("name = %q, want the goal cut at a word", pe.Name)
 	}
-	if pe.CreatedBy == nil || *pe.CreatedBy != (domain.Actor{Kind: domain.ActorUser, ID: "u-1", Name: "Ada"}) {
-		t.Errorf("created_by = %+v, want the person who asked", pe.CreatedBy)
+	if pe.Actor == nil || *pe.Actor != (domain.Actor{Kind: domain.ActorUser, ID: "u-1", Name: "Ada"}) {
+		t.Errorf("actor = %+v, want the person who asked", pe.Actor)
 	}
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
@@ -521,7 +521,7 @@ func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Act
 			return db.ErrNothingProposed
 		}
 		pe.ProposedAt, pe.EndsAt = nil, planUntil
-		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, By: by, At: time.Now().UTC()})
+		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
 	}
 	return db.ErrNotDraft
@@ -562,7 +562,7 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	if pe.ProposedAt != nil || out["proposed_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
 		t.Errorf("revised draft %+v, want no proposed_at and the proposal kept", pe)
 	}
-	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].By.Kind != domain.ActorUser || pe.Revisions[0].By.ID != "u-1" {
+	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].Actor.Kind != domain.ActorUser || pe.Revisions[0].Actor.ID != "u-1" {
 		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
 	}
 	if left := pe.EndsAt.Sub(before); left < DefaultPlanning.Limit-time.Minute || left > DefaultPlanning.Limit+time.Minute {
@@ -571,7 +571,7 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	// Read back, whoever asked is named.
 	code, out = call("GET", "/platform-experiments/pe-draft", nil)
 	revisions, _ := out["revisions"].([]any)
-	if code != http.StatusOK || len(revisions) != 1 || revisions[0].(map[string]any)["by"].(map[string]any)["name"] != "named u-1" {
+	if code != http.StatusOK || len(revisions) != 1 || revisions[0].(map[string]any)["actor"].(map[string]any)["name"] != "named u-1" {
 		t.Errorf("read back: got = %d %v, want the revision with its author named", code, out["revisions"])
 	}
 	// The planner proposes again, and the draft waits for the person again.

@@ -91,10 +91,15 @@ func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, name, orgNam
 	return user, orgIDs, nil
 }
 
-// userName is the SQL of the display name of the user whose id the expression idExpr yields,
-// empty when there is no such user or they carry no name.
+// userName is the SQL of the name of the user whose id the expression idExpr yields as an actor
+// carries it: their display name, or that id while they carry none.
 func userName(idExpr string) string {
-	return `COALESCE((SELECT named.name FROM users named WHERE named.id = ` + idExpr + `), '')`
+	return `COALESCE((SELECT named.name FROM users named WHERE named.id = ` + idExpr + ` AND named.name <> ''), ` + idExpr + `, '')`
+}
+
+// userActor is the user id as an actor, under the name userName read for it.
+func userActor(id, name string) domain.Actor {
+	return domain.Actor{Kind: domain.ActorUser, ID: id, Name: name}
 }
 
 type rowQuerier interface {
@@ -403,13 +408,14 @@ const apiKeyHeldBy = `(EXISTS (SELECT 1 FROM users u WHERE u.id = k.created_by A
 
 func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 	k := &domain.APIKey{}
-	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.CreatedBy, &k.CreatedByName, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt, &k.Orphaned); err != nil {
+	k.Actor.Kind = domain.ActorUser
+	if err := row.Scan(&k.ID, &k.OrgID, &k.ProjectID, &k.Actor.ID, &k.Actor.Name, &k.MintedBy, &k.Name, &k.CreatedAt, &k.RevokedAt, &k.Orphaned); err != nil {
 		return nil, err
 	}
 	return k, nil
 }
 
-// CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, CreatedBy and Name are
+// CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, Actor.ID and Name are
 // required; the project, when set, must belong to the org, and the creator must be one who may
 // hold the key (apiKeyHeldBy), which is what the key is held to for as long as it lives.
 func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
@@ -433,7 +439,8 @@ SELECT k.id, k.key_hash, k.org_id, k.project_id, k.created_by, k.minted_by, k.na
 FROM (SELECT $1::text AS id, $2::text AS key_hash, $3::text AS org_id, $4::text AS project_id,
              $5::text AS created_by, $6::text AS minted_by, $7::text AS name) k
 WHERE `+apiKeyHeldBy+`
-RETURNING created_at, `+userName("created_by"), key.ID, keyHash, key.OrgID, projectID, key.CreatedBy, mintedBy, key.Name).Scan(&key.CreatedAt, &key.CreatedByName)
+RETURNING created_at, `+userName("created_by"), key.ID, keyHash, key.OrgID, projectID, key.Actor.ID, mintedBy, key.Name).Scan(&key.CreatedAt, &key.Actor.Name)
+	key.Actor.Kind = domain.ActorUser
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrAPIKeyCreatorLacksOrg
 	}

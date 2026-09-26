@@ -615,7 +615,7 @@ async function scenarios(browser) {
   await page.route(runInstallations, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { ...runCors, 'X-Total-Count': '1' },
-      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() }],
+      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
     })
     : route.fallback())
   await page.route(runRepositories, route => route.fulfill({
@@ -730,7 +730,7 @@ async function scenarios(browser) {
     if (request.method() === 'OPTIONS') return route.fallback()
     if (request.method() === 'POST') {
       draftWrites.push({ path, body: request.postDataJSON() })
-      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, revisions: [{ message: request.postDataJSON().message, by: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
+      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
@@ -960,7 +960,7 @@ async function scenarios(browser) {
   const githubCard = page.locator('#github')
   assert.equal((await installationsRead).status(), 200)
   assert.deepEqual(await (await installationsRead).json(), [], 'a new org has connected no GitHub account')
-  await githubCard.getByText(`No GitHub account is connected to ${ada.name} Lab, so its platform experiments run without a repository.`).waitFor()
+  await githubCard.getByText(`No GitHub account is connected to ${ada.name} Lab, so its experiments run without a repository.`).waitFor()
   const stackHasGitHub = (await appRead).status() === 200
   if (stackHasGitHub) {
     await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
@@ -1055,7 +1055,7 @@ async function scenarios(browser) {
   // install goes on to authorise, and the connect names that installation.
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
   }
   const authorizesBeforeInstall = authorizes.length
   await githubCard.getByRole('button', { name: 'Install the App on an account' }).click()
@@ -1089,7 +1089,7 @@ async function scenarios(browser) {
   await shot(page, 'github-choose-account', githubCard)
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
   }
   await choice.getByRole('button', { name: 'ada-personal' }).click()
   await page.waitForURL(landed)
@@ -1499,7 +1499,7 @@ async function scenarios(browser) {
     await otherPage.route(url => url.href.startsWith(memberInstallationsAPI), route => route.request().method() === 'GET'
       ? route.fulfill({
         headers: { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count', 'X-Total-Count': '1' },
-        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() }],
+        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
       })
       : route.fallback())
     await otherPage.goto(`${UI}/settings?project=${adaMe.projects[0].id}`)

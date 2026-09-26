@@ -8,7 +8,7 @@ type Module = typeof import('@/lib/github-connect')
 const AUTHORIZE = 'https://github.test/login/oauth/authorize?client_id=app'
 const INSTALL = 'https://github.test/apps/hl/installations/new'
 const origin = { orgID: 'org_a', projectID: 'prj_1' }
-const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u1', connected_by_name: 'Ada', connected_at: '2026-01-01T00:00:00Z' }
+const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z' }
 
 let lib: Module
 // Loaded with the module under test, so its refusals are the class that module checks for.

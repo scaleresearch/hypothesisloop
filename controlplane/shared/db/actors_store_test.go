@@ -19,7 +19,7 @@ func TestActorsAreNamedByWhatTheyCarryNow(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE users SET name = '' WHERE id = $1`, quiet); err != nil {
 		t.Fatalf("clear a name: %v", err)
 	}
-	key := &domain.APIKey{ID: "key-" + uuid.New().String(), OrgID: orgID, CreatedBy: userID, Name: "laptop"}
+	key := &domain.APIKey{ID: "key-" + uuid.New().String(), OrgID: orgID, Actor: domain.Actor{Kind: domain.ActorUser, ID: userID}, Name: "laptop"}
 	if err := accounts.CreateAPIKey(ctx, key, "hash-"+key.ID); err != nil {
 		t.Fatalf("create key: %v", err)
 	}

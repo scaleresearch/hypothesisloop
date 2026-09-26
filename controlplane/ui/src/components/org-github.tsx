@@ -8,14 +8,14 @@ import {
 import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
-import { Person } from '@/components/actor'
+import { Actor } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Table } from '@/components/ui/table'
 import { Callout, EmptyState, ErrorMessage, Loading } from '@/components/ui/status-message'
 
 /**
- * The GitHub accounts the org connected through the platform's GitHub App. A platform experiment
+ * The GitHub accounts the org connected through the platform's GitHub App. An experiment
  * of the org may name any repository such an account's installation covers. An owner connects an
  * account, in one pass through GitHub, and disconnects one; a member reads the list.
  */
@@ -60,7 +60,7 @@ export function OrgGitHub() {
   return (
     <div className="grid gap-3.5">
       <p className="text-sm text-muted">
-        A platform experiment of {org.name} names the repository its agents clone and push their branches to. It may name any
+        An experiment of {org.name} names the repository its agents clone and push their branches to. It may name any
         repository of a GitHub account connected here, and that account&apos;s owner chooses the repositories on GitHub.
       </p>
 
@@ -110,7 +110,7 @@ export function OrgGitHub() {
       {!data && !error && <Loading />}
       {installations && installations.length === 0 && (
         <EmptyState>
-          No GitHub account is connected to {org.name}, so its platform experiments run without a repository.
+          No GitHub account is connected to {org.name}, so its experiments run without a repository.
           {administers ? '' : ' An owner connects one here.'}
         </EmptyState>
       )}
@@ -124,7 +124,7 @@ export function OrgGitHub() {
               <tr key={installation.installation_id}>
                 <td className="font-mono text-xs font-semibold">{installation.account_login}</td>
                 <td>
-                  <Person id={installation.connected_by} name={installation.connected_by_name} self={installation.connected_by === me.user_id} />
+                  <Actor actor={installation.connected_actor} self={installation.connected_actor.kind === 'user' && installation.connected_actor.id === me.user_id} />
                 </td>
                 <td className="font-mono text-xs text-muted">{new Date(installation.connected_at).toLocaleString()}</td>
                 {administers && (
@@ -146,7 +146,7 @@ export function OrgGitHub() {
           onConfirm={() => disconnect(disconnecting)}
           onCancel={() => setDisconnecting(null)}
         >
-          Platform experiments that name one of its repositories keep running, but their agents and jobs can no longer
+          Experiments that name one of its repositories keep running, but their agents and jobs can no longer
           clone, fetch or push within the hour. The App stays installed on GitHub.
         </ConfirmDialog>
       )}

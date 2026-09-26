@@ -64,12 +64,12 @@ beforeEach(() => {
     { org_id: 'org_a', user_id: 'u1', name: 'Ada Lovelace', role: 'owner', joined_at: at },
     { org_id: 'org_a', user_id: 'u2', name: 'Bob Stone', role: 'member', joined_at: at },
   ]
-  invites = [{ id: 'inv_1', org_id: 'org_a', role: 'member', created_by: 'u1', created_by_name: 'Ada Lovelace', created_at: at, expires_at: expires }]
+  invites = [{ id: 'inv_1', org_id: 'org_a', role: 'member', actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, created_at: at, expires_at: expires }]
   vi.mocked(fetchMe).mockResolvedValue(owner)
   vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: [...members], total: members.length }))
   vi.mocked(fetchOrgInvites).mockImplementation(async () => ({ items: [...invites], total: invites.length }))
   vi.mocked(createOrgInvite).mockImplementation(async (orgID, role) => {
-    const invite: OrgInvite = { id: 'inv_2', org_id: orgID, role, created_by: 'u1', created_by_name: 'Ada Lovelace', created_at: at, expires_at: expires }
+    const invite: OrgInvite = { id: 'inv_2', org_id: orgID, role, actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, created_at: at, expires_at: expires }
     invites = [invite, ...invites]
     return { ...invite, token: TOKEN }
   })

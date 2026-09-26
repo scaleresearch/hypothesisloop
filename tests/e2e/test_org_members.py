@@ -90,12 +90,12 @@ def test_an_invite_brings_a_person_into_the_org_once(api: API, run_id: str):
 
     assert _call(guest.home, "GET", f"/orgs/{org}/members").status_code == 404, "an org is not found by someone outside it"
     created = json.loads(owner.home.hl("org", "invites", "create", "--role", "member"))
-    assert created["id"].startswith("inv-") and created["token"].startswith("hli_") and created["created_by"] == owner.subject
+    assert created["id"].startswith("inv-") and created["token"].startswith("hli_") and created["actor"]["id"] == owner.subject
 
     listed = _call(owner.home, "GET", f"/orgs/{org}/invites")
     assert listed.status_code == 200 and listed.headers["X-Total-Count"] == "1"
     assert [i["id"] for i in listed.json()] == [created["id"]] and "token" not in listed.text, f"pending invites: {listed.text}"
-    assert created["created_by_name"] == owner.name and listed.json()[0]["created_by_name"] == owner.name, "an invite names who made it"
+    assert created["actor"] == {"kind": "user", "id": owner.subject, "name": owner.name} and listed.json()[0]["actor"] == created["actor"], "an invite names who made it"
     assert [i["id"] for i in _lines(owner.home.hl("org", "invites", "list"))] == [created["id"]]
 
     _refused(owner.home, "POST", "/invites/accept", {"token": created["token"]}, 409, "already_member")
@@ -172,7 +172,7 @@ def test_a_member_reads_the_org_and_changes_none_of_what_an_owner_holds(api: API
     created = _call(member, "POST", f"/orgs/{org}/api-keys", {"name": "a member's", "project_id": project})
     assert created.status_code == 201, f"a member's project key: {created.status_code} {created.text}"
     key = created.json()
-    assert key["created_by"] == guest.subject and key["project_id"] == project
+    assert key["actor"]["id"] == guest.subject and key["project_id"] == project
     with_key = api.as_caller(key["token"], org, project)
     assert with_key.get_json("/me")["kind"] == "key"
     second = _call(member, "POST", f"/orgs/{org}/api-keys", {"name": "another", "project_id": project}).json()
@@ -225,7 +225,7 @@ def test_an_api_key_manages_members_and_joins_nothing(api: API, run_id: str):
     with_key = api.as_caller(key["token"], org, owner.home.project_id)
 
     invite = json.loads(with_key.hl("org", "invites", "create"))
-    assert invite["role"] == "member" and invite["created_by"] == owner.subject, "an invite made with a key is answered for by the key's creator"
+    assert invite["role"] == "member" and invite["actor"]["id"] == owner.subject, "an invite made with a key is answered for by the key's creator"
     refused = _call(with_key, "POST", "/invites/accept", {"token": invite["token"]})
     assert refused.status_code == 403, f"an API key accepting an invite: {refused.status_code} {refused.text}"
     assert _call(guest.home, "POST", "/invites/accept", {"token": invite["token"]}).status_code == 201

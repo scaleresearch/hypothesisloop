@@ -9,6 +9,7 @@ import type { Draft, Proposal } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
 import type { MetricDataPoint, MetricDefinition } from '@/types'
+import { actorLabel } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
@@ -204,7 +205,7 @@ function Planning({ draft, revising }: { draft: Draft; revising: boolean }) {
 }
 
 /**
- * The page of a platform experiment that is still a draft: the sentence it came from, what its
+ * The page of an experiment that is still a draft: the sentence it came from, what its
  * planner is doing or proposed, and the two things a person does with a proposal, accepting it
  * at a cost they state or asking for a change. A reader of a shared draft is shown neither.
  */
@@ -238,7 +239,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           <p className="text-sm">{draft.goal}</p>
           {(draft.revisions ?? []).map(revision => (
             <p key={revision.at} className="text-sm">
-              <span className="text-xs text-muted">{revision.by.name || revision.by.kind} asked {relTime(revision.at)}: </span>
+              <span className="text-xs text-muted">{actorLabel(revision.actor)} asked {relTime(revision.at)}: </span>
               {revision.message}
             </p>
           ))}

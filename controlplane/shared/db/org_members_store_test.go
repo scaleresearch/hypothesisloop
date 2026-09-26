@@ -17,7 +17,7 @@ import (
 func newTestInvite(t *testing.T, accounts *AccountsStore, orgID, createdBy string, role domain.OrgRole, lifetime time.Duration) (*domain.OrgInvite, string) {
 	t.Helper()
 	suffix := uuid.New().String()
-	invite := &domain.OrgInvite{ID: "inv-" + suffix, OrgID: orgID, Role: role, CreatedBy: createdBy, ExpiresAt: time.Now().Add(lifetime)}
+	invite := &domain.OrgInvite{ID: "inv-" + suffix, OrgID: orgID, Role: role, Actor: domain.Actor{Kind: domain.ActorUser, ID: createdBy}, ExpiresAt: time.Now().Add(lifetime)}
 	if err := accounts.CreateOrgInvite(context.Background(), invite, "hash-"+suffix); err != nil {
 		t.Fatalf("create invite: got = %v, want = nil", err)
 	}
@@ -314,7 +314,7 @@ func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 	project := defaultProjectOf(t, accounts, orgID)
 	suffix := uuid.New().String()[:8]
 	key := func(name, createdBy, projectID, mintedBy string) error {
-		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, ProjectID: projectID, CreatedBy: createdBy, MintedBy: mintedBy, Name: name}
+		k := &domain.APIKey{ID: name + suffix, OrgID: orgID, ProjectID: projectID, Actor: domain.Actor{Kind: domain.ActorUser, ID: createdBy}, MintedBy: mintedBy, Name: name}
 		return accounts.CreateAPIKey(ctx, k, "hash-"+name+suffix)
 	}
 	working := func(name string) bool {
@@ -389,7 +389,7 @@ func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range listed {
-		if want := k.CreatedBy != owner; k.Orphaned != want {
+		if want := k.Actor.ID != owner; k.Orphaned != want {
 			t.Errorf("key %s listed orphaned = %v, want = %v", k.ID, k.Orphaned, want)
 		}
 	}

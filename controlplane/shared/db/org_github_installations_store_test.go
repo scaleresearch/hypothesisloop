@@ -23,14 +23,14 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 		t.Fatalf("disconnect with none connected: got = %v, want = %v", err, ErrGitHubInstallationNotFound)
 	}
 
-	first := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme", ConnectedBy: "user-1"}
+	first := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
 	if err := accounts.ConnectGitHubInstallation(ctx, first); err != nil || first.ConnectedAt.IsZero() {
 		t.Fatalf("connect: got = %v at %v, want = nil and the moment it happened", err, first.ConnectedAt)
 	}
 	for _, more := range []*domain.OrgGitHubInstallation{
-		{OrgID: orgA, InstallationID: 8, AccountLogin: "rival", ConnectedBy: "user-1"},
+		{OrgID: orgA, InstallationID: 8, AccountLogin: "rival", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}},
 		// The same installation serves a second org, each with a row of its own.
-		{OrgID: orgB, InstallationID: 7, AccountLogin: "Acme", ConnectedBy: "user-2"},
+		{OrgID: orgB, InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-2"}},
 	} {
 		if err := accounts.ConnectGitHubInstallation(ctx, more); err != nil {
 			t.Fatalf("connect %+v: %v", more, err)
@@ -38,12 +38,12 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 
 	// Connected again, it keeps who connected it and when, and takes the account's name of today.
-	again := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme-Renamed", ConnectedBy: "user-9"}
+	again := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme-Renamed", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-9"}}
 	if err := accounts.ConnectGitHubInstallation(ctx, again); err != nil {
 		t.Fatalf("connect again: %v", err)
 	}
-	if again.ConnectedBy != "user-1" || !again.ConnectedAt.Equal(first.ConnectedAt) {
-		t.Fatalf("connected again = %+v, want who and when of the first connect (%s at %s)", again, first.ConnectedBy, first.ConnectedAt.Format(time.RFC3339Nano))
+	if again.ConnectedActor.ID != "user-1" || !again.ConnectedAt.Equal(first.ConnectedAt) {
+		t.Fatalf("connected again = %+v, want who and when of the first connect (%s at %s)", again, first.ConnectedActor.ID, first.ConnectedAt.Format(time.RFC3339Nano))
 	}
 
 	listed, err := accounts.ListGitHubInstallations(ctx, orgA)
@@ -78,7 +78,7 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 		t.Fatalf("after one org disconnected it, the other's: got = %+v, %v, want it still connected", found, err)
 	}
 
-	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: "org-nowhere", InstallationID: 7, AccountLogin: "Acme", ConnectedBy: "user-1"}); !errors.Is(err, ErrOrgNotFound) {
+	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: "org-nowhere", InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); !errors.Is(err, ErrOrgNotFound) {
 		t.Fatalf("connect to an org that does not exist: got = %v, want = %v", err, ErrOrgNotFound)
 	}
 }

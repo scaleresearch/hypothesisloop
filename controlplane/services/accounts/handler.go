@@ -743,7 +743,7 @@ func (h *Handler) createAPIKey(ctx context.Context, orgID, projectID, name strin
 	if name, err = validName("api key", name); err != nil {
 		return nil, err
 	}
-	key := &domain.APIKey{OrgID: orgID, ProjectID: projectID, CreatedBy: p.UserID, Name: name}
+	key := &domain.APIKey{OrgID: orgID, ProjectID: projectID, Actor: domain.Actor{Kind: domain.ActorUser, ID: p.UserID}, Name: name}
 	if p.Kind == auth.KindKey {
 		// The person answerable for a minted key is the one answerable for the key that minted it.
 		minter, err := h.accounts.GetAPIKey(ctx, p.KeyID)
@@ -753,7 +753,7 @@ func (h *Handler) createAPIKey(ctx context.Context, orgID, projectID, name strin
 		if minter == nil {
 			return nil, fmt.Errorf("the calling api key %s has no row", p.KeyID)
 		}
-		key.CreatedBy, key.MintedBy = minter.CreatedBy, minter.ID
+		key.Actor.ID, key.MintedBy = minter.Actor.ID, minter.ID
 	}
 	id, token, err := auth.NewAPIKey()
 	if err != nil {

@@ -229,8 +229,9 @@ type PlatformExperiment struct {
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.
 	Goal string `json:"goal,omitempty"`
-	// CreatedBy is whose credential created it. Absent on one created before this was kept.
-	CreatedBy *Actor `json:"created_by,omitempty"`
+	// Actor is whose credential created it, unverified with no id on one created before this
+	// was kept. Carried by a read of one platform experiment and left out of a list.
+	Actor *Actor `json:"actor,omitempty"`
 	// Proposal is what a draft's planner proposed, as it was accepted by the check on writing it,
 	// and ProposedAt when. ProposedAt is absent while a draft is being planned or revised.
 	// Carried by a read of one platform experiment and left out of a list.
@@ -251,7 +252,7 @@ type PlatformExperiment struct {
 // PlanningRequest is one request to a draft's planner to change its proposal.
 type PlanningRequest struct {
 	Message string    `json:"message"`
-	By      Actor     `json:"by"`
+	Actor   Actor     `json:"actor"`
 	At      time.Time `json:"at"`
 }
 

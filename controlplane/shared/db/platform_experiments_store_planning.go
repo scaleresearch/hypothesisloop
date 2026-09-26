@@ -255,7 +255,7 @@ func (s *PlatformExperimentsStore) planningRequests(ctx context.Context, id stri
 	var out []domain.PlanningRequest
 	for rows.Next() {
 		var request domain.PlanningRequest
-		if err := rows.Scan(&request.Message, &request.By.Kind, &request.By.ID, &request.At); err != nil {
+		if err := rows.Scan(&request.Message, &request.Actor.Kind, &request.Actor.ID, &request.At); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)
 		}
 		out = append(out, request)

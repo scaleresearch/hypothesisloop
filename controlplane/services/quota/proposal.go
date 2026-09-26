@@ -386,11 +386,11 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 // nameActors names whoever created pe and whoever asked for its revisions, when it carries them.
 func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
 	var actors []*domain.Actor
-	if pe.CreatedBy != nil {
-		actors = append(actors, pe.CreatedBy)
+	if pe.Actor != nil {
+		actors = append(actors, pe.Actor)
 	}
 	for i := range pe.Revisions {
-		actors = append(actors, &pe.Revisions[i].By)
+		actors = append(actors, &pe.Revisions[i].Actor)
 	}
 	if len(actors) == 0 {
 		return nil

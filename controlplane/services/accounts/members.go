@@ -170,7 +170,7 @@ func registerMembers(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		invite := &domain.OrgInvite{ID: id, OrgID: in.ID, Role: in.Body.Role, CreatedBy: createdBy, ExpiresAt: time.Now().UTC().Add(domain.InviteLifetime)}
+		invite := &domain.OrgInvite{ID: id, OrgID: in.ID, Role: in.Body.Role, Actor: domain.Actor{Kind: domain.ActorUser, ID: createdBy}, ExpiresAt: time.Now().UTC().Add(domain.InviteLifetime)}
 		if err := h.accounts.CreateOrgInvite(ctx, invite, auth.HashAPIKey(token)); err != nil {
 			return nil, err
 		}

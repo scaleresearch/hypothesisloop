@@ -49,21 +49,18 @@ const InviteLifetime = 7 * 24 * time.Hour
 
 // OrgInvite is a link that lets one signed-in person join an org with Role. Its token is returned
 // once at creation and only its hash is stored. It works once, until ExpiresAt, and while not
-// revoked. CreatedBy is the person answerable for it.
+// revoked. Actor is the person answerable for it: who made it, or for one made with an API key
+// the person that key answers to. AcceptedActor is the person who joined with it.
 type OrgInvite struct {
-	ID        string  `json:"id"`
-	OrgID     string  `json:"org_id"`
-	Role      OrgRole `json:"role"`
-	CreatedBy string  `json:"created_by"`
-	// CreatedByName and AcceptedByName are the display names of those two people, empty when
-	// their identity provider has stated none.
-	CreatedByName  string     `json:"created_by_name"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ExpiresAt      time.Time  `json:"expires_at"`
-	AcceptedBy     string     `json:"accepted_by,omitempty"`
-	AcceptedByName string     `json:"accepted_by_name,omitempty"`
-	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
-	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	ID            string     `json:"id"`
+	OrgID         string     `json:"org_id"`
+	Role          OrgRole    `json:"role"`
+	Actor         Actor      `json:"actor"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	AcceptedActor *Actor     `json:"accepted_actor,omitempty"`
+	AcceptedAt    *time.Time `json:"accepted_at,omitempty"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
 }
 
 // Project groups an org's platform experiments.
@@ -77,12 +74,11 @@ type Project struct {
 // OrgGitHubInstallation is an installation of the platform's GitHub App that an org connected.
 // AccountLogin is the GitHub account it is on, the owner part of every repository it covers.
 type OrgGitHubInstallation struct {
-	OrgID           string    `json:"org_id"`
-	InstallationID  int64     `json:"installation_id"`
-	AccountLogin    string    `json:"account_login"`
-	ConnectedBy     string    `json:"connected_by" doc:"The user who connected it, or the API key it was connected with."`
-	ConnectedByName string    `json:"connected_by_name" doc:"The name of that user or key, empty when it has none."`
-	ConnectedAt     time.Time `json:"connected_at"`
+	OrgID          string    `json:"org_id"`
+	InstallationID int64     `json:"installation_id"`
+	AccountLogin   string    `json:"account_login"`
+	ConnectedActor Actor     `json:"connected_actor" doc:"Who connected it: a user, the API key it was connected with, or staff."`
+	ConnectedAt    time.Time `json:"connected_at"`
 }
 
 // DefaultOrgName is the org a person starts with at their first sign-in, and DefaultProjectName
@@ -99,10 +95,9 @@ type APIKey struct {
 	ID        string `json:"id"`
 	OrgID     string `json:"org_id"`
 	ProjectID string `json:"project_id,omitempty"`
-	CreatedBy string `json:"created_by"`
-	// CreatedByName is the display name of the person who created the key, empty when their
-	// identity provider has stated none.
-	CreatedByName string `json:"created_by_name"`
+	// Actor is the person the key answers to: who created it, or for a key created with a key
+	// the person that one answers to. The key carries their authority.
+	Actor Actor `json:"actor"`
 	// MintedBy is the key this one was created with, empty when a person created it.
 	MintedBy  string    `json:"minted_by,omitempty"`
 	Name      string    `json:"name"`

@@ -190,9 +190,6 @@ type installations interface {
 	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
 }
 
-// connectedByOperator is who connected an installation that no person proved they reach.
-const connectedByOperator = "hl-admin"
-
 // connectGitHub records an installation as an org's. Nothing typed is recorded unchecked: the
 // installation is the App's own, and the account it is on is GitHub's answer.
 func connectGitHub(ctx context.Context, store installationStore, app installations, orgID string, installationID int64, stdout io.Writer) error {
@@ -200,7 +197,7 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	if err != nil {
 		return fmt.Errorf("installation %d: %w", installationID, err)
 	}
-	connected := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: found.ID, AccountLogin: found.AccountLogin, ConnectedBy: connectedByOperator}
+	connected := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: found.ID, AccountLogin: found.AccountLogin, ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
 	if err := store.ConnectGitHubInstallation(ctx, connected); err != nil {
 		return err
 	}
@@ -254,7 +251,7 @@ func addAPIKey(ctx context.Context, accounts *db.AccountsStore, subject, orgID, 
 	if err != nil {
 		return err
 	}
-	key := &domain.APIKey{ID: id, OrgID: orgID, ProjectID: projectID, CreatedBy: subject, Name: "hl-admin"}
+	key := &domain.APIKey{ID: id, OrgID: orgID, ProjectID: projectID, Actor: domain.Actor{Kind: domain.ActorUser, ID: subject}, Name: "hl-admin"}
 	if err := accounts.CreateAPIKey(ctx, key, auth.HashAPIKey(token)); err != nil {
 		return err
 	}

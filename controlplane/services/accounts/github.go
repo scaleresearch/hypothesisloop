@@ -220,11 +220,7 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 			return nil, invalid(ReasonInstallationNotReachable, "your GitHub account does not reach that installation of the GitHub App")
 		}
 	}
-	by := p.UserID
-	if by == "" {
-		by = p.KeyID
-	}
-	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, ConnectedBy: by}
+	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, ConnectedActor: p.Actor()}
 	if err := r.store.ConnectGitHubInstallation(ctx, installation); err != nil {
 		return nil, err
 	}

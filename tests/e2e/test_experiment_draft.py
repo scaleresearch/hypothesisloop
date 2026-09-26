@@ -54,7 +54,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
     pe_id = draft["id"]
     try:
         assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 2.0, draft
-        assert draft["created_by"]["kind"] in ("staff", "user", "key"), draft["created_by"]
+        assert draft["actor"]["kind"] in ("staff", "user", "key"), draft["actor"]
         assert "repository_url" not in draft
 
         # Its one agent is the planner, and the launcher is asked for its machine.

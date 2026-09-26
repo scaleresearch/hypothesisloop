@@ -224,7 +224,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 func (w *githubWorld) connect(orgID string, installation github.Installation) {
 	w.t.Helper()
 	err := w.installations.ConnectGitHubInstallation(context.Background(), &domain.OrgGitHubInstallation{
-		OrgID: orgID, InstallationID: installation.ID, AccountLogin: installation.AccountLogin, ConnectedBy: "u-owner",
+		OrgID: orgID, InstallationID: installation.ID, AccountLogin: installation.AccountLogin, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"},
 	})
 	if err != nil {
 		w.t.Fatal(err)
@@ -316,7 +316,7 @@ func TestConnectRecordsAnInstallationThePersonReachesOnGitHub(t *testing.T) {
 	path := "/orgs/" + w.orgA + "/github-installations"
 	var connected domain.OrgGitHubInstallation
 	w.ok("owner", "POST", path, connectBody("code-both", 200), http.StatusCreated, &connected)
-	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: 200, AccountLogin: "rival", ConnectedBy: "u-owner", ConnectedAt: connected.ConnectedAt}
+	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: 200, AccountLogin: "rival", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, ConnectedAt: connected.ConnectedAt}
 	if connected != want || connected.ConnectedAt.IsZero() {
 		t.Fatalf("connected = %+v, want %+v", connected, want)
 	}
@@ -339,7 +339,7 @@ func TestConnectRecordsAnInstallationThePersonReachesOnGitHub(t *testing.T) {
 	// An API key that connects is named as who did.
 	w.installations.connected[w.orgA] = nil
 	w.ok("org-key", "POST", path, connectBody("code-acme", 100), http.StatusCreated, &connected)
-	if connected.ConnectedBy != "k-org" {
+	if connected.ConnectedActor != (domain.Actor{Kind: domain.ActorKey, ID: "k-org"}) {
 		t.Fatalf("connected by a key = %+v, want the key named", connected)
 	}
 	if len(w.installations.connected[w.orgB]) != 0 {

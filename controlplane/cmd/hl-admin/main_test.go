@@ -141,7 +141,7 @@ func TestGitHubConnectRecordsOnlyWhatGitHubConfirms(t *testing.T) {
 	if err := connectGitHub(ctx, store, app, "org-1", 100, &out); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	want := domain.OrgGitHubInstallation{OrgID: "org-1", InstallationID: 100, AccountLogin: "Acme", ConnectedBy: "hl-admin"}
+	want := domain.OrgGitHubInstallation{OrgID: "org-1", InstallationID: 100, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
 	if len(store.connected) != 1 || *store.connected[0] != want {
 		t.Fatalf("connected = %+v, want %+v with the account GitHub stated", store.connected, want)
 	}

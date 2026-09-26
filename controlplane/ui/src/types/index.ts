@@ -515,8 +515,8 @@ export interface OrgInvite {
   id: string
   org_id: string
   role: OrgRole
-  created_by: string
-  created_by_name: string
+  /** The person answerable for it: who made it, or the person behind the API key it was made with. */
+  actor: Actor
   created_at: string
   expires_at: string
 }
@@ -531,7 +531,8 @@ export interface APIKey {
   org_id: string
   // Absent on a key that reaches the whole org.
   project_id?: string
-  created_by: string
+  /** The person the key answers to: who created it, or the person behind the key it was created with. */
+  actor: Actor
   // The key this one was created with, absent when a person created it.
   minted_by?: string
   name: string
@@ -646,9 +647,8 @@ export interface GitHubInstallation {
   installation_id: number
   /** The GitHub user or organisation the App is installed on. */
   account_login: string
-  /** The user who connected it, or the API key it was connected with, and the name of that one. */
-  connected_by: string
-  connected_by_name: string
+  /** Who connected it: a user, the API key it was connected with, or staff. */
+  connected_actor: Actor
   connected_at: string
 }
 

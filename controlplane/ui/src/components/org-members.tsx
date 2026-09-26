@@ -8,7 +8,7 @@ import { inviteLink } from '@/lib/invite'
 import { HOME_PATH } from '@/lib/auth'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import type { CreatedOrgInvite, OrgInvite, OrgMember, OrgRole } from '@/types'
-import { Person } from '@/components/actor'
+import { Actor, Person } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
@@ -103,7 +103,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           <tbody>
             {invites.map(invite => (
               <tr key={invite.id}>
-                <td><Person id={invite.created_by} name={invite.created_by_name} self={invite.created_by === me.user_id} /></td>
+                <td><Actor actor={invite.actor} self={invite.actor.kind === 'user' && invite.actor.id === me.user_id} /></td>
                 <td className="text-xs">{invite.role}</td>
                 <td className="text-xs text-muted">{when(invite.created_at)}</td>
                 <td className="text-xs text-muted">{when(invite.expires_at)}</td>
@@ -119,7 +119,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       {revoking && (
         <ConfirmDialog
           open
-          title={`Revoke the invite ${revoking.created_by_name || revoking.created_by} created ${when(revoking.created_at)}?`}
+          title={`Revoke the invite ${revoking.actor.name} created ${when(revoking.created_at)}?`}
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
           onCancel={() => setRevoking(null)}

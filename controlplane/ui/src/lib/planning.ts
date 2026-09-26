@@ -1,5 +1,5 @@
 import { apiSend, startPlatformExperiment } from '@/lib/api'
-import type { MetricDefinition, PlatformExperiment } from '@/types'
+import type { Actor, MetricDefinition, PlatformExperiment } from '@/types'
 
 /** One researcher of a proposal or of an acceptance. */
 export interface ProposedAgent {
@@ -33,7 +33,7 @@ export interface Proposal {
 
 export interface PlanningRequest {
   message: string
-  by: { kind: string; id: string; name: string }
+  actor: Actor
   at: string
 }
 

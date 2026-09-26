@@ -126,7 +126,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Repository:                req.Repository,
 		RepositoryURL:             domain.RepositoryURL(req.Repository),
 		AgentImage:                req.AgentImage,
-		CreatedBy:                 req.createdBy,
+		Actor:                     req.createdBy,
 	}
 	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)

@@ -83,8 +83,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		coordinator = *pe.Coordinator
 	}
 	var createdBy domain.Actor
-	if pe.CreatedBy != nil {
-		createdBy = *pe.CreatedBy
+	if pe.Actor != nil {
+		createdBy = *pe.Actor
 	}
 	_, err = db.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
@@ -139,9 +139,10 @@ WHERE id = $1`
 	if pe.CoordinatorHosted {
 		pe.Coordinator = &coordinator
 	}
-	if createdBy.Kind != "" {
-		pe.CreatedBy = &createdBy
+	if createdBy.Kind == "" {
+		createdBy.Kind = domain.ActorUnverified
 	}
+	pe.Actor = &createdBy
 	if len(proposal) > 0 {
 		pe.Proposal = proposal
 	}

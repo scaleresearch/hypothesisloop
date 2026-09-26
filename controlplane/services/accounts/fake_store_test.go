@@ -192,10 +192,10 @@ func (s *memStore) ListProjects(_ context.Context, orgIDs []string) ([]*domain.P
 }
 
 func (s *memStore) CreateAPIKey(_ context.Context, key *domain.APIKey, keyHash string) error {
-	if !s.users[key.CreatedBy] {
-		return fmt.Errorf("created_by %q is no user", key.CreatedBy)
+	if !s.users[key.Actor.ID] {
+		return fmt.Errorf("created_by %q is no user", key.Actor.ID)
 	}
-	if role, member := s.roles[key.OrgID][key.CreatedBy]; !s.staff[key.CreatedBy] && role != domain.OrgRoleOwner && (!member || key.ProjectID == "") {
+	if role, member := s.roles[key.OrgID][key.Actor.ID]; !s.staff[key.Actor.ID] && role != domain.OrgRoleOwner && (!member || key.ProjectID == "") {
 		return db.ErrAPIKeyCreatorLacksOrg
 	}
 	if key.ProjectID != "" {
@@ -420,7 +420,7 @@ func (s *memStore) leaveOwnership(orgID, userID string, change func()) error {
 		if other != userID && role == domain.OrgRoleOwner {
 			change()
 			for _, invite := range s.invites {
-				if invite.OrgID == orgID && invite.CreatedBy == userID && invite.AcceptedAt == nil && invite.RevokedAt == nil {
+				if invite.OrgID == orgID && invite.Actor.ID == userID && invite.AcceptedAt == nil && invite.RevokedAt == nil {
 					now := s.now()
 					invite.RevokedAt = &now
 				}
@@ -451,8 +451,8 @@ func (s *memStore) RemoveOrgMember(_ context.Context, orgID, userID string) erro
 }
 
 func (s *memStore) CreateOrgInvite(_ context.Context, invite *domain.OrgInvite, tokenHash string) error {
-	if !s.users[invite.CreatedBy] {
-		return fmt.Errorf("created_by %q is no user", invite.CreatedBy)
+	if !s.users[invite.Actor.ID] {
+		return fmt.Errorf("created_by %q is no user", invite.Actor.ID)
 	}
 	invite.CreatedAt = s.now()
 	stored := *invite
@@ -516,6 +516,6 @@ func (s *memStore) AcceptOrgInvite(_ context.Context, tokenHash, userID string) 
 		return nil, db.ErrAlreadyOrgMember
 	}
 	now := s.now()
-	invite.AcceptedBy, invite.AcceptedAt = userID, &now
+	invite.AcceptedActor, invite.AcceptedAt = &domain.Actor{Kind: domain.ActorUser, ID: userID}, &now
 	return s.join(invite.OrgID, userID, invite.Role), nil
 }
