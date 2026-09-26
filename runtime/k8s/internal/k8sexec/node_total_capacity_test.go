@@ -77,3 +77,65 @@ func TestGetNodeTotalCapacityExcludesNonPlatformPodsButNotPlatformOnes(t *testin
 		t.Fatal("GetNodeTotalCapacity reported the raw allocatable total unchanged — the DaemonSet pod's permanent request was not excluded")
 	}
 }
+
+// A node's whole cores are units of the CPU type, counted from what Kubernetes already says and
+// written nowhere. A chip job and a job on cores share a node: the cores the chip job holds are
+// gone from the free count, and the job on cores is a pod that requests its cpu and nothing else.
+func TestANodesCoresAreUnitsOfTheCPUTypeWithNothingWrittenToTheCluster(t *testing.T) {
+	milliNode := func(name string, cpuMilli int64) *corev1.Node {
+		node := totalCapacityTestNode(name, 0, 64)
+		node.Status.Allocatable[corev1.ResourceCPU] = *resource.NewMilliQuantity(cpuMilli, resource.DecimalSI)
+		return node
+	}
+	cordoned := milliNode("cordoned", 16000)
+	cordoned.Spec.Unschedulable = true
+	c := newDRATestClient()
+	kube := fake.NewClientset(milliNode("box", 15800), milliNode("small", 3999), cordoned,
+		requestingPod("cni-agent", "box", false, 300), requestingPod("chip-job", "box", true, 4000))
+	c.kube = kube
+	ctx := context.Background()
+
+	available, total, byNode, _, err := c.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cores := string(domain.CPUType)
+	if total[cores] != 18 || available[cores] != 14 || byNode["box"][cores] != 11 || byNode["small"][cores] != 3 || len(total) != 1 {
+		t.Errorf("total %v, available %v, by node %v; want 18 cores in all (15 and 3), 14 free, 11 of them on box", total, available, byNode)
+	}
+	totals, err := c.GetNodeTotalCapacity(ctx)
+	if err != nil || totals["box"][domain.NodeResourceCPUMillicores]/1000 != 15 {
+		t.Errorf("box's cores for platform jobs = %v, %v; want the 15 its units add up to", totals["box"], err)
+	}
+	for _, action := range kube.Actions() {
+		if verb := action.GetVerb(); verb != "list" && verb != "get" {
+			t.Errorf("reading capacity made a %s on %s", verb, action.GetResource().Resource)
+		}
+	}
+
+	exp := attemptTestExperiment(0)
+	exp.AcceleratorType, exp.AcceleratorCount = domain.CPUType, 4
+	exp.Job.AcceleratorType, exp.Job.AcceleratorCount, exp.Job.CPU = domain.CPUType, 4, "4"
+	placement, err := c.resolvePlacementFor(ctx, exp)
+	if err != nil || placement != (AcceleratorPlacement{}) {
+		t.Fatalf("placement of a job on cores = %+v, %v; want none needed", placement, err)
+	}
+	job, err := c.BuildJob(exp, placement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := job.Spec.Template
+	requests := pod.Spec.Containers[0].Resources.Requests
+	for name := range requests {
+		if name != corev1.ResourceCPU && name != corev1.ResourceMemory && name != corev1.ResourceEphemeralStorage {
+			t.Errorf("a job on cores requests %s", name)
+		}
+	}
+	pinned := pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil
+	if requests.Cpu().Value() != 4 || pinned || len(pod.Spec.ResourceClaims) != 0 {
+		t.Errorf("requests %v, pinned to nodes %v, claims %v; want 4 cores on any node", requests, pinned, pod.Spec.ResourceClaims)
+	}
+	if got := pod.Annotations[AcceleratorTypeAnnotation]; got != cores {
+		t.Errorf("the pod is recorded as %q, want the CPU type", got)
+	}
+}

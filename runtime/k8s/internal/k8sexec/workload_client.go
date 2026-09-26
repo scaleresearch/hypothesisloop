@@ -43,9 +43,6 @@ type Config struct {
 	// JobImage is the image a job that names none runs in. Empty on a cluster that takes only
 	// jobs that name their image.
 	JobImage string
-	// CPUClass names the CPU class the cluster's nodes offer their cores as (see
-	// PublishCPUClass). Empty on a cluster that offers none.
-	CPUClass string
 }
 
 type JobWorkloadClient struct {
@@ -55,15 +52,11 @@ type JobWorkloadClient struct {
 	// jobImage is reported to the control plane, which then also places here the jobs that
 	// name no image.
 	jobImage string
-	cpuClass string
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {
 	if cfg.APIURL == "" {
 		return nil, fmt.Errorf("workload: APIURL is required")
-	}
-	if err := validCPUClass(cfg.CPUClass); err != nil {
-		return nil, err
 	}
 	restCfg, err := buildRestConfig(cfg.KubeconfigPath, cfg.KubeContext)
 	if err != nil {
@@ -82,5 +75,5 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
-	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL, jobImage: cfg.JobImage, cpuClass: cfg.CPUClass}, nil
+	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL, jobImage: cfg.JobImage}, nil
 }

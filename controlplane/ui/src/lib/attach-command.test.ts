@@ -23,26 +23,16 @@ describe('the scripts of the attach commands', () => {
   it('are the ones hl cluster add prints', () => {
     expect(KUBERNETES_SCRIPT).toBe(goConstant('kubernetesScript'))
     expect(BARE_METAL_SCRIPT).toBe(goConstant('bareMetalScript'))
-    expect(BARE_METAL_SCRIPT).toContain('${5:+--cpu-class "$5"}')
   })
 })
 
 describe('a start command', () => {
   it('holds no token and quotes what the shell and helm would split', () => {
     for (const kind of ['kubernetes', 'bare-metal'] as const) {
-      const command = startCommand(kind, registered, 'tt-host')
+      const command = startCommand(kind, registered)
       expect(command).not.toContain('hls_secret')
       expect(command).toContain(`it'\\''s'`)
     }
     expect(startCommand('kubernetes', registered)).toContain(`--set-string 'apiURL=https://api.example/a?ids=1\\,2'`)
-  })
-
-  it('carries a CPU class as the chart value or the last word, and nothing when there is none', () => {
-    const helm = startCommand('kubernetes', registered)
-    expect(startCommand('kubernetes', registered, 'tt-host')).toBe(`${helm} --set-string 'cpuClass=tt-host'`)
-    expect(helm).not.toContain('cpuClass')
-    const node = startCommand('bare-metal', registered)
-    expect(startCommand('bare-metal', registered, 'tt-host')).toBe(`${node} 'tt-host'`)
-    expect(node.endsWith(`'registry.example/images/hypothesisloop-job:abc1234'`)).toBe(true)
   })
 })

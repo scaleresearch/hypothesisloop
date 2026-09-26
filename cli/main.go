@@ -744,7 +744,8 @@ For the planner of a draft. FILE is YAML: experiment (shaped like .hypothesisloo
 name, description, metrics, report_interval_seconds, optionally stages and the policies), and
 beside it budget_accelerator_hours, duration_hours, agents (a list, one entry per researcher,
 each with optional flavor, model, hyperparameters), baseline_job_id, accelerator_type (the type
-the baseline job ran on, a CPU class for work that needs no accelerator), metric_reason,
+the baseline job ran on; for a job on CPU cores that is hypothesisloop.dev/cpu=core, and
+budget_accelerator_hours is then CPU core-hours), metric_reason,
 measurement, and the lists out_of_scope, risks, questions.
 
 The proposal is checked before it is stored. A refusal names what to fix: fix it and propose

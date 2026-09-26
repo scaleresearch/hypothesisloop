@@ -42,6 +42,10 @@ job:
   # is also subject to the operator's per-job maximum caps (hypothesisloop.yaml's
   # quota.max_accelerator_count_per_job etc) — exceeding a cap is rejected at admission, before
   # any quota is touched.
+  #
+  # A job that needs no accelerator leaves both out and states only its cores, a whole number:
+  # cpu: "4" holds 4 CPU cores (4 units of the type hypothesisloop.dev/cpu=core, 4 core-hours an
+  # hour), and memory and storage left out are its cores' share of the node.
   accelerator_count: 1
   # accelerator_type names the hardware the way its own driver publishes it, as a fully-qualified
   # "key=value" — NVIDIA's GPU Feature Discovery writes the node label

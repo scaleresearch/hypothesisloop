@@ -39,8 +39,7 @@ Write sort.py, a function that sorts one million random 32-bit integers (seed 0)
 without calling sorted or list.sort, and bench.py, which checks the result against sorted and
 reports items_per_second (higher is better) to the platform. A wrong order fails the job.
 Each agent tries a different algorithm, one job at a time, at most three jobs, each asking for
-2 cores of a CPU class from hl capacity (accelerator_type the class, accelerator_count 2, no
-cpu) and 4Gi. The coordinator closes the experiment once both have stopped.`
+2 CPU cores (cpu: 2 and no accelerator) and 4Gi. The coordinator closes the experiment once both have stopped.`
 const LONGEST = 60 * 60 * 1000
 const REPOSITORY = process.env.HL_E2E_GITHUB_REPO
 const INSTALLATION = process.env.HL_E2E_GITHUB_INSTALLATION

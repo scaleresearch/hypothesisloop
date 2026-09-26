@@ -38,8 +38,6 @@ type Settings struct {
 	Token       string
 	// JobImage is optional: the image a job that names none runs in on this node.
 	JobImage string
-	// CPUClass is optional: the name of the CPU class the node offers its cores as.
-	CPUClass string
 }
 
 func (s Settings) envFile() ([]byte, error) {
@@ -61,12 +59,6 @@ func (s Settings) envFile() ([]byte, error) {
 	if s.JobImage != "" {
 		fmt.Fprintf(&out, "JOB_IMAGE=\"%s\"\n", s.JobImage)
 	}
-	if strings.ContainsAny(s.CPUClass, "\n\r\"\\") {
-		return nil, fmt.Errorf("CPU_CLASS %q is not a class name", s.CPUClass)
-	}
-	if s.CPUClass != "" {
-		fmt.Fprintf(&out, "CPU_CLASS=\"%s\"\n", s.CPUClass)
-	}
 	return []byte(out.String()), nil
 }
 
@@ -87,7 +79,7 @@ func ReadSettings(host Host) (settings Settings, installed bool, err error) {
 		}
 		values[key] = strings.NewReplacer(`\\`, `\`, `\"`, `"`).Replace(quoted[1 : len(quoted)-1])
 	}
-	settings = Settings{ClusterName: values["CLUSTER_NAME"], APIURL: values["API_URL"], Token: values["RUNTIME_TOKEN"], JobImage: values["JOB_IMAGE"], CPUClass: values["CPU_CLASS"]}
+	settings = Settings{ClusterName: values["CLUSTER_NAME"], APIURL: values["API_URL"], Token: values["RUNTIME_TOKEN"], JobImage: values["JOB_IMAGE"]}
 	if settings.ClusterName == "" || settings.APIURL == "" || settings.Token == "" {
 		return Settings{}, false, fmt.Errorf("%s does not hold CLUSTER_NAME, API_URL and RUNTIME_TOKEN", EnvPath)
 	}

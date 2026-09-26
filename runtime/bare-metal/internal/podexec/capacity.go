@@ -11,7 +11,6 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 // runningRequests sums the resource requests recorded (as labels, at creation time) on every
@@ -151,9 +150,8 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 			total[label]++
 		}
 	}
-	if class := e.cpuClassType(); class != "" {
-		total[string(class)] = cpuClassUnits()
-	}
+	cores := string(domain.CPUType)
+	total[cores] = int64(totalCPUCores())
 	// Folded: total's label casing and a running job's requested casing can differ (see
 	// domain.AcceleratorType.MatchesLabels); joining on exact match previously undercounted
 	// in-use devices, letting a second job double-book an occupied one.
@@ -168,6 +166,9 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 		}
 		available[label] = free
 	}
+	// Every job holds cores, an accelerator job too, so the cores free are those no running job
+	// was given, whatever its type.
+	available[cores] = max(total[cores]*1000-requests.cpuMilli, 0) / 1000
 	byNode = map[string]map[string]int64{e.nodeName: available}
 	labels := make(map[string]string, len(e.nodeLabels))
 	for k, v := range e.nodeLabels {
@@ -180,9 +181,6 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 				labels[key] = value
 			}
 		}
-	}
-	if e.cpuClass != "" {
-		labels[workloadkeys.CPUClassLabel] = e.cpuClass
 	}
 	nodeLabels = map[string]map[string]string{e.nodeName: labels}
 	return available, total, byNode, nodeLabels, nil
@@ -371,7 +369,7 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 	// failed the job in BuildContainerSpec for a placement nobody had been asked to make. This
 	// runtime only ever runs a one-node job, so the total is that node's own count.
 	count := exp.Job.TotalAccelerators()
-	if count <= 0 || e.onCPUClass(exp.AcceleratorType) {
+	if count <= 0 || onCores(exp.AcceleratorType) {
 		return Placement{}, nil
 	}
 	devices, err := e.probe(ctx)

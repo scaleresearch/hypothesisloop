@@ -12,11 +12,6 @@
 # container's real cgroup quota (see dev-nodes-up.sh's own comment on why that matters);
 # omit them to leave the node's real cpu/memory capacity untouched.
 #
-# With cpu-alloc-milli the node also publishes a CPU class: cpu.hypothesisloop.dev/core, one unit
-# per whole core of that allocation, labelled cpu.hypothesisloop.dev/class=dev-node. A job with
-# no accelerator asks for cores of it (a catalog type of kind cpu), since a job that holds no
-# priced unit is refused. Without cpu-alloc-milli, the case of a real hardware node, no class is
-# published: what that node offers is its operator's to say (the cluster agent's cpuClass).
 set -euo pipefail
 
 CONTEXT="$1" NODE="$2" GPU_COUNT="$3" LABEL_VALUE="$4"
@@ -27,19 +22,10 @@ PATCH="[
   {\"op\":\"add\",\"path\":\"/status/allocatable/nvidia.com~1gpu\",\"value\":\"${GPU_COUNT}\"}"
 [[ -n "${CPU_ALLOC_MILLI}" ]] && PATCH+=",{\"op\":\"add\",\"path\":\"/status/allocatable/cpu\",\"value\":\"${CPU_ALLOC_MILLI}m\"}"
 [[ -n "${MEM_ALLOC_KI}" ]] && PATCH+=",{\"op\":\"add\",\"path\":\"/status/allocatable/memory\",\"value\":\"${MEM_ALLOC_KI}Ki\"}"
-CPU_CLASS_CORES=""
-if [[ -n "${CPU_ALLOC_MILLI}" ]]; then
-  CPU_CLASS_CORES=$(( CPU_ALLOC_MILLI / 1000 ))
-  PATCH+=",{\"op\":\"add\",\"path\":\"/status/capacity/cpu.hypothesisloop.dev~1core\",\"value\":\"${CPU_CLASS_CORES}\"}"
-  PATCH+=",{\"op\":\"add\",\"path\":\"/status/allocatable/cpu.hypothesisloop.dev~1core\",\"value\":\"${CPU_CLASS_CORES}\"}"
-fi
 PATCH+="]"
 
 # "add" on an existing key replaces its value (RFC 6902 semantics for object members), so
 # re-running this against an already-patched node is safe.
 kubectl --context "${CONTEXT}" patch node "${NODE}" --subresource=status --type=json -p "${PATCH}" >/dev/null
 kubectl --context "${CONTEXT}" label node "${NODE}" "nvidia.com/gpu.product=${LABEL_VALUE}" --overwrite >/dev/null
-if [[ -n "${CPU_CLASS_CORES}" ]]; then
-  kubectl --context "${CONTEXT}" label node "${NODE}" "cpu.hypothesisloop.dev/class=dev-node" --overwrite >/dev/null
-fi
-echo "    ${NODE}: nvidia.com/gpu=${GPU_COUNT} (${LABEL_VALUE})${CPU_CLASS_CORES:+, cpu.hypothesisloop.dev/core=${CPU_CLASS_CORES} (dev-node)}"
+echo "    ${NODE}: nvidia.com/gpu=${GPU_COUNT} (${LABEL_VALUE})"

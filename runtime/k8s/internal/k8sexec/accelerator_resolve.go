@@ -224,7 +224,7 @@ func acceleratorNodeAffinity(placement AcceleratorPlacement) *corev1.NodeAffinit
 // the top-level count skipped resolution for every grouped job and then failed it at the guard —
 // the job was admitted, reserved capacity, and never compiled into a single Job object.
 func (c *JobWorkloadClient) resolvePlacementFor(ctx context.Context, exp *domain.Experiment) (AcceleratorPlacement, error) {
-	if exp.Job.TotalAccelerators() <= 0 {
+	if exp.Job.TotalAccelerators() <= 0 || onCores(exp) {
 		return AcceleratorPlacement{}, nil
 	}
 	return c.ResolveAcceleratorPlacement(ctx, exp.AcceleratorType)

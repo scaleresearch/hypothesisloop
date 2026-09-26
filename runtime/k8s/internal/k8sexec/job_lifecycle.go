@@ -645,6 +645,16 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 			}
 		}
 	}
+	freeCores, totalCores := nodeCores(nodes, pods)
+	cores := string(domain.CPUType)
+	for _, node := range nodes {
+		if byNode[node.Name] == nil {
+			byNode[node.Name] = make(map[string]int64)
+		}
+		byNode[node.Name][cores] = freeCores[node.Name]
+		total[cores] += totalCores[node.Name]
+		available[cores] += freeCores[node.Name]
+	}
 	return available, total, byNode, nodeLabels, nil
 }
 

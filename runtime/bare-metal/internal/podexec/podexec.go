@@ -61,9 +61,6 @@ type Config struct {
 	NodeLabels map[string]string
 	// NodeName overrides the OS hostname as this node's reported identity. Optional.
 	NodeName string
-	// CPUClass names the CPU class this node offers its cores as (see cpu_class.go). Empty on a
-	// node that offers none and takes jobs on its accelerators only.
-	CPUClass string
 }
 
 type Executor struct {
@@ -78,8 +75,6 @@ type Executor struct {
 	// nodeName is this node's own identity, reported as the sole entry in every
 	// cluster->node->... map the Backend contract expects (a bare-node "cluster" is one node).
 	nodeName string
-	// cpuClass is the CPU class this node offers its cores as, empty for none.
-	cpuClass string
 	// clusterID is the host's machine id, read once at startup: set at OS install and stable
 	// for the machine's life.
 	clusterID string
@@ -170,9 +165,6 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.ClusterName == "" {
 		return nil, fmt.Errorf("podexec: ClusterName is required")
 	}
-	if err := ValidCPUClass(cfg.CPUClass); err != nil {
-		return nil, err
-	}
 	clusterID, err := readClusterID(machineIDPath)
 	if err != nil {
 		return nil, err
@@ -220,7 +212,6 @@ func New(cfg Config) (*Executor, error) {
 		storageDir:           storageDir,
 		nodeLabels:           labels,
 		nodeName:             nodeName,
-		cpuClass:             cfg.CPUClass,
 		clusterID:            clusterID,
 		docker:               bounded{docker},
 		engineName:           engineName,

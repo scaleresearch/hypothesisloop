@@ -18,7 +18,7 @@ func cmdQuota(c *apiclient.Client, args []string, stdout, stderr io.Writer) int 
 	fs := newFlags("quota", `usage: hl quota [--agent A | --all] [--platform-experiment PE]
 
 Accelerator-hours granted and used, guaranteed and burst, one line per agent. Used includes
-running jobs.`, stderr)
+running jobs. In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.`, stderr)
 	agent := fs.String("agent", "", "agent (default $AGENT_ID)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default $PLATFORM_EXPERIMENT_ID)")
@@ -99,11 +99,11 @@ func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 Live capacity per cluster. First one line of its cores and memory, in total and not asked for
 by running jobs, summed over its nodes: what a job with no accelerator needs to know. Then
 its priced types, one line per type. For an accelerator: available, total and acch_per_hour,
-what an hour on one of them costs in accelerator hours. For a CPU class (kind cpu), whose unit
-is one core: cores_available, cores_total and acch_per_core_hour; a job asks for cores of it
-with accelerator_count, which is then its cpu. accelerator_type is the exact string a job spec
-takes; a type with none available queues and never errors. Every job asks for one of these
-types: one that needs no accelerator asks for cores of a CPU class. A line with job_image is of a
+what an hour on one of them costs in accelerator hours. For CPU cores (kind cpu, the one type
+hypothesisloop.dev/cpu=core): cores_available, cores_total and acch_per_core_hour, which is 1, so
+a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
+whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
+string a job spec takes; a type with none available queues and never errors. A line with job_image is of a
 cluster that runs a job that names no image, in that one. With only_job_image it runs no other
 image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
 runs only jobs that name their image.

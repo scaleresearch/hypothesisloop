@@ -227,28 +227,3 @@ func TestANodesJobImageIsKeptWithItsSettingsAndLeftOutWhenItHasNone(t *testing.T
 		t.Fatalf("a node given no job image has one in its settings:\n%s", host.files[EnvPath])
 	}
 }
-
-func TestANodesCPUClassIsKeptWithItsSettingsAndLeftOutWhenItHasNone(t *testing.T) {
-	host := newFakeHost()
-	with := settings
-	with.CPUClass = "epyc-9354"
-	if err := Install(host, []byte("b"), with, passes("docker")); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(host.files[EnvPath], "CPU_CLASS=\"epyc-9354\"\n") {
-		t.Fatalf("the settings do not hold the class:\n%s", host.files[EnvPath])
-	}
-	if read, _, err := ReadSettings(host); err != nil || read != with {
-		t.Fatalf("settings read back = %+v, err = %v", read, err)
-	}
-	if err := Install(host, []byte("b"), settings, passes("docker")); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(host.files[EnvPath], "CPU_CLASS") {
-		t.Fatalf("a node given no CPU class has one in its settings:\n%s", host.files[EnvPath])
-	}
-	with.CPUClass = "epyc\"\nRUNTIME_TOKEN=\"x"
-	if err := Install(host, []byte("b"), with, passes("docker")); err == nil {
-		t.Fatal("a class that would write a second setting was installed")
-	}
-}

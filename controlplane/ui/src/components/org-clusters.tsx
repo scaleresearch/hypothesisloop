@@ -64,7 +64,6 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
   const [kind, setKind] = useState<Kind>('kubernetes')
   const [name, setName] = useState('')
-  const [cpuClass, setCPUClass] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
@@ -148,16 +147,6 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               value={name}
               onChange={e => setName(e.target.value)}
             />
-            <Input
-              fieldSize="sm"
-              mono
-              className="w-48"
-              aria-label="CPU class"
-              title="Optional. The cluster then offers its cores to jobs that need no accelerator, as the type cpu.hypothesisloop.dev/class=<name>, which the platform's catalog must price."
-              placeholder="CPU class, optional"
-              value={cpuClass}
-              onChange={e => setCPUClass(e.target.value)}
-            />
             <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>
               {kind === 'kubernetes' ? 'Add cluster' : 'Add node'}
             </Button>
@@ -168,7 +157,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
       {registered && (
         <Secret
           label={`Start the agent of ${registered.name} · ${kind === 'kubernetes' ? 'Kubernetes cluster' : 'bare-metal node'}`}
-          value={startCommand(kind, registered, cpuClass.trim())}
+          value={startCommand(kind, registered)}
           note={<>
             {kind === 'kubernetes' ? (
               <>

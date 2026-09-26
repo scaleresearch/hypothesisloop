@@ -85,7 +85,7 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
-	if spec.TotalAccelerators() > 0 && placement.ResourceName == "" && placement.DeviceClassName == "" {
+	if spec.TotalAccelerators() > 0 && !onCores(exp) && placement.ResourceName == "" && placement.DeviceClassName == "" {
 		return nil, fmt.Errorf("workload: accelerator %q has no resolved placement", exp.AcceleratorType)
 	}
 	groups := spec.NodeGroups()
@@ -236,7 +236,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	// of a plain extended-resource request. CreateWorkload reads this back off the returned
 	// Job (non-empty Spec.ResourceClaims) to know whether to also create the ResourceClaimTemplate.
 	jobUsesDRA := group.AcceleratorCount > 0 && placement.UsesDRA()
-	if group.AcceleratorCount > 0 && !jobUsesDRA {
+	if group.AcceleratorCount > 0 && !jobUsesDRA && !onCores(exp) {
 		acceleratorQty := *resource.NewQuantity(int64(group.AcceleratorCount), resource.DecimalSI)
 		acceleratorResource := corev1.ResourceName(placement.ResourceName)
 		resources.Requests[acceleratorResource] = acceleratorQty

@@ -60,7 +60,7 @@ Minimal shape:
     objective: "maximize val_accuracy"
   job:
     image: ...                    # leave out to run in the image of a cluster that has its own
-    accelerator_type: ...
+    accelerator_type: ...         # a job on CPU states only its cores instead: cpu: 4
     accelerator_count: 1
     ...
 
