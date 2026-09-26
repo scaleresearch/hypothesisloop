@@ -63,6 +63,9 @@ async function api(token, path, method = 'GET', body) {
   })
 }
 
+// The platform experiments the run had staff share as examples, taken back in the cleanup.
+const sharedByRun = new Set()
+
 const crashes = []
 const requested = []
 // Everything that must never appear in a URL: each bearer token a page sent and each secret a page showed.
@@ -84,6 +87,17 @@ function hlAdmin(...args) {
   execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], {
     cwd: repo, stdio: 'inherit', env: { ...process.env, HYPOTHESISLOOP_CONFIG: SETTINGS },
   })
+}
+
+// Sharing is staff's alone and has no control in the UI: it is done as staff do it.
+function share(platformExperimentID) {
+  sharedByRun.add(platformExperimentID)
+  hlAdmin('platform-experiment', 'share', platformExperimentID)
+}
+
+function unshare(platformExperimentID) {
+  hlAdmin('platform-experiment', 'unshare', platformExperimentID)
+  sharedByRun.delete(platformExperimentID)
 }
 
 const listening = port => fetch(`http://localhost:${port}`).then(() => true, () => false)
@@ -120,7 +134,8 @@ async function waitForUI(ui) {
 // Every one of them is new in this run, so every org one of them owns is the run's own. An open
 // platform experiment is closed, a cluster removed, an API key and an invite revoked, a GitHub
 // account disconnected and every other member removed. The API deletes no org, project or closed
-// platform experiment, so those stay.
+// platform experiment, so those stay. An experiment the run shared stops being an example first:
+// one left shared would be shown to every account of the stack.
 async function cleanUp() {
   await configure({ tokenLifetimeSeconds: 3600, audience: 'hypothesisloop-dev' })
   const failures = []
@@ -140,6 +155,9 @@ async function cleanUp() {
     const res = await api(token, path, method)
     if (!res.ok) throw new Error(`answered ${res.status} ${await res.text()}`)
   })
+  for (const id of sharedByRun) {
+    await attempt(`unsharing platform experiment ${id}`, async () => unshare(id))
+  }
   for (const user of people.values()) {
     await attempt(`cleaning up after ${user.name}`, async () => {
       const token = await tokenOf(user)
@@ -930,6 +948,163 @@ async function scenarios(browser) {
   await otherPage.getByText('is not available to you').waitFor()
   await shot(otherPage, 'foreign-project-in-url')
   await otherPage.getByRole('button', { name: /^Go to / }).click()
+  await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+
+  section('examples: none of another org\'s experiments is one until staff share it')
+  const exampleName = `${experimentName}-edited`
+  const bobToken = await tokenOf(bob)
+  const bobMe = await (await api(bobToken, '/me')).json()
+  const sharedList = r => r.url().startsWith(`${API}/platform-experiments?`) && new URL(r.url()).searchParams.get('shared') === 'true'
+  const listed = otherPage.waitForResponse(sharedList)
+  await otherPage.getByRole('link', { name: 'Examples', exact: true }).click()
+  await otherPage.waitForURL(/\/examples(\?|$)/)
+  const examples = await listed
+  assert.equal(examples.status(), 200)
+  assert.equal(new URL(examples.url()).searchParams.get('project_id'), null, 'the examples are asked for with no project')
+  assert.ok(examples.headers()['x-total-count'] !== undefined, 'the list carries its total')
+  await otherPage.getByRole('heading', { name: 'Examples' }).waitFor()
+  assert.equal(await otherPage.getByText(exampleName).count(), 0, 'an experiment nobody shared is no example')
+  // The stack may hold examples of its owner's, so the empty state shows only without them.
+  if ((await examples.json()).length === 0) {
+    await otherPage.getByText('There are no examples yet').waitFor()
+    await shot(otherPage, 'examples-none')
+  }
+
+  section('examples: a shared experiment is listed for another account and opens read only, inside their own project')
+  share(experimentID)
+  try {
+    // Everything the pages of the example ask the API, to check what they ask and what it answers.
+    const exampleCalls = []
+    const record = response => {
+      if (response.url().startsWith(API) && response.request().method() !== 'OPTIONS') exampleCalls.push(response)
+    }
+    otherPage.on('response', record)
+
+    await otherPage.reload()
+    const card = otherPage.getByText(exampleName).first()
+    await card.waitFor()
+    assert.equal(await otherPage.getByRole('button', { name: 'Edit' }).count(), 0, 'an example offers no edit in the list')
+    await shot(otherPage, 'examples-list')
+    await card.click()
+    await otherPage.waitForURL(u => u.pathname === `/platform-experiments/${experimentID}` && u.searchParams.get('example') === experimentID)
+    assert.equal(new URL(otherPage.url()).searchParams.get('project') ?? bobMe.projects[0].id, bobMe.projects[0].id, 'the URL names no project of the other org')
+    const banner = otherPage.getByRole('note').filter({ hasText: 'Example, read only' })
+    await banner.waitFor()
+    await banner.getByText(exampleName).waitFor()
+    await otherPage.getByRole('heading', { name: exampleName }).waitFor()
+    assert.equal(await otherPage.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), bob.name, 'the switcher still names the reader\'s own org')
+    assert.equal(await otherPage.getByRole('link', { name: 'Examples', exact: true }).getAttribute('aria-current'), 'page')
+    assert.equal(await otherPage.getByRole('link', { name: 'Platform Experiments', exact: true }).getAttribute('aria-current'), null)
+
+    // The owner's page shows Add agent, and Show token and Remove in the row of its one agent.
+    const exampleAgents = otherPage.locator('table', { hasText: 'Run by' }).locator('tbody tr')
+    await exampleAgents.first().waitFor()
+    assert.equal(await exampleAgents.count(), 1)
+    for (const control of ['Add agent', 'Show token', 'Remove', 'Edit']) {
+      assert.equal(await otherPage.getByRole('button', { name: control }).count(), 0, `an example shows no ${control}`)
+    }
+    assert.equal(await otherPage.locator('.error-banner').count(), 0, 'every read of the example page is answered')
+    await shot(otherPage, 'example-read-only')
+
+    await otherPage.getByRole('link', { name: /Hypotheses →/ }).click()
+    await otherPage.waitForURL(u => u.pathname === '/hypotheses' && u.searchParams.get('example') === experimentID)
+    await banner.waitFor()
+    await otherPage.getByRole('link', { name: 'Experiment →' }).waitFor()
+    assert.equal(await otherPage.getByRole('button', { name: /Add idea/ }).count(), 0, 'an example takes no idea')
+    assert.equal(await otherPage.getByText('Platform Experiment', { exact: true }).count(), 0, 'the graph of an example cannot be turned to another experiment')
+    await shot(otherPage, 'example-hypotheses')
+    await otherPage.getByRole('link', { name: 'Experiment →' }).click()
+    await otherPage.waitForURL(u => u.pathname === `/platform-experiments/${experimentID}` && u.searchParams.get('example') === experimentID)
+
+    await otherPage.getByRole('link', { name: /^Jobs/ }).last().click()
+    await otherPage.waitForURL(u => u.pathname === '/jobs' && u.searchParams.get('example') === experimentID)
+    await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+    await banner.waitFor()
+    await otherPage.getByText('No jobs found').waitFor()
+    assert.equal(await otherPage.getByRole('button', { name: 'Cancel' }).count(), 0)
+    await shot(otherPage, 'example-jobs')
+
+    // What the pages asked: each list narrowed to one shared experiment (the list of examples
+    // reads figures for every card), never within a project of the reader's, nothing but reads,
+    // and nothing the API refused.
+    const lists = exampleCalls.filter(c => /^\/(experiments|agents|donations)(\/stats)?$/.test(new URL(c.url()).pathname))
+    const ofExample = lists.filter(c => new URL(c.url()).searchParams.get('platform_experiment_id') === experimentID)
+    assert.ok(ofExample.length > 3, 'the example pages read their lists')
+    assert.ok(ofExample.some(c => new URL(c.url()).searchParams.get('project_id') === null), 'the jobs of the example are asked for with no project')
+    for (const call of lists) {
+      const asked = new URL(call.url()).searchParams
+      assert.ok(asked.get('platform_experiment_id'), `${call.url()} is narrowed to one platform experiment`)
+      assert.ok(!bobMe.projects.some(p => p.id === asked.get('project_id')), `${call.url()} names no project of the reader`)
+    }
+    for (const call of exampleCalls) {
+      const { pathname } = new URL(call.url())
+      assert.ok(call.request().method() === 'GET' || pathname === '/hypotheses/query', `${call.request().method()} ${call.url()} only reads`)
+      assert.ok(call.status() < 400, `${call.url()} is answered ${call.status()}`)
+    }
+    otherPage.off('response', record)
+
+    section('examples: the nav leads out, and a record opened by its id alone finds its way back in')
+    await otherPage.getByRole('link', { name: 'Jobs', exact: true }).click()
+    await otherPage.waitForURL(u => u.pathname === '/jobs' && !u.searchParams.has('example'))
+    await banner.waitFor({ state: 'detached' })
+    await otherPage.goto(`${UI}/platform-experiments/${experimentID}`)
+    await otherPage.waitForURL(u => u.searchParams.get('example') === experimentID)
+    await banner.waitFor()
+    assert.equal(await otherPage.getByRole('button', { name: 'Add agent' }).count(), 0)
+
+    section('examples: the API refuses the reader every write to one')
+    assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/agents`, 'POST', { hosted: false })).status, 404)
+    assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/close`, 'POST')).status, 404)
+
+    section('examples: an account with no platform experiment is offered them on its home')
+    await otherPage.goto(`${UI}/console`)
+    const start = otherPage.getByRole('region', { name: 'Start from an example' })
+    await start.waitFor()
+    await shot(otherPage, 'home-start-from-an-example', start)
+    // The home lists the newest three; the run's own is the newest unless it started none.
+    if (await start.getByRole('link', { name: exampleName }).count() > 0) {
+      await start.getByRole('link', { name: exampleName }).click()
+      await otherPage.waitForURL(u => u.pathname === `/platform-experiments/${experimentID}` && u.searchParams.get('example') === experimentID)
+      await banner.waitFor()
+    }
+    const ownCount = page.waitForResponse(r => r.url().startsWith(`${API}/platform-experiments?`) && new URL(r.url()).searchParams.get('limit') === '1')
+    await page.goto(`${UI}/console?project=${adaMe.projects[0].id}`)
+    assert.equal((await ownCount).headers()['x-total-count'], '1')
+    // Long enough for the answer to render and anything it shows to ask in turn.
+    await page.waitForTimeout(500)
+    assert.equal(await page.getByRole('region', { name: 'Start from an example' }).count(), 0, 'an account with experiments of its own is offered none')
+
+    section('examples: its own org opens a shared experiment as its own')
+    await page.goto(`${UI}/examples`)
+    await page.getByText(exampleName).first().click()
+    await page.waitForURL(u => u.pathname === `/platform-experiments/${experimentID}` && !u.searchParams.has('example'))
+    await page.getByRole('button', { name: 'Add agent' }).waitFor()
+    assert.equal(await page.getByRole('note').filter({ hasText: 'Example, read only' }).count(), 0)
+
+    section('examples: staff see the same list, with no control to share from')
+    hlAdmin('user', 'staff', bob.id, 'on')
+    try {
+      await otherPage.goto(`${UI}/examples`)
+      await otherPage.getByText(exampleName).first().waitFor()
+      assert.equal(await otherPage.getByRole('button', { name: /share|edit/i }).count(), 0)
+      await shot(otherPage, 'examples-as-staff')
+    } finally {
+      hlAdmin('user', 'staff', bob.id, 'off')
+    }
+  } finally {
+    unshare(experimentID)
+  }
+
+  section('examples: an experiment staff took back is gone for everyone but its org')
+  const relisted = otherPage.waitForResponse(sharedList)
+  await otherPage.goto(`${UI}/examples`)
+  assert.ok(!(await (await relisted).json()).some(pe => pe.id === experimentID), 'the API lists it no more')
+  await otherPage.getByRole('heading', { name: 'Examples' }).waitFor()
+  assert.equal(await otherPage.getByText(exampleName).count(), 0)
+  await otherPage.goto(`${UI}/platform-experiments/${experimentID}?example=${experimentID}`)
+  await otherPage.locator('.error-banner', { hasText: 'Could not load this platform experiment' }).waitFor()
+  assert.ok(!(await otherPage.content()).includes(exampleName), 'the experiment\'s name is nowhere on the page')
+  await otherPage.goto(`${UI}/jobs`)
   await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
 
   section('members: the last owner cannot leave, and an invite link is shown once')
