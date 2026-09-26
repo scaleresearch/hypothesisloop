@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import pytest
 import requests
 
+from conftest import cpu_job
 from support import admin
 from support.api import API
 from support.wait import eventually
@@ -458,7 +459,8 @@ def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
         assert a.api.as_caller(admin.token(scope)).post("/experiments/reprioritize").status_code == 403, scope
 
 
-HOSTLESS_JOB = {"accelerator_count": 0, "accelerator_type": None, "acceptable_accelerator_types": None}
+# One core of the CPU class, which every local node publishes.
+HOSTLESS_JOB = cpu_job()
 
 
 def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, run_id, deadline):

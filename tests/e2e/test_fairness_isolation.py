@@ -1,13 +1,13 @@
 """Two platform experiments sharing one agent must never leak usage into each other's quota
-ledger, and a CPU-only (accelerator_count=0) job must be accepted into the fairness pool without
-requiring an accelerator dimension. Ported 1:1 from tests/scenarios/fairness-isolation.sh.
+ledger, and a job on a CPU class (cores, no accelerator) must be accepted into the fairness pool
+and charged for its cores alone. Ported 1:1 from tests/scenarios/fairness-isolation.sh.
 API-only, parallel-safe (two fresh PEs of its own).
 """
 from __future__ import annotations
 
 import pytest
 
-from conftest import make_agent
+from conftest import TEST_ACCH_RATE, TEST_CPU_ACCH_RATE, cpu_job, make_agent
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -31,33 +31,32 @@ def two_pes_with_pe1_usage(api, experiment, run_id, deadline):
     return pe1, pe2, agent, job1
 
 
-def test_cpu_only_job_accepted_into_fairness_pool(api, two_pes_with_pe1_usage, deadline):
+def test_a_cpu_class_job_is_accepted_into_the_fairness_pool(api, two_pes_with_pe1_usage, deadline):
     pe1, pe2, agent, job1 = two_pes_with_pe1_usage
-    code, cpu_only_id = api.submit_job_expect(
-        pe2, agent, hours=0.02,
-        job_overrides={"accelerator_count": 0, "accelerators": None},
-    )
-    assert code < 400, (
-        f"CPU-only (accelerator_count=0) job submission was rejected outright (HTTP {code})"
-    )
+    code, cpu_id = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=cpu_job())
+    assert code < 400, f"a job for one core of the CPU class was rejected outright (HTTP {code})"
     eventually(
-        f"{cpu_only_id} to reach a terminal/queued status",
-        lambda: api.experiment(cpu_only_id)["status"],
+        f"{cpu_id} to reach a terminal/queued status",
+        lambda: api.experiment(cpu_id)["status"],
         accept=lambda s: s in ("RUNNING", "COMPLETED", "FAILED", "EVICTED", "QUEUED", "REJECTED"),
         deadline=deadline,
     )
 
 
+def test_a_job_that_holds_no_priced_unit_is_refused(api, two_pes_with_pe1_usage):
+    _, pe2, agent, _ = two_pes_with_pe1_usage
+    for overrides in ({"accelerator_count": 0}, {"accelerator_count": 0, "accelerator_type": None, "acceptable_accelerator_types": None}):
+        code, _ = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=overrides)
+        assert code == 400, f"a job with no accelerator and no cores of a CPU class was answered {code}, want 400"
+
+
 def test_pe2_quota_unaffected_by_pe1_usage(api, two_pes_with_pe1_usage, deadline):
     pe1, pe2, agent, job1 = two_pes_with_pe1_usage
-    code, cpu_only_id = api.submit_job_expect(
-        pe2, agent, hours=0.02,
-        job_overrides={"accelerator_count": 0, "accelerators": None},
-    )
-    assert code < 400, f"CPU-only job submission was rejected outright (HTTP {code})"
+    code, cpu_id = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=cpu_job())
+    assert code < 400, f"a job for one core of the CPU class was rejected outright (HTTP {code})"
     eventually(
-        f"{cpu_only_id} to reach a terminal/queued status",
-        lambda: api.experiment(cpu_only_id)["status"],
+        f"{cpu_id} to reach a terminal/queued status",
+        lambda: api.experiment(cpu_id)["status"],
         accept=lambda s: s in ("RUNNING", "COMPLETED", "FAILED", "EVICTED", "QUEUED", "REJECTED"),
         deadline=deadline,
     )
@@ -70,9 +69,12 @@ def test_pe2_quota_unaffected_by_pe1_usage(api, two_pes_with_pe1_usage, deadline
     )
     pe1_used = api.quota_field(pe1, agent, "used_guaranteed_acch")
     pe2_used = api.quota_field(pe2, agent, "used_guaranteed_acch")
-    # PE2's only job requested no accelerator, so any nonzero AccH usage recorded against it can
-    # only have leaked in from PE1 via a quota-map key collision (AgentID-only vs (AgentID, PEID)).
-    assert pe2_used == 0.0, (
-        f"PE2 shows nonzero guaranteed usage ({pe2_used}) from an accelerator-free job -- quota "
+    # PE2's only job held one core for at most 0.02 hours, a twenty-fifth of what PE1's
+    # accelerator job costs. Usage above that can only have leaked in from PE1 via a quota-map key
+    # collision (AgentID-only vs (AgentID, PEID)).
+    own_cost = TEST_CPU_ACCH_RATE * 0.02
+    assert own_cost < TEST_ACCH_RATE * 0.02 / 10
+    assert pe2_used <= own_cost + 1e-9, (
+        f"PE2 shows guaranteed usage ({pe2_used}) above the {own_cost} its one-core job can cost -- quota "
         f"map may key on AgentID alone, leaking PE1's usage (PE1 used={pe1_used})"
     )

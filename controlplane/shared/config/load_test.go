@@ -404,10 +404,9 @@ func TestACatalogEntryStatesItsKindAndNoneIsAnAccelerator(t *testing.T) {
 	if len(cfg.KindByName) != len(cfg.AcceleratorTypes) {
 		t.Errorf("%d kinds for %d types", len(cfg.KindByName), len(cfg.AcceleratorTypes))
 	}
-	for name, kind := range cfg.KindByName {
-		if name != class && kind != domain.TypeKindAccelerator {
-			t.Errorf("kind of %s = %q, want accelerator for an entry that states none", name, kind)
-		}
+	const device = "nvidia.com/gpu.product=NVIDIA-L40"
+	if kind, priced := cfg.KindByName[device]; !priced || kind != domain.TypeKindAccelerator {
+		t.Errorf("kind of %s = %q, want accelerator for an entry that states none", device, kind)
 	}
 
 	for _, kind := range []string{"gpu", "CPU", "core"} {

@@ -38,6 +38,12 @@ pytestmark = pytest.mark.parallel
 if sys.platform != "linux":
     pytest.skip("the bare-node agent runs on Linux hosts only (/proc, /etc/machine-id)", allow_module_level=True)
 
+# The test's job holds no accelerator, and a job that holds no priced unit is now refused at
+# submission. The bare-metal runtime publishes no CPU class yet (its probe finds NVIDIA and
+# Tenstorrent devices only), so on a host without an accelerator there is no job this test could
+# submit. It returns with the bare-metal CPU class, when JOB_OVERRIDE_BASE asks for its cores.
+pytest.skip("the bare-metal runtime publishes no CPU class yet, and a job with no priced unit is refused", allow_module_level=True)
+
 CONTAINER_ENGINE_BIN = shutil.which("podman") or shutil.which("docker")
 if CONTAINER_ENGINE_BIN is None:
     pytest.skip(

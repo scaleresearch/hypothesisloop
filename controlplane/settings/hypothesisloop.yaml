@@ -201,6 +201,12 @@ data_store:
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
 
 accelerator_types:
+  # The CPU class the local dev nodes publish (localdev/lib/fake-gpu-node.sh). The rate of a
+  # core-hour is the operator's to set.
+  - name:      cpu.hypothesisloop.dev/class=dev-node
+    kind:      cpu
+    acch_rate: 0.01
+
   - name:      nvidia.com/gpu.product=Tesla-T4
     acch_rate: 0.125
 
