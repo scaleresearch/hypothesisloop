@@ -4,9 +4,10 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { clsx } from 'clsx'
 import useSWR from 'swr'
-import { FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
+import { FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Settings, BookOpen } from 'lucide-react'
 import { fetchOrgClusters } from '@/lib/api'
 import { HOME_PATH, LANDING_PATH, signOut } from '@/lib/auth'
+import { useReadOnly } from '@/lib/example'
 import { useTenant } from '@/lib/tenant'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 import { ProjectSwitcher } from '@/components/project-switcher'
@@ -15,8 +16,11 @@ import { Link } from '@/components/ui/link'
 import { Logo } from '@/components/ui/logo'
 import { InlineError } from '@/components/ui/status-message'
 
+const EXAMPLES_PATH = '/examples'
+
 const navItems = [
   { href: '/platform-experiments', label: 'Platform Experiments', icon: FlaskConical },
+  { href: EXAMPLES_PATH,           label: 'Examples',             icon: BookOpen     },
   { href: '/hypotheses',           label: 'Hypotheses',           icon: Lightbulb    },
   { href: '/agents',               label: 'Research Agents',      icon: Bot          },
   { href: '/jobs',                 label: 'Jobs',                 icon: ListTree     },
@@ -89,10 +93,12 @@ function Account() {
 
 export function Nav() {
   const pathname = usePathname()
+  // The pages of an example are the same ones the caller's own records open on.
+  const inExample = useReadOnly()
 
   return (
     <nav className="flex h-screen w-56 flex-none flex-col border-r bg-surface">
-      <Link href={HOME_PATH} className="border-b px-4 py-5">
+      <Link href={HOME_PATH} leaveExample className="border-b px-4 py-5">
         <Logo />
       </Link>
       <ProjectSwitcher />
@@ -101,11 +107,12 @@ export function Nav() {
       </div>
       <ul className="mt-1 flex flex-col gap-0.5 px-2.5">
         {navItems.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + '/')
+          const active = inExample ? href === EXAMPLES_PATH : pathname === href || pathname.startsWith(href + '/')
           return (
             <li key={href}>
               <Link
                 href={href}
+                leaveExample
                 aria-current={active ? 'page' : undefined}
                 className={clsx(
                   'flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium transition-colors',

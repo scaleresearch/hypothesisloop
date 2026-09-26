@@ -45,7 +45,8 @@ const DEST_HREF: Record<string, string> = {
  * nav: fuzzy destination search plus "paste an ID, land on the record."
  */
 export function CommandPalette() {
-  const router = useProjectRouter()
+  // Every jump leaves an example: a record of one puts it back in the URL when it opens.
+  const router = useProjectRouter(true)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)

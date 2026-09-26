@@ -2,9 +2,11 @@
 
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
-import { fetchMe } from '@/lib/api'
-import { useProjectParam } from '@/lib/query-state'
+import { fetchMe, fetchPlatformExperiment } from '@/lib/api'
+import { ExampleContext, isExample } from '@/lib/example'
+import { useExampleParam, useProjectParam } from '@/lib/query-state'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { ExampleBanner } from '@/components/example-banner'
 import { Nav } from '@/components/nav'
 import { CommandPalette } from '@/components/command-palette'
 import { Button } from '@/components/ui/button'
@@ -23,6 +25,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // that ended, reaches a page that is already open.
   const { data: me, error } = useSWR('me', fetchMe, { refreshInterval: 30_000 })
   const [projectID, selectProject] = useProjectParam()
+  const exampleID = useExampleParam()
+  const { data: examplePE } = useSWR(exampleID ? ['pe', exampleID] : null, () => fetchPlatformExperiment(exampleID))
 
   if (error && !me) {
     return (
@@ -60,8 +64,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Keyed by project, so a switch remounts the page: a token on show, a half-filled form or an
   // open palette belongs to the project it was opened in.
   const { project } = resolution.tenant
+  // Read only until the experiment is known to be the caller's own, so no control that writes
+  // shows while it loads.
+  const example = exampleID && (!examplePE || isExample(me, examplePE)) ? { id: exampleID, pe: examplePE } : null
   return (
     <TenantContext.Provider value={resolution.tenant}>
+      <ExampleContext.Provider value={example}>
       <Nav />
       <main key={project.id} className="max-w-[1220px] flex-1 overflow-auto px-8 py-7">
         {error && (
@@ -69,9 +77,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
           </ErrorMessage>
         )}
+        <ExampleBanner />
         {children}
       </main>
       <CommandPalette key={`palette-${project.id}`} />
+      </ExampleContext.Provider>
     </TenantContext.Provider>
   )
 }
