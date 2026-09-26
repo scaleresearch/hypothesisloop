@@ -77,8 +77,21 @@ type ClusterCapacity struct {
 	JobImage string `json:"job_image,omitempty"`
 	// JobImageDefault says the cluster also runs a job in the image the job names. False with a
 	// JobImage is a cluster that runs that one image only: a job placed there names none or it.
-	JobImageDefault bool                  `json:"job_image_default,omitempty"`
-	Accelerators    []AcceleratorCapacity `json:"accelerators"`
+	JobImageDefault bool `json:"job_image_default,omitempty"`
+	// Resources is the cluster's cores and memory, which is all a job that asks for no
+	// accelerator needs to know. Absent for a cluster that reported none in the window.
+	Resources    *ResourceCapacity     `json:"resources,omitempty"`
+	Accelerators []AcceleratorCapacity `json:"accelerators"`
+}
+
+// ResourceCapacity is a cluster's cores and memory as its runtime last reported them: what its
+// nodes offer in total and what running jobs have not asked for. Both sum over the nodes, so
+// they bound what the cluster runs at once and say nothing of what fits on one node.
+type ResourceCapacity struct {
+	CPUCoresAvailable    float64 `json:"cpu_cores_available"`
+	CPUCoresTotal        float64 `json:"cpu_cores_total"`
+	MemoryBytesAvailable int64   `json:"memory_bytes_available"`
+	MemoryBytesTotal     int64   `json:"memory_bytes_total"`
 }
 
 // AcceleratorCapacity is one accelerator type's live capacity on one cluster. AcceleratorType is
@@ -114,6 +127,23 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	clusters := buildClusterCapacity(available, total)
+	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	memoryAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	memoryTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	clusters = withResources(clusters, cpuAvailable, cpuTotal, memoryAvailable, memoryTotal)
 	registered, err := h.clusters.RegisteredClusters(ctx)
 	if err != nil {
 		return nil, err
@@ -125,6 +155,32 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return clusters, nil
 	}
 	return placeableBy(orgID, registered, clusters), nil
+}
+
+// withResources adds each cluster's cores and memory, and the clusters that have no accelerator
+// at all: a job that asks for none can run there, and they were in no answer before.
+func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string]float64, memoryAvailable, memoryTotal map[string]int64) []ClusterCapacity {
+	listed := make(map[string]bool, len(clusters))
+	for _, cluster := range clusters {
+		listed[cluster.ClusterName] = true
+	}
+	for name := range cpuTotal {
+		if !listed[name] {
+			clusters = append(clusters, ClusterCapacity{ClusterName: name, Accelerators: []AcceleratorCapacity{}})
+		}
+	}
+	for i, cluster := range clusters {
+		total, reported := cpuTotal[cluster.ClusterName]
+		if !reported {
+			continue
+		}
+		clusters[i].Resources = &ResourceCapacity{
+			CPUCoresAvailable: cpuAvailable[cluster.ClusterName], CPUCoresTotal: total,
+			MemoryBytesAvailable: memoryAvailable[cluster.ClusterName], MemoryBytesTotal: memoryTotal[cluster.ClusterName],
+		}
+	}
+	sort.Slice(clusters, func(i, j int) bool { return clusters[i].ClusterName < clusters[j].ClusterName })
+	return clusters
 }
 
 // withJobImages says of each cluster which image a job that names none runs in there and whether

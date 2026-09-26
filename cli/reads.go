@@ -95,7 +95,9 @@ value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, s
 func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("capacity", `usage: hl capacity [--org ORG]
 
-Live accelerators per cluster, one line per type: available, total and acch_per_hour, what an
+Live capacity per cluster. First one line of its cores and memory, in total and not asked for
+by running jobs, summed over its nodes: what a job with no accelerator needs to know. Then
+its accelerators, one line per type: available, total and acch_per_hour, what an
 hour on one of them costs in accelerator hours. accelerator_type is the exact string a job spec
 takes; a type with none available queues and never errors. A line with job_image is of a
 cluster that runs a job that names no image, in that one. With only_job_image it runs no other
@@ -116,6 +118,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			Name         string            `json:"cluster_name"`
 			JobImage     string            `json:"job_image"`
 			JobImageDef  bool              `json:"job_image_default"`
+			Resources    json.RawMessage   `json:"resources"`
 			Accelerators []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
 	}
@@ -127,14 +130,19 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		return fail(stderr, err)
 	}
 	for _, cl := range out.Clusters {
+		prefix := []string{"cluster", cl.Name}
+		if cl.JobImage != "" {
+			prefix = append(prefix, "job_image", cl.JobImage)
+		}
+		if cl.JobImage != "" && !cl.JobImageDef {
+			prefix = append(prefix, "only_job_image", "true")
+		}
+		if len(cl.Resources) > 0 && string(cl.Resources) != "null" {
+			if err := printPrefixed(stdout, cl.Resources, prefix...); err != nil {
+				return fail(stderr, err)
+			}
+		}
 		for _, a := range cl.Accelerators {
-			prefix := []string{"cluster", cl.Name}
-			if cl.JobImage != "" {
-				prefix = append(prefix, "job_image", cl.JobImage)
-			}
-			if cl.JobImage != "" && !cl.JobImageDef {
-				prefix = append(prefix, "only_job_image", "true")
-			}
 			if err := printPrefixed(stdout, a, prefix...); err != nil {
 				return fail(stderr, err)
 			}

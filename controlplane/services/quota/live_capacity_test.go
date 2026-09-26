@@ -107,3 +107,31 @@ func TestCapacitySaysWhichClustersRunEveryJobInOneImage(t *testing.T) {
 		t.Fatalf("got  = %s\nwant = %s", raw, want)
 	}
 }
+
+// A job that asks for no accelerator is placed by cores and memory, and a cluster without any
+// accelerator was in no capacity answer at all, so nobody choosing where to run could see either.
+func TestCapacityCarriesEachClustersCoresAndMemory(t *testing.T) {
+	clusters := withResources(
+		buildClusterCapacity(map[string]map[string]int64{"chips": {"chip": 1}}, map[string]map[string]int64{"chips": {"chip": 4}}),
+		map[string]float64{"chips": 12, "cpu-only": 30.5}, map[string]float64{"chips": 16, "cpu-only": 32},
+		map[string]int64{"chips": 1 << 30, "cpu-only": 2 << 30}, map[string]int64{"chips": 4 << 30, "cpu-only": 8 << 30})
+
+	if len(clusters) != 2 || clusters[0].ClusterName != "chips" || clusters[1].ClusterName != "cpu-only" {
+		t.Fatalf("clusters = %+v, want the one with chips and the one with none, by name", clusters)
+	}
+	if want := (ResourceCapacity{CPUCoresAvailable: 12, CPUCoresTotal: 16, MemoryBytesAvailable: 1 << 30, MemoryBytesTotal: 4 << 30}); *clusters[0].Resources != want {
+		t.Errorf("chips: %+v, want %+v", *clusters[0].Resources, want)
+	}
+	if want := (ResourceCapacity{CPUCoresAvailable: 30.5, CPUCoresTotal: 32, MemoryBytesAvailable: 2 << 30, MemoryBytesTotal: 8 << 30}); *clusters[1].Resources != want {
+		t.Errorf("cpu-only: %+v, want %+v", *clusters[1].Resources, want)
+	}
+	if clusters[1].Accelerators == nil || len(clusters[1].Accelerators) != 0 {
+		t.Errorf("cpu-only accelerators = %#v, want an empty list", clusters[1].Accelerators)
+	}
+
+	// A cluster that reported accelerators and no cores in the window has no resources to show.
+	silent := withResources(buildClusterCapacity(map[string]map[string]int64{"old": {"chip": 1}}, nil), nil, nil, nil, nil)
+	if len(silent) != 1 || silent[0].Resources != nil {
+		t.Errorf("a cluster with no cores reported: %+v", silent)
+	}
+}
