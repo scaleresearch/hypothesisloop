@@ -52,6 +52,7 @@ type Clusters interface {
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
 	SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error)
 	SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error)
+	SetClusterPriority(ctx context.Context, name string, priority int) (*domain.Cluster, error)
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
@@ -133,13 +134,14 @@ type ClusterView struct {
 	OrgID     string    `json:"org_id,omitempty"`
 	Shared    bool      `json:"shared" doc:"The platform places every org's jobs on a shared cluster. Staff decide it."`
 	Enabled   bool      `json:"enabled" doc:"Whether the jobs of the org in the path are placed on the cluster. True until an owner of that org turns the cluster off, which no other org sees or is bound by."`
+	Priority  int       `json:"priority" doc:"Where the cluster stands among the ones a job may be placed on: a job goes to the highest priority that can take it, and to a lower one when that is full. The org that registered the cluster sets 1 to 1000, 100 until it does. A shared cluster holds 0, so an org's own clusters are tried first."`
 	ClusterID string    `json:"cluster_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 // viewOf shows a cluster as orgID has it.
 func viewOf(c *domain.Cluster, orgID string) ClusterView {
-	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
+	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), Priority: c.Priority, ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
 }
 
 // viewFor shows a cluster as orgID has it to one caller. A cluster the caller does not know keeps
@@ -232,6 +234,8 @@ func (h *Handler) answer(op string, err error) error {
 		return conflict(ReasonMaxOrgsReached, fmt.Sprintf("a person owns at most %d orgs, and the owner of this one already does", h.limits.MaxOrgsPerUser))
 	case errors.Is(err, db.ErrMaxProjectsReached):
 		return conflict(ReasonMaxProjectsReached, fmt.Sprintf("an org holds at most %d projects, and this one already does", h.limits.MaxProjectsPerOrg))
+	case errors.Is(err, db.ErrClusterShared):
+		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
 		return huma.Error409Conflict(err.Error())
 	default:
@@ -503,7 +507,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
 		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
-		Description: "The clusters the org registered and the ones the platform shares with every org, by name, with whether an agent is connected right now " +
+		Description: "The clusters the org registered and the ones the platform shares with every org, in the order a job is placed on them (priority, then name), with whether an agent is connected right now " +
 			"and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
@@ -574,27 +578,53 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}
 
 	route(doc, h, huma.Operation{
-		OperationID: "share-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
-		Summary: "Share a cluster with every org, or stop sharing it", Tags: []string{"clusters"},
-		Description: "Staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster " +
+		OperationID: "update-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
+		Summary: "Set a cluster's priority, or share it with every org", Tags: []string{"clusters"},
+		Description: "Takes the fields that change, at least one. " +
+			"priority is set by an owner of the org that registered the cluster, an API key of the whole org, or staff: 1 to 1000, higher first. " +
+			"A job is placed on the highest-priority cluster that can take it as the scheduler reads capacity at that moment, and on a lower one when the higher is full or has just failed it. " +
+			"It orders placements from then on and moves no job that is placed. A shared cluster holds priority 0, the platform's, and a priority for one answers 422. " +
+			"shared is staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster " +
 			"go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, " +
-			"and none of them spends a retry. requeued names them.",
+			"and none of them spends a retry. requeued names them. The cluster is then at priority 100 again unless the same call names another.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Name string `path:"name"`
 		Body struct {
-			Shared bool `json:"shared"`
+			Shared   *bool `json:"shared,omitempty" doc:"Staff only."`
+			Priority *int  `json:"priority,omitempty" doc:"1 to 1000, higher first."`
 		}
 	}) (*struct{ Body WithdrawnCluster }, error) {
-		if err := h.access.Staff(ctx); err != nil {
-			return nil, err
+		if in.Body.Shared != nil {
+			if err := h.access.Staff(ctx); err != nil {
+				return nil, err
+			}
 		}
-		if _, err := h.access.ClusterOf(ctx, in.ID, in.Name); err != nil {
-			return nil, err
-		}
-		cluster, requeued, err := h.clusters.SetClusterShared(ctx, in.Name, in.Body.Shared)
+		cluster, err := h.access.ClusterOf(ctx, in.ID, in.Name)
 		if err != nil {
 			return nil, err
+		}
+		if in.Body.Shared == nil && in.Body.Priority == nil {
+			return nil, huma.Error422UnprocessableEntity("name what changes: priority or shared")
+		}
+		if in.Body.Priority != nil {
+			if err := domain.ValidateClusterPriority(*in.Body.Priority); err != nil {
+				return nil, huma.Error422UnprocessableEntity(err.Error())
+			}
+			if shared := cluster.Shared; (in.Body.Shared == nil && shared) || (in.Body.Shared != nil && *in.Body.Shared) {
+				return nil, db.ErrClusterShared
+			}
+		}
+		var requeued []string
+		if in.Body.Shared != nil {
+			if cluster, requeued, err = h.clusters.SetClusterShared(ctx, in.Name, *in.Body.Shared); err != nil {
+				return nil, err
+			}
+		}
+		if in.Body.Priority != nil {
+			if cluster, err = h.clusters.SetClusterPriority(ctx, in.Name, *in.Body.Priority); err != nil {
+				return nil, err
+			}
 		}
 		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster, in.ID), Requeued: orEmpty(requeued)}}, nil
 	})

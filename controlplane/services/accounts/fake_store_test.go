@@ -257,7 +257,7 @@ func (s *memStore) RegisterCluster(_ context.Context, name, orgID string) (*doma
 	}
 	c, ok := s.clusters[name]
 	if !ok {
-		c = &domain.Cluster{Name: name, OrgID: orgID, CreatedAt: s.now()}
+		c = &domain.Cluster{Name: name, OrgID: orgID, Priority: domain.DefaultClusterPriority, CreatedAt: s.now()}
 		s.clusters[name] = c
 	}
 	if c.OrgID != orgID {
@@ -284,7 +284,12 @@ func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.C
 			out = append(out, &copied)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
 }
 
@@ -307,6 +312,12 @@ func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool)
 	if !ok {
 		return nil, nil, db.ErrClusterNotFound
 	}
+	switch {
+	case shared:
+		c.Priority = domain.SharedClusterPriority
+	case c.Shared:
+		c.Priority = domain.DefaultClusterPriority
+	}
 	c.Shared = shared
 	var requeued []string
 	if !shared {
@@ -314,6 +325,19 @@ func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool)
 	}
 	out := *c
 	return &out, requeued, nil
+}
+
+func (s *memStore) SetClusterPriority(_ context.Context, name string, priority int) (*domain.Cluster, error) {
+	c, ok := s.clusters[name]
+	if !ok {
+		return nil, db.ErrClusterNotFound
+	}
+	if c.Shared {
+		return nil, db.ErrClusterShared
+	}
+	c.Priority = priority
+	out := *c
+	return &out, nil
 }
 
 func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {

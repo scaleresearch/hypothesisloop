@@ -23,7 +23,7 @@ import (
 //   - A person leaves an org by themselves, whatever their role. An invite is accepted by a
 //     signed-in person, for themselves. The store keeps an org from losing its last owner.
 //   - A cluster is administered by the administrators of the org that registered it, whatever is
-//     done to it: its settings, its identity, placing a job on it by hand, removing it. Only
+//     done to it: its settings, its priority, its identity, placing a job on it by hand, removing it. Only
 //     staff share it.
 //   - A caller sees the clusters its jobs can be placed on: its orgs' own and the shared ones.
 //     Of a cluster another org owns it sees the name and whether it is connected.

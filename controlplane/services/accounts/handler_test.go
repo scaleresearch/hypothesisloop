@@ -1045,6 +1045,105 @@ func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
 	}
 }
 
+// The org that registered a cluster ranks it among its own. The platform's shared cluster holds
+// the priority below all of them and nobody ranks it.
+func TestAnOrgSetsThePriorityOfAClusterItRegistered(t *testing.T) {
+	w := newWorld(t)
+	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
+	var view WithdrawnCluster
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-first"}, http.StatusOK, nil)
+	for caller, priority := range map[string]int{"owner": 1, "org-key": 1000, "staff": 250} {
+		w.ok(caller, "PATCH", path, map[string]any{"priority": priority}, http.StatusOK, &view)
+		if view.Priority != priority || view.Shared || len(view.Requeued) != 0 || view.Requeued == nil {
+			t.Fatalf("%s set priority %d: got = %+v", caller, priority, view)
+		}
+	}
+	w.ok("owner", "PATCH", "/orgs/"+w.orgA+"/clusters/zz-first", map[string]any{"priority": 900}, http.StatusOK, nil)
+
+	var listed struct {
+		Clusters []ListedCluster `json:"clusters"`
+	}
+	w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
+	if len(listed.Clusters) != 2 || listed.Clusters[0].Name != "zz-first" || listed.Clusters[0].Priority != 900 ||
+		listed.Clusters[1].Name != w.clusterA || listed.Clusters[1].Priority != 250 {
+		t.Fatalf("clusters of org a: got = %+v, want zz-first at 900 before %s at 250", listed.Clusters, w.clusterA)
+	}
+
+	for name, body := range map[string]map[string]any{
+		"zero": {"priority": 0}, "negative": {"priority": -5}, "over the range": {"priority": 1001}, "no field": {},
+	} {
+		if rec := w.call("owner", "PATCH", path, body); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: got = %d %s, want = 422", name, rec.Code, rec.Body)
+		}
+	}
+	for name, tc := range map[string]struct {
+		caller, path string
+		want         int
+	}{
+		"a member":                       {"member", path, http.StatusForbidden},
+		"a key bound to one project":     {"project-key", path, http.StatusForbidden},
+		"a person of another org":        {"outsider", path, http.StatusNotFound},
+		"an owner, another org's":        {"owner", "/orgs/" + w.orgA + "/clusters/" + w.clusterB, http.StatusNotFound},
+		"an owner, under another org":    {"owner", "/orgs/" + w.orgB + "/clusters/" + w.clusterB, http.StatusNotFound},
+		"an owner, a name nobody has":    {"owner", "/orgs/" + w.orgA + "/clusters/never-registered", http.StatusNotFound},
+		"an owner sharing with priority": {"owner", path, http.StatusForbidden},
+	} {
+		body := map[string]any{"priority": 7}
+		if name == "an owner sharing with priority" {
+			body["shared"] = false
+		}
+		if rec := w.call(tc.caller, "PATCH", tc.path, body); rec.Code != tc.want {
+			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
+		}
+	}
+	if got := w.store.clusters[w.clusterA].Priority; got != 250 {
+		t.Fatalf("after the refused requests: priority %d, want 250", got)
+	}
+}
+
+func TestASharedClusterHoldsThePlatformsPriorityAndTakesNoOther(t *testing.T) {
+	w := newWorld(t)
+	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
+	var view WithdrawnCluster
+	w.ok("owner", "PATCH", path, map[string]any{"priority": 600}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", path, map[string]any{"shared": true}, http.StatusOK, &view)
+	if !view.Shared || view.Priority != domain.SharedClusterPriority {
+		t.Fatalf("a cluster once shared: got = %+v, want priority %d", view, domain.SharedClusterPriority)
+	}
+	for _, caller := range []string{"owner", "org-key", "staff"} {
+		rec := w.call(caller, "PATCH", path, map[string]any{"priority": 600})
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "shared cluster") {
+			t.Fatalf("%s setting the priority of a shared cluster: got = %d %s, want = 422 saying why", caller, rec.Code, rec.Body)
+		}
+	}
+	if rec := w.call("staff", "PATCH", path, map[string]any{"shared": true, "priority": 600}); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("sharing a cluster at an org's priority: got = %d %s, want = 422", rec.Code, rec.Body)
+	}
+	if rec := w.call("outsider", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterA, map[string]any{"priority": 600}); rec.Code != http.StatusNotFound {
+		t.Fatalf("another org ranking the shared cluster: got = %d %s, want = 404", rec.Code, rec.Body)
+	}
+
+	// Every org sees it after its own.
+	var listed struct {
+		Clusters []ListedCluster `json:"clusters"`
+	}
+	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
+	if len(listed.Clusters) != 2 || listed.Clusters[0].Name != w.clusterB || listed.Clusters[0].Priority != domain.DefaultClusterPriority ||
+		listed.Clusters[1].Name != w.clusterA || listed.Clusters[1].Priority != domain.SharedClusterPriority {
+		t.Fatalf("clusters of org b: got = %+v, want its own at the default before the shared one at 0", listed.Clusters)
+	}
+
+	w.ok("staff", "PATCH", path, map[string]any{"shared": false}, http.StatusOK, &view)
+	if view.Shared || view.Priority != domain.DefaultClusterPriority {
+		t.Fatalf("once the sharing ended: got = %+v, want priority %d", view, domain.DefaultClusterPriority)
+	}
+	w.ok("staff", "PATCH", path, map[string]any{"shared": true}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", path, map[string]any{"shared": false, "priority": 42}, http.StatusOK, &view)
+	if view.Shared || view.Priority != 42 {
+		t.Fatalf("ending the sharing and ranking in one call: got = %+v, want priority 42", view)
+	}
+}
+
 func TestLineageFollowsMintedByThroughAnyDepth(t *testing.T) {
 	keys := []*domain.APIKey{
 		{ID: "root"}, {ID: "child", MintedBy: "root"}, {ID: "grandchild", MintedBy: "child"},
