@@ -28,7 +28,6 @@ import {
   HYPOTHESIS_STATUSES,
 } from '@/lib/api'
 import type { StagesStatus } from '@/lib/api'
-import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { PlatformExperimentStatus } from '@/types'
 import { DraftView } from '@/components/draft'
@@ -51,7 +50,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { Table } from '@/components/ui/table'
 import { Eyebrow, Pill } from '@/components/ui/text'
 import { semantic, agentPalette, chart } from '@/lib/colors'
-import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -417,7 +416,7 @@ function CompetingAgentsChart({
           className="mb-2 inline-block px-2 py-0.5 rounded-sm border border-danger bg-danger/10 font-mono text-2xs text-danger"
           title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
         >
-          Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().join(', ')}
+          Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().map((agentID, i) => <Fragment key={agentID}>{i > 0 && ', '}<AgentLabel id={agentID} /></Fragment>)}
         </div>
       )}
     <ResponsiveContainer width="100%" height={300}>
@@ -503,6 +502,9 @@ function SubmitPolicyChips({ pe }: { pe: PlatformExperiment }) {
   return <>{chips}</>
 }
 
+// How many of the newest jobs the page reads, for the jobs table and the metrics picker.
+const RECENT_JOBS = 20
+
 export default function PlatformExperimentDetailPage({ params }: { params: { id: string } }) {
   return <AgentNames platformExperimentID={params.id}><PlatformExperimentDetail params={params} /></AgentNames>
 }
@@ -529,10 +531,10 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   )
 
   // Each list below is asked for inside the platform experiment's own project, so it waits for
-  // the experiment itself. The newest jobs only, for the recent list and the live metrics picker.
+  // the experiment itself. The newest jobs only, for the jobs table and the live metrics picker.
   const { data: experimentsPage, error: experimentsError } = useSWR(
     pe ? ['pe-experiments', id] : null,
-    () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, sort: '-created_at', limit: MAX_LIST_PAGE_SIZE }),
+    () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, sort: '-created_at', limit: RECENT_JOBS }),
     { refreshInterval: 15_000 },
   )
   const experiments = experimentsPage?.items
@@ -667,9 +669,10 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
+  // One list: what is running first, then the newest of the rest.
   const running = runningPage?.items ?? []
-  const recent = (experiments ?? []).slice(0, 20)
-  const variedByHypothesis = variedEnvByHypothesis(recent)
+  const jobRows = [...running, ...(experiments ?? []).filter(exp => !running.some(r => r.id === exp.id))]
+  const variedByHypothesis = variedEnvByHypothesis(jobRows)
 
   // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
   // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
@@ -690,9 +693,8 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const activeAgentIds = selectedAgentIds ?? new Set(knownAgentIds)
   const activeMetricKeys = selectedMetricKeys ?? new Set(metrics.map(m => m.key))
 
-  // Donations targeted at agents in this experiment
-  const relevantAgents = new Set((quotas ?? []).map(q => q.agent_id))
-  const relevantDonations = (donations?.items ?? []).filter(d => relevantAgents.has(d.agent_id))
+  // The open requests of this experiment, as the read above asked for them.
+  const relevantDonations = donations?.items ?? []
 
   const readOnly = isReadOnly(me, pe)
 
@@ -892,30 +894,11 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               }, { start: 0, nodes: [] }).nodes}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-4">
-              <div>
-                <Eyebrow tone="success" className="mb-1.5 block">
-                  Active Agents ({stagesStatus.active_agents.length})
-                </Eyebrow>
-                {stagesStatus.active_agents.length === 0
-                  ? <span className="text-xs text-subtle">none</span>
-                  : stagesStatus.active_agents.map(a => (
-                    <Pill key={a} tone="success" className="my-0.5 mr-1"><AgentLabel id={a} /></Pill>
-                  ))}
-              </div>
-              <div>
-                <Eyebrow tone="danger" className="mb-1.5 block">
-                  Cut Agents ({stagesStatus.cut_agents.length})
-                </Eyebrow>
-                {stagesStatus.cut_agents.length === 0
-                  ? <span className="text-xs text-subtle">none</span>
-                  : stagesStatus.cut_agents.map(c => (
-                    <Pill key={c.agent_id} tone="danger" className="my-0.5 mr-1">
-                      <AgentLabel id={c.agent_id} /> <span className="opacity-70">· stage {c.stage_index}</span>
-                    </Pill>
-                  ))}
-              </div>
-            </div>
+            <p className="mt-3 text-xs text-muted">
+              <span className="font-mono font-semibold text-success">{stagesStatus.active_agents.length}</span> active
+              {' · '}<span className={clsx('font-mono font-semibold', stagesStatus.cut_agents.length > 0 && 'text-danger')}>{stagesStatus.cut_agents.length}</span> cut.
+              The scoreboard says which.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -968,7 +951,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         </CardHeader>
         <CardContent scrollX>
           {scoreboard.length === 0 ? (
-            <EmptyState>No agents signed up yet.</EmptyState>
+            <EmptyState>No agents yet.</EmptyState>
           ) : (
             <Table>
               <thead>
@@ -1064,9 +1047,15 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                         </td>
                         <td className="text-right font-mono text-xs">{jobs?.total ?? 0}</td>
                         <td className="text-right font-mono text-xs">{jobs?.by_status.COMPLETED ?? 0}</td>
-                        <td className="w-40">
-                          {totalAccH > 0 ? (
-                            <MetricBar value={usedAccH} max={totalAccH} />
+                        <td className="w-56">
+                          {quota && totalAccH > 0 ? (
+                            <>
+                              <MetricBar value={usedAccH} max={totalAccH} />
+                              <div className="mt-0.5 whitespace-nowrap font-mono text-2xs text-muted" title={`Used of what is guaranteed to the agent and of what it may take beyond that, in ${unit}`}>
+                                guaranteed {formatAccH(quota.used_guaranteed_acch)}/{formatAccH(quota.guaranteed_accelerator_hours)}
+                                {' · '}burst {formatAccH(quota.used_burst_acch)}/{formatAccH(quota.burst_accelerator_hours)}
+                              </div>
+                            </>
                           ) : <span className="text-xs text-muted">no quota</span>}
                         </td>
                       </tr>
@@ -1091,59 +1080,24 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         </CardContent>
       </Card>
 
-      {/* Running jobs */}
-      {running.length > 0 && (
-        <Card>
-          <CardHeader>Currently Running Jobs ({runningPage?.total ?? running.length})</CardHeader>
-          <CardContent scrollX>
-            <Table>
-              <thead>
-                <tr>
-                  <th>Experiment ID</th>
-                  <th>Agent</th>
-                  <th>Accelerator</th>
-                  <th className="text-right">Est. Cost</th>
-                  <th>Hypothesis</th>
-                </tr>
-              </thead>
-              <tbody>
-                {running.map(exp => (
-                  <tr key={exp.id}>
-                    <td className="font-mono text-2xs">
-                      <Link href={`/jobs/${exp.id}`} className="text-accent hover:underline">{exp.id.slice(0, 8)}…</Link>
-                    </td>
-                    <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
-                    <td className="font-mono text-xs">{exp.accelerator_count}× {acceleratorLabel(exp.accelerator_type)}</td>
-                    <td className="text-right font-mono text-xs">{exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} AccH` : '—'}</td>
-                    <td className="max-w-[280px] truncate text-xs">{exp.hypothesis}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Live job metrics */}
-      {(experiments ?? []).length > 0 && (
+      {jobRows.length > 0 && (
         <Card>
           <CardHeader>
             Job Metrics
             <span className="ml-2 text-xs font-normal text-subtle">over training progress, refreshed every 30 s</span>
           </CardHeader>
           <CardContent>
-            <LiveMetricsPicker jobs={experiments ?? []} />
+            <LiveMetricsPicker jobs={jobRows} />
           </CardContent>
         </Card>
       )}
 
-      {/* Recent jobs */}
+      {/* Jobs */}
       <Card>
-        <CardHeader>
-          Recent Jobs
-        </CardHeader>
+        <CardHeader>Jobs</CardHeader>
         <CardContent scrollX>
-          {!experiments || experiments.length === 0 ? (
+          {jobRows.length === 0 ? (
             <EmptyState>No jobs submitted yet.</EmptyState>
           ) : (
             <Table>
@@ -1159,7 +1113,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 </tr>
               </thead>
               <tbody>
-                {recent.map(exp => {
+                {jobRows.map(exp => {
                   const cost = exp.estimated_cost_acch
                   const evictionText = exp.eviction_reason
                     ? evictionLabel(exp.eviction_reason)
@@ -1196,45 +1150,13 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               </tbody>
             </Table>
           )}
+          {(stats?.total ?? 0) > jobRows.length && (
+            <Link href={`/jobs?platform_experiment_id=${pe.id}`} className="mt-2 inline-block text-sm text-accent hover:underline">
+              All {stats?.total} jobs →
+            </Link>
+          )}
         </CardContent>
       </Card>
-
-      {/* Quota table */}
-      {quotas && quotas.length > 0 && (
-        <Card>
-          <CardHeader>Agent Quotas</CardHeader>
-          <CardContent scrollX>
-            <Table>
-              <thead>
-                <tr>
-                  <th>Agent</th>
-                  <th>Guaranteed</th>
-                  <th>Burst</th>
-                  <th>Remaining</th>
-                </tr>
-              </thead>
-              <tbody>
-                {quotas.map(q => {
-                  const remaining = quotaRemainingAccH(q)
-                  return (
-                    <tr key={q.id}>
-                      <td className="font-mono text-xs font-semibold"><AgentLabel id={q.agent_id} /></td>
-                      <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} {unit}</td>
-                      <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} {unit}</td>
-                      <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>
-                        {formatAccH(remaining)} {unit}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </Table>
-            {/* RAM/storage quota columns intentionally omitted: those dimensions are hard
-                physical-fit-checked at admission, not hours-tracked, so AgentQuota carries no
-                RAM/storage fields at all. */}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Compute Donation Requests from agents in this experiment */}
       {relevantDonations.length > 0 && (
