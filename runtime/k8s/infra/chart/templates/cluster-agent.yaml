@@ -120,7 +120,13 @@ spec:
             limits:
               cpu: "300m"
               memory: "64Mi"
-      # Same as node-agent.yaml: must always have somewhere to run regardless of
-      # whether any workload node is attached (box-a's no-workload taint).
+      # Runs on a node kept free of workloads (local development's no-workload taint) or on a
+      # control-plane node, so it has somewhere to run before any workload node is attached.
+      # Never a toleration of every taint, as node-agent.yaml has: that covers
+      # node.kubernetes.io/unreachable too, so the scheduler binds this one pod to a node whose
+      # machine is gone, where it stays Pending and the cluster never connects.
       tolerations:
-        - operator: Exists
+        - key: hypothesisloop.io/no-workload
+          operator: Exists
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists

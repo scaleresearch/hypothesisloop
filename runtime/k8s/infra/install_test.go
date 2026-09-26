@@ -1,11 +1,16 @@
 package infra
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
@@ -68,5 +73,41 @@ func TestTheMakeRecipeDoesNotEchoTheRuntimeToken(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "runtime/k8s/infra/install.sh") {
 		t.Fatalf("make -n printed no install recipe:\n%s", out)
+	}
+}
+
+// A pod that tolerates every taint tolerates node.kubernetes.io/unreachable, so the scheduler
+// binds it to a node whose machine is gone. The cluster has one cluster-agent: bound there it
+// never starts and the cluster never connects.
+func TestClusterAgentDoesNotTolerateEveryTaint(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	out, err := exec.Command("helm", "template", "chart", "--show-only", "templates/cluster-agent.yaml",
+		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	for {
+		var deployment appsv1.Deployment
+		if err := decoder.Decode(&deployment); err == io.EOF {
+			t.Fatal("the chart rendered no cluster-agent Deployment")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if deployment.Kind != "Deployment" {
+			continue
+		}
+		tolerations := deployment.Spec.Template.Spec.Tolerations
+		if len(tolerations) == 0 {
+			t.Fatal("cluster-agent tolerates nothing, so it has no node on a cluster whose only node is kept free of workloads")
+		}
+		for _, toleration := range tolerations {
+			if toleration.Key == "" {
+				t.Errorf("cluster-agent tolerates every taint: %+v", toleration)
+			}
+		}
+		return
 	}
 }
