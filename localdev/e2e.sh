@@ -30,6 +30,20 @@ if ! curl -fsS -o /dev/null "${api}/health"; then
   exit 1
 fi
 
+export API_URL="${api}" METRICS_URL="http://localhost:8084"
+HL_TOKEN="$(lib_hl_admin token staff)"
+export HL_TOKEN
+
+# The suite reads the capacity of every cluster as its own and submits jobs any cluster could
+# take, so the local cluster must be the only one connected: a job placed on another would run
+# on somebody's hardware, or rent some.
+others="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/internal/clusters/" |
+  python3 -c 'import json, sys; print(" ".join(c["cluster_name"] for c in json.load(sys.stdin)["clusters"] if c["connected"] and c["cluster_name"] != "local"))')"
+if [[ -n "${others}" ]]; then
+  echo "e2e: other clusters are connected to this control plane (${others}); the suite's jobs could be placed on them. Stop their agents first" >&2
+  exit 1
+fi
+
 # The cluster's runtime and the workload the tests' jobs run are images, pushed and installed by
 # make reload under one tag. A test job names that tag, so both must be there under it.
 if [[ ! -s localdev/.image-tag ]]; then
@@ -49,15 +63,14 @@ if [[ "${installed##*:}" != "${tag}" ]]; then
   exit 1
 fi
 
+# The tests call kubectl with no context, so they get a kubeconfig that holds only this cluster.
+kubeconfig="$(mktemp)"
+nodes_were_up="$(podman ps --filter name=fake- --format '{{.Names}}' | head -1)"
 if ! mkdir "${lock}" 2>/dev/null; then
   echo "e2e: the stack is held (${lock}): $(cat "${lock}/owner" 2>/dev/null || echo 'no owner named')" >&2
   exit 1
 fi
 echo "make e2e (pid $$) since $(date '+%Y-%m-%d %H:%M:%S')" > "${lock}/owner"
-
-# The tests call kubectl with no context, so they get a kubeconfig that holds only this cluster.
-kubeconfig="$(mktemp)"
-nodes_were_up="$(podman ps --filter name=fake- --format '{{.Names}}' | head -1)"
 cleanup() {
   if [[ -z "${nodes_were_up}" ]]; then
     bash localdev/k3s-macos/dev-nodes-down.sh || true
@@ -71,9 +84,6 @@ export KUBECONFIG="${kubeconfig}"
 
 bash localdev/k3s-macos/dev-nodes-up.sh
 
-export API_URL="${api}" METRICS_URL="http://localhost:8084"
-HL_TOKEN="$(lib_hl_admin token staff)"
-export HL_TOKEN
 # The tests that work on a real repository run when .env names the sandbox and the stack has the
 # GitHub App that reaches it. They skip themselves otherwise.
 if [[ -n "${HL_GITHUB_APP_ID}" && -n "$(lib_env_value HL_E2E_GITHUB_REPO)" ]]; then

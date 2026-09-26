@@ -247,6 +247,10 @@ case "${action}" in
     stop cloud-agent
     stop agent-launcher
     start_control_plane
+    # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode
+    # shares it again. A job placed on it goes back to the queue.
+    lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
+    lib_hl_admin cluster share "${cloud_cluster}" off >/dev/null
     start_ui
     echo "dev: API http://localhost:8081, UI http://localhost:3000"
     status
