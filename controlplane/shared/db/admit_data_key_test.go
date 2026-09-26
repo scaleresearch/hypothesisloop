@@ -83,8 +83,8 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 		return &domain.AgentQuota{UsedGuaranteedAccH: 8}, nil
 	}
 	decision, reason, err = store.AdmitExperimentTx(ctx, &burst, spent, SubmissionRateLimit{}, func(context.Context) error { return nil })
-	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "share of the experiment budget has 2.00 remaining") {
-		t.Fatalf("burst job past the share = %v %q %v, want it refused for the share", decision, reason, err)
+	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "share of the experiment budget has 2 remaining") || !strings.Contains(reason, "it is spent") {
+		t.Fatalf("burst job past the share = %v %q %v, want it refused for the share, saying none of it is a reservation", decision, reason, err)
 	}
 }
 

@@ -213,12 +213,12 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		usedAcc, limitAcc = observed.UsedGuaranteedAccH+desiredGuaranteedAcc, allocation.GuaranteedAcceleratorHours
 	}
 	if exp.EstimatedCostAccH > 0 && usedAcc+exp.EstimatedCostAccH > limitAcc {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, have %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, have %.3g remaining. %s", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc, heldByEstimates(usedAcc-observedOf(observed, guaranteed))), nil
 	}
 	// Burst hours are inside the agent's share of the budget, so a job at either priority is
 	// held to what is left of the share.
 	if spent := observed.Used() + desiredGuaranteedAcc + desiredBurstAcc; exp.EstimatedCostAccH > 0 && spent+exp.EstimatedCostAccH > allocation.Share() {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.2f accelerator_hours, the agent's share of the experiment budget has %.2f remaining", exp.CapacityTier, exp.EstimatedCostAccH, allocation.Share()-spent), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, the agent's share of the experiment budget has %.3g remaining. %s", exp.CapacityTier, exp.EstimatedCostAccH, allocation.Share()-spent, heldByEstimates(desiredGuaranteedAcc+desiredBurstAcc)), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err
@@ -230,6 +230,23 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		return AdmitRejected, "", fmt.Errorf("admit experiment: commit: %w", err)
 	}
 	return AdmitInserted, "", nil
+}
+
+// heldByEstimates tells a refused submitter how much of what is used is only reserved: a job
+// holds its whole estimate until it ends and then only what it spent, so over-estimated jobs
+// crowd out the next one though little has been spent.
+func heldByEstimates(reserved float64) string {
+	if reserved <= 0 {
+		return "None of what is used is a reservation: it is spent."
+	}
+	return fmt.Sprintf("%.3g of what is used is reserved by the estimates of jobs that have not ended and returns, less what they spend, as each ends: wait for one, or state a shorter estimated_duration_hours.", reserved)
+}
+
+func observedOf(observed *domain.AgentQuota, guaranteed bool) float64 {
+	if guaranteed {
+		return observed.UsedGuaranteedAccH
+	}
+	return observed.UsedBurstAccH
 }
 
 // ReserveAdmittedFlavorTx rechecks the selected flavor's estimate, enforces the platform
