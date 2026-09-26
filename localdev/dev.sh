@@ -162,11 +162,35 @@ hosted_inputs() {
   tag="$(lib_env_value IMAGE_TAG)"
 }
 
+# The control plane reads the object store at the one address it also hands to jobs
+# (data_store.endpoint). On macOS that is host.containers.internal, which containers resolve and
+# the host does not until /etc/hosts names it; without it the API starts and then fails every
+# job submission, at the store read admission makes.
+require_object_store_address() {
+  local endpoint host
+  endpoint="$(awk '/^data_store:/ { inside = 1; next } /^[^ #]/ { inside = 0 } inside && $1 == "endpoint:" { print $2 }' "${settings}")"
+  host="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname or "")' "${endpoint}")"
+  if [[ -z "${host}" ]]; then
+    echo "dev: ${settings} names no data_store.endpoint" >&2
+    exit 1
+  fi
+  if ! python3 -c 'import socket, sys; socket.getaddrinfo(sys.argv[1], None)' "${host}" 2>/dev/null; then
+    echo "dev: this host does not resolve ${host}, the object store's address in data_store.endpoint (${endpoint})." >&2
+    echo "     The control plane reads the store there, so no job would be admitted." >&2
+    if [[ "${host}" == host.containers.internal ]]; then
+      echo "     Containers resolve that name and this host has to be told. Run once:" >&2
+      echo "       sudo sh -c 'echo \"127.0.0.1 ${host}\" >> /etc/hosts'" >&2
+    fi
+    exit 1
+  fi
+}
+
 start_control_plane() {
   if [[ ! -f "${settings}" ]]; then
     echo "dev: no settings rendered yet; run make dev or make dev-hosted first" >&2
     exit 1
   fi
+  require_object_store_address
   # Built before anything is stopped: a tree that does not compile leaves what runs running.
   (cd controlplane && go build -o "${repo}/${bin}/" ./cmd/control-service ./cmd/metrics-service)
   # Checked before anything is stopped too: settings rendered before this tree made a key
