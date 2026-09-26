@@ -684,7 +684,7 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 			continue
 		}
 		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst,
-			release/float64(len(survivorIDs)), 0); err != nil {
+			domain.RoundHours(release/float64(len(survivorIDs))), 0); err != nil {
 			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
 		}
 	}
