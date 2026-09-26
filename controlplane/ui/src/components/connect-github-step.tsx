@@ -7,15 +7,22 @@ import { useTenant } from '@/lib/tenant'
 import { TextLink } from '@/components/ui/link'
 
 /**
- * Whether the org must connect GitHub before it creates an experiment: the deployment has a
- * GitHub App, so an experiment keeps its code in a repository, and the org has connected no
- * account to name one on or have one created on.
+ * Where the org stands with GitHub when it creates an experiment. On a deployment with a GitHub
+ * App an experiment keeps its code in a repository, so the org either has an account connected,
+ * to name a repository on or have one created on, or must connect one first. Undefined while it
+ * is being read, and on a deployment with no App, where an experiment needs no repository.
  */
-export function useNeedsGitHub(): boolean {
+export function useGitHub(): 'connected' | 'unconnected' | undefined {
   const { org } = useTenant()
   const app = useSWR(['github-app'], fetchGitHubApp, { shouldRetryOnError: false })
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
-  return !!app.data && installations.data?.total === 0
+  if (!app.data || !installations.data) return undefined
+  return installations.data.total > 0 ? 'connected' : 'unconnected'
+}
+
+/** Whether the org must connect GitHub before it creates an experiment. */
+export function useNeedsGitHub(): boolean {
+  return useGitHub() === 'unconnected'
 }
 
 /** Stands where an experiment is created while the org has connected no GitHub account. */

@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
-import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
+import { ConnectGitHubStep, useGitHub } from '@/components/connect-github-step'
+import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 
 /**
  * The shortest way to an experiment: one sentence saying what to find out. The platform plans
@@ -18,13 +19,14 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const [goal, setGoal] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const needsGitHub = useNeedsGitHub()
+  const github = useGitHub()
+  const [repository, setRepository] = useState('')
 
   async function plan() {
     setSending(true)
     setError(null)
     try {
-      onCreated(await createDraft(projectID, goal.trim()))
+      onCreated(await createDraft(projectID, goal.trim(), repositoryFields(repository)))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setSending(false)
@@ -35,7 +37,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
     <div className="grid gap-2">
       <FormField
         label="What do you want to find out?"
-        hint="One sentence is enough. The platform works out how to measure it, runs a baseline and proposes the experiment in about half an hour. Nothing is spent on the run until you accept. Its code goes to a private repository the platform creates on your connected GitHub account."
+        hint="One sentence is enough. The platform works out how to measure it, runs a baseline and proposes the experiment in about half an hour. Nothing is spent on the run until you accept."
       >
         <Textarea
           rows={3}
@@ -45,7 +47,12 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           placeholder="e.g. Does a cosine learning-rate schedule beat a constant one for a small transformer on character-level text?"
         />
       </FormField>
-      {needsGitHub ? <ConnectGitHubStep /> : (
+      {github === 'connected' && (
+        <FormField label="Repository" hint="Where the planner and the agents keep their code, each on its own branch. Fixed once created.">
+          <RepositorySelect value={repository} onChange={setRepository} />
+        </FormField>
+      )}
+      {github === 'unconnected' ? <ConnectGitHubStep /> : (
         <div className="flex items-center gap-3">
           <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan}>Plan this experiment</Button>
           {error && <InlineError>{error}</InlineError>}

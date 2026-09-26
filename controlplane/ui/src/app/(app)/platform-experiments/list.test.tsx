@@ -19,7 +19,7 @@ vi.mock('@/lib/api', () => ({
   HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
 }))
 vi.mock('@/components/repository-select', () => ({ RepositorySelect: () => null }))
-vi.mock('@/components/connect-github-step', () => ({ useNeedsGitHub: () => false, ConnectGitHubStep: () => null }))
+vi.mock('@/components/connect-github-step', () => ({ useNeedsGitHub: () => false, useGitHub: () => undefined, ConnectGitHubStep: () => null }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {

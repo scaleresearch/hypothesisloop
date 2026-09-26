@@ -5,7 +5,7 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { RepositorySelect } from '@/components/repository-select'
+import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { GitHubRepository, Me } from '@/types'
 
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
@@ -69,6 +69,7 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.click(await screen.findByRole('combobox'))
     await userEvent.click(await screen.findByRole('option', { name: 'A new private repository' }))
     expect(screen.getByRole('status').textContent).toBe('')
+    expect([repositoryFields(''), repositoryFields('acme/open'), repositoryFields('@acme')]).toEqual([{}, { repository: 'acme/open' }, { repository_account: 'acme' }])
   })
 
   it('is searched on the server once typing pauses', async () => {

@@ -58,8 +58,8 @@ export interface Acceptance {
 
 export const MAX_GOAL_LENGTH = 2000
 
-export function createDraft(projectID: string, goal: string): Promise<Draft> {
-  return apiSend<Draft>('POST', '/platform-experiments/drafts', { project_id: projectID, goal })
+export function createDraft(projectID: string, goal: string, repository: { repository?: string; repository_account?: string } = {}): Promise<Draft> {
+  return apiSend<Draft>('POST', '/platform-experiments/drafts', { project_id: projectID, goal, ...repository })
 }
 
 export function reviseDraft(id: string, message: string): Promise<Draft> {

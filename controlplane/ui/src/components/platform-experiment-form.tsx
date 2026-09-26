@@ -13,7 +13,7 @@ import type { RunFailure } from '@/lib/run-experiment'
 import { useTenant } from '@/lib/tenant'
 import { COMMON_ML_METRICS, PlatformExperimentStatus } from '@/types'
 import type { MetricDefinition, PlatformExperiment } from '@/types'
-import { RepositorySelect } from '@/components/repository-select'
+import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -432,7 +432,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         metrics: form.metrics,
         ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),
         stages: toStages(form.stages),
-        ...(form.repository ? { repository: form.repository } : {}),
+        ...repositoryFields(form.repository),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
         ...(!hosted && form.starts_at ? { starts_at: new Date(form.starts_at).toISOString() } : {}),
         ends_at: new Date(form.ends_at).toISOString(),

@@ -11,6 +11,15 @@ import { InlineError } from '@/components/ui/status-message'
 
 const LISTED = 50
 
+// The value that stands for a new repository on one connected account, when there are several.
+const ON_ACCOUNT = '@'
+
+/** What a create sends for the value picked: a repository, the account a new one goes to, or neither. */
+export function repositoryFields(value: string): { repository?: string; repository_account?: string } {
+  if (value === '') return {}
+  return value.startsWith(ON_ACCOUNT) ? { repository_account: value.slice(ON_ACCOUNT.length) } : { repository: value }
+}
+
 /**
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
@@ -45,7 +54,12 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
   const more = (data?.total ?? 0) - listed.length
   // What is chosen stays an option while a search leaves it out.
   const options = listed.map(r => ({ value: r.repository, label: r.repository, badge: r.private ? 'private' : undefined }))
-  if (value && !listed.some(r => r.repository === value)) options.unshift({ value, label: value, badge: undefined })
+  if (value && !value.startsWith(ON_ACCOUNT) && !listed.some(r => r.repository === value)) options.unshift({ value, label: value, badge: undefined })
+  // With several accounts connected, which one a new repository goes to is the person's to say.
+  const accounts = installations.data?.items ?? []
+  if (accounts.length > 1) {
+    options.unshift(...accounts.map(a => ({ value: ON_ACCOUNT + a.account_login, label: `A new private repository on ${a.account_login}`, badge: undefined })))
+  }
   return (
     <>
       <SearchableSelect
