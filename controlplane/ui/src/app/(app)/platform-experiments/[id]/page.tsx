@@ -29,7 +29,7 @@ import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker,
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
-import { verdictBy } from '@/components/actor'
+import { Actor, verdictBy } from '@/components/actor'
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { MetricBar } from '@/components/ui/metric-bar'
@@ -50,6 +50,17 @@ import type { Draft } from '@/lib/planning'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
+}
+
+/** Why a closed experiment closed. Nothing for one closed before reasons were kept. */
+function CloseReason({ pe }: { pe: PlatformExperiment }) {
+  if (pe.close_reason === 'end_time_reached') return <span className="text-xs text-subtle">reached its end time</span>
+  if (pe.close_reason !== 'closed_by_request' || !pe.closed_by) return null
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-subtle" title={pe.closed_at && formatDate(pe.closed_at)}>
+      closed early by <Actor actor={pe.closed_by} />
+    </span>
+  )
 }
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
@@ -243,6 +254,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         description={
           <div className="flex flex-wrap items-center gap-2.5">
             <StatusBadge status={pe.status} />
+            <CloseReason pe={pe} />
             <SharedBadge pe={pe} />
             {!isZeroDate(pe.starts_at) && (
               <span className="text-xs text-subtle">

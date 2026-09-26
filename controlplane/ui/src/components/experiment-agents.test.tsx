@@ -179,6 +179,16 @@ describe('the machines the platform runs', () => {
     expect(hosted.getByRole('button', { name: 'Exit log' })).toBeTruthy()
     expect(within(screen.getByRole('cell', { name: 'ag-new' }).closest('tr')!).getByText('not reported yet')).toBeTruthy()
     expect(within(screen.getByRole('cell', { name: 'ag-own' }).closest('tr')!).getByText('not the platform\'s')).toBeTruthy()
+    expect(screen.queryByText('finished')).toBeNull()
+  })
+
+  it('says which agent finished and why it gave', async () => {
+    roster = [{ ...signup('ag-done', true), finished_at: new Date().toISOString(), finished_reason: 'quota spent' }, signup('ag-busy', true)]
+    show(PlatformExperimentStatus.RUNNING)
+    const done = within((await screen.findByRole('cell', { name: 'ag-done' })).closest('tr')!)
+    expect(done.getByText('finished')).toBeTruthy()
+    expect(done.getByText(/: quota spent$/)).toBeTruthy()
+    expect(within(screen.getByRole('cell', { name: 'ag-busy' }).closest('tr')!).queryByText('finished')).toBeNull()
   })
 
   it('shows the coordinator the platform runs, with its model and its machine', async () => {

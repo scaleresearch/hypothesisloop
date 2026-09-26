@@ -216,6 +216,11 @@ export interface PlatformExperiment {
   coordinator?: HostedCoordinator
   // Staff shared it with every account: listed in every project, read by all, written by its own org alone.
   shared: boolean
+  // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
+  // closed before reasons were kept.
+  closed_at?: string
+  close_reason?: 'end_time_reached' | 'closed_by_request'
+  closed_by?: Actor
   created_at: string
 }
 
@@ -612,6 +617,9 @@ export interface AgentSignup {
   flavor?: string
   model?: string
   signed_up_at: string
+  // Set once the agent said it has nothing left to do, which is final, with why.
+  finished_at?: string
+  finished_reason?: string
   // Absent for an agent the platform does not run.
   instance?: AgentInstance
 }

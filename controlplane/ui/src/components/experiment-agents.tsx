@@ -8,6 +8,7 @@ import {
 } from '@/lib/api'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
+import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/dialog'
@@ -18,6 +19,7 @@ import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { InstanceHealth } from '@/components/instance-health'
 import { clearRunFailure, runFailure } from '@/lib/run-experiment'
+import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 
@@ -90,7 +92,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
       </form>
       <p className="text-xs text-subtle">
         {hosted
-          ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent is cut.'
+          ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent finishes or is cut.'
           : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
       </p>
       {error && <ErrorMessage>{error}</ErrorMessage>}
@@ -179,7 +181,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             </ErrorMessage>
           )}
           {readOnly ? null : started
-            ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</p>
+            ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by finishing, by being cut or by the experiment closing.</p>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {!readOnly && pe.status === PlatformExperimentStatus.OPEN && (
             <div className="flex flex-wrap items-center gap-2.5">
@@ -233,6 +235,11 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                     <td className="text-xs">{agent.role}</td>
                     <td className="whitespace-nowrap text-xs">{agent.hosted ? 'the platform' : 'its operator'}</td>
                     <td>
+                      {agent.finished_at && (
+                        <p className="mb-1 text-xs text-muted" title={new Date(agent.finished_at).toLocaleString()}>
+                          <Badge tone="neutral">finished</Badge> {relTime(agent.finished_at)}: {agent.finished_reason}
+                        </p>
+                      )}
                       {agent.instance
                         ? <InstanceHealth instance={agent.instance} />
                         : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}

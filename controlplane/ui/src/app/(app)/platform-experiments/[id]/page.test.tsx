@@ -72,6 +72,16 @@ describe('a shared platform experiment of another org', () => {
     expect(navigation.replace).not.toHaveBeenCalled()
   })
 
+  it('says why a closed one closed: its end time, or who closed it early', async () => {
+    const closed = { status: PlatformExperimentStatus.CLOSED, closed_at: at }
+    const first = show('project=prj_1', { ...closed, close_reason: 'end_time_reached' })
+    expect(await screen.findByText('reached its end time')).toBeTruthy()
+    first.unmount()
+    show('project=prj_1', { ...closed, close_reason: 'closed_by_request', closed_by: { kind: 'user', id: 'u2', name: 'Grace' } })
+    expect((await screen.findByText(/closed early by/)).textContent).toContain('Grace')
+    expect(screen.queryByText('reached its end time')).toBeNull()
+  })
+
   it('shows its agents and no control that writes', async () => {
     show('project=prj_1', {})
     expect(await screen.findByRole('cell', { name: 'ag-self' })).toBeTruthy()
