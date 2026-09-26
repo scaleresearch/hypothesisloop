@@ -270,6 +270,13 @@ const (
 	// PhaseReasonOOMKilled: the container was killed for exceeding its memory limit. Distinct
 	// from a plain non-zero exit because the fix is different — raise the request, not the code.
 	PhaseReasonOOMKilled = "oom_killed"
+	// PhaseReasonNoOffer: a runtime that rents machines found none to rent for the job within
+	// the time its operator allows. Another look changes nothing the runtime has not waited for.
+	PhaseReasonNoOffer = "no_offer"
+	// PhaseReasonWaitingForOffer and PhaseReasonInstanceStarting say what a job on rented
+	// compute waits for. Neither ends it.
+	PhaseReasonWaitingForOffer  = "waiting_for_offer"
+	PhaseReasonInstanceStarting = "instance_starting"
 )
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
@@ -281,4 +288,5 @@ var NeverSelfHealsPhaseReasons = map[string]bool{
 	PhaseReasonImagePullFailed: true,
 	PhaseReasonConfigError:     true,
 	PhaseReasonInvalidImage:    true,
+	PhaseReasonNoOffer:         true,
 }

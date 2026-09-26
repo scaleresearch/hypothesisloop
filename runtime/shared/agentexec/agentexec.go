@@ -16,9 +16,19 @@ import (
 // specified: asking again changes nothing, only another spec or another cluster does. Why is the
 // runtime's own words for it. The loop reports such a job to the control plane, which decides
 // what becomes of it, where every other creation error is logged and tried again next pass.
-type Unrunnable struct{ Why string }
+//
+// Reason is the phase reason it is reported under, one the control plane ends a job for
+// (domain.NeverSelfHealsPhaseReasons). Empty is domain.PhaseReasonConfigError.
+type Unrunnable struct{ Reason, Why string }
 
 func (u *Unrunnable) Error() string { return u.Why }
+
+// Waiting is what CreateWorkload returns while what the job needs is not there yet and may still
+// come, such as a machine to rent. The loop reports the job as pending under Reason with Why as
+// the message its owner reads, says so in its log once, and asks again next pass.
+type Waiting struct{ Reason, Why string }
+
+func (w *Waiting) Error() string { return w.Why }
 
 // Executor is the cluster-local half of the desired-state reconcile loop: given exp's compiled
 // desired state, create/delete/compare it against whatever is actually running, and report

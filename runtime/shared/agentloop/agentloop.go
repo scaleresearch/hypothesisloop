@@ -5,6 +5,7 @@ package agentloop
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,6 +74,7 @@ var ErrClusterRemoved = errors.New("this cluster was removed from the control pl
 
 type refusedCreate struct {
 	attempt int
+	reason  string
 	why     string
 }
 
@@ -202,12 +204,22 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			continue
 		}
 		if err := exec.CreateWorkload(ctx, exp); err != nil {
+			// A job that waits is reported with the next status push and asked for again. Its
+			// wait is logged when it begins or its reason changes, not every pass.
+			var waiting *agentexec.Waiting
+			if errors.As(err, &waiting) {
+				refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: waiting.Reason, why: waiting.Why}
+				if a.lastRefused(id) != refused[id] {
+					a.Log("workload %s waits: %s: %s", id, waiting.Reason, waiting.Why)
+				}
+				continue
+			}
 			a.Log("create workload %s: %v", id, err)
 			// A job that can never be created here is the control plane's to end. It is told
 			// with the next status push, and the pass is not failed for it.
 			var unrunnable *agentexec.Unrunnable
 			if errors.As(err, &unrunnable) {
-				refused[id] = refusedCreate{attempt: exp.AttemptCount, why: unrunnable.Why}
+				refused[id] = refusedCreate{attempt: exp.AttemptCount, reason: cmp.Or(unrunnable.Reason, domain.PhaseReasonConfigError), why: unrunnable.Why}
 				continue
 			}
 			reconcileErrors = append(reconcileErrors, fmt.Errorf("create workload %s: %w", id, err))
@@ -441,9 +453,17 @@ func (a *Agent) reportStatuses(ctx context.Context, exec agentexec.Executor) {
 	a.pushStatus(ctx, reports)
 }
 
-// refusedReports is the status of every job the last reconcile pass could never create and that
-// has no workload: pending, with the reason the control plane ends a job for without waiting
-// (domain.PhaseReasonConfigError) and the runtime's words as the message its owner reads.
+// refusedReports is the status of every job the last reconcile pass did not create and that has
+// no workload: pending, under the reason the runtime gave, which the control plane ends the job
+// for when it is one that never heals, and with the runtime's words as the message its owner
+// reads.
+// lastRefused is what the pass before this one said of id.
+func (a *Agent) lastRefused(id string) refusedCreate {
+	a.unrunnableMu.Lock()
+	defer a.unrunnableMu.Unlock()
+	return a.unrunnable[id]
+}
+
 func (a *Agent) refusedReports(existing []string) []statusReportWire {
 	a.unrunnableMu.Lock()
 	defer a.unrunnableMu.Unlock()
@@ -455,7 +475,7 @@ func (a *Agent) refusedReports(existing []string) []statusReportWire {
 		attempt := refused.attempt
 		reports = append(reports, statusReportWire{
 			ExperimentID: id, Attempt: &attempt, Phase: workload.JobPhasePending.String(),
-			Reason: domain.PhaseReasonConfigError, Message: refused.why,
+			Reason: refused.reason, Message: refused.why,
 		})
 	}
 	sort.Slice(reports, func(i, j int) bool { return reports[i].ExperimentID < reports[j].ExperimentID })
