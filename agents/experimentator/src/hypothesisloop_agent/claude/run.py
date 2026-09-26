@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -33,7 +34,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
-from hypothesisloop_agent import config, core, updates
+from hypothesisloop_agent import config, core, progress, session, updates
 from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
@@ -87,11 +88,11 @@ def _updates_hook(watch_env: dict[str, str], agent_id: str):
 
 
 def _session_file(setup: core.RunSetup) -> str:
-    return os.path.join(setup.workdir, ".claude_session_id")
+    return os.path.join(setup.workdir, _SESSION_ID_FILE)
 
 
 def _handoff_file(setup: core.RunSetup) -> str:
-    return os.path.join(setup.workdir, ".claude_compaction_handoff")
+    return os.path.join(setup.workdir, _HANDOFF_FILE)
 
 
 def _load_resume_id(setup: core.RunSetup) -> str | None:
@@ -180,6 +181,45 @@ class TurnStalled(Exception):
     pass
 
 
+# What the platform reads this agent's health from, see progress.py. A turn silent for longer
+# than the watchdog below allows is one the watchdog failed to end.
+_progress = progress.Progress(quiet_limit_s=_TURN_SILENCE_TIMEOUT_S + 60)
+
+# Where the session is kept so that it outlives this machine. Set by main().
+_sessions: session.Sessions | None = None
+
+_SESSION_ID_FILE = ".claude_session_id"
+_HANDOFF_FILE = ".claude_compaction_handoff"
+
+
+def _transcript_files(session_id: str | None) -> list[str]:
+    """The model CLI's own record of the session, relative to its home: the transcript and
+    whatever it keeps in a directory of the session's name beside it."""
+    if not session_id:
+        return []
+    home = Path(session.model_home())
+    found = []
+    for transcript in home.glob(f"projects/*/{session_id}.jsonl"):
+        found.append(transcript)
+        found.extend(path for path in transcript.with_suffix("").rglob("*") if path.is_file())
+    return [str(path.relative_to(home)) for path in found]
+
+
+async def _store_session(setup: core.RunSetup) -> None:
+    """Hands the session as it stands to the platform, unless it already holds this one."""
+    if _sessions is None:
+        return
+    await asyncio.to_thread(_sessions.save, [_SESSION_ID_FILE, _HANDOFF_FILE], _transcript_files(_load_resume_id(setup)))
+
+
+def _restore_session(setup: core.RunSetup) -> None:
+    """On a machine that holds no session of its own, takes the one the platform keeps."""
+    if _sessions is None or _load_resume_id(setup) or _load_handoff(setup):
+        return
+    if _sessions.restore():
+        log.info("resuming session %s on a new machine", _load_resume_id(setup) or "from its handoff")
+
+
 async def _interrupt_on_stop(client, stopped) -> None:
     """Interrupts the turn in flight as soon as stopped() is true."""
     while not stopped():
@@ -208,15 +248,19 @@ async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list
 async def _receive_turn(client):
     """client.receive_response(), failing with TurnStalled when the CLI goes silent."""
     messages = client.receive_response().__aiter__()
-    while True:
-        try:
-            async with asyncio.timeout(_TURN_SILENCE_TIMEOUT_S):
-                message = await anext(messages)
-        except StopAsyncIteration:
-            return
-        except TimeoutError:
-            raise TurnStalled(f"no message from the CLI for {_TURN_SILENCE_TIMEOUT_S}s") from None
-        yield message
+    try:
+        while True:
+            _progress.awaiting()
+            try:
+                async with asyncio.timeout(_TURN_SILENCE_TIMEOUT_S):
+                    message = await anext(messages)
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                raise TurnStalled(f"no message from the CLI for {_TURN_SILENCE_TIMEOUT_S}s") from None
+            yield message
+    finally:
+        _progress.resting()
 
 
 def _context_tokens(usage: dict) -> int:
@@ -313,10 +357,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                                 _remove_file(_handoff_file(setup))
             finally:
                 interrupter.cancel()
+            if got_result:
+                await _store_session(setup)
 
             if stopped() and got_result and not rate_limited_resets_at:
                 log.info("stopping: turn interrupted, one last turn to file what is owed")
                 await _last_turn(client, cfg.agent_id, watch_env, [], shutdown_prompt)
+                await _store_session(setup)
                 return None, False
 
             if rate_limited_resets_at:
@@ -368,6 +415,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 with open(_handoff_file(setup), "w") as f:
                     f.write(handoff)
                 _remove_file(_session_file(setup))
+                await _store_session(setup)
                 return None, True
 
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
@@ -376,6 +424,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if stopped():
                 log.info("stopping: one last turn to file what is owed")
                 await _last_turn(client, cfg.agent_id, watch_env, events, shutdown_prompt)
+                await _store_session(setup)
                 return None, False
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):
@@ -407,6 +456,14 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     started_at = time.time()
     stop_flag = core.install_signal_handler()
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
+    beat = asyncio.ensure_future(_progress.run())
+    try:
+        await _run_until_stopped(setup, model, started_at, stop_flag, backoff_s)
+    finally:
+        beat.cancel()
+
+
+async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float, stop_flag: list, backoff_s: float) -> None:
 
     def reset_backoff() -> None:
         nonlocal backoff_s
@@ -445,7 +502,10 @@ async def _run(setup: core.RunSetup, model: str) -> None:
 
 
 def main() -> None:
+    global _sessions
     setup = core.prepare()
+    _sessions = session.Sessions(setup.client, setup.cfg, setup.workdir, session.model_home())
+    _restore_session(setup)
     model = setup.cfg.model
     log.info(
         "llm_agent %s starting (claude): pe=%s model=%s",

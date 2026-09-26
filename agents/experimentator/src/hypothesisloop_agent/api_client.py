@@ -18,11 +18,13 @@ class APIError(Exception):
         self.body = body
 
 
-def _send(method: str, url: str, token: str, payload: dict | None = None, timeout: float = 15.0) -> bytes:
-    data = json.dumps(payload).encode() if payload is not None else None
+def _send(method: str, url: str, token: str, payload: dict | None = None, timeout: float = 15.0,
+          content: bytes | None = None) -> bytes:
+    """One request. payload is sent as JSON, content as the bytes they are."""
+    data = json.dumps(payload).encode() if payload is not None else content
     headers = {"Authorization": f"Bearer {token}"}
     if data:
-        headers["Content-Type"] = "application/json"
+        headers["Content-Type"] = "application/json" if payload is not None else "application/octet-stream"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -31,6 +33,10 @@ def _send(method: str, url: str, token: str, payload: dict | None = None, timeou
         raise APIError(method, url, e.code, e.read().decode(errors="replace")) from None
     except urllib.error.URLError as e:
         raise APIError(method, url, 0, str(e.reason)) from None
+
+
+# A session snapshot is megabytes, on whatever line the machine has.
+_BYTES_TIMEOUT_S = 120.0
 
 
 class PlatformClient:
@@ -69,6 +75,18 @@ class PlatformClient:
                 f"agent: HL_TOKEN does not coordinate platform experiment {pe_id} (HTTP {e.status}). A "
                 "coordinator the platform runs is asked for with coordinator_hosted when the platform "
                 "experiment is created.") from None
+
+    def get_bytes(self, path: str) -> bytes | None:
+        """The stored bytes at path, or None when the platform holds none (404)."""
+        try:
+            return _send("GET", f"{self.api_url}{path}", self.token, timeout=_BYTES_TIMEOUT_S)
+        except APIError as e:
+            if e.status == 404:
+                return None
+            raise
+
+    def put_bytes(self, path: str, content: bytes) -> None:
+        _send("PUT", f"{self.api_url}{path}", self.token, content=content, timeout=_BYTES_TIMEOUT_S)
 
     def get_platform_experiment(self, pe_id: str) -> dict:
         return self._request("GET", f"/platform-experiments/{pe_id}")

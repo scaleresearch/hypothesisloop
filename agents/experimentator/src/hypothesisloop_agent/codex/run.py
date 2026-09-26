@@ -31,7 +31,7 @@ import time
 
 from openai_codex import ApprovalMode, AsyncCodex, Sandbox
 
-from hypothesisloop_agent import config, core, updates
+from hypothesisloop_agent import config, core, progress, updates
 
 log = logging.getLogger("llm_agent")
 
@@ -49,7 +49,15 @@ def _log_notification(note) -> None:
 async def _run(setup: core.RunSetup, model: str) -> None:
     started_at = time.time()
     stop_flag = core.install_signal_handler()
+    # This backend has no watchdog over a turn, so the beat says only that the loop is alive.
+    beat = asyncio.ensure_future(progress.Progress(quiet_limit_s=float("inf")).run())
+    try:
+        await _run_thread(setup, model, started_at, stop_flag)
+    finally:
+        beat.cancel()
 
+
+async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_flag: list) -> None:
     async with AsyncCodex() as codex:
         thread = await codex.thread_start(
             model=model or None,
