@@ -78,7 +78,7 @@ func TestResolveClusterAndFootprintSkipsTopologyInfeasibleCluster(t *testing.T) 
 		"cluster-a": {"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 2}},
 		"cluster-b": {"node-b1": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1}, "node-b2": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1}},
 	}
-	cluster, _ := resolveClusterAndFootprint(avail, nodes, nil, nil, exp)
+	cluster, _ := resolveClusterAndFootprint(avail, nil, nodes, nil, nil, exp)
 	if cluster != "cluster-b" {
 		t.Fatalf("resolved cluster = %q, want topology-feasible cluster-b", cluster)
 	}

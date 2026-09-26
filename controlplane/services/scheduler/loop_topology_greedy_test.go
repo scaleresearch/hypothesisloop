@@ -132,7 +132,7 @@ func TestResolveClusterAndFootprintCPUOnlySkipsTopologyCheck(t *testing.T) {
 		"cluster-a": {"node-a1": {domain.NodeResourceCPUMillicores: 3000}, "node-a2": {domain.NodeResourceCPUMillicores: 3000}},
 		"cluster-b": {"node-b1": {domain.NodeResourceCPUMillicores: 6000}},
 	}
-	cluster, _ := resolveClusterAndFootprint(avail, nil, resources, nil, exp)
+	cluster, _ := resolveClusterAndFootprint(avail, nil, nil, resources, nil, exp)
 	if cluster != "cluster-b" {
 		t.Fatalf("resolved cluster = %q, want cluster-b (the only cluster with a node that can hold a 6-core rank)", cluster)
 	}
@@ -231,7 +231,7 @@ func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) 
 	resources := map[string]map[string]map[string]int64{
 		"cluster-a": {"node-a1": {domain.NodeResourceCPUMillicores: 3000}, "node-a2": {domain.NodeResourceCPUMillicores: 3000}},
 	}
-	cluster, gotFP := resolveClusterAndFootprint(avail, nil, resources, nil, exp)
+	cluster, gotFP := resolveClusterAndFootprint(avail, nil, nil, resources, nil, exp)
 	if cluster != "cluster-a" {
 		t.Fatalf("resolved cluster = %q, want the scalar best-fit fallback cluster-a", cluster)
 	}
@@ -249,7 +249,7 @@ func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 	nodeAvail := map[string]map[string]map[string]int64{
 		"cluster-a": {"node-a": {h100: 2}}, // one node has both accelerators; a spread job needs two distinct hosts
 	}
-	cluster, ok := placeAtFlavor(avail, nodeAvail, nil, nil, exp)
+	cluster, ok := placeAtFlavor(avail, nil, nodeAvail, nil, nil, exp)
 	if ok {
 		t.Fatalf("placeAtFlavor reported ok=true with cluster %q, want false: no cluster has two distinct qualifying hosts", cluster)
 	}
@@ -323,7 +323,7 @@ func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *tes
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altFlavor}
 	fpRequested := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fpRequested}
-	cluster, fp := resolveClusterAndFootprint(avail, nil, nil, nil, exp)
+	cluster, fp := resolveClusterAndFootprint(avail, nil, nil, nil, nil, exp)
 	if exp.AcceleratorType != h100 {
 		t.Fatalf("AcceleratorType left as %q after failed substitution, want restored to requested %q", exp.AcceleratorType, h100)
 	}

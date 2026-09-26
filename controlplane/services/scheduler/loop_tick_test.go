@@ -18,7 +18,7 @@ func TestClusterWithBestFitPrefersOutrightFit(t *testing.T) {
 		"a-cluster": {cpuKey: 4000}, // fits
 	}
 	need := domain.Footprint{cpuKey: 2000}
-	got := clusterWithBestFit(avail, need)
+	got := clusterWithBestFit(avail, nil, need)
 	if got != "a-cluster" {
 		t.Errorf("clusterWithBestFit = %q, want a-cluster (the one that actually fits)", got)
 	}
@@ -30,7 +30,7 @@ func TestClusterWithBestFitFallsBackToSmallestShortage(t *testing.T) {
 		"small-gap": {cpuKey: 1800}, // short by 200
 	}
 	need := domain.Footprint{cpuKey: 2000}
-	got := clusterWithBestFit(avail, need)
+	got := clusterWithBestFit(avail, nil, need)
 	if got != "small-gap" {
 		t.Errorf("clusterWithBestFit = %q, want small-gap (least total shortage)", got)
 	}
@@ -171,7 +171,7 @@ func TestClusterWithBestFitNeverTargetsAClusterThatDoesNotOwnTheRequestedFlavor(
 		// Owns eight L40s, every one of them held by preemptible burst work.
 		"z-saturated-l40-cluster": {cpuKey: 78000, acceleratorKey("flavor-l40"): 0},
 	}
-	got := clusterWithBestFit(avail, need)
+	got := clusterWithBestFit(avail, nil, need)
 	if got != "z-saturated-l40-cluster" {
 		t.Errorf("clusterWithBestFit = %q, want z-saturated-l40-cluster (the only cluster preemption could ever unblock)", got)
 	}
@@ -186,7 +186,7 @@ func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedFlavor(t *testi
 		"cluster-a": {cpuKey: 16000, acceleratorKey("flavor-l40"): 8},
 		"cluster-b": {cpuKey: 16000, acceleratorKey("flavor-blackhole"): 4},
 	}
-	if got := clusterWithBestFit(avail, need); got != "" {
+	if got := clusterWithBestFit(avail, nil, need); got != "" {
 		t.Errorf("clusterWithBestFit = %q, want \"\" (no cluster owns this hardware)", got)
 	}
 }
@@ -251,7 +251,7 @@ func TestAGroupedJobIsPlacedOnAClusterWhoseNodesActuallyHaveItsAccelerators(t *t
 		"b-real-devices": {"node-b1": roomy, "node-b2": roomy},
 	}
 
-	cluster, _ := resolveClusterAndFootprint(avail, nodes, resources, nil, exp)
+	cluster, _ := resolveClusterAndFootprint(avail, nil, nodes, resources, nil, exp)
 	if cluster != "b-real-devices" {
 		t.Errorf("resolved cluster = %q, want b-real-devices — the only one whose nodes hold the requested accelerators", cluster)
 	}

@@ -15,8 +15,7 @@ import (
 // after live no-fit is established — burst jobs never speculate (autoscaler.md: "a burst job
 // should not boot a node it can be preempted off").
 //
-// Ordering is stable by cluster_id (autoscaler.md: "no ranking machinery") — the caller picks
-// candidates[0].
+// The caller picks candidates[0]: the highest-priority candidate, see the sort below.
 func (l *Loop) speculativeCandidates(
 	ctx context.Context,
 	resolveCache *resolutionCache,
@@ -122,10 +121,14 @@ func (l *Loop) speculativeCandidates(
 		}
 		candidates = append(candidates, candidate{cluster: cluster, clusterID: clusterID, provenFit: provenFit})
 	}
-	// Clusters with live proof of fit go first (higher confidence bet), then fewest
-	// currently-pending speculative jobs (spreads bets instead of piling onto one cluster), then a
-	// stable clusterID tiebreak — all using data already computed this tick, no new state.
+	// The cluster's priority decides first, as it does for every placement (placementTiers).
+	// Within one priority, clusters with live proof of fit go first (higher confidence bet), then
+	// fewest currently-pending speculative jobs (spreads bets instead of piling onto one cluster),
+	// then a stable clusterID tiebreak — all using data already computed this tick, no new state.
 	sort.Slice(candidates, func(i, j int) bool {
+		if pi, pj := registered[candidates[i].cluster].Priority, registered[candidates[j].cluster].Priority; pi != pj {
+			return pi > pj
+		}
 		if candidates[i].provenFit != candidates[j].provenFit {
 			return candidates[i].provenFit
 		}

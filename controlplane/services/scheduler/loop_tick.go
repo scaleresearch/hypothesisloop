@@ -281,6 +281,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
 		// has a new flavor to persist.
 		persistedFlavor := exp.AcceleratorType
+		betFlavor := persistedFlavor
 		candidates, ineligible := eligibleClusters(gAvail, multiNodeCapable, registeredClusters, exp)
 		if ineligible != "" {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
@@ -294,18 +295,19 @@ func (l *Loop) tick(ctx context.Context) error {
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(candidates, nodeAvail, nodeResources, nodeLabels, exp)
+			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
 			// Reverting to the requested flavor re-places the job, layout included: picking on
 			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
 			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
+			betFlavor = exp.AcceleratorType
 			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(candidates, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			if placed, ok := placeAtFlavor(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp); ok {
 				cluster = placed
 			} else {
-				cluster = clusterWithBestFit(candidates, fp)
+				cluster = clusterWithBestFit(candidates, registeredClusters, fp)
 			}
 		}
 		// Resolve any "max" CPU/memory/storage sentinel (and validate any explicit number) against
@@ -331,18 +333,38 @@ func (l *Loop) tick(ctx context.Context) error {
 		// Which of the two fit checks failed decides whether preemption can help at all, so they
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
-		if !scalarFits || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
-			// Speculative submit (autoscaler.md): before spending a guaranteed job's preemption
-			// power, try every autoscaler-enabled cluster this job hasn't already failed over
-			// from. A candidate has no live capacity by definition (that's why we're here) — the
-			// SUBMITTED row itself is the scale-up request the native autoscaler reacts to.
-			// Live-fit always wins over speculating (this branch only runs on live no-fit), and
-			// speculating anywhere always wins over preempting a burst job (this runs first).
-			candidates, provenFitByCluster, cerr := l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, registeredClusters, nodeAvailAtTickStart, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
+		liveFits := scalarFits && topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp)
+		// Speculative submit (autoscaler.md): before spending a guaranteed job's preemption
+		// power, try every autoscaler-enabled cluster this job hasn't already failed over
+		// from. A candidate has no live capacity by definition — the SUBMITTED row itself is the
+		// scale-up request the native autoscaler reacts to. Within one priority live fit wins
+		// over speculating, and speculating anywhere wins over preempting a burst job. Across
+		// priorities the higher cluster wins: a job that fits live on a lower cluster first asks
+		// a scaling cluster its org ranked above it, and comes back to the lower one when that
+		// bet times out (job_watcher's scale-up deadline) and the cluster is excluded for it.
+		var bets []string
+		var provenFitByCluster map[string]bool
+		if !liveFits || scalesAbove(cluster, exp, autoscalerEnabled, connectedClusters, registeredClusters) {
+			chosenFlavor := exp.AcceleratorType
+			if liveFits {
+				// The flavor the lower cluster fit at is that cluster's. The bet is for the one
+				// the job is queued at, as it is when nothing fits.
+				exp.AcceleratorType = betFlavor
+			}
+			var cerr error
+			bets, provenFitByCluster, cerr = l.speculativeCandidates(ctx, resolveCache, exp, autoscalerEnabled, connectedClusters, clusterIDs, multiNodeCapable, registeredClusters, nodeAvailAtTickStart, nodeResourcesTotal, nodeLabels, speculativeFootprintByCluster, gAvail)
 			if cerr != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("speculative candidates: %w", cerr))
 				continue
 			}
+			if liveFits {
+				if bets = above(bets, cluster, registeredClusters); len(bets) == 0 {
+					exp.AcceleratorType = chosenFlavor
+				}
+			}
+		}
+		if !liveFits || len(bets) > 0 {
+			candidates := bets
 			// waitingForScaleUp: this cluster's own desired-free already went negative in this
 			// job's accelerator dimension (a SUBMITTED row is already outstanding here, possibly
 			// this same job a moment ago). Preempting a burst job to cover that shortage would be
@@ -550,7 +572,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		if cluster != "" {
 			fp = exp.Footprint()
 		} else {
-			cluster, fp = resolveClusterAndFootprint(candidates, nodeAvail, nodeResources, nodeLabels, exp)
+			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
 			// Reverting to the requested flavor re-places the job, layout included: picking on
@@ -558,10 +580,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
 			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(candidates, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			if placed, ok := placeAtFlavor(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp); ok {
 				cluster = placed
 			} else {
-				cluster = clusterWithBestFit(candidates, fp)
+				cluster = clusterWithBestFit(candidates, registeredClusters, fp)
 			}
 		}
 		// See the guaranteed pass above for why this runs here, after cluster/flavor settle and
@@ -997,58 +1019,53 @@ func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType 
 	return types
 }
 
-// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job, trying
-// every candidate flavor (requested type first) and returning the first that fits outright on
-// some cluster — see candidateAcceleratorTypes. This lets a job whose requested flavor is
-// saturated land on a free AcceptableAcceleratorTypes alternative instead of sitting QUEUED with
-// idle capacity elsewhere. If nothing fits outright, falls back to the requested flavor's own
-// best-fit cluster so the caller's preemption path still runs.
+// resolveClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job. It
+// walks the clusters by priority (placementTiers), and within one priority tries every candidate
+// flavor (requested type first, see candidateAcceleratorTypes) before the next tier is looked at:
+// a job lands on a higher-priority cluster at an acceptable alternative flavor before it lands on
+// a lower one at the flavor it asked for, and a full tier never keeps it from a lower one that
+// fits. If nothing fits outright anywhere, falls back to the requested flavor's best-fit cluster
+// so the caller's preemption path still runs.
 // TotalAccelerators, not the top-level per-node count: a grouped job states its counts on its
 // groups and leaves the top-level field empty, so reading it literally said every heterogeneous
 // job wanted no accelerators at all. Such a job then took the CPU-only shortcut below — no flavor
 // substitution and, worse, no placeAtFlavor, so it was placed on scalar fit alone and could be
 // handed a cluster whose nodes had not one free device of the hardware it asked for.
-func resolveClusterAndFootprint(avail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
-	if exp.Job.TotalAccelerators() <= 0 {
-		// Still judged on node layout: a cluster whose aggregate is large enough but whose nodes
-		// are individually too small for one rank would otherwise be picked on the scalar alone,
-		// fail topologyFits in the tick, and go to preemption while another cluster could host it.
-		fp := exp.Footprint()
-		if cluster, ok := placeAtFlavor(avail, nodeAvail, nodeResources, nodeLabels, exp); ok {
-			return cluster, fp
-		}
-		return clusterWithBestFit(avail, fp), fp
-	}
-
+func resolveClusterAndFootprint(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
 	requested := exp.AcceleratorType
-	var fallbackCluster string
-	var fallbackFP domain.Footprint
-	for i, t := range candidateAcceleratorTypes(exp) {
-		exp.AcceleratorType = t
-		fp := exp.Footprint()
-		if i == 0 {
-			fallbackCluster, fallbackFP = clusterWithBestFit(avail, fp), fp
-		}
-		if cluster, ok := placeAtFlavor(avail, nodeAvail, nodeResources, nodeLabels, exp); ok {
-			return cluster, fp
+	types := candidateAcceleratorTypes(exp)
+	if exp.Job.TotalAccelerators() <= 0 {
+		// No flavor to vary. Still judged on node layout: a cluster whose aggregate is large
+		// enough but whose nodes are individually too small for one rank would otherwise be picked
+		// on the scalar alone, fail topologyFits in the tick, and go to preemption while another
+		// cluster could host it.
+		types = []domain.AcceleratorType{requested}
+	}
+	if len(types) == 0 {
+		return "", nil
+	}
+	for _, tier := range placementTiers(avail, registered) {
+		inTier := within(avail, tier)
+		for _, t := range types {
+			exp.AcceleratorType = t
+			if cluster, ok := placeAtFlavor(inTier, registered, nodeAvail, nodeResources, nodeLabels, exp); ok {
+				return cluster, exp.Footprint()
+			}
 		}
 	}
+	exp.AcceleratorType = types[0]
+	fallback := exp.Footprint()
 	exp.AcceleratorType = requested
-	return fallbackCluster, fallbackFP
+	return clusterWithBestFit(avail, registered, fallback), fallback
 }
 
-// placeAtFlavor names the cluster that can host exp at the accelerator type it currently carries,
-// judged on footprint and node layout alike. ok=false means no cluster can — the caller decides
-// what to do with a job that does not fit anywhere, rather than being handed a cluster that only
-// looks big enough in the scalar.
-func placeAtFlavor(avail map[string]domain.Footprint, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
+// placeAtFlavor names the first cluster in placement order that can host exp at the accelerator
+// type it currently carries, judged on footprint and node layout alike. ok=false means no cluster
+// can — the caller decides what to do with a job that does not fit anywhere, rather than being
+// handed a cluster that only looks big enough in the scalar.
+func placeAtFlavor(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
 	fp := exp.Footprint()
-	clusters := make([]string, 0, len(avail))
-	for name := range avail {
-		clusters = append(clusters, name)
-	}
-	sort.Strings(clusters)
-	for _, candidate := range clusters {
+	for _, candidate := range placementOrder(avail, registered) {
 		// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
 		// would be resolved to.
 		probe, ok := onSlots(exp, candidate, nodeResources[candidate], nodeLabels[candidate])
@@ -1576,35 +1593,40 @@ func nodeResourceKind(resource string) (domain.ResourceKind, bool) {
 // case at the call sites: the absent footprint fails every fit check, so the job is marked
 // capacity_unavailable, which is exactly what "no cluster on this platform has this hardware"
 // means.
-func clusterWithBestFit(avail map[string]domain.Footprint, footprint domain.Footprint) string {
-	names := make([]string, 0, len(avail))
-	for c := range avail {
-		names = append(names, c)
-	}
-	sort.Strings(names)
-
-	for _, c := range names {
-		if domain.Fits(avail[c], footprint) {
-			return c
+//
+// Both steps go by priority before anything else (placementTiers): step 1 takes the first fit in
+// placement order, and step 2 answers from the highest-priority tier that holds a cluster which
+// could ever host the request, so the room is made on the compute the org ranked first.
+func clusterWithBestFit(avail map[string]domain.Footprint, registered map[string]domain.Cluster, footprint domain.Footprint) string {
+	tiers := placementTiers(avail, registered)
+	for _, tier := range tiers {
+		for _, c := range tier {
+			if domain.Fits(avail[c], footprint) {
+				return c
+			}
 		}
 	}
-
-	best := ""
-	var bestShortage int64 = -1
-	for _, c := range names {
-		if !reportsEveryDimension(avail[c], footprint) {
-			continue
+	for _, tier := range tiers {
+		best := ""
+		var bestShortage int64 = -1
+		for _, c := range tier {
+			if !reportsEveryDimension(avail[c], footprint) {
+				continue
+			}
+			var shortage int64
+			for _, v := range shortfall(avail[c], footprint) {
+				shortage += v
+			}
+			if bestShortage < 0 || shortage < bestShortage {
+				bestShortage = shortage
+				best = c
+			}
 		}
-		var shortage int64
-		for _, v := range shortfall(avail[c], footprint) {
-			shortage += v
-		}
-		if bestShortage < 0 || shortage < bestShortage {
-			bestShortage = shortage
-			best = c
+		if best != "" {
+			return best
 		}
 	}
-	return best
+	return ""
 }
 
 // reportsEveryDimension reports whether capacity has an entry for every dimension footprint asks
