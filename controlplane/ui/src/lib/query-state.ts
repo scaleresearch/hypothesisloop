@@ -107,8 +107,9 @@ export function useRecordProject(projectID: string | undefined) {
 /**
  * Puts the example a record belongs to in the URL once the record has loaded, for a record
  * reached by its id alone. The project stays the caller's own: the record's is not theirs.
+ * Answers whether the URL names it yet.
  */
-export function useRecordExample(platformExperimentID: string | undefined) {
+export function useRecordExample(platformExperimentID: string | undefined): boolean {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -118,6 +119,7 @@ export function useRecordExample(platformExperimentID: string | undefined) {
     if (!platformExperimentID || platformExperimentID === current) return
     router.replace(withParams(`${pathname}?${query}`, { [EXAMPLE_PARAM]: platformExperimentID }))
   }, [platformExperimentID, current, pathname, query, router])
+  return platformExperimentID === current
 }
 
 /**

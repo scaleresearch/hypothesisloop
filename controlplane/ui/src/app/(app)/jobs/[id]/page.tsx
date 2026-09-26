@@ -32,7 +32,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
 
   const { data: job, error } = useSWR(id, fetchExperiment, { refreshInterval: 5_000 })
-  useRecordScope(job)
+  const scoped = useRecordScope(job)
   const { data: logs, error: logsError } = useSWR(
     job ? `logs-${id}` : null,
     () => fetchExperimentLogs(id),
@@ -51,7 +51,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
     </div>
   )
 
-  if (!job) return <Loading />
+  if (!job || !scoped) return <Loading />
 
   const j = job
   // evictionLabel maps the code to its human label and keeps any explanation the scheduler

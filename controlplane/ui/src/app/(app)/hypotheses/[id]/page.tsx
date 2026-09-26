@@ -47,11 +47,11 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   const { data, error, mutate } = useSWR(id, fetchHypothesis, { refreshInterval: 8_000 })
 
-  const { data: pe } = useSWR<PlatformExperiment>(
+  const { data: pe, error: peError } = useSWR<PlatformExperiment>(
     data ? ['pe', data.platform_experiment_id] : null,
     () => fetchPlatformExperiment(data!.platform_experiment_id),
   )
-  useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
+  const scoped = useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
 
   if (error) return (
     <div>
@@ -61,7 +61,8 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
     </div>
   )
 
-  if (!data) return <Loading />
+  // Whether it is an example is known from its platform experiment.
+  if (!data || (!pe && !peError) || !scoped) return <Loading />
 
   const jobs = [...(data.jobs ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const findings = data.findings ?? []

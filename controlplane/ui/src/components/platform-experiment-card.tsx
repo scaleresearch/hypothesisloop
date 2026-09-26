@@ -5,8 +5,8 @@ import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { fetchPlatformExperimentQuotas, fetchExperimentStats, fetchHypothesisStats, HYPOTHESIS_STATUSES } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, MetricDefinition } from '@/types'
-import { exampleHref, useProjectRouter } from '@/lib/query-state'
-import { isExample } from '@/lib/example'
+import { useProjectRouter } from '@/lib/query-state'
+import { platformExperimentHref } from '@/lib/example'
 import { useTenant } from '@/lib/tenant'
 import { quotaRemainingAccH } from '@/lib/quota'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
@@ -47,7 +47,7 @@ export function PlatformExperimentCard({
   const router = useProjectRouter()
   const { me } = useTenant()
   const [expanded, setExpanded] = useState(false)
-  const href = isExample(me, pe) ? exampleHref(pe.id) : `/platform-experiments/${pe.id}`
+  const href = platformExperimentHref(me, pe)
 
   // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
   // expand toggle needs this data too, otherwise it shows 0 until the card is expanded once.

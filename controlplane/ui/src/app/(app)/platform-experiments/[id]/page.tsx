@@ -504,7 +504,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     () => fetchPlatformExperiment(id),
     { refreshInterval: 15_000 },
   )
-  useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
+  const scoped = useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
   const readOnly = useReadOnly()
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
@@ -613,7 +613,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     (statsError || hypothesisStatsError) && 'job counts',
   ].filter(Boolean) as string[]
 
-  if (peLoading) return <Loading />
+  if (peLoading || !scoped) return <Loading />
   if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
   if (failed.length > 0) return <ErrorMessage>Could not load {failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>

@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext } from 'react'
-import { useRecordExample, useRecordProject } from '@/lib/query-state'
+import { exampleHref, useRecordExample, useRecordProject } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import type { Me, PlatformExperiment } from '@/types'
 
@@ -33,6 +33,11 @@ export function isExample(me: Me, pe: Pick<PlatformExperiment, 'shared' | 'proje
   return pe.shared && !reaches(me, pe.project_id)
 }
 
+/** Where a platform experiment opens for this caller: as an example when that is what it is to them. */
+export function platformExperimentHref(me: Me, pe: Pick<PlatformExperiment, 'id' | 'shared' | 'project_id'>): string {
+  return isExample(me, pe) ? exampleHref(pe.id) : `/platform-experiments/${pe.id}`
+}
+
 /**
  * The scope a list is asked for: the selected project, or inside an example that platform
  * experiment alone. The example lies in another org's project, so the caller's project_id
@@ -46,11 +51,14 @@ export function useListScope(): { project_id: string } | { platform_experiment_i
 
 /**
  * Puts where a loaded record lives in the URL: its project when the caller reaches it, and
- * otherwise the example it belongs to, which is the only way they came to read it.
+ * otherwise the example it belongs to, which is the only way they came to read it. Answers
+ * false while a record of an example waits for the URL to name it: until then the page would
+ * show the controls of an experiment of the caller's own.
  */
-export function useRecordScope(record: { project_id: string; platform_experiment_id: string } | undefined) {
+export function useRecordScope(record: { project_id: string; platform_experiment_id: string } | undefined): boolean {
   const { me } = useTenant()
   const own = record !== undefined && reaches(me, record.project_id)
   useRecordProject(own ? record.project_id : undefined)
-  useRecordExample(record && !own ? record.platform_experiment_id : undefined)
+  const named = useRecordExample(record && !own ? record.platform_experiment_id : undefined)
+  return record === undefined || own || named
 }
