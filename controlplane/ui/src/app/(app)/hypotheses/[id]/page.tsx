@@ -1,14 +1,18 @@
 'use client'
 
+import { useState } from 'react'
 import useSWR from 'swr'
-import { Link } from '@/components/ui/link'
+import { clsx } from 'clsx'
+import { TextLink } from '@/components/ui/link'
 import { useProjectRouter } from '@/lib/query-state'
 import { ReadOnlyProvider, useExperimentAccess, useRecordScope } from '@/lib/read-only'
 import { fetchHypothesis } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
-import { Card, CardHeader, CardContent, InsetCard, RowLink } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle, InsetCard, RowLink } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import { PageHeader } from '@/components/ui/page-header'
-import { Table } from '@/components/ui/table'
+import { LinkTr, Table, num, quiet } from '@/components/ui/table'
 import { Eyebrow } from '@/components/ui/text'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Loading, EmptyState, InlineError } from '@/components/ui/status-message'
@@ -16,6 +20,7 @@ import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { Actor, Verdict } from '@/components/actor'
+import { AgentNames } from '@/components/agent-label'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
 
@@ -43,6 +48,21 @@ function LinkRow({ link, platformExperimentID, pe }: {
   )
 }
 
+// Text longer than this is cut to three lines until asked for in full.
+const LONG_TEXT = 240
+
+/** The hypothesis as the page's title: all of it, the long ones on request. */
+function HypothesisText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > LONG_TEXT
+  return (
+    <span className="min-w-0">
+      <span className={clsx('block whitespace-pre-wrap text-lg font-semibold leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
+      {long && <Button variant="link" size="sm" onClick={() => setOpen(!open)}>{open ? 'Show less' : 'Show all of it'}</Button>}
+    </span>
+  )
+}
+
 export default function HypothesisDetailPage({ params }: { params: { id: string } }) {
   const { id } = params
   const router = useProjectRouter()
@@ -55,9 +75,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   if (error) return (
     <div>
-      <PageHeader title="Hypothesis Not Found" />
-      <p><InlineError>Could not load hypothesis {id}</InlineError></p>
-      <Link href="/hypotheses" className="text-sm text-accent hover:underline">← Hypothesis graph</Link>
+      <PageHeader title="Hypothesis" />
+      <p><InlineError>Could not load hypothesis {id}: {error.message}</InlineError></p>
+      <TextLink href="/hypotheses" className="text-sm">← Hypothesis graph</TextLink>
     </div>
   )
 
@@ -67,7 +87,6 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
   const findings = data.findings ?? []
   const comments = data.comments ?? []
   const jobByID = new Map(jobs.map(j => [j.id, j]))
-  const summarized = new Set(findings.map(f => f.experiment_id))
   const sinceVerdict = findings.filter(f => filedAfterVerdict(data, f.created_at)).length
   // With nothing varied, every setting is shown.
   const variedEnv = variedEnvKeys(jobs)
@@ -76,6 +95,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
   return (
     <ReadOnlyProvider value={access.readOnly}>
+    <AgentNames platformExperimentID={data.platform_experiment_id}>
     <div>
       <PageHeader
         back={{
@@ -84,37 +104,32 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         }}
         title={
           <>
-            <span className="font-mono text-base font-normal text-subtle">{data.id}</span>
+            <HypothesisText text={data.text} />
             <Badge status={data.status ?? 'open'}>{data.status ?? 'open'}</Badge>
           </>
         }
         description={
-          <span className="font-mono text-2xs">
-            Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
-            {data.status_changed_at && <> · <Verdict hypothesis={data} /></>}
-            {sinceVerdict > 0 && (
-              <span className="text-warning"> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
-            )}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
+            <span>
+              Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
+              {data.status_changed_at && <> · <Verdict hypothesis={data} /></>}
+              {sinceVerdict > 0 && (
+                <span className="text-warning"> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
+              )}
+            </span>
+            <span className="font-mono">· {data.id}</span>
+            <CopyButton value={data.id} />
           </span>
         }
         actions={
-          <Link href={graphHref(data.platform_experiment_id, data.id)} className="text-xs text-accent hover:underline">
+          <TextLink href={graphHref(data.platform_experiment_id, data.id)} className="text-xs">
             View in graph →
-          </Link>
+          </TextLink>
         }
       />
 
       <Card>
-        <CardHeader>Hypothesis</CardHeader>
-        <CardContent>
-          <p className="max-w-[760px] whitespace-pre-wrap break-words text-base leading-relaxed">
-            {data.text}
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>Links</CardHeader>
+        <CardHeader><CardTitle>Links</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-3">
             {linkGroups(data.links.out, data.links.in).map(group => (
@@ -137,18 +152,13 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
       <Card>
         <CardHeader>
-          Findings
-          {data.finding_count > 0 && (
-            <span className="ml-2 text-xs font-normal text-muted">
-              ({data.finding_count}{data.finding_count > findings.length ? `, showing ${findings.length}` : ''})
-            </span>
-          )}
+          <CardTitle note={data.finding_count > 0 && `${data.finding_count}${data.finding_count > findings.length ? `, showing ${findings.length}` : ''}`}>Findings</CardTitle>
         </CardHeader>
         <CardContent>
           {findings.length === 0 ? (
             <EmptyState>
-              No findings filed yet. Agents write a summary via POST /experiments/{'{id}'}/summary once a job testing
-              this hypothesis reaches a terminal state.
+              No findings yet. An agent files one as the summary of a job that tested this hypothesis, once the job
+              has ended.
             </EmptyState>
           ) : (
             <div className="grid gap-2.5">
@@ -159,9 +169,9 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                     <div className="mb-1.5 flex items-center justify-between text-2xs">
                       <span className="flex items-center gap-2 font-mono">
                         <span className="font-semibold"><Actor actor={f.actor} agentID={f.agent_id} /></span>
-                        <Link href={`/jobs/${f.experiment_id}`} className="text-accent hover:underline">{f.experiment_id.slice(0, 8)}…</Link>
+                        <TextLink href={`/jobs/${f.experiment_id}`}>{f.experiment_id.slice(0, 8)}…</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span className="text-accent" title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
+                        {job?.metric && <span title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
                       </span>
                       <span className="font-mono text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
@@ -179,12 +189,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
       <Card>
         <CardHeader>
-          Comments
-          {data.comment_count > 0 && (
-            <span className="ml-2 text-xs font-normal text-muted">
-              ({data.comment_count}{data.comment_count > comments.length ? `, showing ${comments.length}` : ''})
-            </span>
-          )}
+          <CardTitle note={data.comment_count > 0 && `${data.comment_count}${data.comment_count > comments.length ? `, showing ${comments.length}` : ''}`}>Comments</CardTitle>
         </CardHeader>
         <CardContent>
           {comments.length === 0 ? (
@@ -208,12 +213,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
 
       <Card>
         <CardHeader>
-          Jobs testing this hypothesis
-          {data.job_count > 0 && (
-            <span className="ml-2 text-xs font-normal text-muted">
-              ({data.job_count}{data.job_count > jobs.length ? `, showing ${jobs.length}` : ''})
-            </span>
-          )}
+          <CardTitle note={data.job_count > 0 && `${data.job_count}${data.job_count > jobs.length ? `, showing ${jobs.length}` : ''}`}>Jobs testing this hypothesis</CardTitle>
         </CardHeader>
         <CardContent scrollX>
           <Table>
@@ -224,7 +224,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>Status</th>
                 <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
-                <th className="text-right">Est. Cost</th>
+                <th className="text-right">Est. cost</th>
                 <th className="text-right">Best {metricName ?? 'metric'}</th>
                 <th>Submitted</th>
               </tr>
@@ -241,34 +241,25 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 const status = j.status ?? 'UNKNOWN'
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
-                  <tr
-                    key={job.id}
-                    tabIndex={0}
-                    role="link"
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/jobs/${job.id}`)}
-                    onKeyDown={e => { if (e.key === 'Enter') router.push(`/jobs/${job.id}`) }}
-                  >
-                    <td className="font-mono text-2xs text-subtle">{job.id.slice(0, 8)}…</td>
-                    <td className="font-mono text-xs">{job.agent_id}</td>
+                  <LinkTr key={job.id} href={`/jobs/${job.id}`}>
+                    <td className={quiet}>{job.id.slice(0, 8)}…</td>
+                    <td className="text-xs" title={job.agent_id}>{job.agent_name}</td>
                     <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
-                      {status === 'COMPLETED' && data.finding_count === findings.length && !summarized.has(job.id) && <NoSummary className="ml-1.5" />}
+                      {job.summary_due && <NoSummary className="ml-1.5" />}
                     </td>
                     <td className="font-mono text-2xs">
                       {envSettings(j, shownEnv) || '—'}
                     </td>
                     <td className="font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
-                    <td className="text-right font-mono text-2xs">
+                    <td className={num}>
                       {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
-                    <td className="text-right font-mono text-xs">
-                      {j.metric ? <span className="text-accent">{j.metric.best.toFixed(4)}</span> : <span className="text-muted">—</span>}
+                    <td className={num}>
+                      {j.metric ? j.metric.best.toFixed(4) : <span className="text-muted">—</span>}
                     </td>
-                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">
-                      {relTime(j.submitted_at ?? j.created_at)}
-                    </td>
-                  </tr>
+                    <td className={quiet}>{relTime(j.submitted_at ?? j.created_at)}</td>
+                  </LinkTr>
                 )
               })}
             </tbody>
@@ -276,6 +267,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         </CardContent>
       </Card>
     </div>
+    </AgentNames>
     </ReadOnlyProvider>
   )
 }

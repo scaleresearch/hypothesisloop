@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchFindings, fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentAgents, fetchPlatformExperimentsPage } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesesPage from '@/app/(app)/hypotheses/page'
 import type { HypothesisGraph, Me, PlatformExperiment } from '@/types'
@@ -14,7 +14,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
 vi.mock('@/lib/api', () => ({
-  fetchFindings: vi.fn(), fetchHypothesisGraph: vi.fn(), fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+  fetchHypothesisGraph: vi.fn(), fetchPlatformExperiment: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
   searchHypotheses: vi.fn(), registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => <span>experiment select</span> }))
@@ -51,7 +51,7 @@ function show(search: string, pe: Partial<PlatformExperiment>) {
 
 beforeEach(() => {
   vi.mocked(fetchHypothesisGraph).mockResolvedValue(graph)
-  vi.mocked(fetchFindings).mockResolvedValue([])
+  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ agent_id: 'ag-1', name: 'Researcher 1' }] as never)
 })
 
 describe('the hypothesis graph', () => {
@@ -71,11 +71,11 @@ describe('the hypothesis graph', () => {
     expect(screen.getByRole('button', { name: '+ Add idea under this' })).toBeTruthy()
   })
 
-  it('names who registered the selected hypothesis beside the agent it was registered for', async () => {
+  it('names who registered the selected hypothesis beside the agent it was registered for, by its name', async () => {
     show('pe=pe-x&focus=hyp-1', { project_id: 'prj_1', shared: false })
     expect((await screen.findByText('Grace Hopper')).getAttribute('title')).toBe('u7')
     expect(screen.getByText('human')).toBeTruthy()
-    expect(screen.getByText('ag-1')).toBeTruthy()
+    expect((await screen.findByText('Researcher 1')).getAttribute('title')).toBe('ag-1')
   })
 
   it('opens on the newest experiment listed for the project, which a shared one may be', async () => {

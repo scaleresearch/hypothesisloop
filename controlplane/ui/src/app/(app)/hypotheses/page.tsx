@@ -4,10 +4,10 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
-import { fetchFindings, fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
-import type { PlatformExperiment } from '@/types'
+import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import type { HypothesisGraph, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
@@ -15,6 +15,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { AddIdeaForm } from '@/components/human-idea'
+import { AgentNames, useAgentName } from '@/components/agent-label'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
@@ -25,6 +26,19 @@ import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
 
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
+
+/** Narrows the graph to one agent's hypotheses, or to the ones people added. */
+function OwnerFilter({ graph, value, onChange }: { graph: HypothesisGraph | undefined; value: string; onChange: (owner: string) => void }) {
+  const agentName = useAgentName()
+  const options = useMemo(() => {
+    const nodes = graph?.nodes ?? []
+    const agents = Array.from(new Set(nodes.map(n => n.agent_id).filter(Boolean)))
+    const listed = agents.map(a => ({ value: a, label: agentName(a) })).sort((a, b) => a.label.localeCompare(b.label))
+    if (nodes.some(n => !n.agent_id && n.actor.kind === 'user')) listed.push({ value: HUMAN_OWNER, label: 'People' })
+    return listed
+  }, [graph, agentName])
+  return <SearchableSelect value={value} onChange={onChange} allLabel="All agents" options={options} />
+}
 
 export default function HypothesesPage() {
   return (
@@ -66,24 +80,11 @@ function HypothesesPageContent() {
     { refreshInterval: 15_000 },
   )
   const search = useHypothesisSearch(peID, q)
-  const { data: findings } = useSWR(
-    peID ? ['pe-findings', peID] : null,
-    () => fetchFindings(peID),
-    { refreshInterval: 15_000 },
-  )
-  const evidence = useMemo(() => new Map((findings ?? []).map(h => [h.id, h])), [findings])
 
   const positions = useMemo(() => graph && layoutGraph(graph), [graph])
   const nodeByID = useMemo(() => new Map((graph?.nodes ?? []).map(n => [n.id, n])), [graph])
   const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
   const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
-  const ownerOptions = useMemo(() => {
-    const nodes = graph?.nodes ?? []
-    const agents = Array.from(new Set(nodes.map(n => n.agent_id).filter(Boolean))).sort()
-    const options = agents.map(a => ({ value: a, label: a }))
-    if (nodes.some(n => !n.agent_id && n.actor.kind === 'user')) options.push({ value: HUMAN_OWNER, label: 'Humans' })
-    return options
-  }, [graph])
 
   const selected = focus || graph?.root || ''
   const filtering = statusFilter !== '' || ownerFilter !== ''
@@ -104,16 +105,16 @@ function HypothesesPageContent() {
   // Nothing is added to a graph whose experiment has not been read yet.
   const readOnly = pe ? isReadOnly(me, pe) : true
 
-  return (
+  const page = (
     <ReadOnlyProvider value={readOnly}>
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
       <PageHeader
         title="Hypotheses"
-        description="Each platform experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others. Registering text equivalent to an existing hypothesis returns the existing one; text close to others waits until the submitter has told it apart from them."
+        description="Each experiment grows a graph of research claims. Every hypothesis builds on the experiment's objective or on earlier hypotheses, and may contradict or relate to others."
       />
 
       <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
-        <FormField inline label="Platform Experiment">
+        <FormField inline label="Experiment">
           <PlatformExperimentSelect
             value={peID}
             onChange={selectExperiment}
@@ -139,24 +140,19 @@ function HypothesesPageContent() {
           />
         </FormField>
         <FormField inline label="Agent" className="ml-2">
-          <SearchableSelect
-            value={ownerFilter}
-            onChange={setOwnerFilter}
-            allLabel="All agents"
-            options={ownerOptions}
-          />
+          <OwnerFilter graph={graph} value={ownerFilter} onChange={setOwnerFilter} />
         </FormField>
         {filtering && graph && (
           <span className="text-xs text-subtle">{matching} of {graph.nodes.length} match</span>
         )}
       </div>
 
-      {peError && <ErrorMessage>Cannot reach registry service.</ErrorMessage>}
+      {peError && <ErrorMessage>Could not load the experiments of {project.name}: {peError.message}</ErrorMessage>}
       {platformExperiments && platformExperiments.length === 0 && (
-        <EmptyState>No platform experiments yet. A hypothesis graph grows inside one.</EmptyState>
+        <EmptyState>No experiments yet. A hypothesis graph grows inside one.</EmptyState>
       )}
-      {selectedError && <ErrorMessage>Cannot load platform experiment {peID}: {selectedError.message}</ErrorMessage>}
-      {error && <ErrorMessage>Cannot load the hypothesis graph: {error.message}</ErrorMessage>}
+      {selectedError && <ErrorMessage>Could not load experiment {peID}: {selectedError.message}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load the hypothesis graph: {error.message}</ErrorMessage>}
       {(peID ? !(graph && pe) && !error && !selectedError : !platformExperiments && !peError) && <Loading />}
 
       {graph && positions && pe && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
@@ -172,7 +168,7 @@ function HypothesesPageContent() {
               <HypothesisOutline
                 graph={graph}
                 rootLabel={pe.name}
-                evidence={evidence}
+                evidence={nodeByID}
                 selected={selected}
                 hits={hits}
                 filters={filters}
@@ -184,7 +180,7 @@ function HypothesesPageContent() {
                 graph={graph}
                 positions={positions}
                 rootLabel={pe.name}
-                evidence={evidence}
+                evidence={nodeByID}
                 focus={focus}
                 selected={selected}
                 hits={hits}
@@ -198,7 +194,7 @@ function HypothesesPageContent() {
             {q && (
               <Card>
                 <CardHeader>
-                  Search results
+                  <CardTitle>Search results</CardTitle>
                   <Button variant="link" size="sm" className="ml-auto" onClick={() => setQ('')}>Clear</Button>
                 </CardHeader>
                 <CardContent>
@@ -210,7 +206,7 @@ function HypothesesPageContent() {
               <HypothesisPanel
                 graph={graph}
                 nodeByID={nodeByID}
-                evidence={evidence}
+                evidence={nodeByID}
                 selected={selected}
                 onSelect={setFocus}
                 onAddIdea={setAddUnder}
@@ -235,4 +231,6 @@ function HypothesesPageContent() {
     </div>
     </ReadOnlyProvider>
   )
+  // The names of an experiment's agents are read once there is an experiment to read them of.
+  return peID ? <AgentNames platformExperimentID={peID}>{page}</AgentNames> : page
 }

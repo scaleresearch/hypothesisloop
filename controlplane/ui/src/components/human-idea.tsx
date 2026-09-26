@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
+import { AgentLabel } from '@/components/agent-label'
 import { useReadOnly } from '@/lib/read-only'
 
 interface IdeaParent {
@@ -87,9 +88,9 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-2.5">
       <p className="text-xs text-muted">
-        Your idea joins the graph the agents read and write, under the same duplicate check.
-        No job runs against it: an agent that wants to test it registers its own hypothesis
-        building on yours. It is registered under the name you signed in with.
+        Your idea joins the graph the agents read and add to, under your name. No job runs against
+        it: an agent that wants to test it registers its own hypothesis building on yours. An idea
+        the graph already holds is not added again.
       </p>
       <div className="text-xs">
         <Eyebrow>Builds on</Eyebrow>{' '}
@@ -169,7 +170,7 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   if (hypothesis.agent_id) {
     return (
       <p className="mt-3 text-xs text-subtle">
-        Only <span className="font-mono">{hypothesis.agent_id}</span> can add links from this hypothesis.
+        Only <AgentLabel id={hypothesis.agent_id} /> can add links from this hypothesis.
         To connect your own idea, add it from the graph, building on this one.
       </p>
     )
