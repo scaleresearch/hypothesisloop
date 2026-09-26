@@ -34,16 +34,21 @@ type Proposal struct {
 	// BaselineJobID is the planner's completed job that measured the baseline. Its numbers are
 	// read from the metrics store when the proposal is shown, never copied here.
 	BaselineJobID string `json:"baseline_job_id" doc:"The planner's own completed job in this draft that measured the baseline, with its finding filed."`
-	// AcceleratorType is the catalog type the jobs are sized for: an accelerator, or
-	// domain.CPUType for work that needs none. Every job holds units of a priced type, so it is
-	// required.
-	AcceleratorType string `json:"accelerator_type" doc:"The catalog type the jobs are sized for, copied from the capacity listing: an accelerator, or hypothesisloop.dev/cpu=core (kind cpu) for work on CPU cores, whose budget is then CPU core-hours."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
 	OutOfScope   []string `json:"out_of_scope,omitempty"`
 	Risks        []string `json:"risks,omitempty"`
 	Questions    []string `json:"questions,omitempty" doc:"What the person should answer before starting, when the goal left it open."`
+}
+
+// storedProposal is a proposal as the platform keeps and answers it: what the planner wrote, and
+// beside it what the platform read from the baseline job.
+type storedProposal struct {
+	Proposal
+	// AcceleratorType is the type the baseline job ran on, which the run's jobs are sized for.
+	// On domain.CPUType the budget is CPU core-hours.
+	AcceleratorType domain.AcceleratorType `json:"accelerator_type"`
 }
 
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
@@ -108,9 +113,6 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 			return experiment, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
-	if !h.knownAcceleratorType(p.AcceleratorType) {
-		return experiment, refusedProposal("unknown_accelerator_type", "accelerator_type %q is not in the resource catalog: copy one from `hl capacity`, the one of kind cpu for work that needs no accelerator", p.AcceleratorType)
-	}
 	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement} {
 		if strings.TrimSpace(text) == "" {
 			return experiment, refusedProposal("missing_explanation", "%s is required: the person who confirms reads it in place of the code", name)
@@ -127,15 +129,6 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 		}
 	}
 	return experiment, nil
-}
-
-func (h *PlatformExperimentsHandler) knownAcceleratorType(name string) bool {
-	for _, known := range h.catalog.AcceleratorTypes {
-		if known.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // requirePlanner admits only the planner of the draft id: the agent the platform signed up to
@@ -226,9 +219,10 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours and agents are proposed, and the person who accepts states them. " +
 			"The proposal is checked before it is stored and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
-			"invalid_cost, invalid_agents, unknown_accelerator_type, missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
+			"invalid_cost, invalid_agents, missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
 			"no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it.",
+			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
+			"The stored proposal also answers accelerator_type, the type the baseline job ran on: the platform reads it from that job and a body that states it is refused.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body Proposal
@@ -267,7 +261,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := checkBaseline(in.Body, experiment, plannerID, baseline); err != nil {
 			return nil, err
 		}
-		stored, err := json.Marshal(in.Body)
+		stored, err := json.Marshal(storedProposal{Proposal: in.Body, AcceleratorType: baseline.Job.AcceleratorType})
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}

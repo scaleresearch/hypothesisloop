@@ -252,10 +252,10 @@ func aProposal(more map[string]any) map[string]any {
 			"report_interval_seconds": 30,
 		},
 		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
-		"baseline_job_id": "job-1", "accelerator_type": "rtx-4090",
-		"metric_reason": "Validation loss on held-out text is the goal itself.",
-		"measurement":   "bench.py trains for a fixed number of steps and scores a split the training never reads.",
-		"questions":     []string{"Is 4 hours enough?"},
+		"baseline_job_id": "job-1",
+		"metric_reason":   "Validation loss on held-out text is the goal itself.",
+		"measurement":     "bench.py trains for a fixed number of steps and scores a split the training never reads.",
+		"questions":       []string{"Is 4 hours enough?"},
 	}
 	for key, value := range more {
 		body[key] = value
@@ -270,7 +270,7 @@ func draftWithPlanner() *draftStore {
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		baseline: &Baseline{
-			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted},
+			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090"},
 			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
 		},
 	}
@@ -324,7 +324,6 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"nobody to run it":                       {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
 		"more machines than it gets":             {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 		"a planner among the agents":             {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
-		"a type the platform has not":            {map[string]any{"accelerator_type": "h100"}, "unknown_accelerator_type"},
 		"no reason for the metric":               {map[string]any{"metric_reason": ""}, "missing_explanation"},
 		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
 	} {
@@ -498,16 +497,18 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusUnprocessableEntity || out["reason"] != "no_baseline" {
 		t.Errorf("a job that does not exist: got = %d %v, want 422 no_baseline", code, out)
 	}
-	// Work that needs no accelerator is sized in cores, the units of a type like any other: a
-	// proposal that names none is refused, as a job that holds none is.
+	// The type is the one the baseline ran on, read from the job: the planner cannot state
+	// another, and the stored proposal answers it.
 	cpu := draftWithPlanner()
+	cpu.baseline.Job.AcceleratorType = domain.CPUType
 	cpu.baseline.Reachable = map[string]bool{string(domain.CPUType): true}
 	_, call = planningAPI(t, cpu, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": ""})); code != http.StatusUnprocessableEntity || out["reason"] != "unknown_accelerator_type" {
-		t.Errorf("a proposal that names no type: got = %d %v, want 422 unknown_accelerator_type", code, out)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": "rtx-4090"})); code != http.StatusUnprocessableEntity {
+		t.Errorf("a proposal that states a type: got = %d %v, want 422 for a field the body does not have", code, out)
 	}
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": string(domain.CPUType)})); code != http.StatusOK {
-		t.Errorf("a proposal sized in cores: got = %d %v, want 200", code, out)
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != string(domain.CPUType) {
+		t.Errorf("a proposal whose baseline ran on cores: got = %d %v, want 200 and the CPU type answered", code, out)
 	}
 }
 

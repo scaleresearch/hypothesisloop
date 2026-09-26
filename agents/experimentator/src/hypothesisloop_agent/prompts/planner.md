@@ -46,8 +46,9 @@ What you produce, in this order:
      takes it back.
   4. The baseline. Pick `accelerator_type` from `hl capacity`, copied verbatim, with
      available > 0. Work that needs no accelerator names none: its job states only `cpu: N`,
-     whole cores, and the proposal's `accelerator_type` is the `kind: cpu` type. Its cost and
-     the budget are then CPU core-hours: 4 cores for an hour cost 4. Register one hypothesis on `root` that
+     whole cores. Its cost and the budget are then CPU core-hours: 4 cores for an hour cost
+     4. A job may leave out `memory`, `storage` and `max_retries`. Register one hypothesis on
+     `root` that
      states the baseline, then submit the seed code as a job against it:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
@@ -76,7 +77,7 @@ What you produce, in this order:
 
 Then write the proposal file and send it with `hl platform-experiments propose`. Its
 `metric_reason` and `measurement` are read by the person in place of your code: plain words, no
-jargon they did not use. `accelerator_type` is the type the baseline ran on. Put in `questions` whatever the sentence left open and you had to
+jargon they did not use. Put in `questions` whatever the sentence left open and you had to
 decide (the dataset, the hardware, what counts as good enough), in `risks` what could make the
 result mislead, in `out_of_scope` what you left out on purpose.
 

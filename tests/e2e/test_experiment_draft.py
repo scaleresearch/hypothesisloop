@@ -33,9 +33,8 @@ def _planner_instance(api: API, pe_id: str) -> tuple[dict | None, set[str]]:
     return (own[0] if own else None), set(desired["ending"])
 
 
-def _proposal(job_id: str, accelerator_type: str = "none-yet", **more) -> dict:
+def _proposal(job_id: str, **more) -> dict:
     return {
-        "accelerator_type": accelerator_type,
         "experiment": {
             "name": "Hidden layer width", "description": "Vary the hidden layer of the sample classifier and report val_accuracy.",
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
@@ -73,26 +72,28 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
 
         # A proposal rests on a baseline the platform saw: none, then one still running.
         job = planner.submit_job(pe_id, planner_id, hours=0.02, hyp_text="the baseline: the sample classifier as it is")
-        # The type the baseline runs on is the one the proposal sizes its jobs for.
-        on = api.experiment(job)["job"]["accelerator_type"]
-        untyped = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
-        assert (untyped.status_code, untyped.json()["reason"]) == (422, "unknown_accelerator_type"), untyped.text
-        none = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal("job-none", on))
+        # The type the proposal sizes its jobs for is the one the baseline runs on, which the
+        # platform reads from the job: a body that states one is refused.
+        on = api.experiment(job)["accelerator_type"]
+        typed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, accelerator_type=on))
+        assert typed.status_code == 422, typed.text
+        none = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal("job-none"))
         assert (none.status_code, none.json()["reason"]) == (422, "no_baseline"), none.text
-        running = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, on))
+        running = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
         assert (running.status_code, running.json()["reason"]) == (422, "baseline_not_completed"), running.text
         eventually("the planner's baseline job to complete", lambda: api.experiment(job),
                    accept=lambda e: e["status"] == "COMPLETED", reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"), deadline=deadline)
-        unfiled = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, on))
+        unfiled = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
         assert (unfiled.status_code, unfiled.json()["reason"]) == (422, "baseline_without_finding"), unfiled.text
         planner.file_finding(job, "baseline: the sample classifier as it is")
-        unmeasured = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, on, experiment=_proposal(job)["experiment"] | {
+        unmeasured = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, experiment=_proposal(job)["experiment"] | {
             "metrics": [{"key": "latency_never_reported", "direction": "minimize"}]}))
         assert (unmeasured.status_code, unmeasured.json()["reason"]) == (422, "baseline_missing_metric"), unmeasured.text
 
-        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, on))
+        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
         assert proposed.status_code == 200, proposed.text
         assert proposed.json()["proposed_at"] and proposed.json()["status"] == "draft"
+        assert proposed.json()["proposal"]["accelerator_type"] == on, proposed.json()["proposal"]
         # Proposed, the planner's machine is only let wind down.
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "a machine is kept beside a proposal that waits for a person"
@@ -103,7 +104,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert [r["message"] for r in revised.json()["revisions"]] == ["Use three researchers at most."]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None, "a revised draft has no planner"
-        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, on, agents=[{}, {}, {}])).status_code == 200
+        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, agents=[{}, {}, {}])).status_code == 200
 
         # Accepted at the cost the person states, whatever was proposed.
         accepted = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "agents": [{"flavor": "data-search"}, {}]})
