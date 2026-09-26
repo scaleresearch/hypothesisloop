@@ -214,7 +214,7 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 		_ = printLine(stderr, raw)
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: judge each. The same claim as yours: register nothing and test it with "+
-		"hl job submit FILE --hypothesis ID; its verdict stays its author's. A different claim, narrower and broader ones "+
+		"hl job submit FILE --hypothesis ID; its verdict stays its owner's. A different claim, narrower and broader ones "+
 		"included: rerun adding --distinct-from %s, with --contradicts ID instead for one that cannot hold together with yours.\n",
 		strings.Join(ids, ","))
 	return true
@@ -625,11 +625,16 @@ experiment's nodes is refused. Prints a JSON object per row keyed by column, 200
 
 Schema:
   (:Objective {id})   the root, id = $pe
-  (:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at,
-                status_changed_at})   the times are datetimes: compare with datetime('RFC3339')
+  (:Hypothesis {id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, status,
+                created_at, status_changed_at, status_actor_kind, status_actor_id})
+      the times are datetimes: compare with datetime('RFC3339')
+      agent_id: whose hypothesis it is, '' on one no agent owns
+      actor_kind (user, key, agent, coordinator, staff) and actor_id: the credential that
+      registered it; status_actor_*: the one that gave the verdict. A node from before these
+      were kept has neither, and author holds the name it stated then
   (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective)
   (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), (:Hypothesis)-[:RELATED]->(:Hypothesis)
-  every relationship {agent_id, author, created_at}
+  every relationship {agent_id, actor_kind, actor_id, created_at}
 $evidence[h.id]: counts {jobs, each lowercase job status, findings, comments} and
 last_finding_at, or null. Text: hl hypothesis get ID.
 

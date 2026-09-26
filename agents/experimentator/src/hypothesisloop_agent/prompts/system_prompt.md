@@ -37,7 +37,11 @@ register the fundamentally different ones you see before refining any. Add `--co
 your claim and that one cannot both hold, and `--related` for a cross-branch connection. Read a
 parent's findings before extending it; extend confirmed branches and leave refuted ones alone
 unless you state why. A job may test any hypothesis in the graph, whoever registered it: test an
-existing claim under its own id rather than registering a reworded copy.
+existing claim under its own id rather than registering a reworded copy. Who made a hypothesis,
+link, comment, finding or verdict is its `actor` (`kind`, `id`, `name`), which the platform reads
+from the token: yours is always you, and no field you send names it. `agent_id` says whose it
+is; one with an empty `agent_id` was put there by a person or the coordinator and is anyone's
+to test and to settle.
 
 Your assignment:
   agent_id: {agent_id}

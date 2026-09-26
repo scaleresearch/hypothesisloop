@@ -79,7 +79,7 @@ func (e *similarHypothesesError) GetStatus() int { return e.Status }
 
 const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `similar` " +
 	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one states the same claim as " +
-	"yours, register nothing and test it under its id; only its author sets its status. A narrower, broader or " +
+	"yours, register nothing and test it under its id; only its owner sets its status. A narrower, broader or " +
 	"otherwise different claim is yours to register: resubmit naming each one, as a contradicts link when yours " +
 	"cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
 
@@ -114,10 +114,13 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"Body {platform_experiment_id, cypher, params}; answer " +
 	"{columns, rows, truncated}. Use it to find where an idea belongs before registering it, and to walk lineage. " +
 	"Schema: (:Objective {id}) is the root of one platform experiment, id = platform_experiment_id. " +
-	"(:Hypothesis {id, platform_experiment_id, agent_id, source, author, text, status, created_at, status_changed_at}). " +
+	"(:Hypothesis {id, platform_experiment_id, agent_id, source, actor_kind, actor_id, text, status, created_at, status_changed_at, " +
+	"status_actor_kind, status_actor_id}). agent_id is whose hypothesis it is, empty on one no agent owns. actor_kind " +
+	"(user, key, agent, coordinator, staff) and actor_id are the credential that registered it, and status_actor_* the one " +
+	"that gave the verdict; a node from before they were kept has neither, and author holds the name it stated. " +
 	"created_at and status_changed_at are datetimes, returned as RFC3339 text: compare them with " +
 	"datetime('2026-10-02T01:30:00Z'), since a string never matches one. " +
-	"Relationships, each {agent_id, author, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
+	"Relationships, each {agent_id, actor_kind, actor_id, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
 	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
 	"(:Hypothesis)-[:RELATED]->(:Hypothesis). $pe is bound to platform_experiment_id: filter every MATCH and text search " +
 	"with it; a result holding a node or relationship of another platform experiment is refused with 400. " +
@@ -505,7 +508,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "get-hypothesis-graph", Method: "GET", Path: "/hypotheses/graph",
 		Summary: "Get one platform experiment's whole hypothesis graph", Tags: []string{"hypotheses"},
 		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
-			"(edges, {from, to, type, agent_id, author, created_at}); an edge to the objective has to = root = the platform_experiment_id. Unpaged, " +
+			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. Unpaged, " +
 			"for drawing the graph.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
@@ -624,7 +627,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Get a hypothesis with its links, jobs, findings, and comments", Tags: []string{"hypotheses"},
 		Description: "links.out and links.in are its edges, oldest first, at most 200 each way. Each has type, the other " +
 			"end's hypothesis_id, text and status (for the objective: the platform_experiment_id, empty text and status), " +
-			"and the agent_id or author and created_at of whoever made the link. ?limit (default 20, max 200) and " +
+			"and the agent_id the link was made for, the actor that made it and its created_at. ?limit (default 20, max 200) and " +
 			"?offset apply to each of jobs, findings and comments alike, oldest first; " +
 			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {

@@ -598,7 +598,7 @@ func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClai
 	if !errors.As(err, &hold) || hold.Status != http.StatusConflict || len(hold.Similar) != 1 {
 		t.Fatalf("hypothesisWriteError(SimilarError) = %#v, want a 409 carrying the similar hypotheses", err)
 	}
-	for _, want := range []string{"only its author sets its status", "narrower, broader", "distinct_from"} {
+	for _, want := range []string{"only its owner sets its status", "narrower, broader", "distinct_from"} {
 		if !strings.Contains(hold.Detail, want) {
 			t.Errorf("detail %q does not say %q", hold.Detail, want)
 		}

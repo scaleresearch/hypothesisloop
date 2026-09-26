@@ -189,10 +189,12 @@ schedule and the stages answer 403 to its token); it writes those down for you.
   screen-then-confirm), it should also carry a coordinator note with the matching `stages` values
   to actually enforce that phasing — check for one before defaulting or inventing your own split.
 - Record the returned `id` as `PLATFORM_EXPERIMENT_ID`.
-- If the experiment's `hypothesis.yaml` is a seed tree (`author:` set, entries building on `root`
+- If the experiment's `hypothesis.yaml` is a seed tree (no `agent_id:`, entries building on `root`
   or on each other's `key`), submit it before spawning: `hl hypothesis submit --platform-experiment
-  $PLATFORM_EXPERIMENT_ID --file agents/coordinator/experiments/$EXPERIMENT/hypothesis.yaml`. A
-  human-authored seed needs `hypothesis_submit_policy: mixed`.
+  $PLATFORM_EXPERIMENT_ID --file agents/coordinator/experiments/$EXPERIMENT/hypothesis.yaml`. Submit it
+  with your own token and no `--agent`: the hypotheses are then no agent's, recorded as made by
+  the coordinator, and any agent may build on, test and settle them. Such a seed needs
+  `hypothesis_submit_policy: mixed`, and a file that states `author:` is refused.
 - **Description sync is not optional, ever.** Agents read the live platform experiment's
   `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is

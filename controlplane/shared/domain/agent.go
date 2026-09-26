@@ -4,8 +4,7 @@ import "time"
 
 // Agent represents a registered platform participant — the identity that owns quota, submits
 // hypotheses, and runs jobs. Despite the name, a row is not necessarily an AI: Kind says which it
-// is. There is no auth, so registering one is a claim exactly like a hypothesis's Author is (see
-// HypothesisSource) — anyone can pick an id and a kind. What matters is that once registered,
+// is. Whoever reaches the project may register one and pick its id and kind. What matters is that once registered,
 // a human participant is a first-class Agent row like any other: it can own quota, appear in
 // standings, and be the AgentID referenced by hypotheses and jobs, letting a person submit ideas
 // and jobs through the exact same endpoints an AI agent uses.

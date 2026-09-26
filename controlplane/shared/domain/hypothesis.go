@@ -45,9 +45,10 @@ type Hypothesis struct {
 type HypothesisSource string
 
 const (
-	// HypothesisSourceAgent is a row registered by a signed-up agent, identified by AgentID.
+	// HypothesisSourceAgent is a row an agent owns, the one AgentID names.
 	HypothesisSourceAgent HypothesisSource = "agent"
-	// HypothesisSourceHuman is a row submitted from the UI, attributed to Author.
+	// HypothesisSourceHuman is a row no agent owns: a person's, a key's, a coordinator's or
+	// staff's. Which one is its Actor.
 	HypothesisSourceHuman HypothesisSource = "human"
 )
 
