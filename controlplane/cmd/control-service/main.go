@@ -101,7 +101,6 @@ func main() {
 	store := db.NewStore(pool, metricsDBURL, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
-	domain.SetAcceleratorKinds(pcfg.KindByName)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
@@ -191,7 +190,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
 	for _, g := range pcfg.AcceleratorTypes {
-		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, Kind: pcfg.KindByName[g.Name], AccHRate: g.AccHRate})
+		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, Kind: domain.AcceleratorType(g.Name).Kind(), AccHRate: g.AccHRate})
 	}
 	resourceCatalog := quota.ResourceCatalog{
 		AcceleratorTypes: acceleratorTypeInfos,

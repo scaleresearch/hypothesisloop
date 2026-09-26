@@ -328,8 +328,8 @@ type ExperimentStats struct {
 	// same tally, never stored: a class is a pure function of a reason.
 	EvictionsByClass map[string]int `json:"evictions_by_class"`
 	// InFlightAccelerators and InFlightCores sum accelerator_count over SUBMITTED and RUNNING,
-	// the first for jobs on an accelerator type and the second for jobs on a CPU class
-	// (TypeKind): devices and cores are never added into one number. The
+	// the first for jobs on an accelerator type and the second for jobs on cores (CPUType):
+	// devices and cores are never added into one number. The
 	// max_concurrent_accelerators cap is checked against the two together.
 	InFlightAccelerators int `json:"in_flight_accelerators"`
 	InFlightCores        int `json:"in_flight_cores"`

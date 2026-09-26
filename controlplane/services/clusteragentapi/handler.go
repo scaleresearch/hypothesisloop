@@ -588,7 +588,7 @@ type capacityReport struct {
 // clusterInfo is one row of GET /internal/clusters.
 type occupancy struct{ busy, total int64 }
 
-// occupancyByKind sums one cluster's reported flavors into devices and cores. A CPU class counts
+// occupancyByKind sums one cluster's reported flavors into devices and cores. The CPU type counts
 // cores and an accelerator type devices, so the two are never one sum.
 func occupancyByKind(available, total map[string]int64) (devices, cores occupancy) {
 	for flavor, installed := range total {
@@ -616,7 +616,7 @@ type clusterInfo struct {
 	// is within the connectedWithin freshness window (e.g. a disconnected cluster).
 	AcceleratorBusy  int64 `json:"accelerator_busy"`
 	AcceleratorTotal int64 `json:"accelerator_total"`
-	// CoreBusy/CoreTotal are the same for the CPU classes the cluster publishes, in cores. Kept
+	// CoreBusy/CoreTotal are the same for the cores the cluster offers to jobs on CPU. Kept
 	// apart: 16 cores and 4 chips are not 20 of anything.
 	CoreBusy  int64 `json:"core_busy"`
 	CoreTotal int64 `json:"core_total"`

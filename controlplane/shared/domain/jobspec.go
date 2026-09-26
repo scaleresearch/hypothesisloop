@@ -42,8 +42,9 @@ type JobSpec struct {
 	// GET always shows exactly what was submitted; every downstream consumer (Footprint, BuildJobs,
 	// cost estimation) reads domain.Experiment.EffectiveJob() instead of this field directly.
 	//
-	// For a type of kind cpu (TypeKind) the count is the node's cores: cpu is left out or equals
-	// the count, and memory and storage left out mean "max". Submission writes that into the job.
+	// A job that names no accelerator runs on cores: cpu is then a whole number, the job holds
+	// that many units of CPUType, and memory and storage left out mean "max". Submission writes
+	// that into the job.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`

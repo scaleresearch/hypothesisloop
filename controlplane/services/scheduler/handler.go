@@ -235,7 +235,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"attempt -- stop debugging code that was correct), and 'policy' is the platform's " +
 			"own decision, such as a stage cut, which is not a failure at all. " +
 			"in_flight_accelerators sums accelerator_count over SUBMITTED and RUNNING jobs on an " +
-			"accelerator type, and in_flight_cores does so for jobs on a CPU class. " +
+			"accelerator type, and in_flight_cores does so for jobs on CPU cores. " +
 			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
 			"agent or hypothesis that has a matching experiment, keyed by its id.",
 	}, func(ctx context.Context, in *struct {

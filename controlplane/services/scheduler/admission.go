@@ -60,23 +60,41 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 	return total, nil
 }
 
-// countSetsCores is the one rule of a type whose unit is a core (domain.TypeKindCPU): the count
-// of each node is its cores. It writes that into a job that names no cpu, refuses one that names
-// another, and gives a node that names no memory or storage its share of the node it lands on.
-// Everything that reads the job afterwards, the stored row, the footprint, the resolved spec and
-// every runtime, sees a job whose cpu is its count and needs no rule of its own.
-func countSetsCores(job *domain.JobSpec) error {
-	shape := func(field string, count int, cpu, memory, storage *string) error {
-		if count < 1 {
-			return fmt.Errorf("%s.accelerator_count must be at least 1: for a type of kind cpu the count is the node's cores", field)
+// asksForCoresOnly reports whether a job names no type and no accelerator anywhere and does state
+// cores: the plain way to ask for CPU, which submission reads as that many units of domain.CPUType.
+func asksForCoresOnly(job domain.JobSpec) bool {
+	if job.AcceleratorType != "" || job.GroupAcceleratorType() != "" || job.TotalAccelerators() != 0 {
+		return false
+	}
+	for _, g := range job.NodeGroups() {
+		if g.CPU != "" && g.CPU != domain.MaxResourceSentinel {
+			return true
 		}
+	}
+	return false
+}
+
+// countSetsCores is the one rule of the type whose unit is a core (domain.CPUType): on each node
+// the count and the cores are one whole number. A job states either and this writes the other,
+// refuses two that differ or a fraction of a core, and gives a node that names no memory or
+// storage its share of the node it lands on. Everything that reads the job afterwards, the stored
+// row, the footprint, the resolved spec and every runtime, sees a job whose cpu is its count and
+// needs no rule of its own.
+func countSetsCores(job *domain.JobSpec) error {
+	shape := func(field string, count *int, cpu, memory, storage *string) error {
 		switch cores, err := workload.ParseCPUCores(*cpu); {
+		case *cpu == "" && *count < 1:
+			return fmt.Errorf("%s.cpu is required: a job on CPU states its cores, a whole number of at least 1", field)
 		case *cpu == "":
-			*cpu = strconv.Itoa(count)
+			*cpu = strconv.Itoa(*count)
 		case err != nil:
 			return fmt.Errorf("%s.cpu: %w", field, err)
-		case *cpu == domain.MaxResourceSentinel || cores != float64(count):
-			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a type of kind cpu the count is the node's cores, so leave cpu out or make it equal", field, *cpu, field, count)
+		case *cpu == domain.MaxResourceSentinel || cores < 1 || cores != float64(int(cores)):
+			return fmt.Errorf("%s.cpu is %q: a job on CPU holds whole cores, so ask for a whole number of at least 1", field, *cpu)
+		case *count == 0:
+			*count = int(cores)
+		case cores != float64(*count):
+			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a job on CPU the count is the node's cores, so leave one out or make them equal", field, *cpu, field, *count)
 		}
 		if *memory == "" {
 			*memory = domain.MaxResourceSentinel
@@ -87,11 +105,11 @@ func countSetsCores(job *domain.JobSpec) error {
 		return nil
 	}
 	if len(job.Groups) == 0 {
-		return shape("job", job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
+		return shape("job", &job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
 	}
 	for i := range job.Groups {
 		group := &job.Groups[i]
-		if err := shape(fmt.Sprintf("job.groups[%q]", group.Name), group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage); err != nil {
+		if err := shape(fmt.Sprintf("job.groups[%q]", group.Name), &group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage); err != nil {
 			return err
 		}
 	}
@@ -136,10 +154,14 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
+	if asksForCoresOnly(exp.Job) {
+		exp.Job.AcceleratorType = domain.CPUType
+	}
 	if requested := exp.Job.AcceleratorType; requested.Kind() == domain.TypeKindCPU || (requested == "" && exp.Job.GroupAcceleratorType().Kind() == domain.TypeKindCPU) {
 		if err := countSetsCores(&exp.Job); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 		}
+		exp.AcceleratorCount = exp.Job.TotalAccelerators()
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
@@ -187,7 +209,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	case exp.AcceleratorCount < 0:
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
 	case exp.AcceleratorCount == 0:
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must be at least 1: every job holds units of a type the catalog prices. A job that needs no accelerator asks for cores of a CPU class, a type of kind cpu in GET /resource-catalog, whose count is the job's cores"}
+		return &AdmissionError{Reason: ReasonMalformed, Message: "the job asks for nothing the catalog prices: state job.cpu, a whole number of cores, for a job on CPU, or job.accelerator_type with job.accelerator_count of at least 1 for a job on accelerators"}
 	case exp.Job.AcceleratorType == "":
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_type is required when job.accelerator_count > 0"}
 	}
@@ -214,11 +236,10 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			if _, ok := t.LookupCost(); !ok {
 				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
 			}
-			// A count of a cpu type is cores and of an accelerator type devices, so one count
-			// cannot stand for both, and the cores a cpu type's count sets would be free on the
-			// other kind.
+			// A count is cores on CPU and devices on an accelerator, so one count cannot stand
+			// for both.
 			if requested := exp.Job.AcceleratorType; t.Kind() != requested.Kind() {
-				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("acceptable accelerator type %q is of kind %s and job.accelerator_type %q of kind %s: a job's alternatives are of the kind of the type it asks for", t, t.Kind(), requested, requested.Kind())}
+				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("acceptable accelerator type %q cannot stand in for job.accelerator_type %q: a job runs on CPU cores or on accelerators, never either", t, requested)}
 			}
 		}
 		exp.AcceleratorType = exp.Job.AcceleratorType

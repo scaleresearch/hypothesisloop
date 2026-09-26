@@ -142,10 +142,14 @@ func SetAcceleratorRates(rates map[string]float64) {
 	acceleratorRateRegistry = next
 }
 
-// TypeKind says what one unit of a priced type is: a device, or one core of a named CPU class.
-// The catalog states it per type (accelerator_types[].kind). It decides two things and nothing
-// else: for a cpu type the count of a job is its cores, and sums and labels count cores apart
-// from devices.
+// CPUType is the one type whose unit is a CPU core. Every runtime offers its nodes' whole cores
+// as units of it, and a job that asks for cores and no accelerator holds that many units (see
+// scheduler.ValidateExperiment). The catalog prices it like any other type.
+const CPUType AcceleratorType = "hypothesisloop.dev/cpu=core"
+
+// TypeKind says what one unit of a priced type is: a device, or one CPU core. It decides two
+// things and nothing else: for the cpu type the count of a job is its cores, and sums and labels
+// count cores apart from devices.
 type TypeKind string
 
 const (
@@ -153,41 +157,10 @@ const (
 	TypeKindCPU         TypeKind = "cpu"
 )
 
-// ParseTypeKind reads a catalog entry's kind. One that states none is an accelerator.
-func ParseTypeKind(kind string) (TypeKind, error) {
-	switch TypeKind(kind) {
-	case "", TypeKindAccelerator:
-		return TypeKindAccelerator, nil
-	case TypeKindCPU:
-		return TypeKindCPU, nil
-	}
-	return "", fmt.Errorf("kind must be %q or %q, got %q", TypeKindAccelerator, TypeKindCPU, kind)
-}
-
-// acceleratorKindRegistry holds the catalog types that are no accelerator, keyed as the rates
-// are. Populated by SetAcceleratorKinds at startup.
-var acceleratorKindRegistry = map[string]TypeKind{}
-
-// SetAcceleratorKinds registers the kind of each catalog type. Call once at startup, beside
-// SetAcceleratorRates.
-func SetAcceleratorKinds(kinds map[string]TypeKind) {
-	next := make(map[string]TypeKind, len(kinds))
-	for name, kind := range kinds {
-		if _, err := ParseTypeKind(string(kind)); err != nil || name == "" || kind == "" {
-			panic("accelerator catalog contains an empty name or an unknown kind")
-		}
-		if kind != TypeKindAccelerator {
-			next[foldKey(name)] = kind
-		}
-	}
-	acceleratorKindRegistry = next
-}
-
-// Kind returns what one unit of the type is. A type the catalog does not state otherwise, one it
-// does not hold included, is an accelerator.
+// Kind returns what one unit of the type is: a core for CPUType, a device for every other.
 func (g AcceleratorType) Kind() TypeKind {
-	if kind, ok := acceleratorKindRegistry[foldKey(string(g))]; ok {
-		return kind
+	if g.Is(CPUType) {
+		return TypeKindCPU
 	}
 	return TypeKindAccelerator
 }

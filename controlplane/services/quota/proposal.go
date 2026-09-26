@@ -34,9 +34,10 @@ type Proposal struct {
 	// BaselineJobID is the planner's completed job that measured the baseline. Its numbers are
 	// read from the metrics store when the proposal is shown, never copied here.
 	BaselineJobID string `json:"baseline_job_id" doc:"The planner's own completed job in this draft that measured the baseline, with its finding filed."`
-	// AcceleratorType is the catalog type the jobs are sized for: an accelerator, or a CPU class
-	// for work that needs none. Every job holds units of a priced type, so it is required.
-	AcceleratorType string `json:"accelerator_type" doc:"The catalog type the jobs are sized for, copied from the capacity listing: an accelerator, or a CPU class (kind cpu) for work that needs no accelerator."`
+	// AcceleratorType is the catalog type the jobs are sized for: an accelerator, or
+	// domain.CPUType for work that needs none. Every job holds units of a priced type, so it is
+	// required.
+	AcceleratorType string `json:"accelerator_type" doc:"The catalog type the jobs are sized for, copied from the capacity listing: an accelerator, or hypothesisloop.dev/cpu=core (kind cpu) for work on CPU cores, whose budget is then CPU core-hours."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
@@ -108,7 +109,7 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 		}
 	}
 	if !h.knownAcceleratorType(p.AcceleratorType) {
-		return experiment, refusedProposal("unknown_accelerator_type", "accelerator_type %q is not in the resource catalog: copy one from `hl capacity`, a CPU class (kind cpu) for work that needs no accelerator", p.AcceleratorType)
+		return experiment, refusedProposal("unknown_accelerator_type", "accelerator_type %q is not in the resource catalog: copy one from `hl capacity`, the one of kind cpu for work that needs no accelerator", p.AcceleratorType)
 	}
 	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement} {
 		if strings.TrimSpace(text) == "" {

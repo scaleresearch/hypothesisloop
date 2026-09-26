@@ -296,6 +296,11 @@ func disbalancePremises(
 	if blocked.Job.TotalAccelerators() <= 0 {
 		return nil, nil, false
 	}
+	// Cores a job on CPU cannot get are held by another job, and no device idles for want of
+	// them, so there is nothing stranded for this pass to free.
+	if blocked.AcceleratorType.Kind() == domain.TypeKindCPU {
+		return nil, nil, false
+	}
 	// preemptionShortfall — the same function the tick's own fit check uses at the call site that
 	// led here (see loop_tick.go) — rather than a plain cluster-total shortfall(): the evictor
 	// must judge "is blocked's accelerator dimension really short" with the identical per-node
@@ -385,11 +390,14 @@ func selectDisbalanceVictims(
 	// jobs of that flavor running there (placed). A job's share of the node is measured among the
 	// units of its own flavor, which is the rule admission bounds its request by (see
 	// installedAcceleratorsByNode), so a job is never evicted for holding what it was admitted
-	// with. Flavors are not pooled: a node that publishes a CPU class beside its chips has many
-	// more core units than chips, and pooled, every chip job's share would shrink to a sliver.
-	// nodeAvail also lists one device under every label of its vendor's domain, so a sum over
-	// flavors counts it several times.
+	// with. Flavors are not pooled: a node offers many more cores than chips, and pooled, every
+	// chip job's share would shrink to a sliver. nodeAvail also lists one device under every
+	// label of its vendor's domain, so a sum over flavors counts it several times.
+	cores := installedCoresByNode(nodeAvail, nodeResourcesTotal)
 	installedOf := func(node string, flavor domain.AcceleratorType) int64 {
+		if flavor.Kind() == domain.TypeKindCPU {
+			return cores[node]
+		}
 		installed := foldLookup(nodeAvail[node], strings.ToLower(string(flavor)))
 		for _, p := range placed {
 			if p.node == node && p.experiment.AcceleratorType.Is(flavor) {

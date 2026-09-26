@@ -67,24 +67,20 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 	}
 }
 
-// A CPU class is in the capacity read as a type of kind cpu, so that a reader counts its units as
+// Cores are in the capacity read as a type of kind cpu, so that a reader counts its units as
 // cores and never adds them to devices.
-func TestCapacitySaysWhichTypesCountCores(t *testing.T) {
-	const class, chip = "cpu.hypothesisloop.dev/class=EPYC-9354", "gpu.product=L40"
-	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0, chip: 0.25, class: 0.01})
-	domain.SetAcceleratorKinds(map[string]domain.TypeKind{class: domain.TypeKindCPU, chip: domain.TypeKindAccelerator})
-	t.Cleanup(func() {
-		domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
-		domain.SetAcceleratorKinds(nil)
-	})
+func TestCapacitySaysWhichTypeCountsCores(t *testing.T) {
+	const cores, chip = string(domain.CPUType), "gpu.product=L40"
+	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0, chip: 0.25, cores: 1.0})
+	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{"h100": 1.0}) })
 
 	clusters := buildClusterCapacity(
-		map[string]map[string]int64{"mixed": {chip: 3, "cpu.hypothesisloop.dev/class=epyc-9354": 12}},
-		map[string]map[string]int64{"mixed": {chip: 4, "cpu.hypothesisloop.dev/class=epyc-9354": 16}})
+		map[string]map[string]int64{"mixed": {chip: 3, cores: 12}},
+		map[string]map[string]int64{"mixed": {chip: 4, cores: 16}})
 
 	want := []AcceleratorCapacity{
-		{AcceleratorType: "cpu.hypothesisloop.dev/class=epyc-9354", Kind: domain.TypeKindCPU, Available: 12, Total: 16, AccHPerHour: 0.01},
 		{AcceleratorType: chip, Kind: domain.TypeKindAccelerator, Available: 3, Total: 4, AccHPerHour: 0.25},
+		{AcceleratorType: cores, Kind: domain.TypeKindCPU, Available: 12, Total: 16, AccHPerHour: 1},
 	}
 	if len(clusters) != 1 || !reflect.DeepEqual(clusters[0].Accelerators, want) {
 		t.Fatalf("capacity = %+v, want %+v", clusters, want)

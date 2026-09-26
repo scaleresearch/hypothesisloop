@@ -129,17 +129,15 @@ func TestAnUnspecifiedResourceDimensionIsRejectedRatherThanDefaulted(t *testing.
 }
 
 // Budget, quota, fairness and the concurrency cap count the units of a priced type a job holds. A
-// job that held none ran outside all four, so there is none: work that needs no accelerator asks
-// for cores of a CPU class.
+// job that held none ran outside all four, so there is none: work that needs no accelerator
+// states its cores and holds them as units of the CPU type (see cpu_type_test.go).
 func TestAJobThatHoldsNoUnitOfAPricedTypeIsRejected(t *testing.T) {
-	const wants = "job.accelerator_count must be at least 1"
+	const wants = "asks for nothing the catalog prices"
 	for name, spoil := range map[string]func(*domain.Experiment){
-		"cores and no type": func(e *domain.Experiment) {
-			e.AcceleratorType, e.Job.AcceleratorType = "", ""
-		},
 		"a type and no count": func(*domain.Experiment) {},
 		"no cores either":     func(e *domain.Experiment) { e.Job.CPU = "0" },
-		"its share of nothing": func(e *domain.Experiment) {
+		"no type and its share of nothing": func(e *domain.Experiment) {
+			e.AcceleratorType, e.Job.AcceleratorType = "", ""
 			e.Job.CPU, e.Job.Memory, e.Job.Storage = domain.MaxResourceSentinel, domain.MaxResourceSentinel, domain.MaxResourceSentinel
 		},
 		"groups that all hold none": func(e *domain.Experiment) {

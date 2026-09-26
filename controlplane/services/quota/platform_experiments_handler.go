@@ -67,7 +67,7 @@ func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, fresh
 // AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only.
 type AcceleratorTypeInfo struct {
 	Name     string          `json:"name"`
-	Kind     domain.TypeKind `json:"kind" doc:"What one unit of the type is: accelerator for a device, cpu for one core of a CPU class. For a cpu type a job's accelerator_count is its cores."`
+	Kind     domain.TypeKind `json:"kind" doc:"What one unit of the type is: accelerator for a device, cpu for one CPU core, of the one type hypothesisloop.dev/cpu=core. A job that states cpu and no accelerator holds that many units of it."`
 	AccHRate float64         `json:"acch_rate"`
 }
 
@@ -106,7 +106,7 @@ type ResourceCapacity struct {
 // an agent reads this and submits the same string with nothing in between to get wrong.
 type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
-	// Kind is what available and total count: devices, or for cpu the cores of a CPU class.
+	// Kind is what available and total count: devices, or for cpu cores.
 	Kind      domain.TypeKind `json:"kind"`
 	Available int64           `json:"available"`
 	Total     int64           `json:"total"`

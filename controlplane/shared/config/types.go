@@ -7,12 +7,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// AcceleratorTypeConfig defines one priced type: its identity, its exchange rate, and what one
-// unit of it is. Kind is "accelerator", the default, or "cpu" for a CPU class whose unit is one
-// core (domain.TypeKind).
+// AcceleratorTypeConfig defines one priced type: its identity and its exchange rate.
 type AcceleratorTypeConfig struct {
 	Name     string  `yaml:"name"`
-	Kind     string  `yaml:"kind"`
 	AccHRate float64 `yaml:"acch_rate"`
 }
 
@@ -326,6 +323,5 @@ type Config struct {
 	GitHub           GitHubConfig            `yaml:"github"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
-	RateByName map[string]float64         // accelerator name → AccH rate
-	KindByName map[string]domain.TypeKind // accelerator name → what one unit is
+	RateByName map[string]float64 // accelerator name → AccH rate
 }

@@ -212,29 +212,18 @@ data_store:
 #
 # acch_rate is cost in accelerator-hours (AccH), H100-equivalent (H100 = 1.0).
 #
-# kind says what one unit of the type is: accelerator (the default) for a device, cpu for one
-# core of a CPU class a cluster publishes. An entry of kind cpu is priced per core-hour:
-#   - name:      cpu.hypothesisloop.dev/class=<cpu-model>
-#     kind:      cpu
-#     acch_rate: 0.01
+# hypothesisloop.dev/cpu=core is the one type that is no device: one unit is one CPU core. Every
+# runtime offers its nodes' cores as it, and a job that asks for cores and no accelerator (cpu: 4)
+# holds that many units. Its rate is 1.0, so the budget of an experiment on cores reads as CPU
+# core-hours: 4 cores for an hour cost 4.
 #
 # Accelerators are the resource dimension admitted/preempted on. RAM/storage are hard
 # physical-fit-checked at admission instead of hours-quota-tracked. Agents declare accelerator
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
 
 accelerator_types:
-  # The CPU class the local dev nodes publish (localdev/lib/fake-gpu-node.sh). The rate of a
-  # core-hour is the operator's to set.
-  - name:      cpu.hypothesisloop.dev/class=dev-node
-    kind:      cpu
-    acch_rate: 0.01
-
-  # The host CPUs of the Tenstorrent machines: box-a (the chart's cpuClass=tt-host) and
-  # box-b (bare-agent install --cpu-class tt-host). One class, so a job on cores places on
-  # either. 50 core-hours cost what one Blackhole chip-hour does.
-  - name:      cpu.hypothesisloop.dev/class=tt-host
-    kind:      cpu
-    acch_rate: 0.01
+  - name:      hypothesisloop.dev/cpu=core
+    acch_rate: 1.0
 
   - name:      nvidia.com/gpu.product=Tesla-T4
     acch_rate: 0.125

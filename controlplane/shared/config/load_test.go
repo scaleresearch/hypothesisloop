@@ -401,38 +401,17 @@ func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
 	}
 }
 
-const catalogHead = "accelerator_types:\n"
-
-func TestACatalogEntryStatesItsKindAndNoneIsAnAccelerator(t *testing.T) {
-	text := productionConfig(t)
-	if !strings.Contains(text, catalogHead) {
-		t.Fatal("the committed config has no accelerator_types")
-	}
-	const class = "cpu.hypothesisloop.dev/class=EPYC-9354"
-	withCPU := strings.Replace(text, catalogHead, catalogHead+"  - name: "+class+"\n    kind: cpu\n    acch_rate: 0.01\n", 1)
+// A CPU experiment's budget reads as core-hours, which holds only while a core-hour costs 1.
+func TestTheShippedCatalogPricesACoreHourAtOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(withCPU), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.KindByName[class] != domain.TypeKindCPU || cfg.RateByName[class] != 0.01 {
-		t.Errorf("kind = %q, rate = %v, want cpu at 0.01", cfg.KindByName[class], cfg.RateByName[class])
-	}
-	if len(cfg.KindByName) != len(cfg.AcceleratorTypes) {
-		t.Errorf("%d kinds for %d types", len(cfg.KindByName), len(cfg.AcceleratorTypes))
-	}
-	const device = "nvidia.com/gpu.product=NVIDIA-L40"
-	if kind, priced := cfg.KindByName[device]; !priced || kind != domain.TypeKindAccelerator {
-		t.Errorf("kind of %s = %q, want accelerator for an entry that states none", device, kind)
-	}
-
-	for _, kind := range []string{"gpu", "CPU", "core"} {
-		bad := strings.Replace(withCPU, "kind: cpu", "kind: "+kind, 1)
-		if err := loadText(t, bad); err == nil || !strings.Contains(err.Error(), class) {
-			t.Errorf("kind %q: err = %v, want a refusal naming the type", kind, err)
-		}
+	if rate := cfg.RateByName[string(domain.CPUType)]; rate != 1.0 {
+		t.Errorf("rate of %s = %v, want 1", domain.CPUType, rate)
 	}
 }

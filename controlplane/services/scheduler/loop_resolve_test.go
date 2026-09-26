@@ -303,7 +303,7 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 	cache := newResolutionCache(loop)
 	nodeAvail := map[string]map[string]int64{"node-a": {string(flavor): 0}}
 
-	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail)
+	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("installedAcceleratorsByNode: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) 
 	cache := newResolutionCache(loop)
 	nodeAvail := map[string]map[string]int64{"node-a": {string(flavor): 0}}
 
-	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail)
+	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("installedAcceleratorsByNode: %v", err)
 	}

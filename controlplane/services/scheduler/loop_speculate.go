@@ -85,7 +85,7 @@ func (l *Loop) speculativeCandidates(
 			// itself has already claimed there) so a fully-saturated node still reports its real
 			// capacity instead of the 0 that would wrongly reject the exact scenario this feature
 			// exists for.
-			installed, ierr := resolveCache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail[cluster])
+			installed, ierr := resolveCache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail[cluster], nodeResourcesTotal[cluster])
 			if ierr != nil {
 				return nil, nil, ierr
 			}

@@ -33,7 +33,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
-		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: "dev-node", Kind: domain.TypeKindCPU, AccHRate: 0.01}}})
+		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: string(domain.CPUType), Kind: domain.TypeKindCPU, AccHRate: 1}}})
 	if drafts, ok := store.(*draftStore); ok {
 		handler.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return drafts.baseline, nil
@@ -498,16 +498,16 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusUnprocessableEntity || out["reason"] != "no_baseline" {
 		t.Errorf("a job that does not exist: got = %d %v, want 422 no_baseline", code, out)
 	}
-	// Work that needs no accelerator is sized in cores of a CPU class, which is a type like any
-	// other: a proposal that names none is refused, as a job that holds none is.
+	// Work that needs no accelerator is sized in cores, the units of a type like any other: a
+	// proposal that names none is refused, as a job that holds none is.
 	cpu := draftWithPlanner()
-	cpu.baseline.Reachable = map[string]bool{"dev-node": true}
+	cpu.baseline.Reachable = map[string]bool{string(domain.CPUType): true}
 	_, call = planningAPI(t, cpu, thePlanner)
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": ""})); code != http.StatusUnprocessableEntity || out["reason"] != "unknown_accelerator_type" {
 		t.Errorf("a proposal that names no type: got = %d %v, want 422 unknown_accelerator_type", code, out)
 	}
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": "dev-node"})); code != http.StatusOK {
-		t.Errorf("a proposal sized in cores of a CPU class: got = %d %v, want 200", code, out)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": string(domain.CPUType)})); code != http.StatusOK {
+		t.Errorf("a proposal sized in cores: got = %d %v, want 200", code, out)
 	}
 }
 

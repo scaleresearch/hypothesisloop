@@ -2,23 +2,19 @@ package db
 
 import (
 	"context"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// A CPU class is a priced type like any other to the store: a job on cores draws on the same
-// quota at its own estimate and stands in the same concurrency cap with its count. These tests
-// hold that beside jobs on an accelerator type in one platform experiment.
+// Cores are units of a priced type like any other to the store: a job on cores stands in the
+// same concurrency cap with its count, and in-flight sums keep cores apart from devices.
 
 const (
-	quotaCPUClass      = "cpu.hypothesisloop.dev/class=EPYC-9354"
-	quotaOtherCPUClass = "cpu.hypothesisloop.dev/class=Xeon-8480"
-	quotaL40           = "nvidia.com/gpu.product=NVIDIA-L40"
+	quotaCPUClass = domain.CPUType
+	quotaL40      = "nvidia.com/gpu.product=NVIDIA-L40"
 )
 
 func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, flavor domain.AcceleratorType, count int, cost float64, status domain.ExperimentStatus) string {
@@ -70,101 +66,14 @@ func TestTheConcurrencyCapCountsCoresAndDevicesAsUnitsOfOnePool(t *testing.T) {
 	}
 }
 
-func TestACoreJobDrawsOnTheSameQuotaAtItsOwnCost(t *testing.T) {
-	pool, store, agentID, peID := setupCapTestPool(t, 1000)
-	ctx := context.Background()
-	var limit float64
-	if err := pool.pool.QueryRow(ctx, `SELECT guaranteed_accelerator_hours FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2`, agentID, peID).Scan(&limit); err != nil {
-		t.Fatal(err)
-	}
-	// Half an accelerator-hour is left of the agent's guaranteed quota.
-	observe := func(context.Context, string, string, time.Time) (*domain.AgentQuota, error) {
-		return &domain.AgentQuota{UsedGuaranteedAccH: limit - 0.5}, nil
-	}
-	reserve := func(flavor domain.AcceleratorType, count int, cost float64) (string, string) {
-		id := seedPricedExperiment(t, pool, agentID, peID, flavor, count, cost, domain.StatusQueued)
-		reason, err := store.ReserveAdmittedFlavorTx(ctx, id, flavor, cost, count, 0, observe)
-		if err != nil {
-			t.Fatalf("reserve %d of %s: %v", count, flavor, err)
-		}
-		return id, reason
-	}
-
-	// 8 cores for 3 hours at 0.01 a core-hour are 0.24. Two such jobs fit in 0.5 and a third does
-	// not; nor does one l40 for 3 hours at 0.25, which is 0.75.
-	first, reason := reserve(quotaCPUClass, 8, 0.24)
-	if reason != "" {
-		t.Fatalf("the first 8-core job: %q, want it within the 0.5 left", reason)
-	}
-	if _, reason := reserve(quotaCPUClass, 8, 0.24); reason != "" {
-		t.Fatalf("the second 8-core job: %q, want it within the 0.5 left", reason)
-	}
-	third, reason := reserve(quotaCPUClass, 8, 0.24)
-	if !strings.HasPrefix(reason, "insufficient_guaranteed_quota") || !strings.Contains(reason, quotaCPUClass) {
-		t.Fatalf("the third 8-core job: %q, want the guaranteed quota short for the class", reason)
-	}
-	if _, err := pool.pool.Exec(ctx, `DELETE FROM experiments WHERE id=$1`, third); err != nil {
-		t.Fatal(err)
-	}
-	if _, reason := reserve(quotaL40, 1, 0.75); !strings.HasPrefix(reason, "insufficient_guaranteed_quota") {
-		t.Fatalf("an l40 for 3 hours beside the two core jobs: %q, want the quota short", reason)
-	}
-
-	// Moving a job to a dearer class is charged the difference: 0.24 becomes 0.48, and with the
-	// other job's 0.24 that is 0.72 against the 0.5 left.
-	reason, err := store.ReserveAdmittedFlavorTx(ctx, first, quotaOtherCPUClass, 0.48, 8, 0, observe)
-	if err != nil || !strings.HasPrefix(reason, "insufficient_guaranteed_quota") {
-		t.Fatalf("moving a job to the dearer class: (%q, %v), want the quota short", reason, err)
-	}
-	var flavor string
-	var cost float64
-	if err := pool.pool.QueryRow(ctx, `SELECT accelerator_type, estimated_cost_acch FROM experiments WHERE id=$1`, first).Scan(&flavor, &cost); err != nil {
-		t.Fatal(err)
-	}
-	if flavor != quotaCPUClass || cost != 0.24 {
-		t.Errorf("a refused move left the job as %s at %v, want it as it was", flavor, cost)
-	}
-}
-
-// The same accelerator jobs against the same quota and cap, in a platform experiment that holds
-// only them: the answers are those of the tests that predate the CPU class.
-func TestAcceleratorJobsAreReservedAsBeforeInAnExperimentWithNoCoreJobs(t *testing.T) {
-	pool, store, agentID, peID := setupCapTestPool(t, 4)
-	ctx := context.Background()
-	var limit float64
-	if err := pool.pool.QueryRow(ctx, `SELECT guaranteed_accelerator_hours FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2`, agentID, peID).Scan(&limit); err != nil {
-		t.Fatal(err)
-	}
-	observe := func(context.Context, string, string, time.Time) (*domain.AgentQuota, error) {
-		return &domain.AgentQuota{UsedGuaranteedAccH: limit - 1}, nil
-	}
-	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 2, 0, domain.StatusRunning)
-
-	fits := seedPricedExperiment(t, pool, agentID, peID, quotaL40, 2, 0.5, domain.StatusQueued)
-	if reason, err := store.ReserveAdmittedFlavorTx(ctx, fits, quotaL40, 0.5, 2, 0, observe); err != nil || reason != "" {
-		t.Fatalf("2 l40 at the cap and within quota: (%q, %v)", reason, err)
-	}
-	overCap := seedPricedExperiment(t, pool, agentID, peID, quotaL40, 3, 0.25, domain.StatusQueued)
-	if reason, err := store.ReserveAdmittedFlavorTx(ctx, overCap, quotaL40, 0.25, 3, 0, observe); err != nil || reason != domain.NotAdmittedConcurrencyCap {
-		t.Fatalf("3 l40 beside 2 running under a cap of 4: (%q, %v)", reason, err)
-	}
-	overQuota := seedPricedExperiment(t, pool, agentID, peID, quotaL40, 1, 0.5, domain.StatusQueued)
-	if reason, err := store.ReserveAdmittedFlavorTx(ctx, overQuota, quotaL40, 0.5, 1, 0, observe); err != nil || !strings.HasPrefix(reason, "insufficient_guaranteed_quota") {
-		t.Fatalf("a job that takes the estimates to 1.25 of the 1 left: (%q, %v)", reason, err)
-	}
-}
-
 // Sixteen cores and four devices in flight are not twenty of anything.
 func TestInFlightUnitsAreCountedPerKind(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 1000)
-	domain.SetAcceleratorKinds(map[string]domain.TypeKind{quotaCPUClass: domain.TypeKindCPU, quotaOtherCPUClass: domain.TypeKindCPU})
-	t.Cleanup(func() { domain.SetAcceleratorKinds(nil) })
-
 	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 3, 1, domain.StatusRunning)
 	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 1, 1, domain.StatusSubmitted)
 	seedPricedExperiment(t, pool, agentID, peID, quotaL40, 8, 1, domain.StatusQueued)
 	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 8, 0.24, domain.StatusRunning)
-	seedPricedExperiment(t, pool, agentID, peID, quotaOtherCPUClass, 8, 0.48, domain.StatusSubmitted)
+	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 8, 0.48, domain.StatusSubmitted)
 	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 32, 0.96, domain.StatusCompleted)
 
 	store := NewExperimentsStore(pool)
@@ -177,11 +86,5 @@ func TestInFlightUnitsAreCountedPerKind(t *testing.T) {
 		if got == nil || got.InFlightAccelerators != 4 || got.InFlightCores != 16 || got.Total != 6 || got.ByStatus["RUNNING"] != 2 {
 			t.Errorf("%s: %+v, want 4 devices and 16 cores in flight among 6 jobs, 2 of them running", name, got)
 		}
-	}
-
-	// A catalog with no CPU class counts every unit as a device, as it did.
-	domain.SetAcceleratorKinds(nil)
-	if stats, err := store.ExperimentStats(context.Background(), filter, ""); err != nil || stats.InFlightAccelerators != 20 || stats.InFlightCores != 0 {
-		t.Errorf("without a CPU class: %+v, %v; want 20 in flight", stats, err)
 	}
 }

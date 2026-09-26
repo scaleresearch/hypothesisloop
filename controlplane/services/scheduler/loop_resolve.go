@@ -95,7 +95,15 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 // only affects the reconstructed INSTALLED total on the node metrics attributed the multi-node job
 // to, while resolving a DIFFERENT job's fair share there — nodeAvail's live free-capacity report
 // already reflects the real device usage on every node regardless of this exclusion.
-func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, cluster string, flavor domain.AcceleratorType, nodeAvail map[string]map[string]int64) (map[string]int64, error) {
+//
+// The cores of domain.CPUType are counted from the node's own total instead. Every job holds
+// cores, an accelerator job too, so free cores plus the cores of CPU jobs falls short of what is
+// installed by whatever the accelerator jobs hold, and a "max" share measured against that would
+// hand the CPU jobs memory the accelerator jobs already have.
+func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, cluster string, flavor domain.AcceleratorType, nodeAvail, nodeResourcesTotal map[string]map[string]int64) (map[string]int64, error) {
+	if flavor.Kind() == domain.TypeKindCPU {
+		return installedCoresByNode(nodeAvail, nodeResourcesTotal), nil
+	}
 	key := strings.ToLower(string(flavor))
 	installed := make(map[string]int64, len(nodeAvail))
 	for node, byFlavor := range nodeAvail {
@@ -133,6 +141,24 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 		installed[node] += int64(r.AcceleratorCount)
 	}
 	return installed, nil
+}
+
+// installedCoresByNode is the whole cores of every node that offers them as domain.CPUType: the
+// node's total where it reports one, what it has free otherwise.
+func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]int64) map[string]int64 {
+	installed := make(map[string]int64, len(nodeAvail))
+	for node, byFlavor := range nodeAvail {
+		for flavor, free := range byFlavor {
+			if !domain.CPUType.Is(domain.AcceleratorType(flavor)) {
+				continue
+			}
+			installed[node] = free
+			if total := nodeResourcesTotal[node][domain.NodeResourceCPUMillicores] / 1000; total > 0 {
+				installed[node] = total
+			}
+		}
+	}
+	return installed
 }
 
 // resolveClusterLocalResources resolves any "max" CPU/memory/storage sentinel in exp.Job (or its
@@ -184,7 +210,7 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		return &out, "", nil
 	}
 
-	installed, ierr := cache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail)
+	installed, ierr := cache.installedAcceleratorsByNode(ctx, cluster, exp.AcceleratorType, nodeAvail, nodeResourcesTotal)
 	if ierr != nil {
 		return nil, "", ierr
 	}
