@@ -10,12 +10,12 @@ import type { PlatformExperiment } from '@/types'
 import { semantic } from '@/lib/colors'
 import { GoalInput } from '@/components/goal-input'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
-import { PlatformExperimentDialog, PlatformExperimentForm } from '@/components/platform-experiment-form'
+import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Link } from '@/components/ui/link'
-import { ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Eyebrow } from '@/components/ui/text'
 
 // How many of the newest platform experiments the home page lists.
@@ -61,65 +61,56 @@ function LiveStrip() {
 }
 
 /**
- * The platform experiments of the selected project, and the way to a new one. A project with
- * none of its own shows the form itself; one with some lists the newest and opens the same form
- * in a dialog. The ones the platform shares are listed in both, read only, and do not count as
- * the project's own.
+ * The platform experiments of the selected project, and the way to a new one: a sentence saying
+ * what to find out, which the platform plans. The full form, for who wants to state the metrics,
+ * the budget and the agents themselves, is behind Advanced and opens in a dialog, as it does
+ * for an edit. The experiments the platform shares are listed too, read only.
  */
 function Experiments() {
   const { org, project } = useTenant()
   const router = useProjectRouter()
   const [dialog, setDialog] = useState<{ editing: PlatformExperiment | null } | null>(null)
-  const own = useSWR(
-    ['platform-experiment-count', project.id],
-    () => fetchPlatformExperimentsPage({ project_id: project.id, shared: false, limit: 1 }),
-  )
   const listed = useSWR(
     ['platform-experiments-home', project.id],
     () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: LISTED }),
     { refreshInterval: 15_000 },
   )
+  // The strip above reads the same key, so this is one request for both.
+  const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
 
-  // A new experiment opens on its own page, where its agents are added and it is started.
+  // A new experiment opens on its own page: a draft to be planned, or one to add agents to.
   const open = (pe: PlatformExperiment) => router.push(`/platform-experiments/${pe.id}`)
-  const failure = own.error ?? listed.error
-  if (failure) return <ErrorMessage>Could not load the platform experiments of {project.name}: {failure.message}</ErrorMessage>
-  if (!own.data || !listed.data) return <Loading />
-
-  const none = own.data.total === 0
-  const experiments = listed.data.items
+  const experiments = listed.data?.items ?? []
   return (
     <section aria-label="Platform experiments">
       <Card className="max-w-[720px]">
-        <CardHeader>Start from one sentence</CardHeader>
-        <CardContent>
+        <CardHeader>New experiment in {org.name} / {project.name}</CardHeader>
+        <CardContent className="grid gap-3">
+          {clusters && clustersInUse(clusters).online === 0 && (
+            <Callout tone="warning" className="mb-0">
+              No cluster this org can use is online, so a plan&apos;s baseline job would wait. <Link href="/cluster" className="text-accent hover:underline">Compute resources</Link> shows what is connected.
+            </Callout>
+          )}
           <GoalInput projectID={project.id} onCreated={open} />
+          <div>
+            <Button variant="link" onClick={() => setDialog({ editing: null })}>Advanced</Button>
+            <span className="ml-2 text-xs text-subtle">Set the metrics, the budget, the repository and the agents yourself.</span>
+          </div>
         </CardContent>
       </Card>
-      {none ? (
-        <Card className="max-w-[720px]">
-          <CardHeader>New platform experiment in {org.name} / {project.name}</CardHeader>
-          <CardContent>
-            <p className="mb-4 text-sm text-muted">
-              A platform experiment sets the task, the budget, the metrics and the time window agents work within.
-              Pick the repository it works on, and under Competition settings choose who runs the agents: with
-              hosted agents it starts as soon as you create it.
-            </p>
-            <PlatformExperimentForm onSaved={open} />
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-bold">Platform experiments of {project.name}</h2>
-          <Button variant="primary" onClick={() => setDialog({ editing: null })}>New experiment</Button>
-        </div>
-      )}
-      {none && experiments.length > 0 && <Eyebrow className="mb-2.5 mt-6 block">Shared by the platform</Eyebrow>}
-      {experiments.map(pe => <PlatformExperimentCard key={pe.id} pe={pe} onEdit={editing => setDialog({ editing })} />)}
-      {listed.data.total > experiments.length && (
-        <Link href="/platform-experiments" className="text-sm text-accent hover:underline">
-          All {listed.data.total} platform experiments →
-        </Link>
+      {listed.error && <ErrorMessage>Could not load the platform experiments of {project.name}: {listed.error.message}</ErrorMessage>}
+      {!listed.error && !listed.data && <Loading />}
+      {listed.data && (
+        <>
+          <h2 className="mb-3.5 mt-6 text-lg font-bold">Platform experiments of {project.name}</h2>
+          {experiments.length === 0 && <p className="text-sm text-muted">None yet. Write what you want to find out above and the platform proposes the first.</p>}
+          {experiments.map(pe => <PlatformExperimentCard key={pe.id} pe={pe} onEdit={editing => setDialog({ editing })} />)}
+          {listed.data.total > experiments.length && (
+            <Link href="/platform-experiments" className="text-sm text-accent hover:underline">
+              All {listed.data.total} platform experiments →
+            </Link>
+          )}
+        </>
       )}
       {dialog && (
         <PlatformExperimentDialog

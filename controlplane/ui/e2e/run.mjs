@@ -431,12 +431,12 @@ async function scenarios(browser) {
     assert.ok(new URL(call.url()).searchParams.get('project_id'), `${call.url()} names the project`)
   }
 
-  section('a first-time user lands in their own org and default project, on the form for a first experiment')
+  section('a first-time user lands in their own org and default project, on one sentence to start from')
   await page.goto(`${UI}/console`)
-  await page.getByText(`New platform experiment in ${ada.name} / default`).waitFor()
-  await page.getByPlaceholder('e.g. Q3 Vision Benchmark').waitFor()
-  assert.equal(await page.getByRole('dialog').count(), 0, 'the form is the page itself')
-  assert.equal(await page.getByRole('button', { name: 'Cancel' }).count(), 0, 'and has nothing to cancel')
+  await page.getByText(`New experiment in ${ada.name} / default`).waitFor()
+  await page.getByLabel('What do you want to find out?').waitFor()
+  await page.getByText('None yet. Write what you want to find out above').waitFor()
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Advanced')
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().waitFor()
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
@@ -560,13 +560,13 @@ async function scenarios(browser) {
   await shot(page, 'hosted-agent-health', stoppedRow)
   await page.unroute(agentsAPI)
 
-  section('home: a project with experiments opens the same form in a dialog, and the new one is created and started from there')
+  section('home: Advanced opens the full form in a dialog, and the new experiment is created and started from there')
   await page.goto(`${UI}/console`)
   await page.getByRole('heading', { name: 'Platform experiments of default' }).waitFor()
   await page.getByText(experimentName).first().waitFor()
-  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind New experiment once the project has one')
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Advanced')
   await shot(page, 'home-with-experiments')
-  await page.getByRole('button', { name: 'New experiment', exact: true }).click()
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const homeDialog = page.getByRole('dialog')
   const homeExperimentName = `ui-e2e-home-${run}`
   await homeDialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(homeExperimentName)
@@ -645,7 +645,7 @@ async function scenarios(browser) {
   // Fills the form in the home dialog for hosted agents and presses Create and run.
   async function createAndRunFromHome(name, researchers) {
     await page.goto(`${UI}/console`)
-    await page.getByRole('button', { name: 'New experiment', exact: true }).click()
+    await page.getByRole('button', { name: 'Advanced', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
     await choose(page, dialog.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
@@ -1306,8 +1306,8 @@ async function scenarios(browser) {
 
     section('shared: it does not count as the reader\'s own, and the pickers offer it')
     await otherPage.goto(`${UI}/console`)
-    await otherPage.getByText('New platform experiment in').waitFor()
-    await otherPage.getByText('Shared by the platform').waitFor()
+    await otherPage.getByText('New experiment in').waitFor()
+    await otherPage.getByRole('heading', { name: /^Platform experiments of / }).waitFor()
     await otherPage.goto(`${UI}/jobs`)
     await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
     await otherPage.getByPlaceholder('All experiments').click()

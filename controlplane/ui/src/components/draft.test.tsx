@@ -4,7 +4,6 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiSend, fetchExperimentMetrics, fetchPlatformExperimentAgents, startPlatformExperiment } from '@/lib/api'
 import { DraftView, lastReported } from '@/components/draft'
-import { GoalInput } from '@/components/goal-input'
 import { draftState } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
@@ -61,32 +60,6 @@ beforeEach(() => {
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
     { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
   ])
-})
-
-// A person with an idea faced a form of metrics, budgets, stages and dates before anything existed.
-describe('starting from one sentence', () => {
-  it('creates a draft from the sentence alone and opens it', async () => {
-    const created = draft()
-    vi.mocked(apiSend).mockResolvedValue(created)
-    const opened = vi.fn()
-    render(<GoalInput projectID="prj_1" onCreated={opened} />)
-    const plan = screen.getByRole('button', { name: 'Plan this experiment' })
-    expect(plan).toHaveProperty('disabled', true)
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), '  Does a cosine schedule beat a constant one? ')
-    await userEvent.click(plan)
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Does a cosine schedule beat a constant one?' })
-    expect(opened).toHaveBeenCalledExactlyOnceWith(created)
-  })
-
-  it('shows the refusal of an org at its planning limit in the API\'s words and stays', async () => {
-    vi.mocked(apiSend).mockRejectedValue(new Error('this org has 2 drafts open, which is the most the platform plans for one org at once'))
-    const opened = vi.fn()
-    render(<GoalInput projectID="prj_1" onCreated={opened} />)
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
-    await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
-    expect((await screen.findByRole('alert')).textContent).toMatch(/2 drafts open/)
-    expect(opened).not.toHaveBeenCalled()
-  })
 })
 
 describe('a draft being planned', () => {

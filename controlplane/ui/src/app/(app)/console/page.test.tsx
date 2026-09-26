@@ -60,52 +60,20 @@ beforeEach(() => {
   vi.mocked(createPlatformExperiment).mockImplementation(async (_project, req) => experiment('pe-new', { name: req.name }))
 })
 
-describe('the home page of a project with no platform experiment of its own', () => {
-  it('is the form to create one, with nothing to cancel, and opens the experiment once it is created', async () => {
-    show()
-    expect(await screen.findByText('New platform experiment in Lab / default')).toBeTruthy()
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
-    await userEvent.type(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
-    await userEvent.click(screen.getByRole('button', { name: 'Next: competition settings' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Create Experiment' }))
-    expect(createPlatformExperiment).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(createPlatformExperiment).mock.calls[0][0]).toBe('prj_1')
-    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1]).toMatchObject({ name: 'First run' })
-    await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-new?project=prj_1'))
-  })
-
-  it('shows the API\'s refusal in its words and stays on the form', async () => {
-    vi.mocked(createPlatformExperiment).mockRejectedValue(new Error('the org has reached its limit of platform experiments'))
-    show()
-    await userEvent.type(await screen.findByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
-    await userEvent.click(screen.getByRole('button', { name: 'Next: competition settings' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Create Experiment' }))
-    expect(await screen.findByText('the org has reached its limit of platform experiments')).toBeTruthy()
-    expect(navigation.push).not.toHaveBeenCalled()
-  })
-
-  it('lists what the platform shares below the form, which does not count as the project\'s own', async () => {
-    shared = [experiment('pe-shared', { project_id: 'prj_other', shared: true })]
-    show()
-    expect(await screen.findByText('New platform experiment in Lab / default')).toBeTruthy()
-    expect(screen.getByText('Shared by the platform')).toBeTruthy()
-    expect(screen.getByText('pe-shared (shared)')).toBeTruthy()
-    expect(fetchPlatformExperimentsPage).toHaveBeenCalledWith({ project_id: 'prj_1', shared: false, limit: 1 })
-  })
-})
-
-// The form asks for metrics, a budget and dates before anything exists. One sentence is enough
-// to start, whether or not the project has experiments.
-describe('the home page takes one sentence', () => {
-  it('makes a draft from it and opens the draft, with the form still there for who wants it', async () => {
+// The form asks for metrics, a budget and dates before anything exists, so the page starts
+// from a sentence and keeps the form for who wants to state all of that themselves.
+describe('the home page', () => {
+  it('starts an experiment from one sentence, in an empty project and in one with experiments', async () => {
     vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
     for (const existing of [[], [experiment('pe-0')]]) {
       own = existing
       navigation.push.mockReset()
       vi.mocked(apiSend).mockClear()
       const { unmount } = show()
-      await userEvent.type(await screen.findByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
+      expect(screen.getByText('New experiment in Lab / default')).toBeTruthy()
+      expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
+      if (existing.length === 0) expect(await screen.findByText(/None yet\. Write what you want to find out above/)).toBeTruthy()
+      await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
       await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
       expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
       await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-draft?project=prj_1'))
@@ -113,46 +81,50 @@ describe('the home page takes one sentence', () => {
       unmount()
     }
   })
-})
 
-describe('the home page of a project with platform experiments', () => {
-  beforeEach(() => {
-    own = Array.from({ length: 7 }, (_, i) => experiment(`pe-${i}`))
+  it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
+    vi.mocked(apiSend).mockRejectedValue(new Error('this org has 2 drafts open, which is the most the platform plans for one org at once'))
+    show()
+    expect(await screen.findByText(/No cluster this org can use is online/)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
+    await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
+    expect(await screen.findByText(/2 drafts open/)).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
   })
 
-  it('lists the newest, leads to the rest, and keeps the form behind New experiment', async () => {
+  it('keeps the full form behind Advanced: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
     show()
-    expect(await screen.findByRole('heading', { name: 'Platform experiments of default' })).toBeTruthy()
-    expect(screen.getAllByRole('article').map(a => a.textContent)).toEqual(['pe-0', 'pe-1', 'pe-2', 'pe-3', 'pe-4'])
-    expect(screen.getByRole('link', { name: 'All 7 platform experiments →' }).getAttribute('href')).toBe('/platform-experiments?project=prj_1')
-    expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
-  })
+    await userEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(createPlatformExperiment).not.toHaveBeenCalled()
 
-  it('opens the same form in a dialog, and the experiment once it is created', async () => {
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'New experiment' }))
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new Error('the org has reached its limit of platform experiments'))
+    await userEvent.click(screen.getByRole('button', { name: 'Advanced' }))
     const dialog = within(screen.getByRole('dialog'))
-    await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'Another run')
+    await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
     await userEvent.click(dialog.getByRole('button', { name: 'Next: competition settings' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Create Experiment' }))
+    expect(await dialog.findByText('the org has reached its limit of platform experiments')).toBeTruthy()
+    expect(navigation.push).not.toHaveBeenCalled()
+    await userEvent.click(dialog.getByRole('button', { name: 'Create Experiment' }))
+    expect(vi.mocked(createPlatformExperiment).mock.calls[1]).toMatchObject(['prj_1', { name: 'First run' }])
     await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-new?project=prj_1'))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('closes the dialog on Cancel and creates nothing', async () => {
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'New experiment' }))
-    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(createPlatformExperiment).not.toHaveBeenCalled()
-  })
-})
+  it('lists the newest experiments with the shared ones and leads to the rest, or says it could not read them', async () => {
+    own = Array.from({ length: 4 }, (_, i) => experiment(`pe-${i}`))
+    shared = [experiment('pe-shared', { project_id: 'prj_other', shared: true }), experiment('pe-shared-2', { project_id: 'prj_other', shared: true })]
+    const { unmount } = show()
+    expect(await screen.findByRole('heading', { name: 'Platform experiments of default' })).toBeTruthy()
+    expect(screen.getAllByRole('article').map(a => a.textContent)).toEqual(['pe-0', 'pe-1', 'pe-2', 'pe-3', 'pe-shared (shared)'])
+    expect(screen.getByRole('link', { name: 'All 6 platform experiments →' }).getAttribute('href')).toBe('/platform-experiments?project=prj_1')
+    unmount()
 
-describe('a home page that cannot read the experiments', () => {
-  it('says so in the API\'s words and offers no form that might hide it', async () => {
     vi.mocked(fetchPlatformExperimentsPage).mockRejectedValue(new Error('API unreachable'))
     show()
     expect(await screen.findByText('Could not load the platform experiments of default: API unreachable')).toBeTruthy()
-    expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
+    expect(screen.getByLabelText('What do you want to find out?')).toBeTruthy()
   })
 })

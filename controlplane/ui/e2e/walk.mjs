@@ -1,4 +1,5 @@
-// Walks the path of a new person on the hosted stack: sign in, pick a repository, Create and run,
+// Walks the path of a new person on the hosted stack: sign in, open the full form behind
+// Advanced on the home page, pick a repository, Create and run,
 // and watch the experiment. It rents real machines, so it is run by hand:
 //   node e2e/walk.mjs [--until form|filled|created|done] [--off cluster,cluster] [--no-repository]
 // --no-repository connects no GitHub account and types the task in: agents start in an empty
@@ -128,23 +129,26 @@ async function main() {
     await shot(page, 'console')
     if (until === 'form') return
 
+    // The home page starts from a sentence; the form this walk fills is behind Advanced.
+    await page.getByRole('button', { name: 'Advanced', exact: true }).click()
+    const form = page.getByRole('dialog')
     if (noRepository) {
-      await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`walk-${run}`)
-      await page.getByLabel('Description').fill(NO_REPOSITORY_BRIEF)
-      await page.getByPlaceholder('custom_metric_key').fill('items_per_second')
-      await page.getByRole('button', { name: 'Add Custom' }).click()
+      await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`walk-${run}`)
+      await form.getByLabel('Description').fill(NO_REPOSITORY_BRIEF)
+      await form.getByPlaceholder('custom_metric_key').fill('items_per_second')
+      await form.getByRole('button', { name: 'Add Custom' }).click()
     } else {
-      await page.getByLabel('Repository').click()
+      await form.getByLabel('Repository').click()
       await page.getByRole('option', { name: REPOSITORY }).click()
-      await page.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
+      await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
     }
     await shot(page, 'form-repository-chosen')
-    await page.getByRole('button', { name: 'Next: competition settings' }).click()
-    await page.getByRole('button', { name: 'Hosted agents' }).click()
-    await page.getByLabel('Researchers').fill(String(RESEARCHERS))
+    await form.getByRole('button', { name: 'Next: competition settings' }).click()
+    await form.getByRole('button', { name: 'Hosted agents' }).click()
+    await form.getByLabel('Researchers').fill(String(RESEARCHERS))
     await shot(page, 'form-competition-settings')
     if (until === 'filled') return
-    await page.getByRole('button', { name: 'Create and run' }).click()
+    await form.getByRole('button', { name: 'Create and run' }).click()
     await page.waitForTimeout(700)
     await shot(page, 'pressed-create-and-run')
     await page.waitForURL(/\/platform-experiments\/pe-/, { timeout: 120000 })
