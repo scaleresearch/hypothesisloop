@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,6 +116,16 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
 	}
 
+	// The platform pays for planning, so an org at its limit is told so and nothing is created.
+	for name, over := range map[string]*db.PlanningLimitError{"open at once": {Limit: 2}, "in a day": {Limit: 10, PerDay: true}} {
+		store.over = over
+		code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal})
+		if code != http.StatusTooManyRequests || out["reason"] != "planning_limit" || len(store.created) != 1 {
+			t.Errorf("%s: got = %d %v with %d created, want 429 planning_limit", name, code, out, len(store.created))
+		}
+	}
+	store.over = nil
+
 	// With no launcher registered a planner would never start, so no draft is made.
 	store.unregistered = true
 	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
@@ -183,6 +194,8 @@ type draftStore struct {
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 
+	// over is the limit the org is at.
+	over *db.PlanningLimitError
 	// baseline is what the platform's records say of the job a proposal names.
 	baseline *Baseline
 
@@ -194,7 +207,13 @@ func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
 }
 
-func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits) error {
+	if limits != (db.DraftLimits{Concurrent: DefaultPlanning.MaxConcurrentPerOrg, PerDay: DefaultPlanning.MaxPerDayPerOrg}) {
+		return errors.New("a draft was created without the planning limits")
+	}
+	if s.over != nil {
+		return s.over
+	}
 	if s.planners == nil {
 		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
 	}

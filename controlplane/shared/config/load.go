@@ -252,6 +252,18 @@ func (c *Config) build() error {
 	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
 		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
+	if c.Planning.AllowanceAcceleratorHours <= 0 {
+		return fmt.Errorf("planning allowance_accelerator_hours is required and positive: what the baseline job of one draft may cost, which the platform pays")
+	}
+	if c.Planning.LimitMinutes <= 0 {
+		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
+	}
+	if c.Planning.ProposedForDays <= 0 {
+		return fmt.Errorf("planning proposed_for_days is required and positive: how long a proposal waits for a person")
+	}
+	if c.Planning.MaxConcurrentPerOrg <= 0 || c.Planning.MaxPerDayPerOrg <= 0 {
+		return fmt.Errorf("planning max_concurrent_per_org and max_per_day_per_org are required and positive: how many drafts an org may have open and may create in a day")
+	}
 	if c.Accounts.MaxOrgsPerUser <= 0 {
 		return fmt.Errorf("accounts max_orgs_per_user is required and positive: how many orgs a person may own when they create one")
 	}

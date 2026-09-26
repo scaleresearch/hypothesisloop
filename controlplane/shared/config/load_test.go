@@ -303,6 +303,26 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
+	for name, edit := range map[string][2]string{
+		"no allowance":     {"  allowance_accelerator_hours: 0.5\n", ""},
+		"a free allowance": {"  allowance_accelerator_hours: 0.5", "  allowance_accelerator_hours: 0"},
+		"no limit":         {"  limit_minutes: 30\n", ""},
+		"no wait":          {"  proposed_for_days: 7\n", ""},
+		"no concurrent":    {"  max_concurrent_per_org: 2\n", ""},
+		"zero per day":     {"  max_per_day_per_org: 10", "  max_per_day_per_org: 0"},
+		"misspelled bound": {"  max_per_day_per_org: 10", "  max_per_day: 10"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
 func TestLoadRejectsAnIncompleteAccountsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
 		"no section":        {"accounts:\n  max_orgs_per_user: 3\n  max_projects_per_org: 10\n", ""},

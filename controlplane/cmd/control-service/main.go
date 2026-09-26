@@ -202,6 +202,13 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
+		}).
+		WithPlanning(quota.Planning{
+			AllowanceAcceleratorHours: pcfg.Planning.AllowanceAcceleratorHours,
+			Limit:                     time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
+			ProposedFor:               time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
+			MaxConcurrentPerOrg:       pcfg.Planning.MaxConcurrentPerOrg,
+			MaxPerDayPerOrg:           pcfg.Planning.MaxPerDayPerOrg,
 		})
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)

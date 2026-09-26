@@ -82,6 +82,26 @@ agents:
   max_new_instances_per_answer: 10
   max_hosted_per_platform_experiment: 25
 
+# What the platform spends on a draft: a platform experiment a person started from one sentence,
+# which an agent the platform runs plans (it works out the metric, runs the baseline and
+# proposes the experiment) before the person accepts and states what the run itself costs. The
+# platform pays for planning, so all of it is bounded here.
+#
+#   allowance_accelerator_hours  a draft's whole budget: what its planner's baseline job may cost.
+#   limit_minutes         how long the planner has to propose, from the goal and again from each
+#              revision. A draft with no proposal by then is closed and its machine released.
+#   proposed_for_days     how long a proposal waits for a person before the draft is closed. No
+#              machine runs while it waits.
+#   max_concurrent_per_org  how many drafts one org may have open at once, proposed ones included.
+#   max_per_day_per_org   how many drafts one org may create in 24 hours. Over either bound a new
+#              draft is refused with 429 planning_limit.
+planning:
+  allowance_accelerator_hours: 0.5
+  limit_minutes: 30
+  proposed_for_days: 7
+  max_concurrent_per_org: 2
+  max_per_day_per_org: 10
+
 # What one account may create. Staff, the platform's operators, are held to neither.
 #
 #   max_orgs_per_user     how many orgs a person may own when they create one. The home org of

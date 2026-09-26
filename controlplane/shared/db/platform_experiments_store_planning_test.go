@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}
-	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup); err != nil {
+	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, DraftLimits{Concurrent: 1000, PerDay: 1000}); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if planner.OrgID != "default" {
@@ -92,7 +93,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, EndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Kind: domain.AgentKindAgent}
-	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}); err == nil {
+	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, DraftLimits{Concurrent: 1000, PerDay: 1000}); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, bad.ID); got != nil {
@@ -255,5 +256,62 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	})
 	if err != nil || !started || len(quotas) != 4 {
 		t.Fatalf("start: started %v with %d quotas, %v, want the 4 researchers'", started, len(quotas), err)
+	}
+}
+
+// The platform pays for planning, so an org's drafts are bounded where they are counted.
+func TestAnOrgsDraftsAreBoundedAtOnceAndPerDay(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	org := "org-" + uuid.New().String()[:8]
+	project := "prj-" + uuid.New().String()[:8]
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO orgs (id, name) VALUES ($1, $1)`, org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $1)`, project, org); err != nil {
+		t.Fatal(err)
+	}
+	create := func(limits DraftLimits) (string, error) {
+		now := time.Now().UTC()
+		pe := &domain.PlatformExperiment{
+			ID: "pe-" + uuid.New().String()[:8], ProjectID: project, Name: "g", Goal: "g", BudgetAcceleratorHours: 0.5, MaxAgents: 1,
+			EndsAt: now.Add(time.Hour), Status: domain.PlatformExpDraft, Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30,
+			Stages: []domain.Stage{{LengthPct: 100}}, HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
+			CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
+		}
+		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", Kind: domain.AgentKindAgent, CreatedAt: now}
+		return pe.ID, pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "l", Flavor: domain.PlannerFlavor, Model: "m"}, limits)
+	}
+	limits := DraftLimits{Concurrent: 2, PerDay: 3}
+	first, err := create(limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create(limits); err != nil {
+		t.Fatal(err)
+	}
+	var over *PlanningLimitError
+	if _, err := create(limits); !errors.As(err, &over) || over.PerDay || over.Limit != 2 {
+		t.Fatalf("a third draft at once: got = %v, want the concurrent limit", err)
+	}
+	// Closing one makes room at once, and the day's count still holds what was created.
+	setPEStatus(t, pool, first, domain.PlatformExpClosed, 0)
+	if _, err := create(limits); err != nil {
+		t.Fatalf("a draft after one closed: %v", err)
+	}
+	setPEStatus(t, pool, first, domain.PlatformExpClosed, 0)
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = 'closed' WHERE project_id = $1`, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create(limits); !errors.As(err, &over) || !over.PerDay || over.Limit != 3 {
+		t.Fatalf("a fourth draft in a day: got = %v, want the daily limit", err)
+	}
+	// An experiment created the ordinary way is no draft of the day.
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET goal = '' WHERE id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create(limits); err != nil {
+		t.Fatalf("a draft once one of the day's is no draft: %v", err)
 	}
 }

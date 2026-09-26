@@ -40,7 +40,7 @@ type PlatformExperimentsStore interface {
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
 	// CreateDraft creates a draft with its planner signed up, or neither.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error

@@ -14,6 +14,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -33,7 +34,8 @@ type Planning struct {
 	MaxPerDayPerOrg     int
 }
 
-// DefaultPlanning is the planning allowance of a deployment that configures none.
+// DefaultPlanning is what the settings file ships with (its planning section), for a handler
+// built without one, as tests build it.
 var DefaultPlanning = Planning{
 	AllowanceAcceleratorHours: 0.5, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
 	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,
@@ -104,7 +106,15 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
 	}
-	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {
+	err = s.store.CreateDraft(ctx, pe, planner, signup, db.DraftLimits{Concurrent: planning.MaxConcurrentPerOrg, PerDay: planning.MaxPerDayPerOrg})
+	var over *db.PlanningLimitError
+	if errors.As(err, &over) {
+		if over.PerDay {
+			return nil, refuseSignup(429, "planning_limit", "this org created %d drafts in the last 24 hours, which is the most the platform plans for one org in a day: accept or use the ones it has, or create the experiment yourself with POST /platform-experiments", over.Limit)
+		}
+		return nil, refuseSignup(429, "planning_limit", "this org has %d drafts open, which is the most the platform plans for one org at once: accept one, or close one with POST /platform-experiments/{id}/close", over.Limit)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
 	pe.SignupCount = 1
@@ -134,7 +144,8 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then nothing but the " +
 			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
-			"503 launcher_not_registered when the deployment has no launcher to run the planner.",
+			"503 launcher_not_registered when the deployment has no launcher to run the planner. " +
+			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID string `json:"project_id"`

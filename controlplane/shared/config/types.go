@@ -258,6 +258,21 @@ type AgentsConfig struct {
 	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
 }
 
+// PlanningConfig is what the platform spends on a draft: a platform experiment being planned
+// from one sentence by an agent the platform runs, before a person accepts its proposal.
+type PlanningConfig struct {
+	// AllowanceAcceleratorHours is a draft's whole budget: what its planner's baseline job may cost.
+	AllowanceAcceleratorHours float64 `yaml:"allowance_accelerator_hours"`
+	// LimitMinutes is how long a planner has to propose, from the goal or from a revision.
+	LimitMinutes int `yaml:"limit_minutes"`
+	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
+	ProposedForDays int `yaml:"proposed_for_days"`
+	// MaxConcurrentPerOrg is how many drafts of one org may be open at once.
+	MaxConcurrentPerOrg int `yaml:"max_concurrent_per_org"`
+	// MaxPerDayPerOrg is how many drafts one org may create in 24 hours.
+	MaxPerDayPerOrg int `yaml:"max_per_day_per_org"`
+}
+
 // AccountsConfig bounds what one account creates. Staff are held to neither bound.
 type AccountsConfig struct {
 	// MaxOrgsPerUser is how many orgs a person may own when they create one.
@@ -305,6 +320,7 @@ type Config struct {
 	Services         ServicesConfig          `yaml:"services"`
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
+	Planning         PlanningConfig          `yaml:"planning"`
 	Accounts         AccountsConfig          `yaml:"accounts"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
 	GitHub           GitHubConfig            `yaml:"github"`
