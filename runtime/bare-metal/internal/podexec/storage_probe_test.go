@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/storage"
 	"github.com/moby/moby/client"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -16,8 +18,10 @@ import (
 // of what it holds.
 type probedEngine struct {
 	refusesSize, refusesAll bool
-	images, containers      map[string]bool
-	sizes                   []string
+	// containerdStore is Docker with the containerd image store, whose containers have no graph driver.
+	containerdStore    bool
+	images, containers map[string]bool
+	sizes              []string
 }
 
 func (e *probedEngine) ImageImport(_ context.Context, _ client.ImageImportSource, ref string, _ client.ImageImportOptions) (client.ImageImportResult, error) {
@@ -44,6 +48,17 @@ func (e *probedEngine) ContainerCreate(_ context.Context, options client.Contain
 	return client.ContainerCreateResult{ID: id}, nil
 }
 
+func (e *probedEngine) ContainerInspect(_ context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	if !e.containers[id] {
+		return client.ContainerInspectResult{}, errors.New("no such container")
+	}
+	made := container.InspectResponse{ID: id, HostConfig: &container.HostConfig{StorageOpt: map[string]string{"size": strings.TrimPrefix(id, "probe-")}}}
+	if !e.containerdStore {
+		made.GraphDriver = &storage.DriverData{Name: "overlay2"}
+	}
+	return client.ContainerInspectResult{Container: made}, nil
+}
+
 func (e *probedEngine) ContainerRemove(_ context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
 	delete(e.containers, id)
 	return client.ContainerRemoveResult{}, nil
@@ -51,7 +66,8 @@ func (e *probedEngine) ContainerRemove(_ context.Context, id string, _ client.Co
 
 // Whether a job is held to its storage request is the engine's to say. Read off the store's
 // filesystem and mount options, it was reported as enforced on an engine that then refused
-// every container given a size.
+// every container given a size. Read off a create that succeeds, it was reported as enforced on
+// an engine that takes the size and ignores it.
 func TestStorageIsEnforcedOnlyWhenTheEngineTakesAContainerWithASize(t *testing.T) {
 	for name, tc := range map[string]struct {
 		engine   probedEngine
@@ -59,9 +75,11 @@ func TestStorageIsEnforcedOnlyWhenTheEngineTakesAContainerWithASize(t *testing.T
 		why      string
 		fails    bool
 	}{
-		"the engine takes a size":         {probedEngine{}, true, "", false},
-		"the engine refuses a size":       {probedEngine{refusesSize: true}, false, "supported only for overlay over xfs", false},
-		"the engine creates no container": {probedEngine{refusesAll: true}, false, "", true},
+		"the engine takes a size":   {probedEngine{}, true, "", false},
+		"the engine refuses a size": {probedEngine{refusesSize: true}, false, "supported only for overlay over xfs", false},
+		// Docker 29 on box-b took a 1 GiB size, recorded it, and gave the container the whole disk.
+		"the engine takes a size and ignores it": {probedEngine{containerdStore: true}, false, "containerd snapshots", false},
+		"the engine creates no container":        {probedEngine{refusesAll: true}, false, "", true},
 	} {
 		engine := tc.engine
 		engine.images, engine.containers = map[string]bool{}, map[string]bool{}
