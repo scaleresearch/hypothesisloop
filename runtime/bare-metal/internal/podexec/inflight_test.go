@@ -407,6 +407,10 @@ func testAJobInFlightGetsNoSecondOperation(t *testing.T, stoppingState string) {
 	for range 5 {
 		pass(t, ctx, e, slow)
 	}
+	// A pass hands each operation to its own goroutine and returns, so the engine is asked
+	// some time after the last pass has ended.
+	eventually(t, "the pull has reached the engine", f.blockedIn("pull slow"))
+	eventually(t, "the stop has reached the engine", f.blockedIn("stop "+containerName("stopping")))
 	if got := f.count(f.pulls, "slow"); got != 1 {
 		t.Fatalf("%d pulls started for one job in flight, want 1", got)
 	}
