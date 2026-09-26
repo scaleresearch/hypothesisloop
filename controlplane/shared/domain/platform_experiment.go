@@ -236,6 +236,10 @@ type PlatformExperiment struct {
 	// Carried by a read of one platform experiment and left out of a list.
 	Proposal   json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it."`
 	ProposedAt *time.Time      `json:"proposed_at,omitempty"`
+	// DeclinedReason is why a draft's planner proposed nothing: the goal could not be made into
+	// an experiment. With it ProposedAt is when the planner said so and there is no Proposal.
+	// It stays while a revision is planned and goes with the next proposal.
+	DeclinedReason string `json:"declined_reason,omitempty"`
 	// Revisions are what a person asked the planner to change, oldest first. One made after
 	// ProposedAt, or with ProposedAt absent, is not answered by a proposal yet.
 	Revisions []PlanningRequest `json:"revisions,omitempty"`

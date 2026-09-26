@@ -132,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | close [PE] | summary [PE] | agents add|remove|list
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -578,6 +578,8 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
 		case "propose":
 			return cmdPlatformExperimentsPropose(c, args[1:], stdout, stderr)
+		case "decline":
+			return cmdPlatformExperimentsDecline(c, args[1:], stdout, stderr)
 		case "get":
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
 		case "results":
@@ -586,7 +588,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -741,8 +743,9 @@ func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, s
 For the planner of a draft. FILE is YAML: experiment (shaped like .hypothesisloop/experiment.yaml:
 name, description, metrics, report_interval_seconds, optionally stages and the policies), and
 beside it budget_accelerator_hours, duration_hours, agents (a list, one entry per researcher,
-each with optional flavor, model, hyperparameters), baseline_job_id, accelerator_type,
-metric_reason, measurement, and the lists out_of_scope, risks, questions.
+each with optional flavor, model, hyperparameters), baseline_job_id, accelerator_type (the type
+the baseline job ran on, a CPU class for work that needs no accelerator), metric_reason,
+measurement, and the lists out_of_scope, risks, questions.
 
 The proposal is checked before it is stored. A refusal names what to fix: fix it and propose
 again. Each proposal replaces the one before. Once stored the draft waits for a person.`, stderr)
@@ -766,6 +769,31 @@ again. Each proposal replaces the one before. Once stored the draft waits for a 
 	}
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/proposal", body, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
+func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--pe PE] --reason TEXT
+
+For the planner of a draft, when the goal cannot be made into an experiment: nothing measurable,
+or nothing this platform can run. The reason is shown to the person who wrote the goal in place
+of a proposal, so say in plain words why, and what would make it plannable. A proposal you made
+before no longer stands. The person may answer with a revision, which starts you again.`, stderr)
+	pe := fs.String("pe", "", "the draft (default $"+platformExperimentEnv+")")
+	reason := fs.String("reason", "", "why no experiment is proposed")
+	operands, err := parseArgs(fs, args)
+	if err != nil {
+		return parseExit(err)
+	}
+	id := orEnv(*pe, platformExperimentEnv)
+	if id == "" || len(operands) > 0 || strings.TrimSpace(*reason) == "" {
+		return parseExit(misuse(fs, "want --reason, and --pe or $"+platformExperimentEnv))
+	}
+	var out any
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]string{"reason": *reason}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

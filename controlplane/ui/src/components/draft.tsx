@@ -77,7 +77,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           <p className="text-sm">{proposal.measurement}</p>
           <p className="mt-1 text-xs text-muted">
             The baseline was measured by <Link href={`/jobs/${proposal.baseline_job_id}`} className="text-accent hover:underline">job {proposal.baseline_job_id}</Link>
-            {proposal.accelerator_type ? ` on ${proposal.accelerator_type}.` : ' on CPU.'}
+            {` on ${proposal.accelerator_type}.`}
           </p>
         </div>
         <Sentences title="What could mislead" items={proposal.risks} />
@@ -139,7 +139,7 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
   )
 }
 
-function Revise({ draft, onDone }: { draft: Draft; onDone: () => void }) {
+function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; onDone: () => void }) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -159,10 +159,20 @@ function Revise({ draft, onDone }: { draft: Draft; onDone: () => void }) {
 
   return (
     <Card>
-      <CardHeader>Ask for a change</CardHeader>
+      <CardHeader>{declined ? 'Answer the planner' : 'Ask for a change'}</CardHeader>
       <CardContent className="grid gap-2">
-        <FormField label="What should be different?" hint="The planner starts again with what it knows and proposes anew. The proposal above stays until it does.">
-          <Textarea rows={2} value={message} onChange={e => setMessage(e.target.value)} placeholder="e.g. It must fit a single RTX 4090. Measure latency too." />
+        <FormField
+          label={declined ? 'What was missing?' : 'What should be different?'}
+          hint={declined
+            ? 'The planner starts again with what it knows and your answer.'
+            : 'The planner starts again with what it knows and proposes anew. The proposal above stays until it does.'}
+        >
+          <Textarea
+            rows={2}
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            placeholder={declined ? 'e.g. The small transformer in train.py, judged by validation loss.' : 'e.g. It must fit a single RTX 4090. Measure latency too.'}
+          />
         </FormField>
         <div className="flex items-center gap-3">
           <Button loading={sending} disabled={message.trim() === ''} onClick={revise}>Revise</Button>
@@ -218,7 +228,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
       <PageHeader
         back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
         title={draft.name}
-        description={<span className="text-xs text-subtle">Draft, {state === 'proposed' ? 'waiting for you' : 'being planned'}</span>}
+        description={<span className="text-xs text-subtle">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</span>}
       />
       <Card>
         <CardHeader>What you asked</CardHeader>
@@ -232,14 +242,23 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           ))}
         </CardContent>
       </Card>
-      {state !== 'proposed' && <Planning draft={draft} revising={state === 'revising'} />}
-      {draft.proposal && <ProposalCard proposal={draft.proposal} />}
-      {!readOnly && state === 'proposed' && draft.proposal && (
-        <>
-          <Accept draft={draft} proposal={draft.proposal} onDone={reread} />
-          <Revise draft={draft} onDone={reread} />
-        </>
+      {(state === 'planning' || state === 'revising') && <Planning draft={draft} revising={state === 'revising'} />}
+      {draft.declined_reason && (
+        <Card>
+          <CardHeader>The planner proposed no experiment</CardHeader>
+          <CardContent className="grid gap-2">
+            <p className="text-sm">{draft.declined_reason}</p>
+            {state === 'declined' && (
+              <p className="text-xs text-muted">
+                Nothing runs and nothing is spent. Answer below to have it try again, or abandon this draft; it is closed on {formatDate(draft.ends_at)} otherwise.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
+      {draft.proposal && <ProposalCard proposal={draft.proposal} />}
+      {!readOnly && state === 'proposed' && draft.proposal && <Accept draft={draft} proposal={draft.proposal} onDone={reread} />}
+      {!readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />}
       {!readOnly && (
         <div className="mt-2 flex items-center gap-3">
           <Button variant="ghost" onClick={abandon}>Abandon this draft</Button>

@@ -22,7 +22,8 @@ export interface Proposal {
   duration_hours: number
   agents: ProposedAgent[]
   baseline_job_id: string
-  accelerator_type?: string
+  // The type the jobs are sized for: an accelerator, or a CPU class for work that needs none.
+  accelerator_type: string
   metric_reason: string
   measurement: string
   out_of_scope?: string[]
@@ -40,8 +41,11 @@ export interface PlanningRequest {
 export type Draft = PlatformExperiment & {
   goal?: string
   proposal?: Proposal
-  // Absent while the planner works, on the first plan or on a revision.
+  // When the planner answered, with a proposal or with declined_reason. Absent while it works,
+  // on the first plan or on a revision.
   proposed_at?: string
+  // Why the planner proposed nothing. It stays while a revision is planned.
+  declined_reason?: string
   revisions?: PlanningRequest[]
 }
 
@@ -78,9 +82,9 @@ export async function acceptAndStart(id: string, acceptance: Acceptance): Promis
 }
 
 /** What a draft is waiting for. */
-export function draftState(draft: Draft): 'planning' | 'revising' | 'proposed' {
-  if (draft.proposed_at) return 'proposed'
-  return draft.proposal ? 'revising' : 'planning'
+export function draftState(draft: Draft): 'planning' | 'revising' | 'proposed' | 'declined' {
+  if (draft.proposed_at) return draft.proposal ? 'proposed' : 'declined'
+  return draft.proposal || draft.declined_reason ? 'revising' : 'planning'
 }
 
 /** Abandons a draft: it is closed and its planner's machine released. */

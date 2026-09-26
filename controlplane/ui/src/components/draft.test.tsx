@@ -176,3 +176,38 @@ describe('a proposed draft', () => {
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/close')
   })
 })
+
+// A goal the planner could not plan left a draft with nothing on its page until it closed.
+describe('a draft the planner declined', () => {
+  const why = '"Make the model better" names nothing to measure: say which model, on what data, and what better means.'
+  const declined = () => draft({ declined_reason: why, proposed_at: '2026-10-05T12:10:00Z' })
+
+  it('shows the reason, nothing to accept, and the ways to answer it or drop it', async () => {
+    expect(draftState(declined())).toBe('declined')
+    show(declined())
+    expect(screen.getByText('The planner proposed no experiment')).toBeTruthy()
+    expect(screen.getByText(why)).toBeTruthy()
+    expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('What was missing?'), 'The small transformer, by validation loss.')
+    await userEvent.click(screen.getByRole('button', { name: 'Revise' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/revise', { message: 'The small transformer, by validation loss.' })
+  })
+
+  it('keeps the reason readable while the planner tries again', async () => {
+    const retrying = draft({ declined_reason: why })
+    expect(draftState(retrying)).toBe('revising')
+    show(retrying)
+    expect(screen.getByText(why)).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))
+    expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
+  })
+
+  it('is abandoned like any draft', async () => {
+    show(declined())
+    await userEvent.click(screen.getByRole('button', { name: 'Abandon this draft' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/close')
+  })
+})

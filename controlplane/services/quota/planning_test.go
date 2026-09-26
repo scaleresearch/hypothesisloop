@@ -33,7 +33,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
-		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}}})
+		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: "dev-node", Kind: domain.TypeKindCPU, AccHRate: 0.01}}})
 	if drafts, ok := store.(*draftStore); ok {
 		handler.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return drafts.baseline, nil
@@ -236,7 +236,7 @@ func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, 
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.Proposal, pe.ProposedAt, pe.EndsAt = proposal, &now, waitUntil
+			pe.Proposal, pe.ProposedAt, pe.EndsAt, pe.DeclinedReason = proposal, &now, waitUntil, ""
 			return nil
 		}
 	}
@@ -498,12 +498,16 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusUnprocessableEntity || out["reason"] != "no_baseline" {
 		t.Errorf("a job that does not exist: got = %d %v, want 422 no_baseline", code, out)
 	}
-	// A run on CPU alone names no type, and none has to be reachable.
+	// Work that needs no accelerator is sized in cores of a CPU class, which is a type like any
+	// other: a proposal that names none is refused, as a job that holds none is.
 	cpu := draftWithPlanner()
-	cpu.baseline.Reachable = map[string]bool{}
+	cpu.baseline.Reachable = map[string]bool{"dev-node": true}
 	_, call = planningAPI(t, cpu, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": ""})); code != http.StatusOK {
-		t.Errorf("a proposal for CPU alone: got = %d %v, want 200", code, out)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": ""})); code != http.StatusUnprocessableEntity || out["reason"] != "unknown_accelerator_type" {
+		t.Errorf("a proposal that names no type: got = %d %v, want 422 unknown_accelerator_type", code, out)
+	}
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": "dev-node"})); code != http.StatusOK {
+		t.Errorf("a proposal sized in cores of a CPU class: got = %d %v, want 200", code, out)
 	}
 }
 
@@ -580,5 +584,69 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	store.created[0].Status = domain.PlatformExpOpen
 	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "m"}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
 		t.Errorf("revising what is no draft: got = %d %v, want 409 invalid_transition", code, out)
+	}
+}
+
+func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil time.Time) error {
+	for _, pe := range s.created {
+		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
+			now := time.Now().UTC()
+			pe.DeclinedReason, pe.Proposal, pe.ProposedAt, pe.EndsAt = reason, nil, &now, waitUntil
+			return nil
+		}
+	}
+	return db.ErrNotDraft
+}
+
+// A goal the planner could not plan ended as a draft that closed at its limit with nothing on
+// its page. The planner says why, and the person answers that as they answer a proposal.
+func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
+	store := draftWithPlanner()
+	_, asPlanner := planningAPI(t, store, thePlanner)
+	_, call := planningAPI(t, store, planner)
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	for name, reason := range map[string]string{"no reason": " ", "an essay": strings.Repeat("x", maxDeclineBytes+1)} {
+		if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": reason}); code != http.StatusUnprocessableEntity || store.created[0].DeclinedReason != "" {
+			t.Errorf("%s: got = %d %v, want 422 and nothing stored", name, code, out)
+		}
+	}
+	for name, caller := range map[string]auth.Principal{
+		"a researcher of it":   {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-researcher", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+		"the person who asked": planner,
+	} {
+		_, as := planningAPI(t, store, caller)
+		if code, _ := as("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r"}); code != http.StatusForbidden || store.created[0].DeclinedReason != "" {
+			t.Errorf("%s declining: got = %d, want 403", name, code)
+		}
+	}
+
+	before := time.Now()
+	const why = "\"Make the model better\" names nothing to measure: say which model, on what data, and what better means."
+	code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "  " + why + "\n"})
+	if code != http.StatusOK || out["declined_reason"] != why || out["proposed_at"] == nil || out["proposal"] != nil || out["status"] != "draft" {
+		t.Fatalf("decline: got = %d %v, want the reason, an answer time and no proposal", code, out)
+	}
+	if wait := store.created[0].EndsAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
+		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
+	}
+	// The earlier proposal no longer stands, so nothing is accepted.
+	accept := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusConflict || out["reason"] != "invalid_transition" || !strings.Contains(out["message"].(string), "declined") {
+		t.Errorf("accepting a declined draft: got = %d %v, want 409 invalid_transition that says it declined", code, out)
+	}
+	// The person says what was missing; the reason stays until the planner answers again.
+	code, out = call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "The small transformer in train.py, by validation loss."})
+	if code != http.StatusOK || out["proposed_at"] != nil || out["declined_reason"] != why {
+		t.Fatalf("revising a declined draft: got = %d %v, want it back with the planner and the reason kept", code, out)
+	}
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK || out["declined_reason"] != nil || out["proposal"] == nil {
+		t.Fatalf("proposing after a decline: got = %d %v, want the proposal and no reason", code, out)
+	}
+
+	store.created[0].Status = domain.PlatformExpOpen
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r"}); code != http.StatusConflict || out["reason"] != "not_a_draft" {
+		t.Errorf("declining what is no draft: got = %d %v, want 409 not_a_draft", code, out)
 	}
 }

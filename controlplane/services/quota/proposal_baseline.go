@@ -102,7 +102,7 @@ func checkBaseline(p Proposal, experiment CreatePlatformExperimentRequest, plann
 		sort.Strings(missing)
 		return refusedProposal("baseline_missing_metric", "baseline job %s reported no %s: every metric you propose must be one the harness really reports", baseline.Job.ID, strings.Join(missing, ", "))
 	}
-	if p.AcceleratorType != "" && !baseline.Reachable[p.AcceleratorType] {
+	if !baseline.Reachable[p.AcceleratorType] {
 		return refusedProposal("accelerator_unreachable", "no cluster this org's jobs can be placed on has a %s now: propose a type `hl capacity` lists", p.AcceleratorType)
 	}
 	if floor := baseline.AcceleratorHours * float64(len(p.Agents)); p.BudgetAcceleratorHours < floor {

@@ -223,6 +223,37 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	// Declined, the draft is answered and has nothing to accept; a revision gives it back to the
+	// planner with the reason kept, and the next proposal clears it.
+	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	declined, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || declined.DeclinedReason != "nothing here can be measured" || declined.ProposedAt == nil || len(declined.Proposal) != 0 {
+		t.Fatalf("declined: got = %+v, %v", declined, err)
+	}
+	if wanted, _ := pes.ListLauncherAgents(ctx, launcher, 0); len(wanted) != 0 {
+		t.Fatalf("a planner that declined is still asked for: %+v", wanted)
+	}
+	pe, agents, signups = accepted(2)
+	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
+		t.Fatalf("accepting a declined draft: got = %v, want ErrNothingProposed", err)
+	}
+	if err := pes.Revise(ctx, id, "measure validation loss", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("revising a declined draft: %v", err)
+	}
+	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.ProposedAt != nil || revised.DeclinedReason == "" {
+		t.Fatalf("revised after a decline: got = %+v, want it with the planner and the reason kept", revised)
+	}
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil {
+		t.Fatalf("proposed after a decline: got = %+v, want no reason", proposed)
+	}
+	if err := pes.Decline(ctx, "pe-none", "r", time.Now()); err != ErrNotDraft {
+		t.Fatalf("declining what is not there: got = %v, want ErrNotDraft", err)
+	}
 	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
 	// 5, its coordinator is one, and the planner is none of them.
 	pe, agents, signups = accepted(5)

@@ -88,6 +88,8 @@ agents:
 # platform pays for planning, so all of it is bounded here.
 #
 #   allowance_accelerator_hours  a draft's whole budget: what its planner's baseline job may cost.
+#              What the job did cost stays with the experiment: once the draft is accepted it
+#              counts in the run's consumed budget and stage progress.
 #   limit_minutes         how long the planner has to propose, from the goal and again from each
 #              revision. A draft with no proposal by then is closed and its machine released.
 #   proposed_for_days     how long a proposal waits for a person before the draft is closed. No

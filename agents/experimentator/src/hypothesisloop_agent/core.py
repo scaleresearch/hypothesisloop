@@ -22,7 +22,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
 # A planner pushes the seed code and proposes, which no other agent does.
-_HL_HELP_PLANNER = ([], ["job"], ["hypothesis"], ["code"], ["platform-experiments", "propose"])
+_HL_HELP_PLANNER = ([], ["job"], ["hypothesis"], ["code"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
@@ -140,10 +140,11 @@ def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | No
         pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
         if pe["status"] == "closed":
             return "platform experiment closed"
-        # A planner's work is the proposal: once it is stored, or the draft was accepted, the
+        # A planner's work is the proposal, or the reason there is none: once either is stored
+        # (both set proposed_at), or the draft was accepted, the
         # platform releases its machine, and a revision starts it again with its session.
         if config.plans(cfg) and (pe["status"] != "draft" or pe.get("proposed_at")):
-            return "the draft is proposed"
+            return "the draft is answered"
     except api_client.APIError as e:
         log.warning("could not check platform experiment status (%s) — continuing", e)
     return None

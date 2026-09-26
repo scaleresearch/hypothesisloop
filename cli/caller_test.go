@@ -275,4 +275,15 @@ func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	if code := run([]string{"platform-experiments", "propose", file, "another"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
 		t.Errorf("two files: exit %d with %d requests, want 2 and nothing sent", code, len(*got))
 	}
+
+	// A goal that cannot be planned is declined with the reason the person will read.
+	if code := run([]string{"platform-experiments", "decline", "--reason", "nothing here can be measured"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("decline: exit %d, stderr %s", code, stderr.String())
+	}
+	if last := (*got)[1]; last.Method != "PUT" || last.Path != "/platform-experiments/pe-env/decline" || !reflect.DeepEqual(last.Body, map[string]any{"reason": "nothing here can be measured"}) {
+		t.Fatalf("decline sent %+v", last)
+	}
+	if code := run([]string{"platform-experiments", "decline", "--reason", " "}, &stdout, &stderr); code != 2 || len(*got) != 2 {
+		t.Errorf("declining with no reason: exit %d with %d requests, want 2 and nothing sent", code, len(*got))
+	}
 }

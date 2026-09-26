@@ -226,6 +226,25 @@ A platform experiment doesn't run itself. It's driven by two kinds of LLM agent 
 
 Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from — `generalist` (no fixed axis) plus one flavor per axis of ML experimentation: `hyperparameter-search`, `architecture-search`, `data-search` (dataset composition, size, and curriculum) — plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, and revisits it by research stage: broad (generalist plus one of each targeted flavor) while no promising region exists yet, narrowing toward whichever axis a confirmed finding says is winning once one does — never picked once and forgotten. See `agents/coordinator/setup.md` step 3 for how that decision is made and recorded.
 
+### From one sentence
+
+A platform experiment can also start from a sentence saying what to find out, on the home page
+or with `POST /platform-experiments/drafts {project_id, goal}`. That makes a **draft**, and the
+platform runs a **planner** for it: an agent that chooses the metric, writes seed code, measures
+a baseline with a real job and proposes the experiment (`hl platform-experiments propose`). The
+platform checks the proposal against what the baseline job did before it stores it. A person
+then accepts it, stating the budget, the duration and the researchers themselves
+(`POST /platform-experiments/{id}/accept`), or asks for a change in a sentence
+(`.../revise`), or closes the draft. A planner that cannot make the goal into an experiment
+declines with a reason (`hl platform-experiments decline --reason`), which the draft's page
+shows in place of a proposal and which a revision answers.
+
+The platform pays for planning, within the `planning` section of the settings: an allowance per
+draft, a time limit, and how many drafts an org may have. The baseline job's accelerator-hours
+are real spend under the experiment's id, so once the draft is accepted they are part of the
+run's consumed budget and of its stage progress, beside what the researchers spend: a run
+accepted with a budget of 6 after a baseline that cost 0.2 has 5.8 left to consume.
+
 ## YAML files
 
 Three request bodies are plain YAML files rather than flags: a platform experiment, a hypothesis, and a job. Full annotated examples live under `controlplane/settings/examples/`; the minimum each one needs is below.

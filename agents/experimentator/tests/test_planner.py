@@ -40,7 +40,16 @@ class PlannerPromptTest(unittest.TestCase):
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         self.assertIn("end your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`", " ".join(self.render().split()))
 
+    # A goal the planner could not plan left a draft that closed with nothing said. And a job
+    # with accelerator_count 0 is refused, so work for a CPU is sized in cores of a CPU class.
+    def test_the_planner_declines_with_a_reason_and_sizes_cpu_work_in_cores(self):
+        flat = " ".join(self.render().split())
+        self.assertIn('Decline with `hl platform-experiments decline --reason "..."`', flat)
+        self.assertIn("pick a CPU class (`kind: cpu`), whose `accelerator_count` is the job's cores, and leave `cpu` out", flat)
+        self.assertNotIn("none for work a CPU does", flat)
+
     def test_the_planner_is_listed_the_commands_it_alone_uses(self):
+        self.assertIn(["platform-experiments", "decline"], core._HL_HELP_PLANNER)
         self.assertIn(["platform-experiments", "propose"], core._HL_HELP_PLANNER)
         self.assertIn(["code"], core._HL_HELP_PLANNER)
 
@@ -55,8 +64,9 @@ class PlannerStopTest(unittest.TestCase):
     def test_a_planner_stops_once_its_draft_is_proposed_or_accepted(self):
         self.assertIsNone(self.reason(planner(), {"status": "draft"}))
         self.assertIsNone(self.reason(planner(), {"status": "draft", "proposed_at": None, "proposal": {"x": 1}}))
-        self.assertEqual(self.reason(planner(), {"status": "draft", "proposed_at": "2026-01-01T00:00:00Z"}), "the draft is proposed")
-        self.assertEqual(self.reason(planner(), {"status": "open"}), "the draft is proposed")
+        self.assertEqual(self.reason(planner(), {"status": "draft", "proposed_at": "2026-01-01T00:00:00Z"}), "the draft is answered")
+        self.assertEqual(self.reason(planner(), {"status": "draft", "proposed_at": "2026-01-01T00:00:00Z", "declined_reason": "nothing to measure"}), "the draft is answered")
+        self.assertEqual(self.reason(planner(), {"status": "open"}), "the draft is answered")
         self.assertEqual(self.reason(planner(), {"status": "closed"}), "platform experiment closed")
 
     def test_a_researcher_does_not_stop_in_an_open_experiment(self):

@@ -44,9 +44,11 @@ What you produce, in this order:
      in, where every command starts again, commit there, and `hl code push` stores your
      committed HEAD with the platform. After a restart, `hl-clone <code_ref of your job> <dir>`
      takes it back.
-  4. The baseline. Pick the accelerator type from `hl capacity`, copied verbatim, with
-     available > 0, or none for work a CPU does. Register one hypothesis on `root` that states
-     the baseline, then submit the seed code as a job against it:
+  4. The baseline. Pick `accelerator_type` from `hl capacity`, copied verbatim, with
+     available > 0. Every job holds units of a type: for work that needs no accelerator pick
+     a CPU class (`kind: cpu`), whose `accelerator_count` is the job's cores, and leave `cpu`
+     out. A job with `accelerator_count: 0` is refused. Register one hypothesis on `root` that
+     states the baseline, then submit the seed code as a job against it:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
@@ -63,8 +65,8 @@ What you produce, in this order:
        - the gate, and that changing how it is checked voids the result;
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
-       - how to run a trial: `hl-clone` that code_ref, the job spec to submit (resources,
-         accelerator type, command), how long one takes and what it costs;
+       - how to run a trial: `hl-clone` that code_ref, the job spec to submit (the type and
+         count, memory, command), how long one takes and what it costs;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
   6. The cost. Budget = what the baseline cost x the trials each researcher should get x the
      researchers, with room for the control runs a verdict needs. Duration follows from how
@@ -74,7 +76,7 @@ What you produce, in this order:
 
 Then write the proposal file and send it with `hl platform-experiments propose`. Its
 `metric_reason` and `measurement` are read by the person in place of your code: plain words, no
-jargon they did not use. Put in `questions` whatever the sentence left open and you had to
+jargon they did not use. `accelerator_type` is the type the baseline ran on. Put in `questions` whatever the sentence left open and you had to
 decide (the dataset, the hardware, what counts as good enough), in `risks` what could make the
 result mislead, in `out_of_scope` what you left out on purpose.
 
@@ -84,8 +86,9 @@ work is done: say so in one line and end your turn. Your machine is released the
 back with this conversation if the person asks for a change.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform can
-run), do not invent one: propose nothing, register one hypothesis on `root` whose text says
-why, and end your turn.
+run now), do not invent one. Decline with `hl platform-experiments decline --reason "..."`: the
+person reads the reason in place of a proposal, so say in plain words why, and what would make
+the goal plannable. Then end your turn; a revision starts you again.
 
 An error from `hl` is signal: read its reason and message, fix that exact thing and retry rather
 than retrying blindly.

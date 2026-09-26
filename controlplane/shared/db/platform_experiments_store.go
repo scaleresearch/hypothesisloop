@@ -107,7 +107,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
-       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at
+       ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -127,7 +127,7 @@ WHERE id = $1`
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.AgentImage,
-		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &pe.ProposedAt,
+		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &pe.ProposedAt, &pe.DeclinedReason,
 	)
 	pe.RepositoryURL = domain.RepositoryURL(pe.Repository)
 	if err != nil {

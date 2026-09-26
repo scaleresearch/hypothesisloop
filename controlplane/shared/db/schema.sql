@@ -157,6 +157,10 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_id   TEXT N
 -- machine only while proposed_at is NULL.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposal    JSONB;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPTZ;
+-- Why a draft's planner declined to propose: the goal could not be made into an experiment. A
+-- decline answers the goal as a proposal does, so it sets proposed_at and clears proposal, and
+-- the next proposal clears it. Empty when the planner never declined.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS declined_reason TEXT NOT NULL DEFAULT '';
 
 -- What a person asked a draft's planner to change in its proposal, one row per request, and
 -- whose credential asked (domain.Actor: kind and id). A draft has no hypothesis a comment could

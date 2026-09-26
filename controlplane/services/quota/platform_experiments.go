@@ -44,6 +44,9 @@ type PlatformExperimentsStore interface {
 	NameActors(ctx context.Context, actors []*domain.Actor) error
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
+	// Decline stores why a draft's planner proposes nothing and until when the draft waits for
+	// a person; db.ErrNotDraft for anything but a draft.
+	Decline(ctx context.Context, id, reason string, waitUntil time.Time) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.

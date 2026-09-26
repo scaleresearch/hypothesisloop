@@ -34,8 +34,9 @@ type Proposal struct {
 	// BaselineJobID is the planner's completed job that measured the baseline. Its numbers are
 	// read from the metrics store when the proposal is shown, never copied here.
 	BaselineJobID string `json:"baseline_job_id" doc:"The planner's own completed job in this draft that measured the baseline, with its finding filed."`
-	// AcceleratorType is the catalog type the jobs are sized for. Empty for a run on CPU alone.
-	AcceleratorType string `json:"accelerator_type,omitempty"`
+	// AcceleratorType is the catalog type the jobs are sized for: an accelerator, or a CPU class
+	// for work that needs none. Every job holds units of a priced type, so it is required.
+	AcceleratorType string `json:"accelerator_type" doc:"The catalog type the jobs are sized for, copied from the capacity listing: an accelerator, or a CPU class (kind cpu) for work that needs no accelerator."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
@@ -106,8 +107,8 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (C
 			return experiment, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
-	if p.AcceleratorType != "" && !h.knownAcceleratorType(p.AcceleratorType) {
-		return experiment, refusedProposal("unknown_accelerator_type", "accelerator_type %q is not in the resource catalog: copy one from `hl capacity`, or leave it out for a run on CPU alone", p.AcceleratorType)
+	if !h.knownAcceleratorType(p.AcceleratorType) {
+		return experiment, refusedProposal("unknown_accelerator_type", "accelerator_type %q is not in the resource catalog: copy one from `hl capacity`, a CPU class (kind cpu) for work that needs no accelerator", p.AcceleratorType)
 	}
 	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement} {
 		if strings.TrimSpace(text) == "" {
@@ -155,12 +156,14 @@ func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id stri
 
 func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	access := doc.Access
+	registerDeclineHuma(doc, h)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
-		Summary: "Ask a draft's planner to change its proposal", Tags: []string{"platform-experiments"},
+		Summary: "Ask a draft's planner to change its proposal, or to try again after it declined", Tags: []string{"platform-experiments"},
 		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
 			"the proposal stays readable, proposed_at is cleared, and the platform starts the planner again with what it knew, with the planning limit to propose anew. " +
-			"409 invalid_transition for anything but a draft with a proposal: while the planner still works there is nothing to revise yet.",
+			"A draft its planner declined is revised the same way: say what the planner lacked, and its reason stays readable until it answers again. " +
+			"409 invalid_transition for anything but a draft its planner has answered: while the planner still works there is nothing to revise yet.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -179,7 +182,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		case errors.Is(err, db.ErrNotDraft):
 			return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is revised", in.ID)
 		case errors.Is(err, db.ErrNothingProposed):
-			return nil, invalidTransition("draft %s has no proposal to revise yet: its planner is still working", in.ID)
+			return nil, invalidTransition("draft %s has nothing to revise yet: its planner is still working", in.ID)
 		case err != nil:
 			return nil, h.refusal("revise", err)
 		}
@@ -201,7 +204,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"The platform hosts its coordinator and each researcher, and starts_at is now, so POST /platform-experiments/{id}/start starts it and the platform does if nobody calls. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
-			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
+			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it. " +
+			"What the planner's baseline job cost is real spend of this platform experiment and counts in the run's consumed budget from the start.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body AcceptRequest
@@ -307,6 +311,9 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if pe.Status != domain.PlatformExpDraft {
 		return nil, invalidTransition("platform experiment %s is %s: only a draft is accepted", id, pe.Status)
 	}
+	if pe.ProposedAt != nil && len(pe.Proposal) == 0 {
+		return nil, invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Revise it with POST /platform-experiments/%s/revise, or close it", id, id)
+	}
 	if pe.ProposedAt == nil || len(pe.Proposal) == 0 {
 		return nil, invalidTransition("draft %s has no proposal to accept yet: its planner is still working", id)
 	}
@@ -367,7 +374,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	case errors.Is(err, db.ErrNotDraft):
 		return nil, invalidTransition("platform experiment %s is no longer a draft", id)
 	case errors.Is(err, db.ErrNothingProposed):
-		return nil, invalidTransition("draft %s has no proposal to accept: it is being revised", id)
+		return nil, invalidTransition("draft %s has no proposal to accept", id)
 	case errors.Is(err, db.ErrMaxHostedReached):
 		return nil, refusedProposal("invalid_agents", "%s", maxHostedReached(pe.MaxHosted))
 	case err != nil:
@@ -398,6 +405,60 @@ func (h *PlatformExperimentsHandler) nameActors(ctx context.Context, pe *domain.
 
 // maxRevisionBytes bounds one request to change a proposal.
 const maxRevisionBytes = domain.MaxGoalBytes
+
+// maxDeclineBytes bounds the reason a planner gives for proposing nothing.
+const maxDeclineBytes = maxProposalTextBytes
+
+func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
+	access := doc.Access
+	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+		OperationID: "put-decline", Method: "PUT", Path: "/platform-experiments/{id}/decline",
+		Summary: "Decline to propose, with the reason", Tags: []string{"platform-experiments"},
+		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
+			"nothing measurable, or nothing this platform can run. reason is read by the person who wrote the goal, in plain words, with what would make it plannable. " +
+			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and proposed_at, a proposal made before is cleared so there is nothing to accept, " +
+			"the planner's machine is released, and the person revises the draft or closes it. The next proposal clears the reason.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Reason string `json:"reason" doc:"Why no experiment is proposed, and what would make the goal plannable."`
+		}
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
+		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		if _, err := h.requirePlanner(ctx, in.ID); err != nil {
+			return nil, err
+		}
+		reason := strings.TrimSpace(in.Body.Reason)
+		if reason == "" || len(reason) > maxDeclineBytes {
+			return nil, refusedProposal("missing_explanation", "reason is required and at most %d bytes: the person who wrote the goal reads it in place of a proposal", maxDeclineBytes)
+		}
+		pe, err := h.svc.store.GetPlatformExperiment(ctx, in.ID)
+		if err != nil {
+			return nil, h.refusal("read draft", err)
+		}
+		if pe == nil {
+			return nil, huma.Error404NotFound("platform experiment not found")
+		}
+		if pe.Status != domain.PlatformExpDraft {
+			return nil, notADraft(pe)
+		}
+		err = h.svc.store.Decline(ctx, in.ID, reason, time.Now().UTC().Add(h.planning.ProposedFor))
+		if errors.Is(err, db.ErrNotDraft) {
+			return nil, notADraft(pe)
+		}
+		if err != nil {
+			return nil, h.refusal("store decline", err)
+		}
+		h.logger.Info("draft declined", zap.String("id", in.ID))
+		pe, err = h.svc.store.GetPlatformExperiment(ctx, in.ID)
+		if err != nil || pe == nil {
+			return nil, h.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
+		}
+		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+	})
+}
 
 func notADraft(pe *domain.PlatformExperiment) error {
 	return &reasonError{status: http.StatusConflict, Reason: "not_a_draft", Message: "platform experiment " + pe.ID + " is " + string(pe.Status) + ": only a draft is proposed, revised or accepted"}

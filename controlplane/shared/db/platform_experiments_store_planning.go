@@ -110,7 +110,7 @@ var ErrNotDraft = errors.New("platform experiment is not a draft")
 // draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
 func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
 	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments SET proposal = $2, proposed_at = now(), ends_at = $3, updated_at = now()
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()
 WHERE id = $1 AND status = 'draft'`, id, proposal, waitUntil)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
@@ -121,8 +121,25 @@ WHERE id = $1 AND status = 'draft'`, id, proposal, waitUntil)
 	return nil
 }
 
-// ErrNothingProposed is returned for accepting a draft whose planner has proposed nothing, or
-// whose proposal is being revised.
+// Decline stores why a draft's planner proposes nothing. It answers the goal as a proposal
+// does: the draft waits for a person until waitUntil and the planner's machine is released. A
+// proposal made before no longer stands, so it is cleared and there is nothing to accept.
+func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time) error {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), ends_at = $3, updated_at = now()
+WHERE id = $1 AND status = 'draft'`, id, reason, waitUntil)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Decline: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotDraft
+	}
+	return nil
+}
+
+// ErrNothingProposed is returned for accepting a draft whose planner has proposed nothing or
+// declined, or whose proposal is being revised, and for revising one the planner has not
+// answered.
 var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
@@ -149,7 +166,7 @@ func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.P
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var status string
 	var proposed bool
-	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
+	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
 		return ErrNotDraft
 	}
