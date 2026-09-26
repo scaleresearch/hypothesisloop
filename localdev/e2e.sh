@@ -108,7 +108,7 @@ if [[ -n "${HL_GITHUB_APP_ID}" && -n "$(lib_env_value HL_E2E_GITHUB_REPO)" ]]; t
 fi
 
 if [[ $# -eq 0 ]]; then
-  set -- e2e -m "not hardware"
+  set -- e2e -m "not hardware and not real_providers"
 fi
 cd tests
 uv run pytest "$@"

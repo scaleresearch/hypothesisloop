@@ -25,6 +25,7 @@ markers = [
     "slow: duration-only marker, orthogonal to isolation — excluded from the default quick loop",
     "hardware: needs real accelerator hardware behavior beyond generic scheduling; skipped unless explicitly requested",
     "accelerator: touches at least one real accelerator (as opposed to pure API/DB state)",
+    "real_providers: rents sandboxes and GPU instances at real vendors and spends model tokens; never part of a suite run, only when named with -m real_providers",
 ]
 timeout = 240
 timeout_method = "thread"
