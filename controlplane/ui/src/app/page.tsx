@@ -20,7 +20,7 @@ export default async function LandingPage() {
         <Logo />
         <nav aria-label="Account" className="flex items-center gap-2">
           {inside ? (
-            <ButtonLink href={HOME_PATH} variant="primary">Console</ButtonLink>
+            <ButtonLink href={HOME_PATH} variant="primary">Experiments</ButtonLink>
           ) : (
             <>
               <ButtonLink href={LOGIN_PATH} variant="ghost">Sign in</ButtonLink>

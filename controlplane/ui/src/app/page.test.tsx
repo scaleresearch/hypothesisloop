@@ -27,7 +27,7 @@ describe('the landing page', () => {
   })
 
   it('offers a signed-in visitor the console and nothing else', async () => {
-    expect(await show(true)).toEqual([['Console', '/console']])
+    expect(await show(true)).toEqual([['Experiments', '/console']])
   })
 
   it('says what the product is in one heading and plain text, with no control in the page itself', async () => {

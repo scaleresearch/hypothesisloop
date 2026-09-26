@@ -701,7 +701,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
     <div>
       {/* Header */}
       <PageHeader
-        back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
+        back={{ label: 'Experiments', onClick: () => router.push('/platform-experiments') }}
         title={pe.name}
         description={
           <div className="flex flex-wrap items-center gap-2.5">

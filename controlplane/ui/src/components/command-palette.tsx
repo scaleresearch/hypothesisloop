@@ -22,7 +22,7 @@ type CommandItem = {
 }
 
 const DESTINATIONS: Omit<CommandItem, 'action'>[] = [
-  { id: 'nav-pe',   label: 'Platform Experiments', sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
+  { id: 'nav-pe',   label: 'Experiments',          sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
   { id: 'nav-hyp',  label: 'Hypotheses',           sub: 'Go to page', icon: Lightbulb,    keywords: 'hypothesis graph claims findings' },
   { id: 'nav-agt',  label: 'Research Agents',      sub: 'Go to page', icon: Bot,          keywords: 'agents quota balances' },
   { id: 'nav-jobs', label: 'Jobs',                 sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },

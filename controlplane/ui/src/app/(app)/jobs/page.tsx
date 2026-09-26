@@ -138,7 +138,7 @@ function JobsPageContent() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Agent-submitted workload runs within Platform Experiments — status, capacity tier, accelerator cost in AccH"
+        description="What agents ran for their experiments, with status and the compute each used."
       />
 
       {/* KPI strip */}

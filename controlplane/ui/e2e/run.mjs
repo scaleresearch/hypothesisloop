@@ -344,7 +344,7 @@ async function scenarios(browser) {
   await visitorPage.goto(UI)
   await visitorPage.getByRole('heading', { level: 1 }).waitFor()
   assert.equal(new URL(visitorPage.url()).pathname, '/', 'a visitor without a session stays on the landing page')
-  assert.equal(await visitorPage.getByRole('link', { name: 'Console' }).count(), 0)
+  assert.equal(await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).count(), 0)
   await shot(visitorPage, 'landing-signed-out')
   await visitorPage.getByRole('link', { name: 'Sign up' }).click()
   await visitorPage.waitForURL(`${UI}/login?mode=sign-up`)
@@ -386,11 +386,11 @@ async function scenarios(browser) {
     await visitorPage.waitForURL(`${UI}/platform-experiments`)
   }
 
-  section('the landing page offers a signed-in visitor the console')
+  section('the landing page offers a signed-in visitor the experiments')
   await visitorPage.goto(UI)
   assert.equal(await visitorPage.getByRole('link', { name: 'Sign in' }).count(), 0)
   await shot(visitorPage, 'landing-signed-in')
-  await visitorPage.getByRole('link', { name: 'Console' }).click()
+  await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).click()
   await visitorPage.waitForURL(`${UI}/platform-experiments`)
   await visitor.close()
 
