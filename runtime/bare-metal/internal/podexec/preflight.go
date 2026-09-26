@@ -100,7 +100,7 @@ func (e *Executor) Preflight(ctx context.Context, client *http.Client) ([]string
 	if e.storageQuotaEnforced {
 		lines = append(lines, "job storage: the engine holds each job to the storage it asked for")
 	} else {
-		lines = append(lines, "job storage: a job's storage request is counted and not enforced here: "+e.storageQuotaRefusal)
+		lines = append(lines, "job storage: a job's storage request is counted and not enforced here, the engine refuses a size: "+e.storageQuotaRefusal)
 	}
 	return lines, nil
 }

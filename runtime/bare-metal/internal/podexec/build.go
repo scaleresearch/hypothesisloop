@@ -230,7 +230,8 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	}
 
 	if e.storageQuotaEnforced {
-		cs.StorageOptSize = group.Storage
+		// In bytes: podman reads no binary suffix ("128Mi") in a size, docker does.
+		cs.StorageOptSize = fmt.Sprintf("%d", storageQty.Value())
 	}
 
 	// The checkpoint window is recorded separately from the shutdown grace rather than folded

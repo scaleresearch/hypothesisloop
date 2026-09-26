@@ -89,7 +89,7 @@ type containerSpec struct {
 	NanoCPUs       int64
 	MemoryBytes    int64
 	ShmSizeBytes   int64
-	StorageOptSize string   // storage-opt "size" value, e.g. "10Gi"; empty when not enforced
+	StorageOptSize string   // storage-opt "size" value in bytes; empty when not enforced
 	Devices        []string // host device paths, mapped straight through to the container
 	Mounts         []string // host paths bind-mounted read-write at the same path in the container (e.g. a hugetlbfs mount)
 	// ReadOnlyMounts is JobSpec.HostMounts, resolved and validated (see BuildContainerSpec):

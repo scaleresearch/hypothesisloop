@@ -44,47 +44,6 @@ func totalMemoryBytes() (int64, error) {
 	return 0, fmt.Errorf("podexec: MemTotal not found in /proc/meminfo")
 }
 
-// storageQuota says whether the engine holds a container to a storage-opt size, and why not
-// when it does not. Both engines enforce it in one case only: the overlay driver, with its
-// store on XFS mounted with project quotas. The store is the engine's own directory, wherever
-// the node's scratch directory is, so it is the store's mount that is read, from mountinfoPath
-// (/proc/self/mountinfo). An engine whose store is not a directory of this host (a remote
-// one) is one this agent cannot vouch for.
-func storageQuota(driver, storeDir, mountinfoPath string) (enforced bool, why string, err error) {
-	if driver != "overlay" && driver != "overlay2" {
-		return false, fmt.Sprintf("the engine's storage driver is %s, which holds no container to a size", driver), nil
-	}
-	if info, err := os.Stat(storeDir); err != nil || !info.IsDir() {
-		return false, fmt.Sprintf("the engine's store %s is not a directory of this host", storeDir), nil
-	}
-	mountinfo, err := os.ReadFile(mountinfoPath)
-	if err != nil {
-		return false, "", fmt.Errorf("podexec: read this host's mounts: %w", err)
-	}
-	mountPoint, fsType, options := "", "", ""
-	for _, line := range strings.Split(string(mountinfo), "\n") {
-		before, after, found := strings.Cut(line, " - ")
-		fields, super := strings.Fields(before), strings.Fields(after)
-		if !found || len(fields) < 5 || len(super) < 3 {
-			continue
-		}
-		point := fields[4]
-		under := point == "/" || storeDir == point || strings.HasPrefix(storeDir, point+"/")
-		if under && len(point) >= len(mountPoint) {
-			mountPoint, fsType, options = point, super[0], super[2]
-		}
-	}
-	if fsType != "xfs" {
-		return false, fmt.Sprintf("the engine's store %s is on %s, and only XFS holds a container to a size", storeDir, fsType), nil
-	}
-	for _, option := range strings.Split(options, ",") {
-		if option == "prjquota" || option == "pquota" {
-			return true, "", nil
-		}
-	}
-	return false, fmt.Sprintf("the engine's store %s is on XFS mounted at %s without project quotas (the pquota mount option)", storeDir, mountPoint), nil
-}
-
 // scratchCapacityBytes statfs's the configured scratch directory, which is what this node
 // reports as its storage.
 func scratchCapacityBytes(dir string) (total, available int64, err error) {

@@ -69,7 +69,7 @@ type Executor struct {
 	docker engine
 	// engineName is the resolved engine's name ("podman" or "docker"), for logging only.
 	engineName string
-	// storageQuotaEnforced is decided once at startup (see storageQuota): whether the engine
+	// storageQuotaEnforced is decided once at startup (see probeStorageQuota): whether the engine
 	// holds a container to a storage-opt size, with storageQuotaRefusal the reason when not. When false,
 	// Storage is still a required, recorded, accounted-for field (capacity math still treats it
 	// as a hard dimension) but is not passed to the engine as an enforced quota — see
@@ -170,13 +170,9 @@ func New(cfg Config) (*Executor, error) {
 	if _, _, err := scratchCapacityBytes(cfg.ScratchDir); err != nil {
 		return nil, err
 	}
-	infoCtx, infoCancel := context.WithTimeout(context.Background(), engineCallTimeout)
-	defer infoCancel()
-	info, err := docker.Info(infoCtx, client.InfoOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("podexec: read the engine's storage: %w", err)
-	}
-	quotaEnforced, quotaRefusal, err := storageQuota(info.Info.Driver, info.Info.DockerRootDir, "/proc/self/mountinfo")
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*engineCallTimeout)
+	defer probeCancel()
+	quotaEnforced, quotaRefusal, err := probeStorageQuota(probeCtx, docker)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +191,7 @@ func New(cfg Config) (*Executor, error) {
 }
 
 // StorageQuotaEnforced reports whether this node can enforce per-container storage quotas
-// (see storageQuota) — surfaced so main.go can log it plainly at startup.
+// (see probeStorageQuota) — surfaced so main.go can log it plainly at startup.
 func (e *Executor) StorageQuotaEnforced() bool { return e.storageQuotaEnforced }
 
 // NodeName returns this executor's node identity, for callers (main) that log it.

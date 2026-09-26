@@ -13,7 +13,7 @@ import (
 func preflightExecutor(apiURL string, devices ...acceleratorDevice) *Executor {
 	return &Executor{
 		apiURL: apiURL, engineName: "docker", nodeName: "node-1", clusterID: "0123", scratchDir: "/scratch",
-		storageQuotaRefusal: "the engine's store /var/lib/docker is on ext4, and only XFS holds a container to a size",
+		storageQuotaRefusal: "--storage-opt is supported only for overlay over xfs with 'pquota' mount option",
 		probe:               func(context.Context) ([]acceleratorDevice, error) { return devices, nil },
 	}
 }
@@ -61,7 +61,7 @@ func TestPreflightNamesTheAcceleratorsAsJobsAskForThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	said := strings.Join(lines, "\n")
-	for _, want := range []string{"accelerators: 2 x tenstorrent.com/chipArch=blackhole", "hugepages: 4 x 1 GiB reserved", "not enforced here: the engine's store /var/lib/docker is on ext4", "container engine: docker"} {
+	for _, want := range []string{"accelerators: 2 x tenstorrent.com/chipArch=blackhole", "hugepages: 4 x 1 GiB reserved", "not enforced here, the engine refuses a size: --storage-opt is supported only", "container engine: docker"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("preflight did not say %q:\n%s", want, said)
 		}
