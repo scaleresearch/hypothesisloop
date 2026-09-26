@@ -3,52 +3,64 @@
 import { Fragment, Suspense, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import {
-  fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage, fetchPlatformExperimentQuotas,
-  fetchDonationsPage, fetchExperimentsPage, fetchExperimentStats, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
+  ApiError, fetchAgentQuota, fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage,
+  fetchExperimentStats, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
 } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
-import type { PlatformExperiment, AgentQuota } from '@/types'
+import type { Draft } from '@/lib/planning'
+import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Badge, AgentKindBadge, NoSummary } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { FormField } from '@/components/ui/form-field'
 import { StatTile } from '@/components/ui/stat-tile'
-import { ColumnTh, Table } from '@/components/ui/table'
-import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { ColumnTh, Table, num } from '@/components/ui/table'
+import { Loading, ErrorMessage, EmptyState, InlineError } from '@/components/ui/status-message'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
 import { formatAccH } from '@/lib/format'
+import { budgetKind, budgetUnit } from '@/lib/units'
 import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 
 const PAGE_SIZE = 25
 
+function unitOf(pe: PlatformExperiment): string {
+  return budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
+}
+
+// One agent's compute in one experiment. An agent that is not in the experiment has none, which
+// the API answers 404 and this shows as no row.
 function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: PlatformExperiment; colSpan: number }) {
-  const { data: quotas } = useSWR<AgentQuota[]>(
-    ['pe-quotas', pe.id],
-    () => fetchPlatformExperimentQuotas(pe.id),
-    { refreshInterval: 30_000 },
+  const { data: q, error } = useSWR(
+    ['agent-quota', pe.id, agentId],
+    () => fetchAgentQuota(pe.id, agentId),
+    { refreshInterval: 30_000, shouldRetryOnError: false },
   )
-  const q = quotas?.find(q => q.agent_id === agentId)
+  if (error instanceof ApiError && error.status === 404) return null
+  if (error) return (
+    <tr><td colSpan={colSpan} className="pl-7"><InlineError>Could not load its compute in {pe.name}: {error.message}</InlineError></td></tr>
+  )
   if (!q) return null
+  const unit = unitOf(pe)
   const totalRem = quotaRemainingAccH(q)
   return (
     <tr className="bg-foreground/5">
-      <td colSpan={colSpan} className="pl-7 font-mono text-2xs">
+      <td colSpan={colSpan} className="pl-7 text-2xs">
         <div className="flex flex-wrap items-center gap-6">
-          <Link href={`/platform-experiments/${pe.id}`} className="text-xs text-accent hover:underline">{pe.name}</Link>
+          <TextLink href={`/platform-experiments/${pe.id}`} className="text-xs">{pe.name}</TextLink>
           <span>
-            <Badge status="guaranteed" className="mr-1">G</Badge>
-            {formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} AccH used
+            <Badge status="guaranteed" className="mr-1">Guaranteed</Badge>
+            <span className="font-mono">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)}</span> {unit} used
           </span>
           <span>
-            <Badge status="burst" className="mr-1">B</Badge>
-            {formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} AccH used
+            <Badge status="burst" className="mr-1">Burst</Badge>
+            <span className="font-mono">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</span> {unit} used
           </span>
-          <span className={totalRem > 0 ? 'text-success' : 'text-danger'}>{formatAccH(totalRem)} AccH left</span>
+          <span className={totalRem > 0 ? 'text-success' : 'text-danger'}><span className="font-mono">{formatAccH(totalRem)}</span> {unit} left</span>
         </div>
       </td>
     </tr>
@@ -57,7 +69,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
 
 function AgentQuotaRows({ agentId, experiments, colSpan }: { agentId: string; experiments: PlatformExperiment[]; colSpan: number }) {
   if (experiments.length === 0) return (
-    <tr><td colSpan={colSpan} className="pl-5 text-xs text-subtle">No running platform experiments</td></tr>
+    <tr><td colSpan={colSpan} className="pl-5 text-xs text-subtle">No running experiments</td></tr>
   )
   return <>{experiments.map(pe => <AgentExperimentQuota key={pe.id} agentId={agentId} pe={pe} colSpan={colSpan} />)}</>
 }
@@ -75,7 +87,6 @@ function AgentsPageContent() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
   const [experimentFilter, setExperimentFilter] = useQueryParam('platform_experiment_id')
   const [page, setPage] = useState(0)
-  const [donationPage, setDonationPage] = useState(0)
 
   const { data, error, isLoading } = useSWR(
     ['agents-page', project.id, experimentFilter, page],
@@ -98,24 +109,21 @@ function AgentsPageContent() {
     { refreshInterval: 30_000 },
   )
 
-  const { data: donations } = useSWR(
-    ['donations-open', project.id, donationPage],
-    () => fetchDonationsPage({ project_id: project.id, status: 'open', limit: PAGE_SIZE, offset: donationPage * PAGE_SIZE }),
-    { refreshInterval: 15_000, keepPreviousData: true },
-  )
-  const donationItems = donations?.items ?? []
-  const donationTotal = donations?.total ?? 0
-
   const { data: selectedPE } = useSWR(
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
 
-  // What each agent did in the selected experiment: its jobs, its best result and standing, and the
-  // completed jobs it left without a summary (tallied from at most the 50 newest of them).
+  // What each agent did in the selected experiment: its jobs, its best result and standing, and
+  // how many of its completed jobs it left without a summary.
   const { data: jobStats } = useSWR(
     experimentFilter ? ['pe-stats-by-agent', experimentFilter] : null,
     () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
+    { refreshInterval: 15_000 },
+  )
+  const { data: summariesDue } = useSWR(
+    experimentFilter ? ['pe-summaries-due-by-agent', experimentFilter] : null,
+    () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent', needs_summary: true }),
     { refreshInterval: 15_000 },
   )
   const { data: results } = useSWR(
@@ -123,19 +131,14 @@ function AgentsPageContent() {
     () => fetchPlatformExperimentResults(experimentFilter),
     { refreshInterval: 15_000 },
   )
-  const { data: unsummarized } = useSWR(
-    experimentFilter ? ['pe-unsummarized-jobs', experimentFilter] : null,
-    () => fetchExperimentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, needs_summary: true, limit: 50 }).then(p => p.items),
-    { refreshInterval: 15_000 },
-  )
   const ranking = results?.metrics[0]
   const colSpan = experimentFilter ? 7 : 4
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
-    { accessorKey: 'id', header: 'Agent ID' },
-    { accessorKey: 'top3_count', header: 'Bonus Eligibility' },
-    { accessorKey: 'performance_score', header: 'Perf Score' },
+    { accessorKey: 'name', header: 'Agent' },
+    { accessorKey: 'top3_count', header: 'Top-3 bonus' },
+    { accessorKey: 'performance_score', header: 'Performance score' },
   ], [])
   const agentTable = useReactTable({
     data: agents ?? [],
@@ -147,84 +150,43 @@ function AgentsPageContent() {
   })
   const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
 
-  const baseShare = selectedPE && selectedPE.signup_count > 0 ? selectedPE.budget_accelerator_hours / selectedPE.signup_count : 0
+  const share = selectedPE && selectedPE.signup_count > 0
+    ? `In ${selectedPE.name} that share is ${formatAccH(selectedPE.budget_accelerator_hours / selectedPE.signup_count)} ${unitOf(selectedPE)}: ${formatAccH(selectedPE.budget_accelerator_hours)} among ${selectedPE.signup_count} ${selectedPE.signup_count === 1 ? 'agent' : 'agents'}. `
+    : ''
 
   return (
     <div>
       <PageHeader
         title="Research Agents"
-        description="Researcher agent bonus eligibility and per-experiment quota allocation"
+        description="The agents of this project, how they have placed, and the compute each holds in running experiments."
       />
 
-      {/* KPI row: every agent the filter matches. */}
-      <div className="mb-4 grid grid-cols-4 gap-2.5">
-        <StatTile label="Registered Agents" value={total || '—'} />
-        <StatTile label="Top-3 Eligible" value={stats?.top3_eligible ?? '—'} tone="success" sub="+25% quota bonus" />
-        <StatTile label="Avg Perf Bonus" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
-        <StatTile label="Open Donation Requests" value={donationTotal} tone={donationTotal > 0 ? 'warning' : undefined} />
+      <div className="mb-4 grid grid-cols-3 gap-2.5">
+        <StatTile label="Agents" value={total || '—'} />
+        <StatTile label="With the top-3 bonus" value={stats?.top3_eligible ?? '—'} tone="success" sub="25% more guaranteed compute" />
+        <StatTile label="Average performance score" value={stats?.total ? stats.avg_performance_score.toFixed(3) : '—'} />
       </div>
 
-      <div className="grid grid-cols-2 items-start gap-3">
-        {/* Experiment filter */}
-        <Card>
-          <CardHeader>Filter</CardHeader>
-          <CardContent className="flex flex-wrap items-center gap-2.5">
-            <span className="text-xs text-muted">By experiment:</span>
-            <PlatformExperimentSelect
-              value={experimentFilter}
-              onChange={v => { setExperimentFilter(v); setPage(0) }}
-              allLabel="All experiments"
-            />
-            {experimentFilter && (
-              <Button size="sm" onClick={() => { setExperimentFilter(''); setPage(0) }}>Clear</Button>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Bonus formula — the underlying formula only produces a concrete number within a
-            single platform experiment (base_share depends on that experiment's own budget and
-            signup count), so show real computed numbers once one is selected; otherwise show
-            the formula as a reference only. */}
-        {selectedPE ? (
-          <Card>
-            <CardHeader>Quota Formula — {selectedPE.name}</CardHeader>
-            <CardContent>
-              <Table>
-                <tbody>
-                  <tr><td>Base share</td><td className="font-mono text-xs">{formatAccH(selectedPE.budget_accelerator_hours)} ÷ {selectedPE.signup_count} = {formatAccH(baseShare)} AccH</td></tr>
-                  <tr><td>Top-3 bonus <Badge tone="success" className="ml-1">+25%</Badge></td><td className="font-mono text-xs text-muted">any top-3 placement in prior experiments</td></tr>
-                  <tr><td>Guaranteed quota</td><td className="font-mono text-xs text-muted">{formatAccH(baseShare)} × (1 + bonus)</td></tr>
-                  <tr><td>Burst quota</td><td className="font-mono text-xs text-muted">guaranteed × 2.0 — preemptable</td></tr>
-                </tbody>
-              </Table>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardHeader>Quota Bonus Formula <span className="text-2xs font-normal text-subtle">(reference — select an experiment for real numbers)</span></CardHeader>
-            <CardContent>
-              <Table>
-                <tbody>
-                  <tr><td>Base share</td><td className="font-mono text-xs text-muted">total_budget_AccH ÷ signed_up_agent_count</td></tr>
-                  <tr><td>Top-3 bonus <Badge tone="success" className="ml-1">+25%</Badge></td><td className="font-mono text-xs text-muted">any top-3 placement in prior experiments</td></tr>
-                  <tr><td>Guaranteed quota</td><td className="font-mono text-xs text-muted">base_share × (1 + bonus)</td></tr>
-                  <tr><td>Burst quota</td><td className="font-mono text-xs text-muted">guaranteed × 2.0 — preemptable</td></tr>
-                </tbody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
+      <div className="mb-4 grid gap-2">
+        <FormField inline label="Experiment">
+          <PlatformExperimentSelect
+            value={experimentFilter}
+            onChange={v => { setExperimentFilter(v); setPage(0) }}
+            allLabel="All experiments"
+          />
+        </FormField>
+        <p className="max-w-[860px] text-xs text-muted">
+          An experiment&apos;s budget is split equally among its agents when it starts. {share}An agent that placed in the
+          top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
+          twice that amount as burst compute, which can be preempted.
+        </p>
       </div>
 
       {isLoading && <Loading />}
-      {error && <ErrorMessage>Cannot reach quota service.</ErrorMessage>}
+      {error && <ErrorMessage className="mb-4">Could not load the agents of {project.name}: {error.message}</ErrorMessage>}
 
-      {/* Agent table */}
       <Card>
-        <CardHeader>
-          Registered Agents
-          {agents && <span className="text-xs font-normal text-subtle">({total})</span>}
-        </CardHeader>
+        <CardHeader><CardTitle note={agents ? total : undefined}>Agents</CardTitle></CardHeader>
         <CardContent scrollX>
           <Table>
             <thead>
@@ -243,7 +205,7 @@ function AgentsPageContent() {
                     <th>Summaries filed</th>
                   </>
                 )}
-                <th></th>
+                <th><span className="sr-only">Compute</span></th>
               </tr>
             </thead>
             <tbody>
@@ -251,7 +213,7 @@ function AgentsPageContent() {
                 <tr>
                   <td colSpan={colSpan} className="p-0">
                     <EmptyState>
-                      {experimentFilter ? 'No agents signed up for this experiment.' : 'No agents registered.'}
+                      {experimentFilter ? 'No agents in this experiment.' : 'No agents yet. An agent appears here once it is added to an experiment.'}
                     </EmptyState>
                   </td>
                 </tr>
@@ -260,86 +222,50 @@ function AgentsPageContent() {
                 const standing = ranking?.standings.find(st => st.agent_id === a.id)
                 const jobs = jobStats?.groups?.[a.id]
                 const completed = jobs?.by_status.COMPLETED ?? 0
-                const missing = (unsummarized ?? []).filter(j => j.agent_id === a.id)
+                const due = summariesDue?.groups?.[a.id]?.total ?? 0
+                const shown = selectedPE ? [selectedPE] : running
                 return (
                   <Fragment key={a.id}>
-                    <tr className="cursor-pointer" onClick={() => setExpandedAgent(isExpanded ? null : a.id)}>
-                      <td className="font-mono text-xs font-bold">
-                        {a.id}
-                        <AgentKindBadge kind={a.kind} className="ml-2" />
-                      </td>
+                    <tr
+                      className="cursor-pointer"
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      onClick={() => setExpandedAgent(isExpanded ? null : a.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) setExpandedAgent(isExpanded ? null : a.id) }}
+                    >
+                      <td className="text-xs font-semibold" title={a.id}>{a.name}</td>
                       <td className="text-center">
-                        {a.top3_count > 0 ? <Badge tone="success">+25% Top-3</Badge> : <span className="text-xs text-subtle">—</span>}
+                        {a.top3_count > 0 ? <Badge tone="success">+25%</Badge> : <span className="text-xs text-subtle">—</span>}
                       </td>
-                      <td className="text-right font-mono text-xs">{a.performance_score.toFixed(3)}</td>
+                      <td className={num}>{a.performance_score.toFixed(3)}</td>
                       {experimentFilter && (
                         <>
-                          <td className="text-right font-mono text-xs">
+                          <td className={num}>
                             {standing?.experiment_id ? (
-                              <Link href={`/jobs/${standing.experiment_id}`} className="text-accent hover:underline" onClick={e => e.stopPropagation()}>
+                              <TextLink href={`/jobs/${standing.experiment_id}`} onClick={e => e.stopPropagation()}>
                                 #{standing.rank} · {standing.best.toFixed(4)}
-                              </Link>
-                            ) : <span className="text-xs text-subtle">—</span>}
-                            {missing.some(j => j.id === standing?.experiment_id) && <div><NoSummary /></div>}
+                              </TextLink>
+                            ) : <span className="text-subtle">—</span>}
                           </td>
-                          <td className="font-mono text-2xs">
+                          <td className="text-2xs">
                             {jobs
                               ? Object.entries(jobs.by_status).map(([status, n]) => `${n} ${status.toLowerCase()}`).join(' · ')
                               : <span className="text-xs text-subtle">none</span>}
                           </td>
-                          <td className={clsx('font-mono text-2xs', missing.length > 0 && 'text-warning')}>
-                            {completed - missing.length} of {completed} completed
+                          <td className={clsx('text-2xs', due > 0 && 'text-warning')}>
+                            {summariesDue ? `${completed - due} of ${completed} completed` : '—'}
                           </td>
                         </>
                       )}
-                      <td className="text-xs text-subtle">{isExpanded ? '▲' : '▼'}</td>
+                      <td className="whitespace-nowrap text-right text-xs text-subtle">{isExpanded ? 'Hide compute ▲' : 'Compute ▼'}</td>
                     </tr>
-                    {isExpanded && (selectedPE ? [selectedPE] : running) && (
-                      <AgentQuotaRows agentId={a.id} experiments={(selectedPE ? [selectedPE] : running)!} colSpan={colSpan} />
-                    )}
+                    {isExpanded && shown && <AgentQuotaRows agentId={a.id} experiments={shown} colSpan={colSpan} />}
                   </Fragment>
                 )
               })}
             </tbody>
           </Table>
           <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
-        </CardContent>
-      </Card>
-
-      {/* Compute Donation Requests */}
-      <Card>
-        <CardHeader>
-          Compute Donation Requests
-          {donationTotal > 0 && <span className="font-normal text-accent">({donationTotal} open)</span>}
-        </CardHeader>
-        <CardContent>
-          {donationItems.length === 0 ? (
-            <EmptyState>No open donation requests. Agents can request extra compute via POST /donations.</EmptyState>
-          ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <th>Agent</th>
-                  <th className="text-right">Wants (AccH)</th>
-                  <th>Reason</th>
-                  <th>Status</th>
-                  <th>Requested</th>
-                </tr>
-              </thead>
-              <tbody>
-                {donationItems.map(d => (
-                  <tr key={d.id}>
-                    <td className="font-mono text-xs font-semibold">{d.agent_name || d.agent_id}</td>
-                    <td className="text-right font-mono text-xs">{d.credits_want}</td>
-                    <td className="max-w-[300px] text-xs text-muted">{d.reason}</td>
-                    <td><Badge status={d.status}>{d.status}</Badge></td>
-                    <td className="text-2xs text-subtle">{new Date(d.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-          <Pagination page={donationPage} pageSize={PAGE_SIZE} total={donationTotal} onPageChange={setDonationPage} />
         </CardContent>
       </Card>
     </div>
