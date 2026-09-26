@@ -682,6 +682,14 @@ func (a *Agent) logTailLines() int {
 	return a.LogTailLines
 }
 
+// CheckAccess makes the call every pass starts with and acts on nothing it answers, so an
+// installer learns that the control plane refuses this cluster's token before it starts an
+// agent that would only log the refusal.
+func (a *Agent) CheckAccess(ctx context.Context) error {
+	_, _, err := a.fetchDesiredState(ctx, a.Executor)
+	return err
+}
+
 // RunDetach is the detach command of an agent binary: it ends the cluster named by the
 // environment the agent itself runs with and says what became of its jobs. A cluster already
 // removed is the state asked for.

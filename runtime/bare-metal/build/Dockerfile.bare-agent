@@ -1,7 +1,15 @@
-# The agent links the NVIDIA management library through cgo, so it needs a C compiler for the
-# target. The compiler runs on the build host and cross-compiles, so building for another
-# platform does not emulate it.
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+# This image carries the bare-metal agent to a node; it is not run there. The node's engine
+# copies /usr/local/bin/bare-agent out of it and the binary installs itself as a systemd unit
+# (hl cluster add NAME --bare-metal prints the command).
+#
+# The agent links the NVIDIA management library through cgo, so it is linked against glibc, and
+# a binary runs on hosts whose glibc has every symbol version it was linked against. Built on
+# Ubuntu 20.04 it asks for nothing newer than glibc 2.17, and the build fails if that changes:
+# 2.17 is the floor (RHEL 7, Debian 8, Ubuntu 14.04 and later). The compiler runs on the build
+# host and cross-compiles, so building for another platform does not emulate it.
+FROM --platform=$BUILDPLATFORM golang:1.25 AS go
+
+FROM --platform=$BUILDPLATFORM ubuntu:20.04 AS builder
 ARG TARGETOS TARGETARCH
 RUN set -e; \
     case "$TARGETARCH" in \
@@ -9,18 +17,26 @@ RUN set -e; \
       arm64) triple=aarch64-linux-gnu; package=gcc-aarch64-linux-gnu ;; \
       *) echo "bare-agent is built for amd64 and arm64, not $TARGETARCH" >&2; exit 1 ;; \
     esac; \
+    apt-get update; \
     if [ "$(dpkg --print-architecture)" = "$TARGETARCH" ]; then \
-      ln -s "$(command -v gcc)" /usr/local/bin/target-cc; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc6-dev binutils ca-certificates; \
+      ln -s "$(command -v gcc)" /usr/local/bin/target-cc; ln -s "$(command -v objdump)" /usr/local/bin/target-objdump; \
     else \
-      apt-get update && apt-get install -y --no-install-recommends "$package" "libc6-dev-$TARGETARCH-cross" && rm -rf /var/lib/apt/lists/*; \
-      ln -s "$(command -v "$triple-gcc")" /usr/local/bin/target-cc; \
-    fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$package" "libc6-dev-$TARGETARCH-cross" ca-certificates; \
+      ln -s "$(command -v "$triple-gcc")" /usr/local/bin/target-cc; ln -s "$(command -v "$triple-objdump")" /usr/local/bin/target-objdump; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=go /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH
 WORKDIR /app
 COPY . .
 COPY vendor ./vendor
-RUN CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /bare-agent ./runtime/bare-metal/cmd/bare-agent
+RUN set -e; \
+    CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /bare-agent ./runtime/bare-metal/cmd/bare-agent; \
+    newest="$(target-objdump -T /bare-agent | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"; \
+    echo "newest glibc symbol version linked: $newest"; \
+    [ "$(printf '%s\n' GLIBC_2.17 "$newest" | sort -V | tail -1)" = GLIBC_2.17 ] || { echo "bare-agent needs $newest, above the floor of 2.17" >&2; exit 1; }
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM scratch
 COPY --from=builder /bare-agent /usr/local/bin/bare-agent
-ENTRYPOINT ["bare-agent"]
+ENTRYPOINT ["/usr/local/bin/bare-agent"]

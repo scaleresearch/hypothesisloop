@@ -11,12 +11,12 @@
 //	CLUSTER_NAME          — this node's stable identity, registered as its own cluster
 //	API_URL               — base URL of the control-plane API
 //	                        (must also be reachable from *inside* a workload container)
-//	SCRATCH_DIR           — filesystem Storage quotas are measured/enforced against (default /var/lib/hypothesisloop/scratch)
+//	RUNTIME_TOKEN         — the cluster's runtime token
+//	SCRATCH_DIR           — filesystem this node's storage capacity is measured on (default /var/lib/hypothesisloop/scratch)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
 //
-// bare-agent detach, run with the same CLUSTER_NAME, API_URL and RUNTIME_TOKEN, removes this
-// node's cluster from the control plane. The running agent then stops its jobs and exits, as it
-// does when the cluster's owner removes it.
+// bare-agent install, detach and uninstall (node.go) put the agent on a node as a systemd unit
+// and take it off again.
 package main
 
 import (
@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/runtime/bare-metal/internal/hostinstall"
 	"github.com/scaleresearch/hypothesisloop/runtime/bare-metal/internal/podexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -40,15 +41,15 @@ const (
 
 func main() {
 	if len(os.Args) > 1 {
-		if len(os.Args) != 2 || os.Args[1] != "detach" {
-			fmt.Fprintln(os.Stderr, "usage: bare-agent [detach]")
+		command, known := commands[os.Args[1]]
+		if !known {
+			fmt.Fprintln(os.Stderr, usage)
 			os.Exit(2)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		agentloop.RunDetach(ctx, binaryName, func(format string, args ...any) {
-			fmt.Printf("[bare-agent] "+format+"\n", args...)
-		})
+		if err := command(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "bare-agent %s: %v\n", os.Args[1], err)
+			os.Exit(1)
+		}
 		return
 	}
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
@@ -62,21 +63,7 @@ func main() {
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
-	scratchDir := os.Getenv("SCRATCH_DIR")
-	if scratchDir == "" {
-		scratchDir = "/var/lib/hypothesisloop/scratch"
-	}
-	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "bare-agent: create scratch dir %s: %v\n", scratchDir, err)
-		os.Exit(1)
-	}
-
-	exec, err := podexec.New(podexec.Config{
-		APIURL:     apiURL,
-		ScratchDir: scratchDir,
-		NodeLabels: parseNodeLabels(os.Getenv("NODE_LABELS")),
-		NodeName:   os.Getenv("NODE_NAME"),
-	})
+	exec, err := newExecutor(apiURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
 		os.Exit(1)
@@ -122,7 +109,30 @@ func main() {
 	exec.Wait()
 	if errors.Is(err, agentloop.ErrClusterRemoved) {
 		log("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
+		// systemd sets INVOCATION_ID on what it starts. Run as the installed unit, the agent
+		// keeps that unit from starting again at boot for a cluster that is gone.
+		if os.Getenv("INVOCATION_ID") != "" {
+			if err := hostinstall.StayStopped(hostinstall.Node{}); err != nil {
+				log("%v", err)
+			}
+		}
 	}
+}
+
+func newExecutor(apiURL string) (*podexec.Executor, error) {
+	scratchDir := os.Getenv("SCRATCH_DIR")
+	if scratchDir == "" {
+		scratchDir = "/var/lib/hypothesisloop/scratch"
+	}
+	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create scratch dir %s: %w", scratchDir, err)
+	}
+	return podexec.New(podexec.Config{
+		APIURL:     apiURL,
+		ScratchDir: scratchDir,
+		NodeLabels: parseNodeLabels(os.Getenv("NODE_LABELS")),
+		NodeName:   os.Getenv("NODE_NAME"),
+	})
 }
 
 // parseNodeLabels parses "k1=v1,k2=v2" into a map — the bare-node equivalent of one fleet.yaml
