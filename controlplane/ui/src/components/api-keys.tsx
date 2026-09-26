@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api'
 import type { APIKey, CreatedAPIKey } from '@/types'
 import { useTenant } from '@/lib/tenant'
+import { StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -78,9 +79,7 @@ export function APIKeys() {
             ...projects.map(p => ({ value: p.id, label: `Project ${p.name} only` })),
           ]}
         />
-        <Button size="sm" variant="primary" type="submit" disabled={busy || name.trim() === ''}>
-          {busy ? 'Creating…' : 'Create API key'}
-        </Button>
+        <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>Create API key</Button>
       </form>
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
@@ -104,22 +103,25 @@ export function APIKeys() {
       {keys && keys.length > 0 && (
         <Table>
           <thead>
-            <tr><th>Name</th><th>Id</th><th>Reaches</th><th>Created</th><th>Status</th><th /></tr>
+            <tr><th>Name</th><th>Reaches</th><th>Created</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
             {keys.map(key => (
               <tr key={key.id}>
-                <td className="font-semibold">{key.name}</td>
-                <td className="font-mono text-xs text-muted">
-                  {key.id}
-                  {key.minted_by && <div className="text-2xs">minted from {key.minted_by}</div>}
+                <td>
+                  <span className="font-semibold">{key.name}</span>
+                  {key.minted_by && (
+                    <div className="text-xs text-subtle">minted from {keys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</div>
+                  )}
                 </td>
                 <td className="text-xs">{scopeLabel(key)}</td>
-                <td className="font-mono text-xs text-muted">{new Date(key.created_at).toLocaleString()}</td>
+                <td className="text-xs text-muted">{new Date(key.created_at).toLocaleString()}</td>
                 <td className="text-xs">
-                  {key.revoked_at ? `revoked ${new Date(key.revoked_at).toLocaleString()}` : 'active'}
+                  {key.revoked_at
+                    ? <span className="text-muted">revoked {new Date(key.revoked_at).toLocaleString()}</span>
+                    : <StatusLabel tone="success">active</StatusLabel>}
                 </td>
-                <td>
+                <td className="text-right">
                   {!key.revoked_at && <Button size="sm" variant="danger" onClick={() => setRevoking(key)}>Revoke</Button>}
                 </td>
               </tr>
