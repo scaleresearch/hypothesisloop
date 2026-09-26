@@ -1,6 +1,9 @@
-import type { TableHTMLAttributes, ThHTMLAttributes } from 'react'
+'use client'
+
+import type { HTMLAttributes, TableHTMLAttributes, ThHTMLAttributes } from 'react'
 import type { Header } from '@tanstack/react-table'
 import { clsx } from 'clsx'
+import { useProjectRouter } from '@/lib/query-state'
 
 // The :where() keeps these at the weight of a plain utility, so a class on a cell wins.
 const tableClass = clsx(
@@ -14,6 +17,27 @@ const tableClass = clsx(
 /** The data table. Rows and cells inside are plain thead, tbody, tr, th and td. */
 export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) {
   return <table className={clsx(tableClass, className)} {...props} />
+}
+
+/** A cell or header of figures: right-aligned, digits of one width so a column lines up. */
+export const num = 'text-right font-mono text-xs tabular-nums'
+
+/** A cell of an id or a time, the quiet columns of a row. */
+export const quiet = 'whitespace-nowrap font-mono text-2xs text-subtle'
+
+/** A row that opens the record it lists, on a click or Enter. A control inside stops its own click. */
+export function LinkTr({ href, className, ...props }: HTMLAttributes<HTMLTableRowElement> & { href: string }) {
+  const router = useProjectRouter()
+  return (
+    <tr
+      tabIndex={0}
+      role="link"
+      className={clsx('cursor-pointer', className)}
+      onClick={() => router.push(href)}
+      onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) router.push(href) }}
+      {...props}
+    />
+  )
 }
 
 interface SortableThProps extends ThHTMLAttributes<HTMLTableCellElement> {

@@ -1,4 +1,4 @@
-import type { ComponentProps, HTMLAttributes } from 'react'
+import type { ComponentProps, HTMLAttributes, ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { Link } from '@/components/ui/link'
 
@@ -9,7 +9,7 @@ export function Card({ className, ...props }: DivProps) {
   return (
     <div
       className={clsx(
-        'mb-4 animate-rise overflow-hidden rounded-lg border bg-surface shadow-sm transition-shadow hover:border-border-strong hover:shadow-md',
+        'mb-4 animate-rise overflow-hidden rounded-lg border bg-surface shadow-sm',
         className,
       )}
       {...props}
@@ -26,13 +26,23 @@ export function CardHeader({ className, ...props }: DivProps) {
   )
 }
 
+/** The heading of a card, inside CardHeader. `note` is what stands beside it: a count, a scope. */
+export function CardTitle({ note, children }: { note?: ReactNode; children: ReactNode }) {
+  return (
+    <h2 className="min-w-0 text-sm font-semibold text-foreground">
+      {children}
+      {note !== undefined && note !== null && note !== false && <span className="ml-2 text-xs font-normal text-muted">{note}</span>}
+    </h2>
+  )
+}
+
 export function CardContent({ className, scrollX, ...props }: DivProps & { scrollX?: boolean }) {
   return <div className={clsx('p-4', scrollX && 'overflow-x-auto', className)} {...props} />
 }
 
 /** A tile inside a card: a per-job chart, an agent's job list. */
 export function InsetCard({ className, ...props }: DivProps) {
-  return <div className={clsx('rounded border bg-surface-inset p-2.5 transition-colors hover:border-border-strong', className)} {...props} />
+  return <div className={clsx('rounded border bg-surface-inset p-2.5', className)} {...props} />
 }
 
 /** A card that is one link to another page. */
