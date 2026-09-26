@@ -406,6 +406,28 @@ as plain manifests, no helm release) refuses the install: delete the old
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
+What the release adds to the cluster, all removed with it: the namespace `hypothesisloop-jobs`
+where every job runs, the PriorityClasses `hypothesisloop-jobs-guaranteed` and
+`hypothesisloop-jobs-burst`, and the agents' rights. The cluster-agent may create and delete
+Jobs, pods, Services and ResourceClaimTemplates in `hypothesisloop-jobs` only. Across the
+cluster it only reads: nodes, pods, and the DRA devices and claims, which is what the capacity
+it reports is counted from. Installing needs the right to create those objects, a namespace and
+a PriorityClass among them. Chart values (`runtime/k8s/infra/chart/values.yaml`):
+
+- `jobs.preemptLowerPriorityPods` (default `false`): job pods wait for room and evict no other
+  workload of the cluster. `true` lets them evict pods of lower priority.
+- `nodeAgent.nodeSelector` (default empty): the node labels the node-agent DaemonSet is limited
+  to, for a cluster where only some nodes run jobs.
+- `detachOnUninstall` (default `true`): see below.
+
+To detach the cluster, `make cluster-agent-down` (`helm uninstall hypothesisloop-cluster-agent
+-n hypothesisloop`). Before the release goes, a hook removes the cluster from the platform, where
+its jobs go back to the queue, and stays until every job object it created is gone. It fails,
+and the release stays, when the platform does not answer from the cluster; `--no-hooks`
+uninstalls regardless. `hl cluster remove my-cluster` detaches from the other side: the agent
+reads that its cluster is gone, stops its jobs and exits, and the release is then uninstalled
+the same way.
+
 **A bare-metal node.** Needs docker on the node and nothing else. `hl cluster add my-node
 --bare-metal` prints the command, which runs on the node:
 

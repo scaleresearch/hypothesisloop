@@ -15,6 +15,19 @@ metricsURL: ""
 # true only if this cluster runs a native autoscaler (cluster-autoscaler / Karpenter) that reacts
 # to Pending pods. See autoscaler.md.
 autoscalerEnabled: "false"
+# helm uninstall removes the cluster from the control plane and stops its jobs before the
+# release goes. false leaves the cluster registered, for a release that is coming back.
+detachOnUninstall: true
+
+jobs:
+  # Whether a job's pod may evict pods of lower priority to get a node. false makes job pods
+  # wait for room, so they never evict another workload of a cluster this runtime shares.
+  preemptLowerPriorityPods: false
+
+nodeAgent:
+  # Node labels the node-agent DaemonSet is limited to, for a cluster where only some nodes run
+  # jobs. Empty runs it on every node.
+  nodeSelector: {}
 
 images:
   # Registry every node in this cluster can already pull from.

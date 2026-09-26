@@ -4,33 +4,29 @@ metadata:
   name: hypothesisloop-node-agent
   namespace: {{ .Release.Namespace }}
 ---
-# ClusterRole (not a namespaced Role) deliberately: hypothesisloop-jobs — where the pods this
-# agent needs to read actually live — doesn't exist yet at apply time. It's created later,
-# idempotently, by cluster-agent's own startup. A ClusterRole grants the
-# permission cluster-wide up front so it's already in effect whenever that namespace shows up,
-# with no dependency on apply order between this file and cluster-agent.yaml. The agent
-# itself still only ever lists pods in hypothesisloop-jobs on its own node (see
-# podExperimentIDs in main.go) — this is broader than it uses, not broader than it needs to.
+# The agent lists the job pods of its own node to name the job behind each cgroup it measures.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: hypothesisloop-node-agent-pod-reader
+  name: hypothesisloop-node-agent
+  namespace: hypothesisloop-jobs
 rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: hypothesisloop-node-agent-pod-reader
+  name: hypothesisloop-node-agent
+  namespace: hypothesisloop-jobs
 subjects:
   - kind: ServiceAccount
     name: hypothesisloop-node-agent
     namespace: {{ .Release.Namespace }}
 roleRef:
-  kind: ClusterRole
-  name: hypothesisloop-node-agent-pod-reader
+  kind: Role
+  name: hypothesisloop-node-agent
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
@@ -51,6 +47,10 @@ spec:
     spec:
       serviceAccountName: hypothesisloop-node-agent
       hostPID: true
+      {{- with .Values.nodeAgent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: node-agent
           image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-node-agent:{{ required "images.tag is required" .Values.images.tag }}

@@ -4,23 +4,18 @@ metadata:
   name: hypothesisloop-cluster-agent
   namespace: {{ .Release.Namespace }}
 ---
+# Everything the agent changes is in hypothesisloop-jobs, so the rights to change anything are a
+# Role there. What it reads outside that namespace is the ClusterRole below, which changes nothing.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: hypothesisloop-cluster-agent
+  namespace: hypothesisloop-jobs
 rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "create"]
-  - apiGroups: [""]
-    # nodes: read live CPU capacity/allocatable off real cluster nodes (replaces the old
-    # fake-Accelerator-only capacity accounting) — see workload's "get live CPU capacity" step.
-    resources: ["nodes"]
-    verbs: ["get", "list"]
-  - apiGroups: [""]
-    # pods: cluster-wide list to compute actual per-node utilization (workload_client.go's
-    # nodeCapacity/nodeUsage path) — same capacity-accounting feature as the nodes rule above.
-    #
     # get+delete are what deliver a policy termination's checkpoint window. Deleting a Job hands
     # its pods to the garbage collector, which uses the POD's own grace and cannot be told
     # otherwise — so DeleteWorkload deletes the pods itself, with an explicit grace, before
@@ -29,45 +24,67 @@ rules:
     resources: ["pods"]
     verbs: ["get", "list", "delete"]
   - apiGroups: [""]
-    # pods/log: FetchLogTail reads a job's own pod's current stdout/stderr to report alongside
-    # its phase (see k8sexec.FetchLogTail, agentloop.LogTailer) — without this, GetLogs 403s and
-    # was previously failing silently (job_logs.go's Stream() error path treats any failure as
-    # "nothing to report yet", so a permissions error looked identical to a pod that just hasn't
-    # started -- confirmed live: no lines were ever reported until this rule was added).
+    # FetchLogTail reads a job's own pod's stdout/stderr to report beside its phase. Without
+    # this GetLogs 403s, which reads the same as a pod that has not started.
     resources: ["pods/log"]
     verbs: ["get"]
   - apiGroups: [""]
-    # services: one ClusterIP per submitted job (for distributed/multi-node jobs' pod-to-pod
-    # discovery), created alongside the Job and deleted with it (workload_client.go create/
-    # delete paths).
+    # One headless Service per multi-node job, for its pods to find each other.
     resources: ["services"]
     verbs: ["get", "list", "create", "delete"]
-  - apiGroups: ["scheduling.k8s.io"]
-    resources: ["priorityclasses"]
-    verbs: ["get", "create", "update"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: ["resource.k8s.io"]
-    # ResourceClaimTemplates are reconciled with desired Jobs. ResourceSlices and allocated
-    # ResourceClaims are the authoritative live DRA capacity/usage source.
+    # One ResourceClaimTemplate per job that asks for a DRA device.
     resources: ["resourceclaimtemplates"]
     verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hypothesisloop-cluster-agent
+  namespace: hypothesisloop-jobs
+subjects:
+  - kind: ServiceAccount
+    name: hypothesisloop-cluster-agent
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: hypothesisloop-cluster-agent
+  apiGroup: rbac.authorization.k8s.io
+---
+# Read only. It is what the capacity this cluster reports is counted from: the nodes, every pod
+# on them whoever started it, and the DRA devices and the claims that hold them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hypothesisloop-cluster-agent-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
   - apiGroups: ["resource.k8s.io"]
     resources: ["resourceclaims", "resourceslices", "deviceclasses"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    # kube-system's UID is the identity this cluster reports.
+    resources: ["namespaces"]
+    resourceNames: ["kube-system", "hypothesisloop-jobs"]
+    verbs: ["get"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    resourceNames: ["hypothesisloop-jobs-guaranteed", "hypothesisloop-jobs-burst"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: hypothesisloop-cluster-agent
+  name: hypothesisloop-cluster-agent-reader
 subjects:
   - kind: ServiceAccount
     name: hypothesisloop-cluster-agent
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: hypothesisloop-cluster-agent
+  name: hypothesisloop-cluster-agent-reader
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1

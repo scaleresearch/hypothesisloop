@@ -11,6 +11,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/k8sexec"
 )
 
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
@@ -109,5 +111,145 @@ func TestClusterAgentDoesNotTolerateEveryTaint(t *testing.T) {
 			}
 		}
 		return
+	}
+}
+
+// render returns every object the chart renders, hooks included, as generic maps.
+func render(t *testing.T, set ...string) []map[string]any {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	args := []string{"template", "hypothesisloop-cluster-agent", "chart", "--namespace", "hypothesisloop",
+		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1"}
+	for _, value := range set {
+		args = append(args, "--set", value)
+	}
+	out, err := exec.Command("helm", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	var objects []map[string]any
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	for {
+		var object map[string]any
+		if err := decoder.Decode(&object); err == io.EOF {
+			return objects
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if object != nil {
+			objects = append(objects, object)
+		}
+	}
+}
+
+func ofKind(objects []map[string]any, kind string) []map[string]any {
+	var found []map[string]any
+	for _, object := range objects {
+		if object["kind"] == kind {
+			found = append(found, object)
+		}
+	}
+	return found
+}
+
+func metadata(object map[string]any, field string) string {
+	value, _ := object["metadata"].(map[string]any)[field].(string)
+	return value
+}
+
+// A cluster's owner reads what the runtime may do before installing it. It may change things in
+// the jobs namespace only, and outside it only read.
+func TestTheRuntimeChangesNothingOutsideTheJobsNamespace(t *testing.T) {
+	objects := render(t)
+	for _, role := range ofKind(objects, "ClusterRole") {
+		for _, rule := range role["rules"].([]any) {
+			for _, verb := range rule.(map[string]any)["verbs"].([]any) {
+				if verb != "get" && verb != "list" && verb != "watch" {
+					t.Errorf("ClusterRole %s grants %s on %v across the cluster", metadata(role, "name"), verb, rule.(map[string]any)["resources"])
+				}
+			}
+		}
+	}
+	roles := ofKind(objects, "Role")
+	if len(roles) != 2 {
+		t.Fatalf("the chart rendered %d Roles, want one for each agent", len(roles))
+	}
+	for _, kind := range []string{"Role", "RoleBinding"} {
+		for _, object := range ofKind(objects, kind) {
+			if metadata(object, "namespace") != k8sexec.HypothesisLoopNamespace {
+				t.Errorf("%s %s is in namespace %q", kind, metadata(object, "name"), metadata(object, "namespace"))
+			}
+		}
+	}
+}
+
+// The agent holds no right to create them, so a job would never start on a cluster whose chart
+// names them differently from what the agent puts on a pod.
+func TestTheChartInstallsTheNamespaceAndPriorityClassesJobsName(t *testing.T) {
+	objects := render(t)
+	namespaces := ofKind(objects, "Namespace")
+	if len(namespaces) != 1 || metadata(namespaces[0], "name") != k8sexec.HypothesisLoopNamespace {
+		t.Fatalf("namespaces rendered: %v", namespaces)
+	}
+	classes := map[string]map[string]any{}
+	for _, class := range ofKind(objects, "PriorityClass") {
+		classes[metadata(class, "name")] = class
+	}
+	guaranteed, burst := classes[k8sexec.PriorityClassGuaranteed], classes[k8sexec.PriorityClassBurst]
+	if len(classes) != 2 || guaranteed == nil || burst == nil {
+		t.Fatalf("PriorityClasses rendered: %v", classes)
+	}
+	if guaranteed["value"].(float64) <= burst["value"].(float64) {
+		t.Errorf("guaranteed = %v, burst = %v: a guaranteed job must come first", guaranteed["value"], burst["value"])
+	}
+	for name, class := range classes {
+		if class["preemptionPolicy"] != "Never" || class["globalDefault"] != false {
+			t.Errorf("%s: preemptionPolicy = %v, globalDefault = %v; unasked, a job pod evicts nothing and is nobody's default", name, class["preemptionPolicy"], class["globalDefault"])
+		}
+	}
+	for _, class := range ofKind(render(t, "jobs.preemptLowerPriorityPods=true"), "PriorityClass") {
+		if class["preemptionPolicy"] != "PreemptLowerPriority" {
+			t.Errorf("%s: preemptionPolicy = %v with preemption asked for", metadata(class, "name"), class["preemptionPolicy"])
+		}
+	}
+}
+
+func podSpec(object map[string]any) map[string]any {
+	return object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+}
+
+func TestNodeAgentRunsOnlyOnTheNodesItIsLimitedTo(t *testing.T) {
+	if selector, limited := podSpec(ofKind(render(t), "DaemonSet")[0])["nodeSelector"]; limited {
+		t.Errorf("unasked, node-agent is limited to %v", selector)
+	}
+	selector, _ := podSpec(ofKind(render(t, "nodeAgent.nodeSelector.pool=jobs"), "DaemonSet")[0])["nodeSelector"].(map[string]any)
+	if len(selector) != 1 || selector["pool"] != "jobs" {
+		t.Errorf("nodeSelector = %v, want pool=jobs", selector)
+	}
+}
+
+// Uninstalling only the release would leave the cluster registered, its jobs placed on it and
+// their pods running with no agent.
+func TestUninstallDetachesTheClusterFirst(t *testing.T) {
+	hooks := ofKind(render(t), "Job")
+	if len(hooks) != 1 {
+		t.Fatalf("the chart rendered %d Jobs, want the detach hook", len(hooks))
+	}
+	annotations := hooks[0]["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if annotations["helm.sh/hook"] != "pre-delete" {
+		t.Errorf("hook = %v, want pre-delete", annotations["helm.sh/hook"])
+	}
+	spec := podSpec(hooks[0])
+	command := spec["containers"].([]any)[0].(map[string]any)["command"].([]any)
+	if len(command) != 2 || command[0] != "/cluster-agent" || command[1] != "detach" {
+		t.Errorf("command = %v", command)
+	}
+	if spec["serviceAccountName"] != "hypothesisloop-cluster-agent" {
+		t.Errorf("the hook runs as %v, which may not delete this cluster's jobs", spec["serviceAccountName"])
+	}
+	if left := ofKind(render(t, "detachOnUninstall=false"), "Job"); len(left) != 0 {
+		t.Errorf("with detachOnUninstall=false the chart still rendered %d Jobs", len(left))
 	}
 }

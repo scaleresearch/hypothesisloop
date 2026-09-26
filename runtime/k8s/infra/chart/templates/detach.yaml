@@ -1,0 +1,47 @@
+{{- if .Values.detachOnUninstall }}
+# helm uninstall detaches the cluster first: this removes it from the control plane, where its
+# jobs go back to the queue, and stays until every job object it created here is gone. Helm
+# deletes the release only after it succeeds, so an uninstall that cannot reach the control
+# plane fails and says so; --no-hooks uninstalls without it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hypothesisloop-cluster-detach
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: hypothesisloop-cluster-agent
+      restartPolicy: Never
+      containers:
+        - name: detach
+          image: {{ .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag }}
+          imagePullPolicy: IfNotPresent
+          command: ["/cluster-agent", "detach"]
+          env:
+            - name: CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            - name: API_URL
+              value: {{ .Values.apiURL | quote }}
+            - name: RUNTIME_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hypothesisloop-runtime-token
+                  key: token
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "300m"
+              memory: "64Mi"
+      tolerations:
+        - key: hypothesisloop.io/no-workload
+          operator: Exists
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+{{- end }}

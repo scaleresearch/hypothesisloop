@@ -5,7 +5,7 @@
 // scheduler loop (services/scheduler) before this client is ever asked to create a Job, so
 // there's no suspend/admit handshake here. This client just creates a plain batchv1.Job with a
 // native scheduling.k8s.io/v1 PriorityClass so the k8s scheduler orders/preempts pods
-// correctly under node pressure. Two priority classes exist: hypothesisloop-guaranteed, hypothesisloop-burst.
+// in tier order. The two priority classes and the namespace are the chart's (runtime/k8s/infra/chart).
 //
 // This client belongs exclusively to cluster-agent. The control plane exposes desired state
 // and never owns Kubernetes credentials.
@@ -25,12 +25,10 @@ import (
 const (
 	HypothesisLoopNamespace = "hypothesisloop-jobs"
 
-	// Native scheduling.k8s.io/v1 PriorityClass names. Higher value preempts lower
-	// value at the k8s scheduler level under node resource pressure.
-	PriorityClassGuaranteed = "hypothesisloop-guaranteed"
-	PriorityClassBurst      = "hypothesisloop-burst"
-	priorityValueGuaranteed = int32(1000000)
-	priorityValueBurst      = int32(100000)
+	// The PriorityClass a job's pods carry, by capacity tier. The chart installs both, and
+	// says there whether a pod of one may evict a pod of lower priority.
+	PriorityClassGuaranteed = "hypothesisloop-jobs-guaranteed"
+	PriorityClassBurst      = "hypothesisloop-jobs-burst"
 
 	// DistributedMasterPort is the fixed rendezvous port advertised to every rank of a
 	// distributed (NumNodes > 1) job via HYPOTHESISLOOP_MASTER_PORT — fine as a fixed port since

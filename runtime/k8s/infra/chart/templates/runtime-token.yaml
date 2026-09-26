@@ -5,4 +5,4 @@ metadata:
   namespace: {{ .Release.Namespace }}
 type: Opaque
 stringData:
-  token: {{ required "runtimeToken is required" .Values.runtimeToken | quote }}
+  token: {{ required "runtimeToken is required" .Values.runtimeToken | trim | quote }}

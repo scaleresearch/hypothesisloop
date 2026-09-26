@@ -22,9 +22,6 @@ import (
 )
 
 func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
-	if err := c.ensureNamespace(ctx, HypothesisLoopNamespace); err != nil {
-		return err
-	}
 	// Reconcile calls this only when no live Job exists for the experiment, so any pod still
 	// carrying its identity belongs to the previous generation and may be inside its checkpoint
 	// window. A new pod started now would read the store before that checkpoint lands, restart

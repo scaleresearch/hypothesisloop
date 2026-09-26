@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Uninstalls the HypothesisLoop runtime that install.sh installed. The hypothesisloop-jobs
-# namespace and PriorityClasses cluster-agent created stay (harmless if it is reinstalled later).
+# Detaches the cluster and uninstalls the HypothesisLoop runtime that install.sh installed. The
+# release first removes the cluster from the control plane, where its jobs go back to the queue,
+# and stops what it runs here; then the release goes, with the hypothesisloop-jobs namespace and
+# the PriorityClasses. The name must be registered again before the runtime is installed again.
 #
 # Parameters (env vars, all optional):
 #   KUBECONFIG_PATH   kubeconfig file to use (default: $HOME/.kube/config)

@@ -1,0 +1,19 @@
+# Where every job of this cluster runs, and the two PriorityClasses its pods name. The chart owns
+# them, so the agents hold no right to create a namespace or a PriorityClass, and uninstalling
+# the release removes them with whatever is left in the namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hypothesisloop-jobs
+{{- range $tier, $value := dict "guaranteed" 1000000 "burst" 100000 }}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: hypothesisloop-jobs-{{ $tier }}
+value: {{ $value }}
+globalDefault: false
+# Never: a job's pod waits for room and evicts no pod of this cluster's other workloads.
+preemptionPolicy: {{ if $.Values.jobs.preemptLowerPriorityPods }}PreemptLowerPriority{{ else }}Never{{ end }}
+description: HypothesisLoop jobs of the {{ $tier }} capacity tier.
+{{- end }}
