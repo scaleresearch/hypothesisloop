@@ -151,6 +151,12 @@ export async function setClusterEnabled(orgID: string, name: string, enabled: bo
   await apiSend('POST', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}/${enabled ? 'enable' : 'disable'}`)
 }
 
+// Where a cluster the org registered stands among the ones its jobs are placed on: 1 to 1000,
+// higher first. It orders placements from then on and moves no job.
+export async function setClusterPriority(orgID: string, name: string, priority: number): Promise<void> {
+  await apiSend('PATCH', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}`, { priority })
+}
+
 // Registering a name the org already owns changes nothing and answers the same. The answer's
 // runtime token is left behind here, so no page holds it.
 export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {

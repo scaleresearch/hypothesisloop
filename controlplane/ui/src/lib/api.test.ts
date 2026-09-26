@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
   ApiError, addHumanHypothesisComment, registerCluster, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings, setClusterEnabled,
+  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings, setClusterEnabled, setClusterPriority,
   registerHumanHypothesis, revokeAPIKey,
   acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
 } from '@/lib/api'
@@ -124,6 +124,16 @@ describe('a cluster turned off or on for an org\'s jobs', () => {
     fetchMock().mockResolvedValue(answer(200, { name: 'lab', enabled: true }))
     await setClusterEnabled('org_b', 'lab', true)
     expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/lab/enable')
+  })
+})
+
+describe('a cluster\'s priority', () => {
+  it('is a PATCH of the cluster with the one field', async () => {
+    fetchMock().mockResolvedValue(answer(200, { name: 'lab', priority: 500, requeued: [] }))
+    await setClusterPriority('org_b', 'lab', 500)
+    expect(sent().init.method).toBe('PATCH')
+    expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/lab')
+    expect(sent().body).toEqual({ priority: 500 })
   })
 })
 

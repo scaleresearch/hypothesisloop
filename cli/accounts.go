@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -59,6 +60,7 @@ var clusterCommands = []subcommand{
 	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
 	{"list", "the clusters an org's jobs run on, whether each is connected and whether the org has it enabled", clusterList},
 	{"token", "print the runtime token of a cluster the org registered", clusterToken},
+	{"priority", "set where a cluster the org registered stands among the ones its jobs are placed on, 1 to 1000, higher first", clusterPriority},
 	{"disable", "turn a cluster off for the org's jobs: none is placed there, the ones running finish", clusterDisable},
 	{"enable", "turn a cluster on again for the org's jobs", clusterEnable},
 	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity},
@@ -543,6 +545,35 @@ decision is this org's alone. Its jobs already placed there are not touched and 
 end. A job that waits because the org turned off every cluster it could use reads
 not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`, stderr)
 	return onCluster(c, fs, args, "POST", "/disable", stdout, stderr)
+func clusterPriority(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster priority", `usage: hl cluster priority NAME VALUE [--org ORG]
+
+Sets where a cluster the org registered stands among the ones its jobs are placed on: 1 to 1000,
+higher first, 100 until it is set. A job goes to the highest-priority cluster that can take it as
+the scheduler reads capacity at that moment, and to a lower one when that is full or has just
+failed it. A guaranteed job first asks a higher cluster that scales up to do so, and takes a lower
+one when that times out. A cluster the platform shares holds 0 and takes no other, so an org's
+own clusters are tried before it. Jobs that are placed do not move. hl cluster list shows the
+priorities, in the order placement goes by.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	operands, err := parseOperands(fs, args)
+	if err != nil {
+		return parseExit(err)
+	}
+	if len(operands) != 2 {
+		return parseExit(misuse(fs, "want NAME and a priority, got %d operands", len(operands)))
+	}
+	priority, err := strconv.Atoi(operands[1])
+	if err != nil {
+		return parseExit(misuse(fs, "the priority must be a whole number, got %s", operands[1]))
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(operands[0])), map[string]int{"priority": priority}, "", "", stdout, stderr)
+}
+
 }
 
 func clusterEnable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -578,7 +609,7 @@ func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest str
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
+	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, in the order a job is placed on them (priority, then name; see hl cluster priority), with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

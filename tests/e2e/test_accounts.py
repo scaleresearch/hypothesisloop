@@ -521,6 +521,92 @@ def test_only_staff_see_every_org(orgs, api: API):
     a, b = orgs
     me = api.get_json("/me")
     assert me["kind"] == "staff" and {a.org_id, b.org_id, "default"} <= {o["id"] for o in me["orgs"]}
+@pytest.mark.timeout(240)
+@pytest.mark.exclusive
+def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API, run_id: str, deadline: Deadline):
+    """Exclusive: its jobs fit any cluster of org A that reports the accelerator, and for a moment
+    one of its clusters is shared."""
+    a, b = orgs
+    # The names sort against the priorities they are given, so placement by name fails the test.
+    low, high = f"a-low-{a.marker}"[:40], f"z-high-{a.marker}"[:40]
+    runtimes = {
+        name: FakeRuntime(a.api, name, a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})["runtime_token"])
+        for name in (low, high)
+    }
+
+    def path(name: str) -> str:
+        return f"/orgs/{a.org_id}/clusters/{name}"
+
+    def ranked() -> list[tuple[str, int]]:
+        return [(c["name"], c["priority"]) for c in _lines(a.api.hl("cluster", "list")) if c["name"] in runtimes]
+
+    def placed(job_id: str) -> str:
+        def read() -> dict:
+            for runtime in runtimes.values():
+                runtime.reconcile()
+            return a.api.experiment(job_id)
+        return eventually(f"job {job_id} is placed on one of org A's clusters", read, deadline=deadline, interval=2,
+                          accept=lambda exp: exp.get("cluster_name") in runtimes)["cluster_name"]
+
+    agent, pe_id = _running_org(a, run_id)
+    jobs: list[str] = []
+
+    def submit() -> str:
+        jobs.append(a.api.submit_job(pe_id, agent, job_overrides=JOB_SHAPE))
+        return jobs[-1]
+
+    try:
+        for runtime in runtimes.values():
+            assert runtime.reconcile() == []
+        assert ranked() == [(low, 100), (high, 100)], "clusters do not start at priority 100, listed by name"
+
+        for body in ({"priority": 0}, {"priority": 1001}, {"priority": -1}, {}):
+            refused = _status(a.api, "PATCH", path(high), body)
+            assert refused.status_code == 422, f"PATCH {body}: {refused.status_code} {refused.text}"
+        assert _status(b.api, "PATCH", path(high), {"priority": 5}).status_code == 404, "org B ranked org A's cluster"
+        assert _status(a.api, "PATCH", path(high), {"shared": True}).status_code == 403, "an org shared its own cluster"
+        assert a.api.hl_expect("cluster", "priority", high, "1001").returncode != 0
+        assert ranked() == [(low, 100), (high, 100)], "a refused request changed a priority"
+
+        ranked_first = json.loads(a.api.hl("cluster", "priority", high, "500"))
+        assert ranked_first["priority"] == 500 and ranked_first["requeued"] == [], f"hl cluster priority answered {ranked_first}"
+        assert ranked() == [(high, 500), (low, 100)], "the listing is not in placement order"
+
+        # Each faked node holds two jobs: the higher cluster fills first, then the lower takes one.
+        first, second = submit(), submit()
+        assert placed(first) == high and placed(second) == high, "jobs did not go to the cluster the org ranked first"
+        third = submit()
+        assert placed(third) == low, "a job waited for the full higher cluster, or went nowhere, with room on the lower one"
+
+        # The order changes for what is placed from now on. What is placed stays.
+        a.api.hl("cluster", "priority", low, "900")
+        assert ranked() == [(low, 900), (high, 500)]
+        a.api.cancel_job(first)
+        fourth = submit()
+        assert placed(fourth) == low, "a job went to the cluster that is now ranked second, with room on the first"
+        assert a.api.experiment(second)["cluster_name"] == high, "a job that was placed moved when the order changed"
+
+        # A shared cluster holds the platform's priority, after every org's own, and takes no other.
+        admin.share_cluster(high, True)
+        try:
+            assert dict(ranked())[high] == 0 and ranked()[-1][0] == high, f"a shared cluster is ranked {ranked()}"
+            for caller in (a.api, api):
+                refused = _status(caller, "PATCH", path(high), {"priority": 700})
+                assert refused.status_code == 422 and "shared" in refused.text, f"a priority for a shared cluster: {refused.status_code} {refused.text}"
+            seen_by_b = {c["name"]: c for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]}
+            assert seen_by_b[high]["priority"] == 0
+            assert all(c["priority"] >= 1 for c in seen_by_b.values() if c["owned"] and not c["shared"]), "an org's own cluster is not ranked above the platform's"
+        finally:
+            admin.share_cluster(high, False)
+        assert dict(ranked())[high] == 100, "a cluster no longer shared did not return to the default priority"
+    finally:
+        for name in runtimes:
+            _status(api, "DELETE", path(name))
+        for job_id in jobs:
+            a.api.post(f"/experiments/{job_id}/cancel")
+        a.api.close_platform_experiment(pe_id)
+
+
     assert api.get(f"/orgs/{a.org_id}/api-keys").status_code == 200
     r = api.post(f"/orgs/{a.org_id}/api-keys", {"name": "by a staff token"})
     assert r.status_code == 403, f"a staff token that is no person created a key: {r.status_code} {r.text}"

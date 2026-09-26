@@ -80,6 +80,7 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"cluster", "remove", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east", nil},
 		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
 		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
+		{[]string{"cluster", "priority", "gpu-east", "250", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/gpu-east", map[string]any{"priority": 250}},
 		{[]string{"cluster", "enable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/enable", nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -130,7 +131,7 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
 			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
 			{"cluster", "token", "x"}, {"cluster", "remove", "x"}, {"cluster", "forget-identity", "x"},
-			{"cluster", "disable", "x"}, {"cluster", "enable", "x"},
+			{"cluster", "disable", "x"}, {"cluster", "enable", "x"}, {"cluster", "priority", "x", "5"},
 			{"org", "members", "list"}, {"org", "members", "set-role", "u-1", "member"}, {"org", "members", "remove", "u-1"},
 			{"org", "invites", "create"}, {"org", "invites", "list"},
 		} {
@@ -320,11 +321,43 @@ func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
 	}
 }
 
+func TestClusterPriorityAsksForANameAndAWholeNumberAndPrintsARefusal(t *testing.T) {
+	calls := accountsServer(t, nil, `{"name":"gpu-east","priority":250}`)
+	for _, args := range [][]string{
+		{"cluster", "priority", "gpu-east", "--org", "org-1"},
+		{"cluster", "priority", "gpu-east", "high", "--org", "org-1"},
+		{"cluster", "priority", "gpu-east", "2.5", "--org", "org-1"},
+		{"cluster", "priority", "gpu-east", "1", "2", "--org", "org-1"},
+	} {
+		if code, stdout, _ := hl(t, args...); code != 2 || stdout != "" {
+			t.Errorf("hl %s: exit code = %d, stdout = %q, want a usage error", strings.Join(args, " "), code, stdout)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a command that does not parse reached the API: %+v", *calls)
+	}
+	code, stdout, stderr := hl(t, "cluster", "priority", "gpu-east", "250", "--org", "org-1")
+	if code != 0 || !strings.Contains(stdout, `"priority":250`) {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the cluster printed with its priority", code, stdout, stderr)
+	}
+
+	// The range and the shared cluster are the API's to refuse, and it says why.
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"reason":"invalid_request","message":"a shared cluster holds the platform's priority, below every org's own clusters"}`))
+	}))
+	code, stdout, stderr = hl(t, "cluster", "priority", "platform", "5", "--org", "org-1")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "shared cluster holds the platform's priority") {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal", code, stdout, stderr)
+	}
+}
+
 func TestAccountGroupsListTheirCommands(t *testing.T) {
 	setAPIURL(t, "http://unused")
 	for group, commands := range map[string][]string{
 		"org": {"list", "create NAME", "rename NAME", "members <command>", "invites <command>"}, "project": {"list", "create NAME", "rename NAME"},
-		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
+		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "priority NAME VALUE", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
 	} {
 		code, stdout, _ := hl(t, group, "--help")
 		if code != 0 {

@@ -2,14 +2,14 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchClusterSettings, fetchOrgClusters, putClusterSettings, registerCluster, setClusterEnabled } from '@/lib/api'
+import { fetchClusterSettings, fetchOrgClusters, putClusterSettings, registerCluster, setClusterEnabled, setClusterPriority } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgClusters } from '@/components/org-clusters'
 import type { ClusterSettings, Me, OrgCluster } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   fetchClusterSettings: vi.fn(), fetchOrgClusters: vi.fn(), putClusterSettings: vi.fn(), registerCluster: vi.fn(),
-  setClusterEnabled: vi.fn(),
+  setClusterEnabled: vi.fn(), setClusterPriority: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -36,20 +36,24 @@ function show({ manage = true, as = me }: { manage?: boolean; as?: Me } = {}) {
 
 beforeEach(() => {
   clusters = [
-    { name: 'lab', org_id: 'org_a', shared: false, enabled: true, cluster_id: 'cid-1', created_at: at, owned: true, connected: true },
-    { name: 'new', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false },
+    { name: 'lab', org_id: 'org_a', shared: false, enabled: true, priority: 100, cluster_id: 'cid-1', created_at: at, owned: true, connected: true },
+    { name: 'new', org_id: 'org_a', shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: false },
   ]
   settings = { cluster_id: 'cid-1', scale_up_timeout_seconds: 600, max_speculative_accelerators: null, stuck_pending_timeout_seconds: null }
   vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters])
   vi.mocked(fetchClusterSettings).mockImplementation(async () => ({ ...settings }))
   vi.mocked(putClusterSettings).mockImplementation(async (id, next) => (settings = { cluster_id: id, ...next }))
+  vi.mocked(setClusterPriority).mockReset()
+  vi.mocked(setClusterPriority).mockImplementation(async (_orgID, name, priority) => {
+    clusters = clusters.map(c => (c.name === name ? { ...c, priority } : c))
+  })
   vi.mocked(setClusterEnabled).mockReset()
   vi.mocked(setClusterEnabled).mockImplementation(async (_orgID, name, enabled) => {
     clusters = clusters.map(c => (c.name === name ? { ...c, enabled } : c))
   })
   vi.mocked(registerCluster).mockImplementation(async (orgID, name) => {
     if (!clusters.some(c => c.name === name)) {
-      clusters = [...clusters, { name, org_id: orgID, shared: false, enabled: true, created_at: at, owned: true, connected: false }]
+      clusters = [...clusters, { name, org_id: orgID, shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: false }]
     }
     return { name, runtime_token: 'hls_cnVudGltZQ.c2ln', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
   })
@@ -144,7 +148,7 @@ describe('a cluster name the API refuses', () => {
 
 describe('a cluster the platform shares with the org', () => {
   beforeEach(() => {
-    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true }]
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true }]
   })
 
   it('is listed with its status, as the platform\'s, with settings that are not the org\'s to change', async () => {
@@ -161,7 +165,7 @@ describe('a cluster the platform shares with the org', () => {
 
 describe('turning a cluster off for the org\'s jobs', () => {
   beforeEach(() => {
-    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true }]
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true }]
   })
 
   const rowOf = async (name: RegExp) => (await screen.findByRole('cell', { name })).closest('tr')!
@@ -213,6 +217,84 @@ describe('turning a cluster off for the org\'s jobs', () => {
     show({ manage: false })
     expect(within(await rowOf(/^lab/)).getByText('Not used')).toBeTruthy()
     expect(screen.queryByRole('switch')).toBeNull()
+  })
+})
+
+describe('a cluster\'s priority', () => {
+  beforeEach(() => {
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true }]
+  })
+
+  const rowOf = async (name: RegExp) => (await screen.findByRole('cell', { name })).closest('tr')!
+  const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] }
+
+  it('is an owner\'s to set on the org\'s own clusters, and the platform\'s is shown as coming after them', async () => {
+    show()
+    const lab = await rowOf(/^lab/)
+    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
+    expect(field.value).toBe('100')
+    expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
+
+    await userEvent.clear(field)
+    await userEvent.type(field, '500')
+    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
+    expect(setClusterPriority).toHaveBeenCalledExactlyOnceWith('org_a', 'lab', 500)
+    expect((await within(lab).findByLabelText('Priority of lab') as HTMLInputElement).value).toBe('500')
+    expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
+
+    const platform = await rowOf(/^platform-gpu/)
+    expect(within(platform).queryByLabelText(/Priority of/)).toBeNull()
+    expect(within(platform).getByText('0')).toBeTruthy()
+    expect(within(platform).getByText('used after Ada\'s own')).toBeTruthy()
+  })
+
+  it('offers nothing to set for a value that is empty, unchanged or no whole number', async () => {
+    show()
+    const lab = await rowOf(/^lab/)
+    const field = within(lab).getByLabelText('Priority of lab')
+    for (const typed of ['', '100', '2.5']) {
+      await userEvent.clear(field)
+      if (typed) await userEvent.type(field, typed)
+      expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
+    }
+    expect(setClusterPriority).not.toHaveBeenCalled()
+  })
+
+  it('shows the API\'s refusal and keeps what was typed', async () => {
+    vi.mocked(setClusterPriority).mockRejectedValue(new Error('forbidden: only an owner of the org may change it'))
+    show()
+    const lab = await rowOf(/^lab/)
+    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
+    await userEvent.clear(field)
+    await userEvent.type(field, '700')
+    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
+    expect(await screen.findByText('forbidden: only an owner of the org may change it')).toBeTruthy()
+    expect(field.value).toBe('700')
+    expect(within(lab).getByRole('button', { name: 'Set' })).toBeTruthy()
+    expect(setClusterPriority).toHaveBeenCalledExactlyOnceWith('org_a', 'lab', 700)
+  })
+
+  it('holds a value out of range in the field, where the browser refuses it', async () => {
+    show()
+    const lab = await rowOf(/^lab/)
+    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
+    await userEvent.clear(field)
+    await userEvent.type(field, '5000')
+    expect(field.validity.valid).toBe(false)
+    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
+    expect(setClusterPriority).not.toHaveBeenCalled()
+    expect(field.value).toBe('5000')
+  })
+
+  it('is shown and not offered to a member, nor where clusters are only shown', async () => {
+    const shown = show({ as: member })
+    expect(within(await rowOf(/^lab/)).getByText('100')).toBeTruthy()
+    expect(screen.queryByLabelText(/Priority of/)).toBeNull()
+    shown.unmount()
+
+    show({ manage: false })
+    expect(within(await rowOf(/^lab/)).getByText('100')).toBeTruthy()
+    expect(screen.queryByLabelText(/Priority of/)).toBeNull()
   })
 })
 

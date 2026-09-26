@@ -206,6 +206,7 @@ hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
 hl cluster token my-cluster | forget-identity my-cluster | remove my-cluster
+hl cluster priority my-cluster 500                         # where the org's own cluster stands, 1 to 1000, higher first
 hl cluster disable my-cluster | enable my-cluster          # turn a cluster off or on for the org's jobs; running ones finish
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
@@ -384,25 +385,38 @@ kubeconfig and no credential of one. A control plane started with `make dev` or
 the settings must name addresses that cluster reaches. `API_URL` and `METRICS_URL` can also be
 given to the install command directly, and `data_store.endpoint` cannot.
 
-**A Kubernetes cluster.** Needs `helm`, `kubectl` pointed at the cluster, and the images in a
-registry every node pulls from. `hl cluster add my-cluster` prints the command:
+**A Kubernetes cluster.** Needs `helm` 3.17 or newer, `kubectl` pointed at the cluster, and the
+images in a registry every node pulls from. `hl cluster add my-cluster`, or the UI, shows the
+command and below it the cluster's runtime token:
 
 ```bash
-hl cluster token 'my-cluster' --org 'org-1' | helm upgrade --install hypothesisloop-cluster-agent \
-  'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' --version '0.1.0+the-tag-that-was-pushed' \
-  --namespace hypothesisloop --create-namespace \
+sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" --namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' \
+  sh 'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' '0.1.0+the-tag-that-was-pushed' \
   --set-string 'clusterName=my-cluster' \
   --set-string 'apiURL=https://your-control-plane:8081' --set-string 'metricsURL=https://your-control-plane:8084' \
   --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed' \
-  --set-file runtimeToken=/dev/stdin
+  --set-string 'jobImage=registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
 ```
+
+The command is complete and holds no token. It asks for the token, without echo, and hands it to
+helm on standard input, so the token is in no shell history and no process's arguments, and the
+machine needs neither `hl` nor an API key. `jobImage` is the platform's job image, where a job
+that names no image runs; name another image there, or leave the value out for a cluster that
+takes only jobs that name their image.
 
 `make images REGISTRY=...` pushes the chart beside the images, under `charts/` and at a version
 that carries their tag, so the command needs no checkout. It installs the release into the
 namespace `hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it
-again upgrades the release. `--kube-context` names a context other than the current one. helm
-reads the registry with the credentials of `helm registry login`, and the nodes pull the images
-with their own.
+again upgrades the release. `--kube-context` after the last value names a context other than the
+current one. helm reads the registry with the credentials of `helm registry login`, and the
+nodes pull the images with their own.
+
+On a cluster that ran the runtime before the chart owned the jobs namespace, the same command
+is the upgrade: `--take-ownership` makes the existing `hypothesisloop-jobs` namespace the
+release's, with whatever is in it. Nothing is removed. The PriorityClasses
+`hypothesisloop-guaranteed` and `hypothesisloop-burst` of that older runtime are left behind
+and no longer used; `kubectl delete priorityclass hypothesisloop-guaranteed hypothesisloop-burst`
+removes them once no pod of an older job is left.
 
 From a checkout, `make cluster-agent-up` installs the same chart from `runtime/k8s/infra/chart`
 and is what local development uses:
@@ -417,9 +431,7 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agen
 Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
 which only the local cluster pulls. A cluster that holds the runtime's objects from before the
 chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
-`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first. A
-`hypothesisloop-jobs` namespace an earlier agent created is taken over by `make
-cluster-agent-up`; the helm command refuses it, so delete it first.
+`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
@@ -450,11 +462,12 @@ the same way.
 
 **A bare-metal node.** Needs docker or podman, systemd and root on the node, and glibc 2.17 or
 newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-metal choice,
-shows two things: the command to run on the node and the cluster's runtime token.
+shows the command to run on the node and below it the cluster's runtime token.
 
 ```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' \
-  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' \
+  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed' \
+  'registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
 ```
 
 The node's engine copies the agent's binary out of the image that carries it; no container is
@@ -503,9 +516,7 @@ From a checkout, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/b
 needs Go and gcc) and runs in the foreground with `CLUSTER_NAME`, `API_URL` and `RUNTIME_TOKEN`
 in its environment.
 
-A Kubernetes cluster's runtime token reaches helm on stdin: a token given as a make argument or
-a flag is readable in the process list. Its command reads the token with `hl cluster token` when
-it runs, so the token is in no scrollback and no shell history.
+`hl cluster token my-cluster` prints a cluster's runtime token again at any time.
 
 `hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
 accelerators under the names its drivers publish. Repeat for every additional cluster.
@@ -534,6 +545,21 @@ the job's org or on a shared cluster, and a job whose org has neither waits with
 to the queue in the same step, keep their retries, get their checkpoint window and are placed
 elsewhere. A job with no cluster of its org registered waits with `no_cluster_for_org` whether
 or not other clusters are connected; one whose cluster is registered and away waits for it.
+
+An org also decides the order its own clusters are used in. `hl cluster priority my-cluster 500`
+(`PATCH /orgs/{id}/clusters/{name}` with `{"priority": 500}`), or the Priority field of the
+cluster's row in Settings, sets 1 to 1000 on a cluster the org registered, 100 until it is set. A
+shared cluster holds 0 and takes no other (422), so an org's own compute is always tried before
+the platform's. A job is placed on the highest-priority cluster that can take it, at the
+accelerator type it asked for or one it accepts, and goes down to the next priority when that one
+is full: it never waits for a higher cluster while a lower one has room. A guaranteed job first
+asks a higher-priority cluster that scales up to do so, and takes the lower one if the scale-up
+times out. The order is the scheduler's reading of capacity when it places the job: room that
+frees on a higher cluster a moment later does not move it, and running jobs never move. A cluster
+that failed a job (an infrastructure fault, a scale-up that timed out) is left out of that job's
+next placement for `scheduler.tried_cluster_ttl_seconds` unless no other cluster could run it, and
+every such requeue spends the job's infrastructure allowance, so a job cannot go round its
+clusters for ever. `hl cluster list` shows `priority` and lists the clusters in that order.
 
 An org decides which of those clusters its jobs use. `hl cluster disable my-cluster`
 (`POST /orgs/{id}/clusters/{name}/disable`) turns a cluster off for the org's jobs, one it

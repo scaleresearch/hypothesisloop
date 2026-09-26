@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchOrgClusters, registerCluster, setClusterEnabled } from '@/lib/api'
+import { fetchOrgClusters, registerCluster, setClusterEnabled, setClusterPriority } from '@/lib/api'
 import type { OrgCluster, RegisteredCluster } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
@@ -66,11 +66,47 @@ function helmValue(text: string): string {
 
 /**
  * The clusters the org's jobs can run on: its own, with the scheduler settings an owner reads and
- * changes, and any the platform provides, each with whether the org uses it for its jobs. With
+ * changes, and any the platform provides, in the order a job is placed on them, each with its
+ * priority and whether the org uses it for its jobs. With
  * `manage` an owner also turns a cluster off or on for the org's jobs, adds a Kubernetes cluster
  * or a bare-metal node and reads the command that starts its agent.
  */
 export function OrgClusters({ manage }: { manage: boolean }) {
+/**
+ * Where a cluster the org registered stands among the ones its jobs are placed on. The field
+ * holds what is typed until it is set.
+ */
+function ClusterPriority({ cluster, onSet, disabled }: { cluster: OrgCluster; onSet: (priority: number) => Promise<boolean>; disabled: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const value = draft ?? String(cluster.priority)
+  const priority = Number(value)
+  const changed = draft !== null && draft.trim() !== '' && Number.isInteger(priority) && priority !== cluster.priority
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (changed && await onSet(priority)) setDraft(null)
+  }
+
+  return (
+    <form className="flex items-center gap-1.5" onSubmit={submit}>
+      <Input
+        fieldSize="sm"
+        mono
+        type="number"
+        min={1}
+        max={1000}
+        step={1}
+        className="w-20"
+        aria-label={`Priority of ${cluster.name}`}
+        title="1 to 1000. A job is placed on the highest-priority cluster that can take it."
+        value={value}
+        onChange={e => setDraft(e.target.value)}
+      />
+      {changed && <Button size="sm" type="submit" disabled={disabled}>Set</Button>}
+    </form>
+  )
+}
+
   const { org, administers } = useTenant()
   const { data, error, mutate } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 5_000 })
   const [kind, setKind] = useState<Kind>('kubernetes')
@@ -88,6 +124,21 @@ export function OrgClusters({ manage }: { manage: boolean }) {
       await setClusterEnabled(org.id, cluster.name, enabled)
       await mutate()
     } catch (e) {
+  async function setPriority(cluster: OrgCluster, priority: number): Promise<boolean> {
+    setSwitching(cluster.name)
+    setActionError('')
+    try {
+      await setClusterPriority(org.id, cluster.name, priority)
+      await mutate()
+      return true
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setSwitching('')
+    }
+  }
+
       setActionError(e instanceof Error ? e.message : String(e))
     } finally {
       setSwitching('')
@@ -198,6 +249,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               {manages && <th />}
             </tr>
           </thead>
+              <th>Priority</th>
           <tbody>
             {data.map(c => (
               <tr key={c.name}>
@@ -215,6 +267,12 @@ export function OrgClusters({ manage }: { manage: boolean }) {
                     {manages && (
                       <Switch
                         label={`Use ${c.name} for the jobs of ${org.name}`}
+                <td className="text-xs">
+                  {manages && c.owned && !c.shared
+                    ? <ClusterPriority cluster={c} onSet={priority => setPriority(c, priority)} disabled={switching !== ''} />
+                    : <span className="font-mono">{c.priority}</span>}
+                  {c.shared && <div className="mt-0.5 text-2xs text-muted">used after {org.name}&apos;s own</div>}
+                </td>
                         checked={c.enabled}
                         disabled={switching !== ''}
                         onChange={enabled => setEnabled(c, enabled)}
