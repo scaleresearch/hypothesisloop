@@ -76,8 +76,13 @@ type OrgGitHubInstallation struct {
 	ConnectedAt    time.Time `json:"connected_at"`
 }
 
-// DefaultProjectName is the project every org starts with.
-const DefaultProjectName = "default"
+// DefaultOrgName is the org a person starts with at their first sign-in, and DefaultProjectName
+// the project every org starts with. Neither is drawn from who the person is. An org is told from
+// another by its id, so many carry this name.
+const (
+	DefaultOrgName     = "Default org"
+	DefaultProjectName = "Default project"
+)
 
 // APIKey is a customer's credential. The token is returned once at creation and only its hash is
 // stored. An empty ProjectID reaches every project of the org. A key works while it is neither revoked nor orphaned.

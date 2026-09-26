@@ -26,21 +26,3 @@ func ValidateName(what, name string) (string, error) {
 	}
 	return name, nil
 }
-
-// NameFrom makes a valid name of text the platform did not ask for, such as the name an identity
-// provider states: what ValidateName refuses is dropped and the rest is cut to length. It is
-// empty when nothing usable is left.
-func NameFrom(text string) string {
-	kept := strings.Map(func(r rune) rune {
-		if r == utf8.RuneError || unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(text, ""))
-	kept = strings.TrimSpace(kept)
-	for len(kept) > MaxNameLength {
-		_, size := utf8.DecodeLastRuneInString(kept)
-		kept = kept[:len(kept)-size]
-	}
-	return strings.TrimSpace(kept)
-}

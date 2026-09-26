@@ -86,10 +86,10 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     with pytest.raises(HLError, match="409"):
         a.api.hl("project", "create", f"vision-{a.marker}")
     with pytest.raises(HLError, match="409"):
-        a.api.hl("project", "rename", "--project", project["id"], "default")
+        a.api.hl("project", "rename", "--project", project["id"], "Default project")
     assert json.loads(a.api.hl("project", "rename", "--project", project["id"], f"language-{a.marker}"))["id"] == project["id"]
     assert {p["id"]: p["name"] for p in _lines(a.api.hl("project", "list"))} == {
-        a.project_id: "default", project["id"]: f"language-{a.marker}",
+        a.project_id: "Default project", project["id"]: f"language-{a.marker}",
     }
 
     created = json.loads(a.api.hl("api-key", "create", f"ci-{a.marker}", "--project", project["id"]))

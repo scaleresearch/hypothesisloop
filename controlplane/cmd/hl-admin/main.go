@@ -26,7 +26,8 @@ const usage = `usage: hl-admin <command>
   token SCOPE                      print the token for a scope: staff, runtime:<cluster>,
                                    agent:<platform experiment>/<agent>, coordinator:<platform experiment>,
                                    job:<experiment>, launcher:<name>
-  user add SUBJECT NAME            create a user with their home org and its default project
+  user add SUBJECT NAME            create a user with a home org named NAME and its default project.
+                                   A person who signs in gets theirs named Default org
   user staff SUBJECT on|off        make a user one of the platform's operators, or stop
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token

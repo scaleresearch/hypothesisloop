@@ -271,7 +271,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	route(doc, h, huma.Operation{
 		OperationID: "create-org", Method: "POST", Path: "/orgs", DefaultStatus: http.StatusCreated,
 		Summary: "Create an org", Tags: []string{"accounts"},
-		Description: "The org starts with its creator as owner and a project named default. A person creates an org for " +
+		Description: "The org starts with its creator as owner and a project named Default project. A person creates an org for " +
 			"themselves. Staff name the owner in owner_user_id. An API key cannot create an org. " +
 			"A person owns a bounded number of orgs, their first one included: past it the create answers 409 with reason max_orgs_reached. " +
 			"GET /me states the bound in limits. Staff are held to none, whoever they create for.",

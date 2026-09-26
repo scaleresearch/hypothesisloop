@@ -290,6 +290,8 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
     me = first.json()
     assert me["kind"] == "user" and me["user_id"] == subject and me["name"] == "Ada Lovelace"
     assert len(me["orgs"]) == 1 and len(me["projects"]) == 1, f"a new person's home: {me}"
+    assert me["orgs"][0]["name"] == "Default org" and me["projects"][0]["name"] == "Default project", \
+        f"a new person's home is named plainly, whatever their name is: {me}"
     assert _me(api, _jwt(key, sub=subject, name="Ada Lovelace")).json()["orgs"] == me["orgs"], "a second request made a second home"
 
     person = api.as_caller(token, me["orgs"][0]["id"], me["projects"][0]["id"])

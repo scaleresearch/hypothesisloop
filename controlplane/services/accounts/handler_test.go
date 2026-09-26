@@ -424,7 +424,7 @@ func TestAnOrgIsCreatedForItsOwner(t *testing.T) {
 		t.Fatalf("role of the creator: got = %q, want owner", role)
 	}
 	if projects, _ := w.store.ListProjects(context.Background(), []string{org.ID}); len(projects) != 1 || projects[0].Name != domain.DefaultProjectName {
-		t.Fatalf("projects of a new org: got = %+v, want one named default", projects)
+		t.Fatalf("projects of a new org: got = %+v, want one named %q", projects, domain.DefaultProjectName)
 	}
 
 	if rec := w.call("member", "POST", "/orgs", name{"name": "for another", "owner_user_id": "u-owner"}); rec.Code != http.StatusForbidden {

@@ -625,7 +625,7 @@ export function fetchMe(): Promise<Me> {
   return apiFetch<Me>(`/me`)
 }
 
-// The new org starts with the caller as owner and a project named default.
+// The new org starts with the caller as owner and a project named Default project.
 export function createOrg(name: string): Promise<Org> {
   return apiSend<Org>('POST', '/orgs', { name })
 }

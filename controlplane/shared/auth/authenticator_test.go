@@ -265,32 +265,29 @@ func TestAUsersFirstRequestMakesTheirHomeAndLaterOnesReuseIt(t *testing.T) {
 	if _, err := a.Authenticate(ctx, ec.token(t, goodClaims())); err != nil {
 		t.Fatalf("second request: %v", err)
 	}
-	if len(directory.homeCreated) != 1 || directory.homeCreated[0] != "Ada Lovelace" {
-		t.Fatalf("homes created: got = %v, want one named after the user", directory.homeCreated)
+	if len(directory.homeCreated) != 1 || directory.homeCreated[0] != domain.DefaultOrgName {
+		t.Fatalf("homes created: got = %v, want one named %q", directory.homeCreated, domain.DefaultOrgName)
 	}
 
+	// The home org is named the same whatever the person's claims say of them.
 	nameless := goodClaims()
 	delete(nameless, "name")
 	nameless["sub"] = "user-2"
-	if _, err := a.Authenticate(ctx, ec.token(t, nameless)); err != nil {
-		t.Fatalf("a user with no name claim: %v", err)
-	}
-	if directory.homeCreated[1] != "user-2" {
-		t.Fatalf("org name for a user with no name claim: got = %q, want the subject", directory.homeCreated[1])
-	}
-
-	// The name claim is the person's own text: it names their org only as a name may read.
 	loud := goodClaims()
 	loud["sub"] = "user-3"
-	loud["name"] = "Eve\x00\n" + strings.Repeat("x", 4*domain.MaxNameLength)
-	if _, err := a.Authenticate(ctx, ec.token(t, loud)); err != nil {
-		t.Fatalf("a user with an overlong name claim: %v", err)
+	loud["name"] = "Eve\x00\n" + strings.Repeat("x", 500)
+	loud["email"] = "eve@example.invalid"
+	loud["user_name"] = "eve-on-github"
+	for i, claims := range []map[string]any{nameless, loud} {
+		if _, err := a.Authenticate(ctx, ec.token(t, claims)); err != nil {
+			t.Fatalf("first request of %v: %v", claims["sub"], err)
+		}
+		if got := directory.homeCreated[i+1]; got != domain.DefaultOrgName {
+			t.Fatalf("home org of %v: got = %q, want = %q", claims["sub"], got, domain.DefaultOrgName)
+		}
 	}
-	if got := directory.homeCreated[2]; len(got) != domain.MaxNameLength || !strings.HasPrefix(got, "Evexxx") {
-		t.Fatalf("org name from an overlong name claim with control characters: got = %q (%d bytes), want it cleaned and cut to %d", got, len(got), domain.MaxNameLength)
-	}
-	if _, err := domain.ValidateName("org", directory.homeCreated[2]); err != nil {
-		t.Fatalf("the home org's name is one the API would refuse: %v", err)
+	if cleaned, err := domain.ValidateName("org", domain.DefaultOrgName); err != nil || cleaned != domain.DefaultOrgName {
+		t.Fatalf("the home org's name is one the API would refuse: %q, %v", cleaned, err)
 	}
 
 	directory.staff["user-1"] = true

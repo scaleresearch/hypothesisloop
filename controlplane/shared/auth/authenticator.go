@@ -215,13 +215,7 @@ func (a *Authenticator) user(ctx context.Context, token string) (Principal, erro
 		return Principal{}, unauthenticated("%s", err)
 	}
 	name := claims.displayName()
-	// The name is the person's own claim and becomes the name of their home org, so it is
-	// held to what a name may be.
-	orgName := domain.NameFrom(name)
-	if orgName == "" {
-		orgName = domain.NameFrom(claims.Subject)
-	}
-	user, orgIDs, err := a.directory.EnsureUserHome(ctx, claims.Subject, orgName)
+	user, orgIDs, err := a.directory.EnsureUserHome(ctx, claims.Subject, domain.DefaultOrgName)
 	if err != nil {
 		return Principal{}, err
 	}

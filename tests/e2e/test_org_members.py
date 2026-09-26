@@ -38,6 +38,7 @@ def _person(api: API, run_id: str, label: str) -> Person:
     assert me.status_code == 200, f"first request of {label}: {me.status_code} {me.text}"
     home = me.json()
     assert len(home["orgs"]) == 1 and home["orgs"][0]["role"] == "owner", f"a new person's home: {home}"
+    assert home["orgs"][0]["name"] == "Default org" and home["projects"][0]["name"] == "Default project", f"a new person's home: {home}"
     return Person(subject, api.as_caller(token, home["orgs"][0]["id"], home["projects"][0]["id"]))
 
 

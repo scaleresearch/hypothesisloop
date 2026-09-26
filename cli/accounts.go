@@ -121,7 +121,7 @@ func orgList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 func orgCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("org create", `usage: hl org create NAME [--owner USER]
 
-Creates an org with a project named default. A signed-in person owns the org they create. A
+Creates an org with a project named Default project. A signed-in person owns the org they create. A
 staff token names the owner with --owner. An API key belongs to one org and cannot create another.
 A person owns a bounded number of orgs, the first one they signed in to included: past it the
 create is refused with max_orgs_reached.`, stderr)
