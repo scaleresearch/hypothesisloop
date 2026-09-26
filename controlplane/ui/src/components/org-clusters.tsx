@@ -39,7 +39,7 @@ function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): st
   const token = `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})"`
   const api = `API_URL=${shellQuote(cluster.api_url)}`
   if (kind === 'bare-metal') return `${token} CLUSTER_NAME=${name} ${api} go run ./runtime/bare-metal/cmd/bare-agent`
-  return `${token} make cluster-agent-up CLUSTER=${name} ${api} METRICS_URL=${shellQuote(cluster.metrics_url)}`
+  return `${token} make cluster-agent-up CLUSTER=${name} ${api} METRICS_URL=${shellQuote(cluster.metrics_url)} REGISTRY=${shellQuote(cluster.registry)} TAG=${shellQuote(cluster.image_tag)}`
 }
 
 /**

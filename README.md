@@ -360,8 +360,9 @@ On macOS:
 ### Option B - Existing cluster or bare-metal node
 
 Register the cluster for your org first. `hl cluster add` prints the Kubernetes install command
-with the two addresses the cluster's agents reach the platform at, which are `runtimes.api_url`
-and `runtimes.metrics_url` of the control plane's settings:
+with what the `runtimes` section of the control plane's settings holds: the two addresses the
+cluster's agents reach the platform at (`api_url`, `metrics_url`) and the registry and tag
+their images are pulled under (`registry`, `image_tag`):
 
 ```bash
 hl cluster add my-cluster
@@ -385,8 +386,9 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agen
   KUBECONFIG_PATH="$HOME/.kube/config" KUBE_CONTEXT='my-cluster'
 ```
 
-`REGISTRY` and `TAG` name what `make images REGISTRY=...` pushed. Left out, they are the local
-development registry and the tag of this checkout, which only the local cluster pulls.
+`REGISTRY` and `TAG` name what `make images REGISTRY=...` pushed, and the printed command
+carries the deployment's own. Left out, they are the local development registry and the tag of
+this checkout, which only the local cluster pulls.
 `KUBECONFIG_PATH` and `KUBE_CONTEXT` default to `~/.kube/config` and its current context.
 The command installs the `runtime/k8s/infra/chart` helm release into the namespace
 `hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it again

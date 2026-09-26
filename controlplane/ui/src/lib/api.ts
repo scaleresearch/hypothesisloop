@@ -148,7 +148,13 @@ export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
 // runtime token is left behind here, so no page holds it.
 export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
   const registered = await apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
-  return { name: registered.name, api_url: registered.api_url, metrics_url: registered.metrics_url }
+  return {
+    name: registered.name,
+    api_url: registered.api_url,
+    metrics_url: registered.metrics_url,
+    registry: registered.registry,
+    image_tag: registered.image_tag,
+  }
 }
 
 // Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler

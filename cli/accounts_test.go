@@ -181,7 +181,7 @@ func TestAPIKeyCreateNeverNarrowsTheKeyFromTheEnvironment(t *testing.T) {
 // The printed command lands in scrollback and, once run, in shell history, so it carries no
 // token: it reads the token when it runs. What the platform answered is quoted as one word each.
 func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's"}`)
+	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's","registry":"registry.example/images","image_tag":"abc1234"}`)
 	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
@@ -190,7 +190,8 @@ func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
 		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
 	}
 	want := `RUNTIME_TOKEN="$(hl cluster token 'gpu-east' --org 'org-1')" make cluster-agent-up CLUSTER='gpu-east' ` +
-		`API_URL='https://api.example/a?b=1&c=$(id)' METRICS_URL='https://metrics.example/it'\''s'` + "\n"
+		`API_URL='https://api.example/a?b=1&c=$(id)' METRICS_URL='https://metrics.example/it'\''s' ` +
+		`REGISTRY='registry.example/images' TAG='abc1234'` + "\n"
 	if stdout != want {
 		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered, each quoted", stdout, want)
 	}

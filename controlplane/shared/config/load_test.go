@@ -23,7 +23,8 @@ func productionConfig(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
+	rendered := strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
+	return strings.ReplaceAll(rendered, Placeholder+"IMAGE-TAG", "abc1234")
 }
 
 func loadText(t *testing.T, text string) error {
@@ -192,11 +193,13 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 		"  api_url: http://host.example.invalid:8081\n  metrics_url",
 		"  metrics_url: http://host.example.invalid:8084",
 		"  endpoint: http://host.example.invalid:9000",
+		"  registry: host.example.invalid:5000",
+		"  image_tag: abc1234",
 	} {
 		if !strings.Contains(rendered, line) {
 			t.Fatalf("the settings file has no %q", line)
 		}
-		unfilled := strings.Replace(rendered, line, strings.Replace(line, "host.example.invalid", Placeholder+"HOST-ADDRESS", 1), 1)
+		unfilled := strings.Replace(rendered, line, strings.NewReplacer("host.example.invalid", Placeholder+"HOST-ADDRESS", "abc1234", Placeholder+"IMAGE-TAG").Replace(line), 1)
 		if err := loadText(t, unfilled); err == nil || !strings.Contains(err.Error(), "placeholder") {
 			t.Errorf("one value left unfilled (%q): Load = %v, want it refused as a placeholder", line, err)
 		}
@@ -209,7 +212,7 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	const api, metrics = "  api_url: http://host.example.invalid:8081\n  metrics_url: http://host.example.invalid:8084", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{
-		"no section":            {"runtimes:\n" + api, ""},
+		"no section":            {"runtimes:\n" + api + "\n  registry: host.example.invalid:5000\n  image_tag: abc1234", ""},
 		"no api url":            {api, "  metrics_url: http://metrics.example.invalid"},
 		"no metrics url":        {metrics, `  metrics_url: ""`},
 		"metrics url no host":   {metrics, "  metrics_url: /metrics"},
@@ -237,8 +240,35 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Runtimes.APIURL != "http://host.example.invalid:8081" || cfg.Runtimes.MetricsURL != "http://host.example.invalid:8084" {
-		t.Errorf("runtimes = %+v, want both addresses of the settings file", cfg.Runtimes)
+	if want := (RuntimesConfig{APIURL: "http://host.example.invalid:8081", MetricsURL: "http://host.example.invalid:8084",
+		Registry: "host.example.invalid:5000", ImageTag: "abc1234"}); cfg.Runtimes != want {
+		t.Errorf("runtimes = %+v, want %+v", cfg.Runtimes, want)
+	}
+}
+
+// The install command a registered cluster is given names these two, so a value no node can
+// pull with is refused where the deployment is configured.
+func TestLoadRejectsRuntimeImagesANodeCannotPull(t *testing.T) {
+	const registry, tag = "  registry: host.example.invalid:5000", "  image_tag: abc1234"
+	for name, edit := range map[string][2]string{
+		"no registry":          {registry + "\n", ""},
+		"empty registry":       {registry, `  registry: ""`},
+		"registry with scheme": {registry, "  registry: https://registry.example.invalid"},
+		"registry localhost":   {registry, "  registry: localhost:5000"},
+		"registry loopback":    {registry, "  registry: 127.0.0.1:5000/images"},
+		"no tag":               {tag, ""},
+		"tag with a name":      {tag, "  image_tag: hypothesisloop-cluster-agent:abc1234"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") {
+			t.Errorf("%s: Load = %v, want it refused naming the runtimes section", name, err)
+		}
+	}
+	if err := loadText(t, strings.Replace(productionConfig(t), registry, "  registry: europe-west1-docker.pkg.dev/project/images", 1)); err != nil {
+		t.Errorf("a registry with a path: Load = %v, want it accepted", err)
 	}
 }
 

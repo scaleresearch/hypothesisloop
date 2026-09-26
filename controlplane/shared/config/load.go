@@ -261,6 +261,16 @@ func (c *Config) build() error {
 			return fmt.Errorf("runtimes %s %q is loopback or unspecified: a runtime inside a cluster cannot reach it", key, address)
 		}
 	}
+	registry, err := url.Parse("//" + c.Runtimes.Registry)
+	if err != nil || registry.Host == "" || strings.Contains(c.Runtimes.Registry, "://") || strings.ContainsAny(c.Runtimes.Registry, " \t") {
+		return fmt.Errorf("runtimes registry %q must be the registry a cluster's nodes pull the runtime's images from, as host[:port][/path]", c.Runtimes.Registry)
+	}
+	if unreachableFromElsewhere(registry.Hostname()) {
+		return fmt.Errorf("runtimes registry %q is loopback or unspecified: a node of a cluster cannot pull from it", c.Runtimes.Registry)
+	}
+	if c.Runtimes.ImageTag == "" || strings.ContainsAny(c.Runtimes.ImageTag, " \t/:") {
+		return fmt.Errorf("runtimes image_tag %q must be the tag the runtime's images were pushed under", c.Runtimes.ImageTag)
+	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}

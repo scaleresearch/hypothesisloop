@@ -75,7 +75,8 @@ agents:
 
 # Where a cluster's runtime reaches the platform: the runtimes section of hypothesisloop.yaml.
 # Both are handed out when a cluster is registered and must be reachable from inside every
-# cluster that runs jobs.
+# cluster that runs jobs. The section's registry and image_tag are images.registry and
+# images.tag above: a cluster's runtime installs the images this release runs.
 runtimes:
   # Required: this API.
   apiURL: ""

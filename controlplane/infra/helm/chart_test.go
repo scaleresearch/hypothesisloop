@@ -74,6 +74,8 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	if got, want := inCluster.Runtimes, (config.RuntimesConfig{
 		APIURL:     "http://api.example.invalid:30081",
 		MetricsURL: "http://metrics.example.invalid:30084",
+		Registry:   "registry.example.invalid",
+		ImageTag:   "test",
 	}); got != want {
 		t.Errorf("in-cluster runtimes = %+v, want %+v", got, want)
 	}

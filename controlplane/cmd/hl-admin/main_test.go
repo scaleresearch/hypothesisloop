@@ -24,6 +24,7 @@ func settingsPath(t *testing.T) string {
 	}
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	rendered := strings.ReplaceAll(string(committed), config.Placeholder+"HOST-ADDRESS", "host.example.invalid")
+	rendered = strings.ReplaceAll(rendered, config.Placeholder+"IMAGE-TAG", "abc1234")
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -71,7 +71,11 @@ lib_render_settings() {
     echo "render-settings: .env sets LOCAL_IDENTITY_PROVIDER=${HL_LOCAL_IDENTITY_PROVIDER}; it is empty or supabase" >&2
     return 1
   fi
+  # The local runtimes install the images `make images` pushes to the dev registry, under the
+  # tag of this tree (make's own TAG when make runs this).
+  local image_tag="${TAG:-$(bash "${LIB_AUTH_REPO}/localdev/lib/image-tag.sh")}"
   sed -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
+      -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
   for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""}; do

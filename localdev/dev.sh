@@ -108,8 +108,11 @@ render_settings() {
     hosted=(-e "s|http://${host}:8081|${public_api}|"
             -e "s|http://${host}:8084|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
-            -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|")
-    values+=("  api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}")
+            -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
+            -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
+            -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
+    values+=("  api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
+             "  registry: ${registry}" "  image_tag: ${tag}")
   fi
   sed -e 's|http://greptimedb:4000|http://localhost:4010|' \
       -e 's|bolt://memgraph:7687|bolt://localhost:7687|' ${hosted[@]+"${hosted[@]}"} "${rendered}" > "${settings}"
@@ -166,15 +169,15 @@ start_control_plane() {
   fi
   # Built before anything is stopped: a tree that does not compile leaves what runs running.
   (cd controlplane && go build -o "${repo}/${bin}/" ./cmd/control-service ./cmd/metrics-service)
-  stop control-service
-  stop metrics-service
-  require_port 8081
   # Checked before anything is stopped too: settings rendered before this tree made a key
   # required do not load, and the API would be stopped with nothing to start in its place.
   if ! lib_hl_admin token staff >/dev/null; then
     echo "dev: ${settings} does not load with this tree; render it again with make dev or make dev-hosted" >&2
     exit 1
   fi
+  stop control-service
+  stop metrics-service
+  require_port 8081
   require_port 8084
   start control-service "${bin}/control-service"
   start metrics-service "${bin}/metrics-service"

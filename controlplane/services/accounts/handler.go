@@ -58,10 +58,13 @@ type Clusters interface {
 // Connectivity reports which clusters have an agent connected right now, by name.
 type Connectivity func(ctx context.Context) (map[string]bool, error)
 
-// RuntimeAddresses is where a cluster's agents reach the platform from inside their cluster.
+// RuntimeAddresses is what a cluster's agents are installed with: where they reach the platform
+// from inside their cluster, and the registry and tag their images are pulled under.
 type RuntimeAddresses struct {
 	APIURL     string
 	MetricsURL string
+	Registry   string
+	ImageTag   string
 }
 
 type Handler struct {
@@ -142,6 +145,8 @@ type RegisteredCluster struct {
 	RuntimeToken string `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
 	APIURL       string `json:"api_url" doc:"The address this cluster's agents reach the API at."`
 	MetricsURL   string `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
+	Registry     string `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
+	ImageTag     string `json:"image_tag" doc:"The tag of the agents' images."`
 }
 
 // ListedCluster is a cluster an org's jobs can be placed on and whether its agent is connected
@@ -483,6 +488,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
 			ClusterView: viewOf(cluster), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
+			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
 		}}, nil
 	})
 

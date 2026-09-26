@@ -550,6 +550,9 @@ export interface RegisteredCluster {
   // Where the cluster's agent reaches the API and sends metrics.
   api_url: string
   metrics_url: string
+  // The registry and tag the agent's images are pulled under.
+  registry: string
+  image_tag: string
 }
 
 // What became of the machine the platform runs for a hosted agent or a coordinator, as its

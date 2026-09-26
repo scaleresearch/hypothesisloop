@@ -25,7 +25,7 @@ const testSigningSecret = "accounts-test-signing-secret"
 
 var testLimits = Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}
 
-var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid"}
+var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid", Registry: "registry.test.invalid/images", ImageTag: "abc1234"}
 
 // world is two orgs on one API. org A has an owner, a member, a second project, four API keys,
 // a pending invite and a cluster; org B has its own owner, key and cluster. Each caller is a token named after
@@ -672,8 +672,8 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 		if registered.RuntimeToken != want || registered.OrgID != w.orgA || registered.Shared {
 			t.Fatalf("registered by %s: got = %+v, want the derived token, owned by %s and not shared", caller, registered, w.orgA)
 		}
-		if registered.APIURL != testRuntimeAddresses.APIURL || registered.MetricsURL != testRuntimeAddresses.MetricsURL {
-			t.Fatalf("registered by %s: got = %s and %s, want the addresses runtimes are configured to use", caller, registered.APIURL, registered.MetricsURL)
+		if got := (RuntimeAddresses{APIURL: registered.APIURL, MetricsURL: registered.MetricsURL, Registry: registered.Registry, ImageTag: registered.ImageTag}); got != testRuntimeAddresses {
+			t.Fatalf("registered by %s: got = %+v, want what runtimes are configured to install with, %+v", caller, got, testRuntimeAddresses)
 		}
 	}
 

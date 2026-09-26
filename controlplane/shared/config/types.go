@@ -263,11 +263,13 @@ type AccountsConfig struct {
 	MaxProjectsPerOrg int `yaml:"max_projects_per_org"`
 }
 
-// RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a
-// cluster is registered.
+// RuntimesConfig is what a cluster's runtime is installed with: where it reaches the platform
+// and which images it runs. All of it is handed out when a cluster is registered.
 type RuntimesConfig struct {
 	APIURL     string `yaml:"api_url"`
 	MetricsURL string `yaml:"metrics_url"`
+	Registry   string `yaml:"registry"`
+	ImageTag   string `yaml:"image_tag"`
 }
 
 // GitHubConfig is the GitHub App a project's repository is reached through. Left empty, the

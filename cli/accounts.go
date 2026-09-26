@@ -386,16 +386,26 @@ type registeredCluster struct {
 	RuntimeToken string `json:"runtime_token"`
 	APIURL       string `json:"api_url"`
 	MetricsURL   string `json:"metrics_url"`
+	Registry     string `json:"registry"`
+	ImageTag     string `json:"image_tag"`
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("cluster add", `usage: hl cluster add NAME [--org ORG]
 
-Registers the cluster name for the org and prints the command that installs its agent, with the
-addresses its agent reaches the platform at filled in. Run that command with kubectl pointed at
-the cluster. It reads the cluster's runtime token with hl cluster token when it runs, so the token
-is in no terminal scrollback and no shell history. Adding a name the org already has prints the
-same command again. A cluster takes its own org's jobs only.`, stderr)
+Registers the cluster name for the org and prints the command that installs its agent on a
+Kubernetes cluster, with the addresses its agent reaches the platform at and the registry and
+tag of its images filled in. Run that command from a checkout of the platform with helm
+installed and kubectl pointed at the cluster (or with KUBECONFIG_PATH=... KUBE_CONTEXT=...
+added). It reads the cluster's runtime token with hl cluster token when it runs, so the token is
+in no terminal scrollback and no shell history. Adding a name the org already has prints the
+same command again. A cluster takes its own org's jobs only.
+
+A bare-metal node with podman or docker is registered the same way, as a cluster of its own, and
+runs one process in place of the printed command. On the node, from a checkout, with Go and gcc:
+
+  go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent
+  CLUSTER_NAME=NAME API_URL=<the API_URL printed> RUNTIME_TOKEN="$(hl cluster token NAME)" ./bare-agent`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -409,8 +419,9 @@ same command again. A cluster takes its own org's jobs only.`, stderr)
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "RUNTIME_TOKEN=\"$(hl cluster token %s --org %s)\" make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s\n",
-		shellQuote(registered.Name), shellQuote(id), shellQuote(registered.Name), shellQuote(registered.APIURL), shellQuote(registered.MetricsURL))
+	fmt.Fprintf(stdout, "RUNTIME_TOKEN=\"$(hl cluster token %s --org %s)\" make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s REGISTRY=%s TAG=%s\n",
+		shellQuote(registered.Name), shellQuote(id), shellQuote(registered.Name), shellQuote(registered.APIURL), shellQuote(registered.MetricsURL),
+		shellQuote(registered.Registry), shellQuote(registered.ImageTag))
 	return 0
 }
 

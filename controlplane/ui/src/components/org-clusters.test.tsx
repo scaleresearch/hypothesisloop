@@ -46,7 +46,7 @@ beforeEach(() => {
     if (!clusters.some(c => c.name === name)) {
       clusters = [...clusters, { name, org_id: orgID, shared: false, created_at: at, owned: true, connected: false }]
     }
-    return { name, api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test' }
+    return { name, api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
   })
 })
 
@@ -186,7 +186,7 @@ describe('adding a cluster', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'edge')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      `RUNTIME_TOKEN="$(hl cluster token 'edge' --org 'org_a')" make cluster-agent-up CLUSTER='edge' API_URL='http://api.cluster.test' METRICS_URL='http://metrics.cluster.test'`,
+      `RUNTIME_TOKEN="$(hl cluster token 'edge' --org 'org_a')" make cluster-agent-up CLUSTER='edge' API_URL='http://api.cluster.test' METRICS_URL='http://metrics.cluster.test' REGISTRY='registry.cluster.test/images' TAG='abc1234'`,
     )
     expect(document.body.textContent).not.toContain('hls_')
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
