@@ -21,6 +21,9 @@ func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*
 	if err := s.store.NameActors(ctx, jobActors(exps)); err != nil {
 		return nil, fmt.Errorf("registry.List: %w", err)
 	}
+	if err := s.store.DescribeJobs(ctx, exps); err != nil {
+		return nil, fmt.Errorf("registry.List: %w", err)
+	}
 	return exps, nil
 }
 
@@ -46,6 +49,9 @@ func (s *Service) GetLineage(ctx context.Context, id string) ([]*domain.Experime
 		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, id)
 	}
 	if err := s.store.NameActors(ctx, jobActors(lineage)); err != nil {
+		return nil, fmt.Errorf("registry.GetLineage: %w", err)
+	}
+	if err := s.store.DescribeJobs(ctx, lineage); err != nil {
 		return nil, fmt.Errorf("registry.GetLineage: %w", err)
 	}
 	return lineage, nil

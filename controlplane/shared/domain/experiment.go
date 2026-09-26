@@ -19,10 +19,13 @@ type TriedCluster struct {
 
 // Experiment is an agent-submitted job within a platform experiment.
 type Experiment struct {
-	ID                   string  `json:"id"`
-	ParentID             *string `json:"parent_id,omitempty"`
-	AgentID              string  `json:"agent_id"`
-	PlatformExperimentID string  `json:"platform_experiment_id"`
+	ID       string  `json:"id"`
+	ParentID *string `json:"parent_id,omitempty"`
+	AgentID  string  `json:"agent_id"`
+	// AgentName is what that agent is called now, its id when it has no name. Set on a job an
+	// operation answers with, like SummaryDue.
+	AgentName            string `json:"agent_name,omitempty"`
+	PlatformExperimentID string `json:"platform_experiment_id"`
 	// Actor is whose credential submitted the job. AgentID is whose job it is and what it
 	// spends from, which is another fact: a person or an API key may submit an agent's job.
 	Actor Actor `json:"actor"`
@@ -83,6 +86,9 @@ type Experiment struct {
 	Metric  *JobMetric  `json:"metric,omitempty"`
 	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
 	Summary string `json:"summary,omitempty"`
+	// SummaryDue says the job completed and no summary was filed for it: the jobs
+	// ?needs_summary=true lists, which hold their agent's queued jobs back.
+	SummaryDue bool `json:"summary_due"`
 	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
 	// Nil on every other read of an experiment.
 	Data *DataAccess `json:"data,omitempty"`

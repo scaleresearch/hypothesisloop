@@ -74,7 +74,8 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 	return nil
 }
 
-// NameJobs names the actor of each job that is about to be answered.
+// NameJobs completes each job that is about to be answered: its actor's name, its agent's name
+// and whether its summary is due.
 func (s *Service) NameJobs(ctx context.Context, jobs ...*domain.Experiment) error {
 	if len(jobs) == 0 {
 		return nil
@@ -83,5 +84,8 @@ func (s *Service) NameJobs(ctx context.Context, jobs ...*domain.Experiment) erro
 	for i, job := range jobs {
 		actors[i] = &job.Actor
 	}
-	return s.store.NameActors(ctx, actors)
+	if err := s.store.NameActors(ctx, actors); err != nil {
+		return err
+	}
+	return s.store.DescribeJobs(ctx, jobs)
 }

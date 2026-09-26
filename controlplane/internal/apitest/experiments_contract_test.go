@@ -41,6 +41,8 @@ func (s *filterSpyStore) NameActors(_ context.Context, actors []*domain.Actor) e
 	return nil
 }
 
+func (s *filterSpyStore) DescribeJobs(context.Context, []*domain.Experiment) error { return nil }
+
 func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	s.gotList = f
 	return s.items, nil

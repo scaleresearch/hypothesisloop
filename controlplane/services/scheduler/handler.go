@@ -144,6 +144,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
 			"Each carries metrics: its best and last value on each declared metric it reported, and metric, the one on the first ranking metric. " +
+			"Each also carries agent_name, what its agent is called now, and summary_due: true for a completed one no summary was filed for, the set ?needs_summary lists. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`

@@ -44,6 +44,8 @@ type Store interface {
 	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error)
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
+	// DescribeJobs sets on each job its agent's name and whether its summary is due.
+	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)

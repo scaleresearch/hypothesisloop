@@ -36,6 +36,8 @@ type Store interface {
 	CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error)
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
+	// DescribeJobs sets on each job its agent's name and whether its summary is due.
+	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error)
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)

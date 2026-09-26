@@ -199,6 +199,41 @@ func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID
 	return exists, err
 }
 
+// DescribeJobs sets on each job what an answer says of it beyond its own row: its agent's name,
+// the agent's id when it has none, and whether its summary is due. It is one read however many
+// jobs are given.
+func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	byID := make(map[string]*domain.Experiment, len(jobs))
+	ids := make([]string, len(jobs))
+	for i, job := range jobs {
+		byID[job.ID], ids[i] = job, job.ID
+		job.AgentName = job.AgentID
+	}
+	rows, err := s.pool.pool.Query(ctx, `SELECT id,
+		COALESCE((SELECT NULLIF(a.name, '') FROM agents a WHERE a.id = experiments.agent_id), agent_id),
+		`+UnsummarizedCompletedPredicate+`
+		FROM experiments WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return fmt.Errorf("experiments_store.DescribeJobs: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, agentName string
+		var summaryDue bool
+		if err := rows.Scan(&id, &agentName, &summaryDue); err != nil {
+			return fmt.Errorf("experiments_store.DescribeJobs: scan: %w", err)
+		}
+		byID[id].AgentName, byID[id].SummaryDue = agentName, summaryDue
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("experiments_store.DescribeJobs: %w", err)
+	}
+	return nil
+}
+
 // ListUnsettledTerminalExperiments returns terminal experiments whose final usage has not yet
 // been durably written — candidates for the settlement reconciler to retry after a crash or
 // metrics-DB outage.
