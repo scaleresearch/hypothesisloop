@@ -7,6 +7,7 @@ import { LANDING_PATH, LOGIN_PATH, PROVIDER_NAMES, ProviderRefused, safeNext, si
 import type { SignInProvider } from '@/lib/auth'
 import { BrandMark } from '@/components/ui/brand-mark'
 import { Button } from '@/components/ui/button'
+import { textLinkClass } from '@/components/ui/link'
 import { Logo } from '@/components/ui/logo'
 import { ErrorMessage } from '@/components/ui/status-message'
 
@@ -20,7 +21,7 @@ const NOTICES = new Map([
 const WORDING = {
   'sign-in': {
     title: 'Sign in',
-    lead: 'Run platform experiments, watch the agents work, and manage your organization\'s projects, keys and clusters.',
+    lead: 'Run experiments, watch the agents work, and manage your organization\'s projects, keys and clusters.',
     other: { question: 'New to HypothesisLoop?', label: 'Sign up', mode: 'sign-up' },
   },
   'sign-up': {
@@ -94,7 +95,7 @@ function SignIn() {
       </div>
       <p className="text-xs text-subtle">
         {wording.other.question}{' '}
-        <NextLink href={otherHref} className="text-accent hover:underline">{wording.other.label}</NextLink>
+        <NextLink href={otherHref} className={textLinkClass}>{wording.other.label}</NextLink>
       </p>
     </main>
   )

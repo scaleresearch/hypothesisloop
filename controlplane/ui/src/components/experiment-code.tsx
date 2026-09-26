@@ -1,4 +1,5 @@
 import type { PlatformExperiment } from '@/types'
+import { textLinkClass } from '@/components/ui/link'
 
 /** The code a platform experiment works on and the image its hosted agents run, both fixed at creation. */
 export function ExperimentCode({ pe }: { pe: Pick<PlatformExperiment, 'repository' | 'repository_url' | 'agent_image'> }) {
@@ -9,7 +10,7 @@ export function ExperimentCode({ pe }: { pe: Pick<PlatformExperiment, 'repositor
         <dd className="font-mono">
           {pe.repository
             ? pe.repository_url
-              ? <a href={pe.repository_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">{pe.repository}</a>
+              ? <a href={pe.repository_url} target="_blank" rel="noreferrer" className={textLinkClass}>{pe.repository}</a>
               : pe.repository
             : <span className="font-sans text-muted">none</span>}
         </dd>

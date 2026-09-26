@@ -19,8 +19,8 @@ export function CollapsibleDescription({ text, collapseLength = DEFAULT_COLLAPSE
           <p className="mb-1 whitespace-pre-wrap text-sm text-subtle">
             {open ? text : text.slice(0, collapseLength).trimEnd() + '…'}
           </p>
-          <DisclosureButton className="text-xs text-accent hover:underline">
-            {open ? 'Show less ▲' : 'Show more ▼'}
+          <DisclosureButton className="rounded-sm text-xs text-accent hover:underline">
+            {open ? 'Show less' : 'Show more'}
           </DisclosureButton>
         </div>
       )}

@@ -109,7 +109,7 @@ export function CommandPalette() {
             setIdResult({
               id: 'resolved-pe',
               label: pe.name || `Platform experiment ${q.slice(0, 12)}…`,
-              sub: 'open platform experiment',
+              sub: 'open experiment',
               icon: Hash,
               action: () => { router.push(`/platform-experiments/${q}`); close() },
             })

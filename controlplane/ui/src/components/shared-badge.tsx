@@ -14,8 +14,8 @@ export function SharedBadge({ pe }: { pe: Pick<PlatformExperiment, 'shared' | 'p
     <Pill
       tone="info"
       title={readOnly
-        ? 'The platform shares this platform experiment with every account. You can read everything in it and change nothing.'
-        : 'The platform shares this platform experiment with every account, read only. Your organization owns it.'}
+        ? 'The platform shares this experiment with every account. You can read everything in it and change nothing.'
+        : 'The platform shares this experiment with every account, read only. Your organization owns it.'}
     >
       {readOnly ? 'Shared · read only' : 'Shared'}
     </Pill>

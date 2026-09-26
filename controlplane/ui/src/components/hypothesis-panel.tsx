@@ -1,9 +1,9 @@
 'use client'
 
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import type { HypothesisGraph, HypothesisLinkType, HypothesisListItem, PlatformExperiment } from '@/types'
 import type { HypothesisEvidence } from '@/lib/api'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
@@ -42,7 +42,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
           </span>
           <span className="ml-auto flex items-center gap-3">
             {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>}
-            <Link href={`/platform-experiments/${graph.root}`} className="text-xs text-accent hover:underline">Experiment →</Link>
+            <TextLink href={`/platform-experiments/${graph.root}`} className="text-xs">Experiment →</TextLink>
           </span>
         </div>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
@@ -57,7 +57,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
   if (!node) {
     return (
       <Card>
-        <CardHeader>Hypothesis</CardHeader>
+        <CardHeader><CardTitle>Hypothesis</CardTitle></CardHeader>
         <CardContent>
           <EmptyState>
             <span className="font-mono text-xs">{selected}</span> is not in this experiment&apos;s graph.{' '}
@@ -75,7 +75,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
   return (
     <Card>
       <CardHeader>
-        Hypothesis
+        <CardTitle>Hypothesis</CardTitle>
         <Badge status={node.status}>{node.status}</Badge>
       </CardHeader>
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
@@ -92,13 +92,13 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         {bestJob && (
           <div className="font-mono text-xs">
             <span className="text-muted">Best job </span>
-            <Link href={`/jobs/${bestJob.id}`} className="text-accent hover:underline">{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</Link>
+            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</TextLink>
           </div>
         )}
         {finding && (
           <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <Eyebrow>
-              Newest finding · <Link href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case text-accent hover:underline">{finding.experiment_id}</Link>
+              Newest finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
               {filedAfterVerdict(node, finding.created_at) && <span className="text-warning"> · filed after the verdict</span>}
             </Eyebrow>
             <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-xs">
@@ -116,7 +116,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
         ))}
         <div className="flex flex-wrap items-center gap-3">
           {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>}
-          <Link href={`/hypotheses/${node.id}`} className="text-xs text-accent hover:underline">Open detail →</Link>
+          <TextLink href={`/hypotheses/${node.id}`} className="text-xs">Open detail →</TextLink>
         </div>
       </CardContent>
     </Card>

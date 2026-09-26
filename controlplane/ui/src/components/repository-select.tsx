@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { Link } from '@/components/ui/link'
+import { TextLink } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { InlineError } from '@/components/ui/status-message'
 
@@ -32,7 +32,7 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
     return (
       <p className="text-sm text-muted">
         No GitHub account is connected to {org.name}, so this experiment has no repository.{' '}
-        <Link href={`/settings#${GITHUB_CARD}`} className="text-accent hover:underline">Connect GitHub in Settings</Link>
+        <TextLink href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
       </p>
     )
   }
