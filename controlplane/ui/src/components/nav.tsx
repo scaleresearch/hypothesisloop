@@ -5,10 +5,11 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { clsx } from 'clsx'
 import useSWR from 'swr'
-import { FlaskConical, Bot, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
+import { FlaskConical, ListTree, Server, LineChart, Lightbulb, Settings } from 'lucide-react'
 import { fetchOrgClusters } from '@/lib/api'
 import { HOME_PATH, LANDING_PATH, signOut } from '@/lib/auth'
 import { useTenant } from '@/lib/tenant'
+import { budgetUnit } from '@/lib/units'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 import { ProjectSwitcher } from '@/components/project-switcher'
 import { Button } from '@/components/ui/button'
@@ -19,10 +20,9 @@ import { InlineError } from '@/components/ui/status-message'
 const navItems = [
   { href: '/platform-experiments', label: 'Experiments',          icon: FlaskConical },
   { href: '/hypotheses',           label: 'Hypotheses',           icon: Lightbulb    },
-  { href: '/agents',               label: 'Research Agents',      icon: Bot          },
   { href: '/jobs',                 label: 'Jobs',                 icon: ListTree     },
   { href: '/cluster',              label: 'Compute Resources',    icon: Server       },
-  { href: '/statistics',           label: 'Statistics',           icon: LineChart    },
+  { href: '/statistics',           label: 'Statistics',           icon: LineChart,   staffOnly: true },
   { href: '/settings',             label: 'Settings',             icon: Settings     },
 ]
 
@@ -36,10 +36,10 @@ const statusTone = {
 function StatusLine({ tone, label, sub }: { tone: keyof typeof statusTone; label: string; sub?: string }) {
   return (
     <div className={clsx('mb-3 flex items-center gap-2 rounded border bg-surface-inset px-2.5 py-2', statusTone[tone])}>
-      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none animate-pulse rounded-full bg-current" />
+      <span aria-hidden="true" className={clsx('h-1.5 w-1.5 flex-none rounded-full bg-current', tone === 'idle' && 'animate-pulse')} />
       <div className="min-w-0">
         <div className="truncate text-xs font-semibold">{label}</div>
-        {sub && <div className="truncate font-mono text-2xs text-subtle" title={sub}>{sub}</div>}
+        {sub && <div className="truncate text-2xs text-subtle" title={sub}>{sub}</div>}
       </div>
     </div>
   )
@@ -56,7 +56,7 @@ function SystemStatus() {
   // What the org's jobs can run on: its own clusters and the platform's it uses.
   const { used, online, whose } = clustersInUse(data)
   const tone = used === 0 ? 'idle' : online === used ? 'success' : online > 0 ? 'warning' : 'danger'
-  const label = used === 0 ? 'No cluster in use' : online === used ? 'All systems nominal' : online > 0 ? 'Degraded' : 'Offline'
+  const label = used === 0 ? 'No cluster in use' : online === used ? 'All clusters online' : online > 0 ? 'Some clusters offline' : 'All clusters offline'
 
   return <StatusLine tone={tone} label={label} sub={`${online}/${used} clusters online${whose ? ` · ${whose}` : ''}`} />
 }
@@ -87,9 +87,10 @@ function Account() {
 
 export function Nav() {
   const pathname = usePathname()
+  const { staff } = useTenant()
 
   return (
-    <nav className="flex h-screen w-56 flex-none flex-col border-r bg-surface">
+    <nav aria-label="Main" className="flex h-screen w-56 flex-none flex-col border-r bg-surface">
       <Link href={HOME_PATH} className="border-b px-4 py-5">
         <Logo />
       </Link>
@@ -98,7 +99,7 @@ export function Nav() {
         <CommandPaletteTrigger />
       </div>
       <ul className="mt-1 flex flex-col gap-0.5 px-2.5">
-        {navItems.map(({ href, label, icon: Icon }) => {
+        {navItems.filter(item => staff || !item.staffOnly).map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
             <li key={href}>
@@ -110,7 +111,7 @@ export function Nav() {
                   active ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted hover:bg-foreground/5 hover:text-foreground',
                 )}
               >
-                <Icon size={16} strokeWidth={2} className="flex-none" />
+                <Icon aria-hidden="true" size={16} strokeWidth={2} className="flex-none" />
                 {label}
               </Link>
             </li>
@@ -122,7 +123,7 @@ export function Nav() {
         <Account />
         <div className="border-t pt-3">
           <p className="text-xs font-semibold text-muted">HypothesisLoop v2.0</p>
-          <p className="mt-0.5 font-mono text-2xs text-subtle">Budget: normalized compute-hours</p>
+          <p className="mt-0.5 text-2xs text-subtle">Budgets are counted in {budgetUnit('accelerator', 'long')}, or {budgetUnit('cpu', 'long')} for jobs on CPU.</p>
         </div>
       </div>
     </nav>

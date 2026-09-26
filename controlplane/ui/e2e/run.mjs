@@ -943,7 +943,10 @@ async function scenarios(browser) {
   assert.equal(await page.getByRole('button', { name: 'Show start command' }).count(), 0, 'the cluster page manages nothing')
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
   await shot(page, 'cluster-page')
-  await page.getByRole('link', { name: 'Statistics' }).click()
+  assert.equal(await page.getByRole('link', { name: 'Statistics' }).count(), 0, 'the nav offers Statistics to staff alone')
+  const statistics = new URL(page.url())
+  statistics.pathname = '/statistics'
+  await page.goto(statistics.href)
   await page.getByText('Jobs by status').waitFor()
   assert.equal(await page.getByText('staff only').count(), 0)
 
