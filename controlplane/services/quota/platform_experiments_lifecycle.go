@@ -23,6 +23,19 @@ func invalidPlatformExperiment(err error) error {
 	return fmt.Errorf("platform_experiments.Create: %w: %w", ErrInvalidPlatformExperiment, err)
 }
 
+// checkLength holds a create to stating how long it lasts in exactly one way.
+func (r CreatePlatformExperimentRequest) checkLength() error {
+	switch {
+	case r.DurationHours < 0:
+		return refuseUpdate(422, "invalid_length", "duration_hours must be positive")
+	case r.DurationHours > 0 && !r.EndsAt.IsZero():
+		return refuseUpdate(422, "invalid_length", "the body states both duration_hours and ends_at: state one")
+	case r.DurationHours == 0 && r.EndsAt.IsZero():
+		return refuseUpdate(422, "invalid_length", "state how long it lasts: duration_hours or ends_at")
+	}
+	return nil
+}
+
 // Create creates a new platform experiment in open status (accepting signups immediately).
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
@@ -36,11 +49,17 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err := domain.RequireRankingMetric(metrics); err != nil {
 		return nil, invalidPlatformExperiment(err)
 	}
+	if req.ReportIntervalSeconds == 0 {
+		req.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
+	}
 	if req.ReportIntervalSeconds <= 0 {
 		return nil, invalidPlatformExperiment(errors.New("report_interval_seconds must be positive"))
 	}
+	if req.MaxAgents == 0 {
+		req.MaxAgents = req.maxHosted
+	}
 	if req.MaxAgents <= 0 {
-		return nil, invalidPlatformExperiment(errors.New("max_agents must be positive"))
+		return nil, invalidPlatformExperiment(errors.New("max_agents must be positive, and this deployment hosts no agents to take it from: state it"))
 	}
 	stages := req.Stages
 	if len(stages) == 0 {
@@ -68,8 +87,15 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
 		return nil, invalidPlatformExperiment(errors.New("max_concurrent_accelerators must be positive"))
 	}
-	if req.EndsAt.IsZero() {
-		return nil, invalidPlatformExperiment(errors.New("ends_at is required"))
+	if err := req.checkLength(); err != nil {
+		return nil, err
+	}
+	if req.DurationHours > 0 {
+		from := req.StartsAt
+		if from.IsZero() {
+			from = now
+		}
+		req.EndsAt = from.Add(time.Duration(req.DurationHours * float64(time.Hour)))
 	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
 		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
@@ -109,7 +135,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	return pe, nil
 }
 
-// refuseUpdate is a patch the caller can fix.
+// refuseUpdate is a create or a patch the caller can fix.
 func refuseUpdate(status int, reason, format string, args ...any) error {
 	return &reasonError{status: status, Reason: reason, Message: fmt.Sprintf(format, args...)}
 }

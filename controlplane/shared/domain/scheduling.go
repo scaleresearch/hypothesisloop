@@ -20,6 +20,9 @@ type QuotaConfig struct {
 	Top3BonusFraction float64 `json:"top3_bonus_fraction"`
 	// BurstFraction is burst_quota = guaranteed * burst_fraction.
 	BurstFraction float64 `json:"burst_fraction"`
+	// DefaultReportIntervalSeconds is the reporting cadence of a platform experiment created
+	// without its own.
+	DefaultReportIntervalSeconds int `json:"default_report_interval_seconds,omitempty"`
 	// DefaultStages is the elimination ladder applied to a platform experiment created
 	// without its own.
 	DefaultStages []Stage `json:"default_stages"`

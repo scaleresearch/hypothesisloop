@@ -164,12 +164,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "Operator/dashboard endpoint. project_id, name, budget_accelerator_hours, max_agents, report_interval_seconds and ends_at are required. " +
+		Description: "Operator/dashboard endpoint. project_id, name, description, metrics and budget_accelerator_hours are required, and so is how long it lasts: " +
+			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither). " +
+			"max_agents left out is max_hosted, report_interval_seconds left out is the platform's default, and with no starts_at it starts when it is started. " +
 			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\". " +
-			"description, metrics and starts_at are required as well, and a zero starts_at starts it now. " +
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
-			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and ends_at " +
-			"are never read from the file and stay required of the body: any agent's token can push to that branch, so what a run costs and how " +
+			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents, duration_hours and ends_at " +
+			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
@@ -200,6 +201,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				return nil, err
 			}
 			in.Body.Repository = named
+		}
+		// Never the experiment file's to state, so it is held before the repository is read.
+		if err := in.Body.checkLength(); err != nil {
+			return nil, err
 		}
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
 			return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_agent_image", Message: err.Error()}
@@ -239,6 +244,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			hosting.createdBy = &by
 		}
 		pe, err := peh.svc.Create(ctx, hosting)
+		var refused *reasonError
+		if errors.As(err, &refused) {
+			return nil, refused
+		}
 		if errors.Is(err, ErrInvalidPlatformExperiment) {
 			return nil, invalid(err.Error())
 		}

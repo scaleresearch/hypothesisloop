@@ -91,6 +91,13 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
 		t.Fatalf("without one: got = %d %v, created %+v", code, out, store.created[0])
 	}
+	// With no max_agents the field is as large as the platform runs machines for one experiment.
+	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	unbounded := run(nil)
+	delete(unbounded, "max_agents")
+	if code, out := create(unbounded); code != http.StatusCreated || store.created[0].MaxAgents != hostingMaxHosted {
+		t.Fatalf("without max_agents: got = %d %v, created %+v, want max_agents %d", code, out, store.created, hostingMaxHosted)
+	}
 }
 
 // The file is pushed to by any agent's token, and a coordinator rents a machine.

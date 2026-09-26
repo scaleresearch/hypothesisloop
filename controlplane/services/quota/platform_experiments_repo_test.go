@@ -134,7 +134,7 @@ func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.Pl
 func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
 	t.Helper()
 	store := &createdStore{}
-	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30}, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},
@@ -202,7 +202,7 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 // Any agent's token can push to the branch the file is read from, so the file cannot raise what
 // a run costs: without them in the body the request is refused before the repository is read.
 func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
-	for _, field := range []string{"budget_accelerator_hours", "max_agents", "ends_at"} {
+	for _, field := range []string{"budget_accelerator_hours", "ends_at"} {
 		repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 		store, call := repoAPI(t, ownerOfA, repos)
 		body := run(nil)
@@ -219,28 +219,38 @@ func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 	}
 }
 
-// Without from_repo nothing can supply a field the body leaves out, so each one a platform
-// experiment needs is required again. A zero starts_at is a value: it means start now.
-func TestCreateWithoutFromRepoRequiresWhatTheFileCouldHaveStated(t *testing.T) {
+// Without from_repo nothing can supply a field the body leaves out, so what only the caller can
+// say is required. The rest has a default: the report interval is the platform's, there is no
+// start time, and the length is a duration or an end.
+func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	whole := func() map[string]any {
 		return map[string]any{
-			"project_id": "prj-a", "name": "by hand", "description": "", "budget_accelerator_hours": 5, "max_agents": 3,
-			"report_interval_seconds": 10, "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
+			"project_id": "prj-a", "name": "by hand", "description": "", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 2,
 			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
 		}
 	}
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
+	before := time.Now()
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusCreated {
-		t.Fatalf("a whole body with an empty description and a zero starts_at: got = %d %s, want 201", rec.Code, rec.Body)
+		t.Fatalf("a body with a duration and no report interval or start: got = %d %s, want 201", rec.Code, rec.Body)
 	}
-	for _, field := range []string{"name", "description", "metrics", "report_interval_seconds", "starts_at", "budget_accelerator_hours", "max_agents", "ends_at"} {
+	pe := store.created[0]
+	if pe.ReportIntervalSeconds != 30 || !pe.StartsAt.IsZero() || pe.EndsAt.Before(before.Add(2*time.Hour)) || pe.EndsAt.After(time.Now().Add(2*time.Hour)) {
+		t.Fatalf("created = %+v, want the platform's report interval, no start and an end two hours on", pe)
+	}
+	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "duration_hours"} {
 		body := whole()
 		delete(body, field)
 		rec := call("POST", "/platform-experiments", body)
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), field) {
 			t.Errorf("without %s: got = %d %s, want 422 naming it", field, rec.Code, rec.Body)
 		}
+	}
+	both := whole()
+	both["ends_at"] = "2027-01-01T00:00:00Z"
+	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_length") {
+		t.Errorf("a duration and an end: got = %d %s, want 422 invalid_length", rec.Code, rec.Body)
 	}
 	if len(store.created) != 1 || len(repos.asked) != 0 {
 		t.Fatalf("created %d, repository read %v, want only the whole body created and no read", len(store.created), repos.asked)

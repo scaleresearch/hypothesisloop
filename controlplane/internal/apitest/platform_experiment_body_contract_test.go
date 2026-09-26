@@ -12,7 +12,8 @@ import (
 //
 // A create may leave to the repository's experiment file what the file can state, so those are
 // not required by the schema (the handler requires them when from_repo is not set). What a run
-// costs and how long it lasts is never the file's, so those stay required whatever else is sent.
+// costs is never the file's, so the budget stays required whatever else is sent. Its length is
+// one of two fields, which the handler holds to exactly one.
 func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 	spec := openAPISpec(t)
 	for _, tc := range []struct {
@@ -20,7 +21,7 @@ func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 		want         []string
 		absent       []string
 	}{
-		{"post", "/platform-experiments", []string{"budget_accelerator_hours", "ends_at", "max_agents"}, nil},
+		{"post", "/platform-experiments", []string{"budget_accelerator_hours"}, nil},
 		{"patch", "/platform-experiments/{id}", nil, []string{"from_repo", "project_id", "repository", "agent_image", "stages", "default_quota_tier"}},
 	} {
 		schema := bodySchema(t, spec, tc.method, tc.path)

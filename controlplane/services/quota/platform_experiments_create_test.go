@@ -26,7 +26,6 @@ func TestCreatePlatformExperimentMarksRequestErrorsInvalid(t *testing.T) {
 	cases := map[string]func(*CreatePlatformExperimentRequest){
 		"missing max_agents":      func(r *CreatePlatformExperimentRequest) { r.MaxAgents = 0 },
 		"missing report interval": func(r *CreatePlatformExperimentRequest) { r.ReportIntervalSeconds = 0 },
-		"missing ends_at":         func(r *CreatePlatformExperimentRequest) { r.EndsAt = time.Time{} },
 		"no ranking metric":       func(r *CreatePlatformExperimentRequest) { r.Metrics = nil },
 		"bad stages":              func(r *CreatePlatformExperimentRequest) { r.Stages = []domain.Stage{{LengthPct: 50}} },
 		"bad quota tier":          func(r *CreatePlatformExperimentRequest) { r.DefaultQuotaTier = "gold" },

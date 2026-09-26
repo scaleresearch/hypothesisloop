@@ -106,6 +106,7 @@ func main() {
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
 		BurstFraction:                    pcfg.Quota.BurstFraction,
 		DefaultStages:                    pcfg.Stages.Default,
+		DefaultReportIntervalSeconds:     pcfg.Scheduler.DefaultReportIntervalSeconds,
 		MaxSubmissionsPerHour:            pcfg.Quota.MaxSubmissionsPerHour,
 		MaxAcceleratorCountPerJob:        pcfg.Quota.MaxAcceleratorCountPerJob,
 		MaxCPUCoresPerJob:                pcfg.Quota.MaxCPUCoresPerJob,
