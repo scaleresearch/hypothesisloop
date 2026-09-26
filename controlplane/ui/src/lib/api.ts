@@ -178,9 +178,9 @@ export function putClusterSettings(
 }
 
 
-// A list is asked for within a project. Inside an example it is asked for by
-// platform_experiment_id alone: the experiment lies in another org's project, and the API
-// admits a list narrowed to a shared one.
+// A list is asked for within a project. What is in a shared platform experiment of another org
+// is asked for by platform_experiment_id alone: it lies in a project the caller's project_id
+// never matches, and the API admits a list narrowed to a shared one.
 export interface AgentsParams {
   project_id?: string
   platform_experiment_id?: string
@@ -460,9 +460,9 @@ export function createPlatformExperiment(projectID: string, req: CreatePlatformE
 }
 
 export interface PlatformExperimentsParams {
-  /** Left out with `shared`. */
+  /** The project's own. The ones staff shared with every account are listed with them, in every project. */
   project_id?: string
-  /** The ones staff shared with every account, of whatever org, in place of the caller's own. */
+  /** true keeps only the shared ones, false leaves them out. */
   shared?: boolean
   status?: string
   /** Search over name/description. */

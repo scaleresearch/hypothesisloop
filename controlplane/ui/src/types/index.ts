@@ -219,7 +219,7 @@ export interface PlatformExperiment {
   agent_image?: string
   // Absent when the platform runs no coordinator for it.
   coordinator?: HostedCoordinator
-  // Staff showed it to every account as an example: read by all, written by its own org alone.
+  // Staff shared it with every account: listed in every project, read by all, written by its own org alone.
   shared: boolean
   created_at: string
 }
