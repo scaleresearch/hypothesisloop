@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -25,12 +26,13 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
-		PlatformExperiments: map[string]domain.Tenancy{},
+		PlatformExperiments: map[string]domain.Tenancy{"pe-draft": {PlatformExperimentID: "pe-draft", ProjectID: "prj-a", OrgID: "org-a"}},
 	}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
+		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}}})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
 	return svc, func(method, path string, body any) (int, map[string]any) {
@@ -188,4 +190,133 @@ func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperimen
 	s.created = append(s.created, pe)
 	s.planners[pe.ID], s.signups[pe.ID] = planner, signup
 	return nil
+}
+
+func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, agentID string) (*domain.AgentSignup, error) {
+	if signup, ok := s.signups[platformExperimentID]; ok && signup.AgentID == agentID {
+		return &signup, nil
+	}
+	if agentID == "ag-researcher" {
+		return &domain.AgentSignup{AgentID: agentID, Flavor: domain.DefaultAgentFlavor}, nil
+	}
+	return nil, nil
+}
+
+func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time) error {
+	for _, pe := range s.created {
+		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
+			now := time.Now().UTC()
+			pe.Proposal, pe.ProposedAt, pe.EndsAt = proposal, &now, waitUntil
+			return nil
+		}
+	}
+	return db.ErrNotDraft
+}
+
+// aProposal is one the check takes, with more laid over it.
+func aProposal(more map[string]any) map[string]any {
+	body := map[string]any{
+		"experiment": map[string]any{
+			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss.",
+			"metrics":                 []map[string]any{{"key": "val_loss", "direction": "minimize"}},
+			"report_interval_seconds": 30,
+		},
+		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
+		"baseline_job_id": "job-1", "accelerator_type": "rtx-4090",
+		"metric_reason": "Validation loss on held-out text is the goal itself.",
+		"measurement":   "bench.py trains for a fixed number of steps and scores a split the training never reads.",
+		"questions":     []string{"Is 4 hours enough?"},
+	}
+	for key, value := range more {
+		body[key] = value
+	}
+	return body
+}
+
+func draftWithPlanner() *draftStore {
+	return &draftStore{
+		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
+			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, EndsAt: time.Now().Add(time.Minute),
+		}}}},
+		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
+	}
+}
+
+var thePlanner = auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-planner", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
+
+// The planner's proposal is the only way a draft gets metrics, a brief and a cost, and a person
+// accepts it unread more often than not: what can be checked is checked before it is stored.
+func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testing.T) {
+	store := draftWithPlanner()
+	_, call := planningAPI(t, store, thePlanner)
+	before := time.Now()
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	if code != http.StatusOK {
+		t.Fatalf("got = %d %v, want 200", code, out)
+	}
+	pe := store.created[0]
+	var stored Proposal
+	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || len(stored.Agents) != 2 || stored.BaselineJobID != "job-1" {
+		t.Fatalf("stored %s, %v", pe.Proposal, err)
+	}
+	if pe.ProposedAt == nil || out["proposed_at"] == nil || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
+		t.Errorf("the draft is not marked proposed: %+v", pe)
+	}
+	// From now on it waits for a person, far longer than the planner was given.
+	if wait := pe.EndsAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
+		t.Errorf("a proposed draft ends in %v, want %v", wait, DefaultPlanning.ProposedFor)
+	}
+	// The draft itself is unchanged: nothing of a proposal takes effect until a person accepts.
+	if pe.Name != "" || len(pe.Metrics) != 0 || pe.BudgetAcceleratorHours != 0 {
+		t.Errorf("the proposal changed the draft before it was accepted: %+v", pe)
+	}
+
+	experiment := func(more map[string]any) map[string]any {
+		e := aProposal(nil)["experiment"].(map[string]any)
+		for key, value := range more {
+			e[key] = value
+		}
+		return map[string]any{"experiment": e}
+	}
+	for name, c := range map[string]struct {
+		more   map[string]any
+		reason string
+	}{
+		"an experiment that sets its own budget": {experiment(map[string]any{"budget": 3}), "invalid_experiment"},
+		"no brief":                               {experiment(map[string]any{"description": " "}), "invalid_experiment"},
+		"no ranked metric":                       {experiment(map[string]any{"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize", "role": "constraint", "bound": 1}}}), "invalid_metrics"},
+		"a ladder that is not one":               {experiment(map[string]any{"stages": []map[string]any{{"length_pct": 40, "evict_pct": 50}}}), "invalid_stages"},
+		"no cost":                                {map[string]any{"budget_accelerator_hours": 0}, "invalid_cost"},
+		"nobody to run it":                       {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
+		"more machines than it gets":             {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
+		"a planner among the agents":             {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
+		"a type the platform has not":            {map[string]any{"accelerator_type": "h100"}, "unknown_accelerator_type"},
+		"no reason for the metric":               {map[string]any{"metric_reason": ""}, "missing_explanation"},
+		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
+	} {
+		store := draftWithPlanner()
+		_, call := planningAPI(t, store, thePlanner)
+		code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(c.more))
+		if code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].ProposedAt != nil {
+			t.Errorf("%s: got = %d %v, want 422 %s and nothing stored", name, code, out, c.reason)
+		}
+	}
+
+	for name, caller := range map[string]auth.Principal{
+		"a researcher of it":   {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-researcher", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+		"the person who asked": planner,
+	} {
+		store := draftWithPlanner()
+		_, call := planningAPI(t, store, caller)
+		if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusForbidden || store.created[0].ProposedAt != nil {
+			t.Errorf("%s: got = %d %v, want 403", name, code, out)
+		}
+	}
+
+	accepted := draftWithPlanner()
+	accepted.created[0].Status = domain.PlatformExpOpen
+	_, call = planningAPI(t, accepted, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "not_a_draft" {
+		t.Errorf("proposing what is no draft: got = %d %v, want 409 not_a_draft", code, out)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,6 +51,24 @@ VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)`, pe.ID, signup.AgentID, stri
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
+	}
+	return nil
+}
+
+// ErrNotDraft is returned for a write that only a draft takes.
+var ErrNotDraft = errors.New("platform experiment is not a draft")
+
+// SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
+// draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
+func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), ends_at = $3, updated_at = now()
+WHERE id = $1 AND status = 'draft'`, id, proposal, waitUntil)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotDraft
 	}
 	return nil
 }

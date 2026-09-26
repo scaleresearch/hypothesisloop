@@ -189,3 +189,25 @@ func TestARequestRefusedForItsShapeIsOneLineNamingTheFields(t *testing.T) {
 		t.Errorf("stderr = %q, want it to end with %q and carry no value", said, want)
 	}
 }
+
+func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1:ag-1"))
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	t.Setenv("AGENT_ID", "ag-1")
+	var stdout, stderr bytes.Buffer
+	file := writeFile(t, "experiment:\n  name: n\n  metrics:\n    - {key: val_loss, direction: minimize}\nbudget_accelerator_hours: 6\nagents:\n  - flavor: generalist\n  - {}\nmetric_reason: r\n")
+	if code := run([]string{"platform-experiments", "propose", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("propose: exit %d, stderr %s", code, stderr.String())
+	}
+	want := []recorded{{Method: "PUT", Path: "/platform-experiments/pe-env/proposal", Body: map[string]any{
+		"experiment":               map[string]any{"name": "n", "metrics": []any{map[string]any{"key": "val_loss", "direction": "minimize"}}},
+		"budget_accelerator_hours": float64(6), "agents": []any{map[string]any{"flavor": "generalist"}, map[string]any{}}, "metric_reason": "r",
+	}}}
+	if !reflect.DeepEqual(*got, want) {
+		t.Fatalf("requests = %+v\nwant %+v", *got, want)
+	}
+	if code := run([]string{"platform-experiments", "propose", file, "another"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
+		t.Errorf("two files: exit %d with %d requests, want 2 and nothing sent", code, len(*got))
+	}
+}

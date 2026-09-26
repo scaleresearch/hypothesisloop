@@ -60,6 +60,21 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 		t.Fatalf("the draft is not listed by its status with its goal and its one signup")
 	}
 
+	// A proposal is stored beside the draft, marks it proposed and moves its end.
+	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
+	if err := pes.SetProposal(ctx, pe, []byte(`{"budget_accelerator_hours":6}`), wait); err != nil {
+		t.Fatal(err)
+	}
+	got, err = pes.GetPlatformExperiment(ctx, pe)
+	if err != nil || got.ProposedAt == nil || string(got.Proposal) == "" || got.EndsAt.Sub(wait).Abs() > time.Second || got.Status != domain.PlatformExpDraft {
+		t.Fatalf("proposed: got = %+v, %v", got, err)
+	}
+	open := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, open, 10)
+	if err := pes.SetProposal(ctx, open, []byte(`{}`), wait); err != ErrNotDraft {
+		t.Fatalf("proposing an open platform experiment: got = %v, want ErrNotDraft", err)
+	}
+
 	// Nobody joins a draft: joining is for an open platform experiment.
 	other := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "x", Kind: domain.AgentKindAgent, CreatedAt: time.Now()}
 	if err := pes.SpawnAgent(ctx, pe, other, domain.AgentSignup{AgentID: other.ID, Role: domain.SignupRoleCompetitor, Flavor: "generalist", Model: "m"}); err != ErrSignupClosed {

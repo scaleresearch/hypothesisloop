@@ -132,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | close [PE] | summary [PE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -576,6 +576,8 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsSummary(c, args[1:], stdout, stderr)
 		case "update":
 			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
+		case "propose":
+			return cmdPlatformExperimentsPropose(c, args[1:], stdout, stderr)
 		case "get":
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
 		case "results":
@@ -584,7 +586,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -727,6 +729,43 @@ experiment was created with (or set the named fields to the live values).`, stde
 	}
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(*id), body, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
+	return 0
+}
+
+func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--pe PE] [FILE|-]
+
+For the planner of a draft. FILE is YAML: experiment (shaped like .hypothesisloop/experiment.yaml:
+name, description, metrics, report_interval_seconds, optionally stages and the policies), and
+beside it budget_accelerator_hours, duration_hours, agents (a list, one entry per researcher,
+each with optional flavor, model, hyperparameters), baseline_job_id, accelerator_type,
+metric_reason, measurement, and the lists out_of_scope, risks, questions.
+
+The proposal is checked before it is stored. A refusal names what to fix: fix it and propose
+again. Each proposal replaces the one before. Once stored the draft waits for a person.`, stderr)
+	pe := fs.String("pe", "", "the draft (default $"+platformExperimentEnv+")")
+	operands, err := parseArgs(fs, args)
+	if err != nil {
+		return parseExit(err)
+	}
+	id := orEnv(*pe, platformExperimentEnv)
+	if id == "" || len(operands) > 1 {
+		return parseExit(misuse(fs, "want --pe or $"+platformExperimentEnv+", and at most one FILE"))
+	}
+	path := "-"
+	if len(operands) == 1 {
+		path = operands[0]
+	}
+	body, err := readYAMLBody(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "hl: %s\n", err)
+		return 2
+	}
+	var out any
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/proposal", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

@@ -31,6 +31,9 @@ type PlatformExperimentsStore interface {
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
+	// SetProposal stores a draft's proposal and until when it waits for a person; db.ErrNotDraft
+	// for anything but a draft.
+	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.

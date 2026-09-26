@@ -107,6 +107,19 @@ func ownSession(audience []string, owner string) rule {
 	}
 }
 
+// plannerOnly is a draft's proposal: in scope, only an agent's own token gets as far as the
+// store, which says whether that agent is the draft's planner (quota's own tests hold that).
+func plannerOnly(audience []string) rule {
+	inScope := scoped(audience, reached)
+	return func(principal, owner string) int {
+		status := inScope(principal, owner)
+		if status == reached && principal != "agent" {
+			return http.StatusForbidden
+		}
+		return status
+	}
+}
+
 // spendsAs is a rule for a request that spends as the agent it names: a coordinator's token is
 // refused where it would otherwise be admitted, since it acts as no agent.
 func spendsAs(admits rule) rule {
@@ -273,6 +286,7 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/start", request: "/platform-experiments/<pe>/start", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/close", request: "/platform-experiments/<pe>/close", rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/results", request: "/platform-experiments/<pe>/results", rule: scoped(agentAudience, reached), sharedRead: true},
+	{method: "PUT", path: "/platform-experiments/{id}/proposal", request: "/platform-experiments/<pe>/proposal", body: `{"experiment":{},"budget_accelerator_hours":1,"duration_hours":1,"agents":[{}],"metric_reason":"r","measurement":"m"}`, rule: plannerOnly(agentAudience)},
 	{method: "POST", path: "/platform-experiments/{id}/summary", request: "/platform-experiments/<pe>/summary", body: `{"summary":"s"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/quotas", request: "/platform-experiments/<pe>/quotas", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/quotas/{agentID}", request: "/platform-experiments/<pe>/quotas/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},

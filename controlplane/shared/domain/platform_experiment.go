@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
@@ -230,6 +231,11 @@ type PlatformExperiment struct {
 	Goal string `json:"goal,omitempty"`
 	// CreatedBy is whose credential created it. Absent on one created before this was kept.
 	CreatedBy *Actor `json:"created_by,omitempty"`
+	// Proposal is what a draft's planner proposed, as it was accepted by the check on writing it,
+	// and ProposedAt when. ProposedAt is absent while a draft is being planned or revised.
+	// Carried by a read of one platform experiment and left out of a list.
+	Proposal   json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it."`
+	ProposedAt *time.Time      `json:"proposed_at,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

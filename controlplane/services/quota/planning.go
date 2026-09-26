@@ -122,6 +122,7 @@ func (h *PlatformExperimentsHandler) WithPlanning(planning Planning) *PlatformEx
 // a draft, the planner's proposal, and the person's acceptance.
 func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	access := doc.Access
+	registerProposalHuma(doc, h)
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "create-draft", Method: "POST", Path: "/platform-experiments/drafts",
