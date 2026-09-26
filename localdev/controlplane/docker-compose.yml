@@ -18,7 +18,7 @@ services:
     image: docker.io/library/registry:2
     restart: unless-stopped
     environment:
-      # Required for registry-prune.sh's tag DELETE calls to take effect -- without this the
+      # Required for prune-images.py's manifest DELETE calls to take effect -- without this the
       # registry accepts the DELETE (204) but never removes the manifest.
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     ports:

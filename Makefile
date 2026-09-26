@@ -1,5 +1,5 @@
 .PHONY: dev reset build test agent-test lint check images sparse-sdpa-workload-image \
-	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up registry-prune \
+	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
@@ -67,8 +67,11 @@ registry-up:
 	podman compose -f $(COMPOSE_FILE) up -d registry
 	@until curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/; do sleep 1; done
 
-registry-prune:
-	bash localdev/controlplane/registry-prune.sh
+# One build of this project's images stays on this machine: every other tag leaves podman's
+# image store and the dev registry (localdev/prune-images.py says what counts as in use). Each
+# target that builds ends here. TAGS names tags to keep besides those.
+prune-images:
+	python3 localdev/prune-images.py $(TAGS)
 
 # compose is started under auth.sh, which exports the GitHub App's secrets when .env has an App:
 # a PEM does not survive being a make variable.
@@ -223,6 +226,7 @@ full-start:
 # the first `make e2e`. A control plane change needs `make dev-api` and no image.
 reload: stack-not-held render-settings images
 	bash localdev/k3s-macos/reload.sh
+	$(MAKE) prune-images
 
 # Restarting the local cluster's agents takes the cluster away from whoever runs jobs on it, so
 # what does that stops while somebody holds the stack (make e2e does for as long as it runs).
@@ -328,6 +332,7 @@ images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	done
 	$(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),echo "$(TAG)" > $(IMAGE_TAG_FILE))
 	$(MAKE) chart-push
+	$(MAKE) prune-images TAGS="$(TAG)"
 
 # The runtime chart goes to the registry its images are in, as an OCI artifact under charts/, so
 # a cluster is attached with one helm command and no checkout (hl cluster add prints it). Its
@@ -354,6 +359,7 @@ ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$(REGIST
 	podman tag "$(REGISTRY)/hypothesisloop-ui:$(TAG)" "$(REGISTRY)/hypothesisloop-ui:latest"
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:$(TAG)"
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:latest"
+	$(MAKE) prune-images TAGS="$(TAG)"
 
 # Shared base every experiment's own Dockerfile.experimentator FROMs (see
 # agents/experimentator/Dockerfile.base's header) -- the agent harness, git/Claude Code plumbing,
