@@ -944,7 +944,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
   await shot(page, 'cluster-page')
   await page.getByRole('link', { name: 'Statistics' }).click()
-  await page.getByText('Job Status Breakdown').waitFor()
+  await page.getByText('Jobs by status').waitFor()
   assert.equal(await page.getByText('staff only').count(), 0)
 
   section('github: what the real API says of an org with no account connected')
@@ -1518,7 +1518,7 @@ async function scenarios(browser) {
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
     await shot(otherPage, 'staff-cluster-page', otherPage.getByRole('columnheader', { name: 'Autoscaler' }))
     await otherPage.goto(`${UI}/statistics`)
-    await otherPage.getByText('Scheduler Quality · every org · staff only').waitFor()
+    await otherPage.getByRole('heading', { name: 'Scheduler quality' }).waitFor()
     await otherPage.getByText('Burst eviction rate').waitFor()
     await shot(otherPage, 'staff-statistics', otherPage.getByText('Burst eviction rate'))
   } finally {

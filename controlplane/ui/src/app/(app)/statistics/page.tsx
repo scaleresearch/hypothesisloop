@@ -1,17 +1,16 @@
 'use client'
 
 import useSWR from 'swr'
-import { useProjectRouter } from '@/lib/query-state'
 import { fetchExperiments, fetchExperimentStats, fetchAllExperimentStats, fetchAllClusters } from '@/lib/api'
 import { useTenant } from '@/lib/tenant'
 import type { Experiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardContent, CardTitle, RowLink } from '@/components/ui/card'
 import { StatTile } from '@/components/ui/stat-tile'
-import { Badge, Dot } from '@/components/ui/badge'
+import { Badge, TierBadge } from '@/components/ui/badge'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
-import { Table } from '@/components/ui/table'
+import { LinkTr, Table, num, quiet } from '@/components/ui/table'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
@@ -72,10 +71,10 @@ function SchedulerQuality() {
 
   return (
     <Card>
-      <CardHeader>Scheduler Quality · every org · staff only</CardHeader>
+      <CardHeader><CardTitle note="every organization, staff only">Scheduler quality</CardTitle></CardHeader>
       <CardContent>
         <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5">
-          <StatTile label="Total Jobs" value={total} />
+          <StatTile label="Total jobs" value={total} />
           <StatTile
             label="Clusters"
             value={`${connectedCount}/${clusterList.length}`}
@@ -83,42 +82,42 @@ function SchedulerQuality() {
             sub="connected / registered"
           />
           <StatTile
-            label="Accelerator Occupancy"
+            label="Accelerators in use"
             value={chips.percent}
             tone="accent"
             sub={chips.detail ?? 'no live capacity reported'}
           />
-          {cores.detail && <StatTile label="CPU Class Occupancy" value={cores.percent} tone="accent" sub={cores.detail} />}
+          {cores.detail && <StatTile label="CPU cores in use" value={cores.percent} tone="accent" sub={cores.detail} />}
         </div>
         <Table className="max-w-[640px]">
           <thead>
-            <tr><th>Metric</th><th>Definition</th><th>Value</th></tr>
+            <tr><th>Metric</th><th>Definition</th><th className="text-right">Value</th></tr>
           </thead>
           <tbody>
             <tr>
               <td>Completion rate</td>
               <td className="text-xs text-muted">Completed ÷ (completed + failed + evicted)</td>
-              <td className="font-mono text-xs">{rate != null ? `${rate}%` : 'n/a'}</td>
+              <td className={num}>{rate != null ? `${rate}%` : '—'}</td>
             </tr>
             <tr>
               <td>Early-stop rate</td>
               <td className="text-xs text-muted">Evicted ÷ (completed + evicted)</td>
-              <td className="font-mono text-xs">{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : 'n/a'}</td>
+              <td className={num}>{completed + evicted > 0 ? `${Math.round(evicted / (completed + evicted) * 100)}%` : '—'}</td>
             </tr>
             <tr>
               <td>Clusters connected</td>
-              <td className="text-xs text-muted">Registered clusters with a live cluster-agent heartbeat</td>
-              <td className="font-mono text-xs">{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : 'n/a'}</td>
+              <td className="text-xs text-muted">Registered clusters that are reporting in</td>
+              <td className={num}>{clusterList.length > 0 ? `${connectedCount}/${clusterList.length}` : '—'}</td>
             </tr>
             <tr>
               <td>Crash rate</td>
               <td className="text-xs text-muted">Failed jobs ÷ total</td>
-              <td className="font-mono text-xs">{total > 0 ? `${Math.round(failed / total * 100)}%` : 'n/a'}</td>
+              <td className={num}>{total > 0 ? `${Math.round(failed / total * 100)}%` : '—'}</td>
             </tr>
             <tr>
               <td>Burst eviction rate</td>
               <td className="text-xs text-muted">Burst evictions ÷ total burst jobs</td>
-              <td className="font-mono text-xs">{burstTotal > 0 ? `${Math.round(burstEvicted / burstTotal * 100)}%` : 'n/a'}</td>
+              <td className={num}>{burstTotal > 0 ? `${Math.round(burstEvicted / burstTotal * 100)}%` : '—'}</td>
             </tr>
           </tbody>
         </Table>
@@ -128,7 +127,6 @@ function SchedulerQuality() {
 }
 
 export default function StatisticsPage() {
-  const router = useProjectRouter()
   const { project, staff } = useTenant()
 
   // Counts come from the server's own aggregate, never from tallying fetched rows: list reads
@@ -179,17 +177,16 @@ export default function StatisticsPage() {
 
   return (
     <div>
-      <PageHeader title="Statistics" description="Job outcomes in this project: status, capacity tiers, the eviction audit log and completion rate" />
+      <PageHeader title="Statistics" description="How the jobs of this project ended: by status, by capacity tier, and why any were evicted." />
 
       {isLoading && <Loading />}
       {error && <ErrorMessage>Could not load the job statistics of {project.name}: {error.message}</ErrorMessage>}
 
-      {/* KPI row */}
       <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
-        <StatTile label="Total Jobs" value={total} />
+        <StatTile label="Total jobs" value={total} />
         <StatTile label="Running" value={running} tone="success" />
         <StatTile label="Pending" value={pending} tone="warning" sub="submitted + queued" />
-        <StatTile label="Completion Rate" value={rate != null ? `${rate}%` : '—'} sub="of finished jobs" />
+        <StatTile label="Completion rate" value={rate != null ? `${rate}%` : '—'} sub="of finished jobs" />
         <StatTile label="Completed" value={completed} tone="accent" />
         <StatTile label="Evicted" value={evicted} tone="purple" />
         <StatTile label="Failed" value={failed} tone="danger" />
@@ -198,7 +195,7 @@ export default function StatisticsPage() {
       <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
         {/* Job status breakdown as donut chart */}
         <Card>
-          <CardHeader>Job Status Breakdown</CardHeader>
+          <CardHeader><CardTitle>Jobs by status</CardTitle></CardHeader>
           <CardContent>
             {total === 0 ? (
               <EmptyState>No jobs yet.</EmptyState>
@@ -226,20 +223,12 @@ export default function StatisticsPage() {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   {statusBreakdown.map(([s, n]) => (
-                    <div
-                      key={s}
-                      tabIndex={0}
-                      role="link"
-                      className="flex cursor-pointer items-center gap-2"
-                      onClick={() => router.push(`/jobs`)}
-                      onKeyDown={e => { if (e.key === 'Enter') router.push('/jobs') }}
-                    >
-                      <Dot color={statusColor(s)} />
+                    <RowLink key={s} href="/jobs" className="px-1 py-0.5">
                       <Badge status={s} className="flex-none">{s}</Badge>
-                      <span className="ml-auto font-mono text-2xs text-muted">
+                      <span className="ml-auto font-mono text-2xs tabular-nums text-muted">
                         {n} · {Math.round(n / total * 100)}%
                       </span>
-                    </div>
+                    </RowLink>
                   ))}
                 </div>
               </div>
@@ -249,24 +238,24 @@ export default function StatisticsPage() {
 
         {/* Capacity tier breakdown */}
         <Card>
-          <CardHeader>Jobs by Capacity Tier</CardHeader>
+          <CardHeader><CardTitle>Jobs by capacity tier</CardTitle></CardHeader>
           <CardContent>
             <Table>
               <thead>
-                <tr><th>Tier</th><th>Running</th><th>Total</th><th>Evicted</th></tr>
+                <tr><th>Tier</th><th className="text-right">Running</th><th className="text-right">Total</th><th className="text-right">Evicted</th></tr>
               </thead>
               <tbody>
                 <tr>
                   <td><Badge status="guaranteed">Guaranteed</Badge></td>
-                  <td className="font-mono text-xs">{tierRunning.guaranteed ?? 0}</td>
-                  <td className="font-mono text-xs">{tierTotal.guaranteed ?? 0}</td>
-                  <td className="font-mono text-xs">{tierEvicted.guaranteed ?? 0}</td>
+                  <td className={num}>{tierRunning.guaranteed ?? 0}</td>
+                  <td className={num}>{tierTotal.guaranteed ?? 0}</td>
+                  <td className={num}>{tierEvicted.guaranteed ?? 0}</td>
                 </tr>
                 <tr>
                   <td><Badge status="burst">Burst</Badge></td>
-                  <td className="font-mono text-xs">{tierRunning.burst ?? 0}</td>
-                  <td className="font-mono text-xs">{tierTotal.burst ?? 0}</td>
-                  <td className="font-mono text-xs">{tierEvicted.burst ?? 0}</td>
+                  <td className={num}>{tierRunning.burst ?? 0}</td>
+                  <td className={num}>{tierTotal.burst ?? 0}</td>
+                  <td className={num}>{tierEvicted.burst ?? 0}</td>
                 </tr>
               </tbody>
             </Table>
@@ -275,10 +264,10 @@ export default function StatisticsPage() {
 
         {/* Eviction breakdown by reason */}
         <Card>
-          <CardHeader>Eviction Reasons</CardHeader>
+          <CardHeader><CardTitle>Why jobs were evicted</CardTitle></CardHeader>
           <CardContent>
             {faultSummary && (
-              <div className="mb-2 text-2xs text-muted">{faultSummary}</div>
+              <p className="mb-2 text-xs text-muted">{faultSummary}</p>
             )}
             {evictionChartData.length === 0 ? (
               <EmptyState>No evictions recorded.</EmptyState>
@@ -310,32 +299,25 @@ export default function StatisticsPage() {
       {/* Recent evictions — audit log */}
       {recentEvictions.length > 0 && (
         <Card>
-          <CardHeader>Recent Evictions · Audit Log</CardHeader>
+          <CardHeader><CardTitle note={`newest ${RECENT_EVICTIONS}`}>Recent evictions</CardTitle></CardHeader>
           <CardContent scrollX>
             <Table>
               <thead>
                 <tr>
                   <th>Job ID</th>
                   <th>Agent</th>
-                  <th>Platform Experiment</th>
-                  <th>Eviction Reason</th>
+                  <th>Experiment</th>
+                  <th>Reason</th>
                   <th>Accelerator</th>
                   <th>Tier</th>
                 </tr>
               </thead>
               <tbody>
                 {recentEvictions.map(e => (
-                  <tr
-                    key={e.id}
-                    tabIndex={0}
-                    role="link"
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/jobs/${e.id}`)}
-                    onKeyDown={ev => { if (ev.key === 'Enter') router.push(`/jobs/${e.id}`) }}
-                  >
-                    <td className="whitespace-nowrap font-mono text-2xs text-subtle">{e.id.slice(0, 8)}…</td>
+                  <LinkTr key={e.id} href={`/jobs/${e.id}`}>
+                    <td className={quiet}>{e.id.slice(0, 8)}…</td>
                     <td className="whitespace-nowrap font-mono text-xs">{e.agent_id}</td>
-                    <td className="text-xs text-accent">
+                    <td className="text-xs">
                       <PlatformExperimentName id={e.platform_experiment_id} />
                     </td>
                     <td className="text-xs">
@@ -343,8 +325,8 @@ export default function StatisticsPage() {
                       <div className="mt-0.5 text-2xs text-subtle">{evictionDetail(e.eviction_reason)}</div>
                     </td>
                     <td className="font-mono text-2xs">{e.accelerator_count}× {acceleratorLabel(e.accelerator_type)}</td>
-                    <td><Badge status={e.capacity_tier ?? 'unknown'}>{e.capacity_tier ?? '—'}</Badge></td>
-                  </tr>
+                    <td><TierBadge tier={e.capacity_tier} /></td>
+                  </LinkTr>
                 ))}
               </tbody>
             </Table>
