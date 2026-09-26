@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Colours are space-separated RGB channels so Tailwind can apply opacity (bg-primary/10). */
+/* Colours are space-separated RGB channels so Tailwind can apply opacity (bg-primary/10).
+   theme-contrast.test.ts holds every pair below to WCAG AA in both schemes. */
 :root {
   --background: 245 246 249;
   --surface: 255 255 255;
@@ -10,6 +11,7 @@
   --surface-raised: 255 255 255;
   --border: 225 227 234;
   --border-strong: 201 205 216;
+  --border-control: 139 141 149;
   --text: 23 25 35;
   --text-muted: 84 90 108;
   --text-subtle: 101 108 126;
@@ -17,13 +19,13 @@
   --primary-hover: 84 66 204;
   --primary-foreground: 255 255 255;
   --accent: 84 66 204;
-  --success: 18 120 56;
-  --warning: 154 91 6;
-  --danger: 196 30 58;
-  --info: 15 118 110;
-  --purple: 134 48 200;
-  --pink: 190 24 93;
-  --orange: 188 64 12;
+  --success: 16 107 50;
+  --warning: 134 79 5;
+  --danger: 174 27 52;
+  --info: 13 104 97;
+  --purple: 129 46 192;
+  --pink: 173 22 85;
+  --orange: 162 55 10;
   --neutral: 82 88 105;
   --ring: 98 81 224;
   --overlay: 23 25 35;
@@ -48,9 +50,10 @@
     --surface-raised: 25 28 36;
     --border: 36 39 48;
     --border-strong: 54 58 70;
+    --border-control: 101 104 113;
     --text: 242 243 247;
     --text-muted: 146 151 170;
-    --text-subtle: 125 131 151;
+    --text-subtle: 134 140 160;
     --primary: 108 92 231;
     --primary-hover: 96 80 216;
     --primary-foreground: 255 255 255;

@@ -41,7 +41,7 @@ interface SegmentedProps<T extends string> {
 /** A few exclusive choices side by side, one always chosen. */
 export function Segmented<T extends string>({ label, options, value, onChange, disabled }: SegmentedProps<T>) {
   return (
-    <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded border border-border-strong">
+    <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded border border-border-control">
       {options.map(option => (
         <button
           key={option.value}

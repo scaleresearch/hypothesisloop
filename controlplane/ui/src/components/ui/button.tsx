@@ -20,7 +20,7 @@ const boxed = 'rounded border shadow-sm active:translate-y-px disabled:shadow-no
 
 // Hover is written for anything not disabled, so the same classes serve a link, which is never `:enabled`.
 const variantClass: Record<Variant, string> = {
-  default: clsx(boxed, 'border-border-strong bg-surface-raised text-foreground [&:not(:disabled)]:hover:bg-foreground/5'),
+  default: clsx(boxed, 'border-border-control bg-surface-raised text-foreground [&:not(:disabled)]:hover:bg-foreground/5'),
   primary: clsx(boxed, 'border-primary bg-primary text-primary-foreground [&:not(:disabled)]:hover:border-primary-hover [&:not(:disabled)]:hover:bg-primary-hover'),
   danger: clsx(boxed, 'border-danger/40 bg-danger/10 text-danger [&:not(:disabled)]:hover:border-danger/60 [&:not(:disabled)]:hover:bg-danger/20'),
   ghost: 'rounded text-muted [&:not(:disabled)]:hover:bg-foreground/5 [&:not(:disabled)]:hover:text-foreground',
@@ -76,7 +76,7 @@ export function Chip({ active, className, ...props }: ChipProps) {
         'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
         active
           ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border-strong bg-surface text-muted hover:border-accent hover:bg-foreground/5 hover:text-foreground',
+          : 'border-border-control bg-surface text-muted hover:border-accent hover:bg-foreground/5 hover:text-foreground',
         className,
       )}
       {...props}

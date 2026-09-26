@@ -23,6 +23,7 @@ const config: Config = {
       border: {
         DEFAULT: token('border'),
         strong: token('border-strong'),
+        control: token('border-control'),
       },
       foreground: token('text'),
       muted: token('text-muted'),
@@ -45,7 +46,7 @@ const config: Config = {
       overlay: token('overlay'),
     },
     fontSize: {
-      '2xs': ['10.5px', '1.4'],
+      '2xs': ['11px', '1.4'],
       xs: ['12px', '1.5'],
       sm: ['13px', '1.5'],
       base: ['13.5px', '1.55'],
