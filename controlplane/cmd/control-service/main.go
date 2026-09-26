@@ -42,6 +42,10 @@ import (
 // scheduler and registry operations share one router, one /openapi.json and one /explore, so a
 // caller needs a single base URL and never has to know which package implements a path.
 func main() {
+	// Every time the API answers with is RFC3339 in UTC (docs/api-conventions.md). A time read
+	// from the database or taken from the clock is in the process's zone, which on a host that
+	// is not in UTC put an offset on every answer and turned the zero time into another date.
+	time.Local = time.UTC
 	logger, err := zap.NewProduction()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "control-service: init logger: %v\n", err)
