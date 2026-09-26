@@ -52,6 +52,9 @@ const (
 	// NotAdmittedNoClusterForOrg means no connected cluster may take this org's jobs: none is
 	// its own and none is shared. Waiting does not fix it; registering a cluster does.
 	NotAdmittedNoClusterForOrg = "no_cluster_for_org"
+	// NotAdmittedClustersDisabled means the org has clusters it can use and has turned every one
+	// of them off for its jobs. Waiting does not fix it; turning one on does.
+	NotAdmittedClustersDisabled = "clusters_disabled"
 	// NotAdmittedWaitingForScaleUp means this cluster's desired-free already went negative for a
 	// speculative submit in this job's accelerator dimension — a scale-up is outstanding there.
 	// Preemption is skipped rather than evicting a burst job to cover a shortage the incoming

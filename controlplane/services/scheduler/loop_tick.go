@@ -715,9 +715,9 @@ func exceedsClusterCapacityReason(exp *domain.Experiment) string {
 }
 
 // eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
-// it: registered clusters of the job's own org and shared ones, and of those, for a job that
-// spans nodes, the ones that report multi-node execution. This is the one place the platform
-// decides which org's jobs a cluster takes.
+// it: registered clusters of the job's own org and shared ones that the org has not turned off,
+// and of those, for a job that spans nodes, the ones that report multi-node execution. This is
+// the one place the platform decides which org's jobs a cluster takes.
 //
 // The returned map shares its Footprint values with avail rather than copying them, so the
 // in-place reservations admission makes against the returned view are the same numbers every
@@ -741,8 +741,11 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	// A job never reaches the queue holding a cluster, so this refuses only a pin written
 	// around admission.
 	pinnedElsewhere := exp.ClusterName != "" && !hostsJob(registered, exp.ClusterName, exp)
-	if pinnedElsewhere || !orgHasCluster(registered, exp.OrgID) {
+	if pinnedElsewhere || !orgHasCluster(registered, exp.OrgID, domain.Cluster.OpenTo) {
 		return map[string]domain.Footprint{}, domain.NotAdmittedNoClusterForOrg
+	}
+	if !orgHasCluster(registered, exp.OrgID, domain.Cluster.Hosts) {
+		return map[string]domain.Footprint{}, domain.NotAdmittedClustersDisabled
 	}
 	if exp.Job.Nodes() <= 1 {
 		return hosted, ""
@@ -759,10 +762,11 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	return out, ""
 }
 
-// orgHasCluster reports whether any registered cluster takes the org's jobs, connected or not.
-func orgHasCluster(registered map[string]domain.Cluster, orgID string) bool {
+// orgHasCluster reports whether any registered cluster, connected or not, is the org's in the
+// given sense: open to it (domain.Cluster.OpenTo), or taking its jobs (domain.Cluster.Hosts).
+func orgHasCluster(registered map[string]domain.Cluster, orgID string, is func(domain.Cluster, string) bool) bool {
 	for _, cluster := range registered {
-		if cluster.Hosts(orgID) {
+		if is(cluster, orgID) {
 			return true
 		}
 	}

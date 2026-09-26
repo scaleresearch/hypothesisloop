@@ -71,11 +71,14 @@ func TestCapacityShowsOnlyTheClustersThatTakeTheOrgsJobs(t *testing.T) {
 	registered := map[string]domain.Cluster{
 		"of-a":   {Name: "of-a", OrgID: "org-a"},
 		"of-b":   {Name: "of-b", OrgID: "org-b"},
-		"shared": {Name: "shared", OrgID: "org-staff", Shared: true},
+		"shared": {Name: "shared", OrgID: "org-staff", Shared: true, DisabledOrgs: []string{"org-d"}},
+		"of-e":   {Name: "of-e", OrgID: "org-e", DisabledOrgs: []string{"org-e"}},
 	}
-	connected := []ClusterCapacity{{ClusterName: "of-a"}, {ClusterName: "of-b"}, {ClusterName: "phantom"}, {ClusterName: "shared"}}
+	connected := []ClusterCapacity{{ClusterName: "of-a"}, {ClusterName: "of-b"}, {ClusterName: "of-e"}, {ClusterName: "phantom"}, {ClusterName: "shared"}}
 	for org, want := range map[string][]string{
 		"org-a": {"of-a", "shared"}, "org-b": {"of-b", "shared"}, "org-c": {"shared"}, "org-staff": {"shared"},
+		// A cluster an org turned off for its jobs is not capacity it can use, its own or shared.
+		"org-d": {}, "org-e": {"shared"},
 	} {
 		got := []string{}
 		for _, c := range placeableBy(org, registered, connected) {

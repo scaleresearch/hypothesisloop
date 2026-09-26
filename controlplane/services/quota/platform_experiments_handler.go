@@ -120,8 +120,10 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 	return placeableBy(orgID, registered, clusters), nil
 }
 
-// placeableBy keeps the clusters that take jobs of orgID: its own and the shared ones, the rule
-// admission places by (domain.Cluster.Hosts). A name nobody registered is no cluster.
+// placeableBy keeps the clusters that take jobs of orgID: its own and the shared ones that it has
+// not turned off, the rule admission places by (domain.Cluster.Hosts). Capacity on a cluster the
+// org turned off is not capacity its jobs can get, so it is left out. A name nobody registered is
+// no cluster.
 func placeableBy(orgID string, registered map[string]domain.Cluster, clusters []ClusterCapacity) []ClusterCapacity {
 	kept := make([]ClusterCapacity, 0, len(clusters))
 	for _, c := range clusters {

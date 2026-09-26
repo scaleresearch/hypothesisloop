@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -16,6 +18,7 @@ type admitStore struct {
 	Store
 	experiments map[string]*domain.Experiment
 	written     map[string]domain.JobSpec
+	cluster     *domain.Cluster
 }
 
 func (s *admitStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
@@ -154,5 +157,32 @@ func TestForceAdmitOfAMultiNodeJobNeedsAClusterThatRunsThem(t *testing.T) {
 	workload.multiNode = true
 	if _, err := admitHandler(store, workload).admit(context.Background(), "exp-1", rented); err != nil {
 		t.Fatalf("on a cluster that runs them: %v", err)
+	}
+}
+
+// The org a job belongs to decides which clusters its jobs use. The administrator of a shared
+// cluster placing the job by hand does not overrule it, and is told why.
+func TestForceAdmitOntoAClusterTheJobsOrgTurnedOffIsRefused(t *testing.T) {
+	exp := queued(h100Job("exp-1", "2"))
+	exp.OrgID = "org-a"
+	store := &admitStore{
+		experiments: map[string]*domain.Experiment{"exp-1": exp},
+		cluster:     &domain.Cluster{Name: rented, OrgID: "org-staff", Shared: true, DisabledOrgs: []string{"org-a"}},
+	}
+	workload := &admitWorkload{c: twoH100AndACPU()}
+
+	_, err := admitHandler(store, workload).admit(context.Background(), "exp-1", rented)
+
+	var refusal *refused
+	if !errors.As(err, &refusal) || refusal.GetStatus() != http.StatusConflict || refusal.Reason != ReasonClusterDisabled {
+		t.Fatalf("err = %v, want a 409 with reason %s", err, ReasonClusterDisabled)
+	}
+	if len(store.written) != 0 || len(workload.created) != 0 {
+		t.Fatalf("the refused job was written %v and created %v", store.written, workload.created)
+	}
+
+	store.cluster.DisabledOrgs = []string{"org-b"}
+	if _, err := admitHandler(store, workload).admit(context.Background(), "exp-1", rented); err != nil {
+		t.Fatalf("on a shared cluster another org turned off: %v", err)
 	}
 }

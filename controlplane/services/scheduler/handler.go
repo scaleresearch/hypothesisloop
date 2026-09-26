@@ -297,7 +297,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "admit-experiment", Method: "POST", Path: "/experiments/{id}/admit",
 		Summary: "Force-admit a QUEUED experiment onto a named cluster", Tags: []string{"experiments"},
 		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting. " +
-			"The cluster must be the caller's own and must take the job: one of the job's org, or a shared one.",
+			"The cluster must be the caller's own and must take the job: one of the job's org, or a shared one. " +
+			"A cluster the job's org turned off for its jobs answers 409 cluster_disabled: nobody places a job there by hand either.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -490,6 +491,10 @@ func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 // ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
 const ReasonSummaryExists = "summary_exists"
 
+// ReasonClusterDisabled is the reason of the 409 a placement by hand is answered with when the
+// job's org turned the named cluster off.
+const ReasonClusterDisabled = "cluster_disabled"
+
 // refused is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
 type refused struct {
 	status  int
@@ -536,7 +541,8 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
 	}
 	// The same rule the tick places by (eligibleClusters): a job goes to a cluster of its own
-	// org or to a shared one, whoever asks.
+	// org or to a shared one, and never to one its org turned off, whoever asks. The administrator
+	// of a shared cluster does not overrule the org a job belongs to.
 	cluster, err := h.svc.store.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
@@ -544,8 +550,12 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	if cluster == nil {
 		return nil, huma.Error400BadRequest("cluster is not registered")
 	}
-	if !cluster.Hosts(exp.OrgID) {
+	if !cluster.OpenTo(exp.OrgID) {
 		return nil, huma.Error409Conflict("cluster " + clusterName + " takes the jobs of its own org only, and this job is another org's")
+	}
+	if !cluster.EnabledFor(exp.OrgID) {
+		return nil, &refused{status: http.StatusConflict, Reason: ReasonClusterDisabled,
+			Message: "cluster " + clusterName + " is turned off for the jobs of this job's org: an owner of that org turns it on with POST /orgs/{id}/clusters/{name}/enable"}
 	}
 	// This manual admit path bypasses the ordinary tick's cluster-local "max" resolution (see
 	// loop_tick.go's resolveClusterLocalResources) entirely — it names a cluster directly rather

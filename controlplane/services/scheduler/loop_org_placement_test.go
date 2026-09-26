@@ -62,8 +62,12 @@ func (*noRunningListStore) RegisteredClusters(context.Context) (map[string]domai
 	return singleOrg, nil
 }
 
-// A force-admit in a deployment with one org: the named cluster is registered and the job's own.
-func (*admitStore) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
+// A force-admit in a deployment with one org: the named cluster is registered and the job's own,
+// unless the test says what the cluster is.
+func (s *admitStore) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
+	if s.cluster != nil {
+		return s.cluster, nil
+	}
 	return &domain.Cluster{Name: name}, nil
 }
 
@@ -582,5 +586,110 @@ func TestMaxResolvesToTheSameShareForTwoOrgsOnASharedCluster(t *testing.T) {
 	}
 	if cpu, placed := own["of-a"]; placed {
 		t.Fatalf("org a's job resolved %q on a cluster of org b, where it is never placed", cpu)
+	}
+}
+
+// An org turns a cluster off for its own jobs, its own cluster or a shared one. Its jobs go to
+// what it left on, whichever tier they are, and the other orgs' jobs are placed as before.
+func TestTickNeverPlacesAJobOnAClusterItsOrgTurnedOff(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		t.Run(string(tier), func(t *testing.T) {
+			registered := threeOrgClusters()
+			shared := registered["shared"]
+			shared.DisabledOrgs = []string{"org-a"}
+			registered["shared"] = shared
+			ofB := registered["of-b"]
+			ofB.DisabledOrgs = []string{"org-b"}
+			registered["of-b"] = ofB
+			store := &orgStore{registered: registered}
+			l := orgLoop(store, map[string]orgCluster{
+				"of-a":   {free: 1, installed: 1},
+				"of-b":   {free: 4, installed: 4},
+				"shared": {free: 8, installed: 8},
+			},
+				orgJob("a1", "org-a", tier, 1), orgJob("a2", "org-a", tier, 1),
+				orgJob("b1", "org-b", tier, 1), orgJob("c1", "org-c", tier, 1))
+
+			tickOnce(t, l)
+
+			if got := store.submitted["a1"]; got != "of-a" {
+				t.Errorf("a1 was placed on %q, want of-a, the one cluster its org left on", got)
+			}
+			if cluster, admitted := store.submitted["a2"]; admitted {
+				t.Errorf("a2 was placed on %s with its org's only enabled cluster full", cluster)
+			}
+			if got := store.notAdmitted["a2"]; got != domain.NotAdmittedOutranked {
+				t.Errorf("a2 not_admitted_reason = %q, want %q: a cluster its org left on exists and a1 took its room", got, domain.NotAdmittedOutranked)
+			}
+			for _, id := range []string{"b1", "c1"} {
+				if got := store.submitted[id]; got != "shared" {
+					t.Errorf("%s was placed on %q, want shared", id, got)
+				}
+			}
+		})
+	}
+}
+
+// A job waiting only because its org turned off every cluster it could use says so, and is told
+// something else than an org that has no cluster at all.
+func TestTickTellsAJobWhoseOrgTurnedEveryClusterOffSo(t *testing.T) {
+	registered := map[string]domain.Cluster{
+		"of-a":   {Name: "of-a", OrgID: "org-a", DisabledOrgs: []string{"org-a"}},
+		"shared": {Name: "shared", OrgID: "org-staff", Shared: true, DisabledOrgs: []string{"org-a", "org-c"}},
+	}
+	for name, clusters := range map[string]map[string]orgCluster{
+		"both connected with room": {"of-a": {free: 4, installed: 4}, "shared": {free: 4, installed: 4}},
+		"one scales up":            {"shared": {installed: 4, autoscaler: true}},
+		"nothing is connected":     {},
+	} {
+		for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+			t.Run(name+"/"+string(tier), func(t *testing.T) {
+				store := &orgStore{registered: registered}
+				l := orgLoop(store, clusters, orgJob("a1", "org-a", tier, 1), orgJob("c1", "org-c", tier, 1), orgJob("d1", "org-d", tier, 1))
+
+				tickOnce(t, l)
+
+				for _, id := range []string{"a1", "c1"} {
+					if cluster, admitted := store.submitted[id]; admitted {
+						t.Fatalf("%s was placed on %s, which its org turned off", id, cluster)
+					}
+					if got := store.notAdmitted[id]; got != domain.NotAdmittedClustersDisabled {
+						t.Fatalf("%s not_admitted_reason = %q, want %q", id, got, domain.NotAdmittedClustersDisabled)
+					}
+				}
+				if _, connected := clusters["shared"]; connected && !clusters["shared"].autoscaler {
+					if got := store.submitted["d1"]; got != "shared" {
+						t.Fatalf("d1 of an org that left the shared cluster on was placed on %q", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Nothing running is evicted to make room on a cluster the waiting job cannot land on: its org
+// turned the cluster off, so it is no candidate for preemption either.
+func TestTickPreemptsNothingOnAClusterTheJobsOrgTurnedOff(t *testing.T) {
+	victim := runningBurst("victim", "org-b", "shared")
+	registered := threeOrgClusters()
+	delete(registered, "of-a")
+	shared := registered["shared"]
+	shared.DisabledOrgs = []string{"org-a"}
+	registered["shared"] = shared
+	store := &orgStore{registered: registered}
+	store.running = []*domain.Experiment{victim}
+	l := orgLoop(store, map[string]orgCluster{"shared": {free: 0, installed: 1}},
+		orgJob("a1", "org-a", domain.CapacityGuaranteed, 1), orgJob("a2", "org-a", domain.CapacityBurst, 1))
+	l.observed = observedOnNode([]string{"victim"}, "node-shared")
+
+	tickOnce(t, l)
+
+	if len(store.requeued) != 0 {
+		t.Fatalf("preempted %v for a job that cannot land on the cluster", store.requeued)
+	}
+	for _, id := range []string{"a1", "a2"} {
+		if got := store.notAdmitted[id]; got != domain.NotAdmittedClustersDisabled {
+			t.Fatalf("%s not_admitted_reason = %q, want %q", id, got, domain.NotAdmittedClustersDisabled)
+		}
 	}
 }

@@ -781,7 +781,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
 		Description: "Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own " +
-			"clusters and the ones the platform shares. The org is the one your token is bound to: every API key, agent and " +
+			"clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and " +
 			"coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, " +
 			"and is answered 400 without it. An org you do not reach is not found. Staff read one org with org_id and every " +
 			"cluster that reports without it. accelerator_type is the exact " +
