@@ -105,7 +105,9 @@ whole number, and no accelerator_type, and holds that many cores. accelerator_ty
 string a job spec takes; a type with none available queues and never errors. A line with job_image is of a
 cluster that runs a job that names no image, in that one. With only_job_image it runs no other
 image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
-runs only jobs that name their image.
+runs only jobs that name their image. A line with on_demand is of a cluster that rents a machine
+when a job needs one: nothing stands by, total is the most it rents at once and available is what
+it may still rent, so a job there starts after its machine is rented.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -121,6 +123,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			Name         string            `json:"cluster_name"`
 			JobImage     string            `json:"job_image"`
 			JobImageDef  bool              `json:"job_image_default"`
+			OnDemand     bool              `json:"on_demand"`
 			Resources    json.RawMessage   `json:"resources"`
 			Accelerators []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
@@ -139,6 +142,9 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		}
 		if cl.JobImage != "" && !cl.JobImageDef {
 			prefix = append(prefix, "only_job_image", "true")
+		}
+		if cl.OnDemand {
+			prefix = append(prefix, "on_demand", "true")
 		}
 		if len(cl.Resources) > 0 && string(cl.Resources) != "null" {
 			if err := printPrefixed(stdout, cl.Resources, prefix...); err != nil {

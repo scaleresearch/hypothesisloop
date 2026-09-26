@@ -85,6 +85,10 @@ type ClusterCapacity struct {
 	// JobImageDefault says the cluster also runs a job in the image the job names. False with a
 	// JobImage is a cluster that runs that one image only: a job placed there names none or it.
 	JobImageDefault bool `json:"job_image_default,omitempty"`
+	// OnDemand says the cluster rents a machine when a job needs one and has none standing by.
+	// Its totals are then the most it rents at once, and what is available is what it may still
+	// rent. The runtime says so itself, by reporting its nodes as slots (domain.NodeSlotLabel).
+	OnDemand bool `json:"on_demand,omitempty"`
 	// Resources is the cluster's cores and memory, which is all a job that asks for no
 	// accelerator needs to know. Absent for a cluster that reported none in the window.
 	Resources    *ResourceCapacity     `json:"resources,omitempty"`
@@ -158,6 +162,11 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	withJobImages(registered, clusters)
+	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, h.metricsDBURL, h.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	withOnDemand(clusters, nodeLabels)
 	// Staff see every name that reports, registered or not: a runtime started under a name
 	// nobody registered is theirs to notice.
 	if every {
@@ -199,6 +208,18 @@ func withJobImages(registered map[string]domain.Cluster, clusters []ClusterCapac
 	for i := range clusters {
 		clusters[i].JobImage = registered[clusters[i].ClusterName].JobImage
 		clusters[i].JobImageDefault = registered[clusters[i].ClusterName].JobImageDefault
+	}
+}
+
+// withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent.
+func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]map[string]string) {
+	for i := range clusters {
+		for _, labels := range nodeLabels[clusters[i].ClusterName] {
+			if labels[domain.NodeSlotLabel] != "" {
+				clusters[i].OnDemand = true
+				break
+			}
+		}
 	}
 }
 

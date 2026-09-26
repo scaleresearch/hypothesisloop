@@ -87,6 +87,19 @@ func TestCapacitySaysWhichTypeCountsCores(t *testing.T) {
 	}
 }
 
+// A cluster that rents its machines reports them as slots. Its totals are a limit and nothing
+// stands by, and a reader is told so by the cluster's own report, never by its name.
+func TestCapacitySaysWhichClustersRentOnDemand(t *testing.T) {
+	clusters := []ClusterCapacity{{ClusterName: "rack"}, {ClusterName: "rented"}, {ClusterName: "silent"}}
+	withOnDemand(clusters, map[string]map[string]map[string]string{
+		"rack":   {"node-1": {"gpu.product": "L40"}},
+		"rented": {"gpu-0": {domain.NodeSlotLabel: "gpu-0", "gpu.product": "L40"}, "gpu-1": {domain.NodeSlotLabel: "gpu-1"}},
+	})
+	if clusters[0].OnDemand || !clusters[1].OnDemand || clusters[2].OnDemand {
+		t.Errorf("on demand = %v, %v, %v, want only the cluster of slots", clusters[0].OnDemand, clusters[1].OnDemand, clusters[2].OnDemand)
+	}
+}
+
 // Capacity is read for one org: the clusters that org's jobs can land on and no other. Knowing
 // what another org runs on is knowing something of that org, also for a person who is in both.
 func TestCapacityShowsOnlyTheClustersThatTakeTheOrgsJobs(t *testing.T) {
