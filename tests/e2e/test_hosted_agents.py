@@ -91,8 +91,7 @@ def coordinator_for(api: API, pe_id: str, observed: list[dict] | None = None) ->
 def _hosted_run(project: API, name: str, **more) -> requests.Response:
     body = {
         "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
-        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z",
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z",
         **({"repository": project.repository} if project.repository else {}), **more,
     }
     return project.post("/platform-experiments", body)
@@ -371,10 +370,8 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         # Its token coordinates this platform experiment: it reads the roster and changes the brief.
         as_coordinator = with_repo.as_caller(env["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
         assert len(as_coordinator.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]) == 2
-        changed = {key: pe[key] for key in ("name", "budget_accelerator_hours", "max_agents", "metrics",
-                                            "report_interval_seconds", "starts_at", "ends_at")}
-        changed["description"] = "the coordinator's brief"
-        put = as_coordinator.put(f"/platform-experiments/{pe_id}", changed)
+        changed = {"description": "the coordinator's brief"}
+        put = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
         assert put.status_code == 200, f"the coordinator updating the description: {put.status_code} {put.text}"
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["description"] == "the coordinator's brief"
 
@@ -403,7 +400,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         # After the close its token still reads and still writes the summary, and nothing else.
         as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "the final summary")
         assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
-        late = as_coordinator.put(f"/platform-experiments/{pe_id}", changed)
+        late = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
         assert late.status_code in (403, 409, 400), f"a description update after the close: {late.status_code} {late.text}"
     finally:
         with_repo.close_platform_experiment(pe_id)
@@ -626,9 +623,8 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
         live = {key: pe[key] for key in ("name", "description", "budget_accelerator_hours", "max_agents", "metrics",
                                          "report_interval_seconds", "starts_at", "ends_at")}
-        for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("ends_at", "2199-01-01T00:00:00Z"),
-                             ("stages", [{"length_pct": 50, "evict_pct": 50}, {"length_pct": 50, "evict_pct": 0}])):
-            r = as_coordinator.put(f"/platform-experiments/{pe_id}", {**live, field: value})
+        for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("ends_at", "2199-01-01T00:00:00Z")):
+            r = as_coordinator.patch(f"/platform-experiments/{pe_id}", {"description": "more to spend", field: value})
             assert r.status_code == 403 and field in r.text, f"a coordinator changing {field}: {r.status_code} {r.text}"
         after = with_repo.get_json(f"/platform-experiments/{pe_id}")
         changed = {key: (pe[key], after[key]) for key in (*live, "stages") if after[key] != pe[key]}

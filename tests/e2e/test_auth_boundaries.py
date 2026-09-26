@@ -49,8 +49,7 @@ def _assert_each(caller: API, who: str, calls: list[tuple[str, str, dict | None,
 def _platform_experiment_body(name: str, project_id: str) -> dict:
     return {
         "name": name, "description": name, "budget_accelerator_hours": 1, "max_agents": 1, "project_id": project_id,
-        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z",
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z",
     }
 
 
@@ -394,7 +393,7 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "what the run showed"}, 200),
         ("POST", "/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": "MATCH (h:Hypothesis) RETURN count(h)", "params": {}}, 200),
         ("POST", f"/platform-experiments/{pe_id}/start", None, 403),
-        ("PUT", f"/platform-experiments/{pe_id}", _platform_experiment_body("reopened", org.project_id), 403),
+        ("PATCH", f"/platform-experiments/{pe_id}", {"description": "reopened"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/agents", {}, 403),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 403),
         ("POST", "/experiments", new_job, 403),

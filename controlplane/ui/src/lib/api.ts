@@ -451,16 +451,23 @@ export interface CreatePlatformExperimentRequest {
   name: string
   description: string
   budget_accelerator_hours: number
-  max_agents: number
+  /** Omitted is as many as the platform runs machines for one experiment. */
+  max_agents?: number
   /** Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Omitted uses
    *  the platform default (quota.default_max_concurrent_accelerators). */
   max_concurrent_accelerators?: number
   metrics: MetricDefinition[]
-  report_interval_seconds: number
+  /** Omitted is the platform's default. */
+  report_interval_seconds?: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
   stages?: Stage[]
-  starts_at: string
-  ends_at: string
+  hypothesis_submit_policy?: SubmitterPolicy
+  job_submit_policy?: SubmitterPolicy
+  /** Omitted, the experiment starts when it is started. */
+  starts_at?: string
+  /** How long it lasts: this or duration_hours, one of the two. */
+  ends_at?: string
+  duration_hours?: number
   /** owner/name of a repository a connected GitHub account covers. Read at creation only. */
   repository?: string
   /** The image hosted agents and the coordinator run; omitted means the platform's. Read at creation only. */
@@ -582,8 +589,14 @@ export function fetchResourceCapacity(orgID: string): Promise<ResourceCapacity> 
   return apiFetch<ResourceCapacity>(withQuery('/resource-catalog/capacity', { org_id: orgID }))
 }
 
-export function updatePlatformExperiment(id: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
-  return apiSend<PlatformExperiment>('PUT', `/platform-experiments/${id}`, req)
+/** The fields of a platform experiment that can change after it is created. */
+export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
+  'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'max_concurrent_accelerators' | 'metrics' |
+  'report_interval_seconds' | 'starts_at' | 'ends_at' | 'hypothesis_submit_policy' | 'job_submit_policy'>>
+
+/** Changes the fields the patch names and no others. */
+export function updatePlatformExperiment(id: string, patch: PlatformExperimentPatch): Promise<PlatformExperiment> {
+  return apiSend<PlatformExperiment>('PATCH', `/platform-experiments/${id}`, patch)
 }
 
 export interface DonationRequest {

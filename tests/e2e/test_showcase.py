@@ -79,11 +79,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("POST", f"/hypotheses/{hyp_id}/comments", {"text": "an intruding comment"}),
             ("POST", f"/hypotheses/{hyp_id}/links", {"type": "related", "to": pe_id}),
             ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed", "despite": "an intruder settles it with a reason of its own"}),
-            # A whole body: one that is not is refused for its shape before anyone's reach is looked at.
-                ("PUT", f"/platform-experiments/{pe_id}", {
-                    "name": "taken over", "description": "taken over", "budget_accelerator_hours": 1, "max_agents": 2,
-                    "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-                    "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z"}),
+            ("PATCH", f"/platform-experiments/{pe_id}", {"name": "taken over", "description": "taken over"}),
             ("POST", f"/platform-experiments/{pe_id}/start", None),
             ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}),
             ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),

@@ -3,6 +3,9 @@
 import React, { useState } from 'react'
 import { clsx } from 'clsx'
 import { ApiError, NO_EXPERIMENT_FILE, createPlatformExperiment, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api'
+import type { PlatformExperimentPatch } from '@/lib/api'
+import { budgetUnit } from '@/lib/units'
+import type { TypeKind } from '@/lib/units'
 import type { Stage } from '@/lib/api'
 import { isZeroDate } from '@/lib/format'
 import { createAndRun } from '@/lib/run-experiment'
@@ -39,10 +42,12 @@ interface FormState {
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Empty string
   // means "use the platform default" — see quota.default_max_concurrent_accelerators.
   max_concurrent_accelerators: string
+  // Empty is no start time: the experiment starts when it is started.
   starts_at: string
   ends_at: string
   metrics: MetricDefinition[]
-  report_interval_seconds: number
+  // Empty is the platform's default.
+  report_interval_seconds: string
   stages: StageDraft[]
   hypothesis_submit_policy: SubmitterPolicy
   job_submit_policy: SubmitterPolicy
@@ -310,6 +315,8 @@ function MetricsEditor({ metrics, onChange }: { metrics: MetricDefinition[]; onC
 interface FormProps {
   /** The experiment to edit. Without one the form creates one in the selected project. */
   initial?: PlatformExperiment | null
+  /** What the budget of the experiment being edited is spent on, when the page knows. */
+  budgetKind?: TypeKind
   /**
    * Told the experiment the API answered with, once it is saved. `run` is set when the form went
    * on to add hosted agents and start it, with what stopped that when something did.
@@ -323,13 +330,11 @@ interface FormProps {
  * The one form a platform experiment is created and edited with, in two steps. It checks only
  * what it needs to build the request; every other rule is the API's, whose refusal it shows.
  */
-export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps) {
+export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel }: FormProps) {
   const { project } = useTenant()
   const isEdit = !!initial
-  // Once running, admission/stage decisions have already been made against budget, max_agents,
-  // metrics, the schedule and the report interval — the backend rejects changes to those (see
-  // Update in platform_experiments_lifecycle.go), so lock them here too instead of round-tripping
-  // a 400. Name/description stay editable: purely informational, safe to amend mid-run.
+  // Once running, admission and the stage ladder have acted on everything but the name and the
+  // description, and the API takes no other field, so the rest is locked here.
   const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
   const [form, setForm] = useState<FormState>({
     name: initial?.name ?? '',
@@ -337,10 +342,10 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     budget_accelerator_hours: initial?.budget_accelerator_hours ?? 10,
     max_agents: initial?.max_agents ?? 20,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
-    starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : localDatetime(1),
+    starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
     ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(2),
     metrics: initial?.metrics ?? [],
-    report_interval_seconds: initial?.report_interval_seconds ?? 30,
+    report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
     hypothesis_submit_policy: initial?.hypothesis_submit_policy ?? 'mixed',
     job_submit_policy: initial?.job_submit_policy ?? 'mixed',
@@ -349,6 +354,8 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     run_by: 'operator',
     researchers: 2,
   })
+  // The form as it opened. An edit sends the fields that differ from it.
+  const [opened] = useState(form)
   const [step, setStep] = useState<1 | 2>(1)
   // What the chosen repository's experiment file did to the form: filled it, is not there, or
   // could not be read.
@@ -378,7 +385,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
         name: f.name.trim() || file.name || '',
         description: f.description.trim() || file.description || '',
         metrics: file.metrics?.length ? file.metrics : f.metrics,
-        report_interval_seconds: file.report_interval_seconds || f.report_interval_seconds,
+        report_interval_seconds: file.report_interval_seconds ? String(file.report_interval_seconds) : f.report_interval_seconds,
         stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
         hypothesis_submit_policy: file.hypothesis_submit_policy || f.hypothesis_submit_policy,
         job_submit_policy: file.job_submit_policy || f.job_submit_policy,
@@ -396,10 +403,29 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
+    if (!isEdit && new Date(form.ends_at) <= new Date()) return 'Ends at must be in the future.'
     // An experiment the form starts itself has no start time of its own to compare with.
-    if (hosted) return new Date(form.ends_at) <= new Date() ? 'Ends At must be in the future.' : null
-    if (new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends At must be after Starts At.'
+    if (!hosted && form.starts_at && new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends at must be after Starts at.'
     return null
+  }
+
+  // What an edit changed, as the fields of the update. A date is compared as the form holds it,
+  // which is to the minute, so one left alone is never sent back rounded.
+  function changes(): PlatformExperimentPatch {
+    const patch: PlatformExperimentPatch = {}
+    if (form.name.trim() !== opened.name) patch.name = form.name.trim()
+    if (form.description.trim() !== opened.description) patch.description = form.description.trim()
+    if (lockedWhileRunning) return patch
+    if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
+    if (Number(form.max_agents) !== Number(opened.max_agents)) patch.max_agents = Number(form.max_agents)
+    if (form.max_concurrent_accelerators.trim() !== '' && form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
+    if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
+    if (form.report_interval_seconds.trim() !== '' && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
+    if (form.starts_at && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
+    if (form.ends_at !== opened.ends_at) patch.ends_at = new Date(form.ends_at).toISOString()
+    if (form.hypothesis_submit_policy !== opened.hypothesis_submit_policy) patch.hypothesis_submit_policy = form.hypothesis_submit_policy
+    if (form.job_submit_policy !== opened.job_submit_policy) patch.job_submit_policy = form.job_submit_policy
+    return patch
   }
 
   // Lives on step 2 now (moved alongside Max participants), so it no longer gates the step 1→2
@@ -418,6 +444,11 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
     setSubmitting(true)
     setError(null)
     try {
+      if (isEdit && initial) {
+        const patch = changes()
+        onSaved(Object.keys(patch).length > 0 ? await updatePlatformExperiment(initial.id, patch) : initial)
+        return
+      }
       const payload = {
         name: form.name.trim(),
         description: form.description.trim(),
@@ -425,25 +456,20 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
         max_agents: Number(maxAgents),
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
-        report_interval_seconds: Number(form.report_interval_seconds),
+        ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),
         hypothesis_submit_policy: form.hypothesis_submit_policy,
         job_submit_policy: form.job_submit_policy,
-        // Omitted when editing: the backend fixes the ladder at creation and silently ignores
-        // it on update, so sending it would imply an edit that never happens.
-        ...(isEdit ? {} : { stages: toStages(form.stages) }),
-        // The repository and the agent image are fixed at creation too.
-        ...(!isEdit && form.repository ? { repository: form.repository } : {}),
-        ...(!isEdit && form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
-        starts_at: new Date(form.starts_at).toISOString(),
+        stages: toStages(form.stages),
+        ...(form.repository ? { repository: form.repository } : {}),
+        ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
+        ...(!hosted && form.starts_at ? { starts_at: new Date(form.starts_at).toISOString() } : {}),
         ends_at: new Date(form.ends_at).toISOString(),
       }
       if (hosted) {
         const { experiment, failure } = await createAndRun(project.id, payload, Number(form.researchers))
         onSaved(experiment, { failure })
       } else {
-        onSaved(isEdit && initial
-          ? await updatePlatformExperiment(initial.id, payload)
-          : await createPlatformExperiment(project.id, payload))
+        onSaved(await createPlatformExperiment(project.id, payload))
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
@@ -519,19 +545,9 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                   />
                 </FormField>
 
-                <div className="grid grid-cols-2 gap-3.5">
-                  <FormField
-                    label="Starts at"
-                    hint={lockedWhileRunning ? 'Locked once running.'
-                      : hosted ? 'Not used: with hosted agents it starts as soon as they have joined.'
-                        : 'Signups close and quota is allocated at this moment.'}
-                  >
-                    <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning || hosted} onChange={e => set('starts_at', e.target.value)} />
-                  </FormField>
-                  <FormField label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
-                    <Input type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
-                  </FormField>
-                </div>
+                <FormField label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
+                  <Input type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
+                </FormField>
 
                 <FieldGroup
                   label="Optimization metrics"
@@ -567,7 +583,7 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                 )}
                 <div className="grid grid-cols-2 gap-3.5">
                   <FormField
-                    label="Budget — AccH (GPU-hours), or CPU core-hours *"
+                    label={`Budget (${budgetKind ? budgetUnit(budgetKind) : `${budgetUnit('accelerator')}, or ${budgetUnit('cpu')} for jobs on CPU cores`}) *`}
                     hint={lockedWhileRunning
                       ? 'Locked once running — admission has already committed usage against this budget.'
                       : <>Normalized H100-equivalent hours — the <strong>only</strong> budget (H100 1.0, A100 0.375, L40 0.25/hr). CPU, RAM and storage are capped per job instead, not budgeted. An experiment whose jobs run on CPU cores spends 1 a core-hour, so its budget is CPU core-hours.</>}
@@ -578,15 +594,6 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                     <Input type="number" min={1} max={500} step={1} value={maxAgents} disabled={lockedWhileRunning} onChange={e => { setMaxAgentsStated(true); set('max_agents', e.target.value) }} />
                   </FormField>
                 </div>
-
-                <FormField
-                  label="Max concurrent accelerators"
-                  hint={lockedWhileRunning
-                    ? 'Locked once running.'
-                    : "Accelerators this experiment may hold in flight (submitted + running) at once, across all agents' jobs. Empty = platform default. Bounds spend rate now that a job can trigger a cluster scale-up on demand."}
-                >
-                  <Input type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={lockedWhileRunning} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
-                </FormField>
 
                 <FieldGroup
                   label={isEdit ? 'Stage ladder (fixed at creation)' : 'Stage ladder'}
@@ -607,14 +614,34 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                   )}
                 </FieldGroup>
 
-                <FormField
-                  label="Report interval (seconds)"
-                  hint={lockedWhileRunning
-                    ? 'Locked once running.'
-                    : "How often agents are expected to push metrics. A job that reports nothing for 3× this interval is treated as dead and evicted, so set it to match your real training loop's logging cadence — too low and healthy jobs get killed during a reschedule."}
-                >
-                  <Input type="number" min={1} step={1} value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
-                </FormField>
+                <Disclosure label="More settings">
+                  <div className="flex flex-col gap-4">
+                    {!hosted && (
+                      <FormField
+                        label="Starts at"
+                        hint={lockedWhileRunning ? 'Locked once running.' : 'Empty, it starts when you start it. With a time, signups close and quota is allocated at that moment.'}
+                      >
+                        <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
+                      </FormField>
+                    )}
+                    <FormField
+                      label="Max concurrent accelerators"
+                      hint={lockedWhileRunning
+                        ? 'Locked once running.'
+                        : "Accelerators this experiment may hold in flight (submitted + running) at once, across all agents' jobs. Empty is the platform's default."}
+                    >
+                      <Input type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={lockedWhileRunning} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
+                    </FormField>
+                    <FormField
+                      label="Report interval (seconds)"
+                      hint={lockedWhileRunning
+                        ? 'Locked once running.'
+                        : "How often agents are expected to push metrics. Empty is the platform's default. A job that reports nothing for 3× this interval is treated as dead and evicted."}
+                    >
+                      <Input type="number" min={1} step={1} placeholder="platform default" value={form.report_interval_seconds} disabled={lockedWhileRunning} onChange={e => set('report_interval_seconds', e.target.value)} />
+                    </FormField>
+                  </div>
+                </Disclosure>
 
                 <div className="grid grid-cols-2 gap-3.5">
                   <FieldGroup label="Who can submit hypotheses?" hint={POLICY_HINTS.hypothesis[form.hypothesis_submit_policy]}>

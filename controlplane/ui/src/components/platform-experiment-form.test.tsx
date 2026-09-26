@@ -65,7 +65,10 @@ describe('a new platform experiment whose agents the operator runs', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created))
     const sent = vi.mocked(createPlatformExperiment).mock.calls[0][1]
     expect(sent.coordinator_hosted).toBeUndefined()
-    expect(new Date(sent.starts_at).getTime()).toBeGreaterThan(Date.now())
+    // It starts when it is started, and the report interval is the platform's.
+    expect(sent.starts_at).toBeUndefined()
+    expect(sent.report_interval_seconds).toBeUndefined()
+    expect(new Date(sent.ends_at!).getTime()).toBeGreaterThan(Date.now())
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
     expect(startPlatformExperiment).not.toHaveBeenCalled()
   })
@@ -117,11 +120,12 @@ describe('a new platform experiment with hosted agents', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create and run' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, { failure: undefined }))
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1]).toMatchObject({
-      name: 'Run', repository: 'acme/widgets', coordinator_hosted: true, starts_at: '0001-01-01T00:00:00Z',
+      name: 'Run', repository: 'acme/widgets', coordinator_hosted: true,
     })
+    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].starts_at).toBeUndefined()
     // Nobody else joins a run the platform staffs, so the cap is the researchers asked for.
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].max_agents).toBe(3)
-    expect(new Date(vi.mocked(createPlatformExperiment).mock.calls[0][1].ends_at).getTime()).toBeLessThan(Date.now() + 3 * 86_400_000)
+    expect(new Date(vi.mocked(createPlatformExperiment).mock.calls[0][1].ends_at!).getTime()).toBeLessThan(Date.now() + 3 * 86_400_000)
     expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(3)
     expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new')
   })
@@ -137,15 +141,6 @@ describe('a new platform experiment with hosted agents', () => {
     expect(sent).toMatchObject({ name: 'Run', coordinator_hosted: true })
     expect(sent.repository).toBeUndefined()
     expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(2)
-  })
-
-  it('does not use the start time, and says so', async () => {
-    show()
-    await essentials({ repository: 'acme/widgets' })
-    await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
-    await userEvent.click(screen.getByRole('tab', { name: '1. Essentials' }))
-    expect(screen.getByLabelText('Starts at')).toHaveProperty('disabled', true)
-    expect(screen.getByText('Not used: with hosted agents it starts as soon as they have joined.')).toBeTruthy()
   })
 
   it('shows a refused create in the API\'s words and stays on the form, with nothing else called', async () => {
@@ -173,14 +168,25 @@ describe('a new platform experiment with hosted agents', () => {
 })
 
 describe('editing a platform experiment', () => {
-  it('offers no choice of who runs it, and saves through the update', async () => {
-    const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, ends_at: '2027-01-01T00:00:00Z', stages: [], shared: false } as unknown as PlatformExperiment
-    vi.mocked(updatePlatformExperiment).mockResolvedValue(existing)
+  it('offers no choice of who runs it, and sends the fields that changed and no others', async () => {
+    const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, ends_at: '2027-01-01T00:00:00Z', stages: [], shared: false } as unknown as PlatformExperiment
+    const renamed = { ...existing, name: 'New' }
+    vi.mocked(updatePlatformExperiment).mockReset().mockResolvedValue(renamed)
     show(existing)
+    const name = screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'New')
     await userEvent.click(screen.getByRole('tab', { name: '2. Competition settings' }))
     expect(screen.queryByRole('group', { name: 'Who runs the agents?' })).toBeNull()
+    // The settings few people change are out of the way until asked for.
+    expect(screen.queryByLabelText('Report interval (seconds)')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'More settings' }))
+    expect(screen.getByLabelText('Report interval (seconds)')).toBeTruthy()
+    expect(screen.getByLabelText('Starts at')).toBeTruthy()
+    expect(screen.getByLabelText('Max concurrent accelerators')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
-    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(existing))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(renamed))
+    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { name: 'New' })
     expect(createPlatformExperiment).not.toHaveBeenCalled()
   })
 })

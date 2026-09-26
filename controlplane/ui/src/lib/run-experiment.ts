@@ -2,10 +2,6 @@ import { addPlatformExperimentAgents, createPlatformExperiment, startPlatformExp
 import type { CreatePlatformExperimentRequest } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 
-// Go's zero time. As starts_at it states "no scheduled start": the platform starts such an
-// experiment on no clock of its own, so it cannot start between two agents joining.
-const NO_SCHEDULED_START = '0001-01-01T00:00:00Z'
-
 /** A run that stopped part way: the experiment exists, and this step is the one the API refused. */
 export interface RunFailure {
   step: string
@@ -32,13 +28,15 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 
 /**
  * Creates a platform experiment the platform runs, and starts it: the experiment with a hosted
- * coordinator, then one hosted agent a call, then the start. They are the calls the experiment's
+ * coordinator and no start time, so that nothing starts it between two agents joining, then one
+ * hosted agent a call, then the start. They are the calls the experiment's
  * own page makes, in order and one at a time. A refused create rejects and nothing exists. Any
  * later refusal ends the run where it is: nothing is undone or tried again, and the outcome names
  * the step, for the experiment's page to finish from.
  */
 export async function createAndRun(projectID: string, request: CreatePlatformExperimentRequest, researchers: number): Promise<RunOutcome> {
-  const experiment = await createPlatformExperiment(projectID, { ...request, starts_at: NO_SCHEDULED_START, coordinator_hosted: true })
+  const { starts_at: _unscheduled, ...unscheduled } = request
+  const experiment = await createPlatformExperiment(projectID, { ...unscheduled, coordinator_hosted: true })
   const stopped = (step: string, error: unknown): RunOutcome => {
     const failure = { step, message: said(error) }
     failures.set(experiment.id, failure)

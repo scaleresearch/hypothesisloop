@@ -23,7 +23,7 @@ describe('creating and running a platform experiment', () => {
     await expect(createAndRun('prj_1', request, 3)).resolves.toEqual({ experiment })
     expect(calls).toEqual(['create', 'agent', 'agent', 'agent', 'start'])
     expect(createPlatformExperiment).toHaveBeenCalledExactlyOnceWith('prj_1', {
-      ...request, starts_at: '0001-01-01T00:00:00Z', coordinator_hosted: true,
+      name: 'run', repository: 'acme/widgets', ends_at: '2026-10-13T10:00:00.000Z', coordinator_hosted: true,
     })
     for (const call of vi.mocked(addPlatformExperimentAgents).mock.calls) expect(call).toEqual(['pe-1', { hosted: true }])
     expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1')

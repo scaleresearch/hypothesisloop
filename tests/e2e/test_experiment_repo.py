@@ -158,25 +158,30 @@ def test_a_platform_experiment_without_a_repository_has_no_clone_address_and_no_
 
 
 @pytest.mark.parallel
-def test_a_create_states_everything_and_an_update_is_whole(orgs, run):
-    """A create without from_repo states everything, and a partial update is refused and clears
-    nothing."""
+def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_changes(orgs, run):
+    """A create without from_repo states its name, description and metrics, and an update changes
+    the fields it names and no others."""
     a, _ = orgs
     pe_id, agent = run
     partial = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "name": "only a name"})
     assert partial.status_code == 422 and "description" in partial.json()["error"], partial.text
     before = agent.get_json(f"/platform-experiments/{pe_id}")
-    for body in ({"name": "x"}, {"from_repo": True, "name": "x"}):
-        assert _call(a.api, "PUT", f"/platform-experiments/{pe_id}", body).status_code == 422, body
+    assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"}).status_code == 422
+    assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {}).status_code == 422
+    assert _call(a.api, "PUT", f"/platform-experiments/{pe_id}", {"name": "x"}).status_code == 405
+    amended = _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"description": "amended"})
+    assert amended.status_code == 200, amended.text
     after = agent.get_json(f"/platform-experiments/{pe_id}")
-    assert (after["name"], after["description"]) == (before["name"], before["description"])
+    assert after["description"] == "amended"
+    unchanged = ("name", "budget_accelerator_hours", "max_agents", "metrics", "report_interval_seconds", "starts_at", "ends_at")
+    assert {key: after[key] for key in unchanged} == {key: before[key] for key in unchanged}
 
 
 @pytest.mark.parallel
 def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reaches(orgs, run_id: str):
     a, b = orgs
     whole = {**RUN, "name": f"repo-named-{run_id}", "description": "names a repository", "report_interval_seconds": 10,
-             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "starts_at": "0001-01-01T00:00:00Z"}
+             "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
     foreign = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": b.project_id, "from_repo": True, "repository": "acme/model"})
     assert foreign.status_code == 404 and foreign.json() == {"error": "project not found"}, foreign.text
 
@@ -257,8 +262,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         # And its org cannot name the repository: it connected nothing that covers it.
         named = _call(other.api, "POST", "/platform-experiments", {
             **RUN, "project_id": other.project_id, "name": f"repo-taken-{run_id}", "description": "another org's repository",
-            "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-            "starts_at": "0001-01-01T00:00:00Z", "repository": repo,
+            "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "repository": repo,
         })
         assert named.status_code == 422 and named.json()["reason"] == "installation_not_connected", named.text
 

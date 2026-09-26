@@ -168,6 +168,9 @@ class API:
     def put(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
         return self.session.put(self._url(path), json=json_body, timeout=30, **kw)
 
+    def patch(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
+        return self.session.patch(self._url(path), json=json_body, timeout=30, **kw)
+
     def get_json(self, path: str, **kw) -> Any:
         r = self.get(path, **kw)
         r.raise_for_status()
@@ -203,9 +206,8 @@ class API:
             "max_agents": max_agents,
             "report_interval_seconds": report_interval_seconds,
             "metrics": metrics or [{"key": "val_accuracy", "direction": "maximize"}],
-            # Zero starts_at means "start now"; creation requires a real ends_at, far enough out
-            # that no test outlives it.
-            "starts_at": "0001-01-01T00:00:00Z",
+            # No starts_at: it starts when a test starts it. The end is far enough out that no
+            # test outlives it.
             "ends_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         if stages is not None:

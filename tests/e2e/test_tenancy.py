@@ -74,8 +74,7 @@ def tenants(api: API, run_id: str):
 def _platform_experiment_body(name: str, **fields) -> dict:
     return {
         "name": name, "description": name, "budget_accelerator_hours": 1, "max_agents": 1,
-        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-        "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z", **fields,
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z", **fields,
     }
 
 
@@ -205,12 +204,11 @@ def test_another_org_writes_nothing(tenants):
     body_naming_b["metadata"]["platform_experiment_id"] = b.pe_id
     body_as_b = a.api.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", a.pe_id, a.agent)
     body_as_b["metadata"]["agent_id"] = b.agent
-    pe_update = _platform_experiment_body("taken over")
     writes = [
         ("POST", f"/platform-experiments/{b.pe_id}/agents", {"agent_id": a.agent}),
         ("POST", f"/platform-experiments/{b.pe_id}/agents", {"hosted": True}),
         ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
-        ("PUT", f"/platform-experiments/{b.pe_id}", pe_update),
+        ("PATCH", f"/platform-experiments/{b.pe_id}", {"name": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/start", None),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),
         ("POST", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
