@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -186,5 +187,155 @@ func TestJobSubmitRefusesSecretEnvInTheSpecFile(t *testing.T) {
 	code := run([]string{"job", "submit", "secret.yaml", "--agent", "jane"}, &stdout, &stderr)
 	if code != 2 || asked || !strings.Contains(stderr.String(), "FILE carries job.secret_env") || strings.Contains(stderr.String(), "the-secret-value") {
 		t.Fatalf("exit code = %d, sent = %v, stderr = %s, want it refused before anything is sent", code, asked, stderr.String())
+	}
+}
+
+// codePlatform is the platform's code routes kept in memory, and what a job submit sent.
+type codePlatform struct {
+	stored map[string][]byte
+	sent   any
+}
+
+func (p *codePlatform) serve(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case strings.Contains(r.URL.Path, "/code/") && r.Method == http.MethodPut:
+		body, _ := io.ReadAll(r.Body)
+		p.stored[r.URL.Path] = body
+		_, _ = w.Write([]byte(`{}`))
+	case strings.Contains(r.URL.Path, "/code/"):
+		body, found := p.stored[r.URL.Path]
+		if !found {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(body)
+	default:
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		p.sent = body["metadata"].(map[string]any)["code_ref"]
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
+	}
+}
+
+// localRepository is a repository with one commit and no origin: what an agent of a platform
+// experiment without a repository works in.
+func localRepository(t *testing.T) (dir, api string, platform *codePlatform) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	dir = t.TempDir()
+	mustGit(t, dir, "init", "-q", "-b", "main")
+	writeJob(t, filepath.Join(dir, "job.yaml"), "metadata:\n  hypothesis_id: h1\n  platform_experiment_id: pe-1\njob:\n  image: foo\n")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-q", "-m", "init")
+	t.Chdir(dir)
+	platform = &codePlatform{stored: map[string][]byte{}}
+	api = withServer(t, platform.serve)
+	setAPIURL(t, api)
+	return dir, api, platform
+}
+
+// An experiment with no repository had no code_ref to give a job at all.
+func TestWithNoOriginAJobCarriesTheCommitThePlatformKeepsOncePushed(t *testing.T) {
+	dir, api, platform := localRepository(t)
+	sha := mustGit(t, dir, "rev-parse", "HEAD")
+	var stdout, stderr bytes.Buffer
+	submitHere := func() int {
+		stdout.Reset()
+		stderr.Reset()
+		return run([]string{"job", "submit", "--agent", "jane", "job.yaml"}, &stdout, &stderr)
+	}
+	if code := submitHere(); code == 0 || platform.sent != nil || !strings.Contains(stderr.String(), "hl code push, then submit again") {
+		t.Fatalf("before the push: exit %d, sent %v, stderr %s", code, platform.sent, stderr.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"code", "push", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code push: exit %d, %s", code, stderr.String())
+	}
+	ref := api + "/platform-experiments/pe-1/agents/jane/code@" + sha
+	if got := strings.TrimSpace(stdout.String()); got != ref {
+		t.Fatalf("code push printed %q, want %s", got, ref)
+	}
+	bundle := platform.stored["/platform-experiments/pe-1/agents/jane/code/"+sha]
+	if !bytes.HasPrefix(bundle, []byte("# v")) || !bytes.Contains(bundle, []byte(sha+" ")) {
+		t.Fatalf("stored %q, want a git bundle whose tip is HEAD", bundle[:min(len(bundle), 80)])
+	}
+	if code := submitHere(); code != 0 || platform.sent != ref {
+		t.Fatalf("after the push: exit %d, code_ref %v, want %s; stderr %s", code, platform.sent, ref, stderr.String())
+	}
+
+	// A commit made since is not what the platform holds.
+	mustGit(t, dir, "commit", "-q", "--allow-empty", "-m", "local only")
+	platform.sent = nil
+	if code := submitHere(); code == 0 || platform.sent != nil {
+		t.Fatalf("an unpushed commit was submitted: exit %d, sent %v", code, platform.sent)
+	}
+}
+
+const hlProcessEnv = "HL_TEST_RUN_AS_HL"
+
+// TestHLProcess is the hl that hl-clone runs in the test below: the test binary acting as hl
+// with the arguments after "--".
+func TestHLProcess(t *testing.T) {
+	if os.Getenv(hlProcessEnv) == "" {
+		t.Skip("run by hl-clone as hl")
+	}
+	for i, arg := range os.Args {
+		if arg == "--" {
+			os.Exit(run(os.Args[i+1:], os.Stdout, os.Stderr))
+		}
+	}
+	os.Exit(2)
+}
+
+func TestHLCloneChecksOutACommitThePlatformKeeps(t *testing.T) {
+	cliDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, api, _ := localRepository(t)
+	sha := mustGit(t, dir, "rev-parse", "HEAD")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"code", "push", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code push: exit %d, %s", code, stderr.String())
+	}
+	// hl-clone runs the hl on its PATH: this test binary, told to act as hl.
+	bin := t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "hl"), []byte("#!/bin/sh\n"+hlProcessEnv+"=1 exec "+self+" -test.run=TestHLProcess -- \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script, err := filepath.Abs(filepath.Join(cliDir, "..", "agents", "coordinator", "experiments", "hl-clone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// As a job has it: the platform's address and its own token under the job's names, and a
+	// code_ref written with another address for the same API.
+	out := filepath.Join(t.TempDir(), "code")
+	cmd := exec.Command("sh", script, "https://api.as-the-agent-saw-it.example/platform-experiments/pe-1/agents/jane/code@"+sha, out)
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "API_URL=", "HL_TOKEN=",
+		"HYPOTHESISLOOP_API_URL="+api, "HYPOTHESISLOOP_TOKEN=job-token")
+	if printed, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(printed)) != out {
+		t.Fatalf("hl-clone: %v: %s", err, printed)
+	}
+	if got := mustGit(t, out, "rev-parse", "HEAD"); got != sha {
+		t.Fatalf("checked out %s, want %s", got, sha)
+	}
+	if _, err := os.Stat(filepath.Join(out, "job.yaml")); err != nil {
+		t.Fatalf("the commit's files are not there: %v", err)
+	}
+}
+
+func TestCodeFetchTakesOnlyACodeRefThePlatformKeeps(t *testing.T) {
+	_, _, _ = localRepository(t)
+	var stdout, stderr bytes.Buffer
+	for _, ref := range []string{"https://github.com/acme/model@" + strings.Repeat("a", 40), "https://api.example/platform-experiments/pe-1/agents/jane/code@main"} {
+		if code := run([]string{"code", "fetch", ref, filepath.Join(t.TempDir(), "x")}, &stdout, &stderr); code == 0 {
+			t.Errorf("code fetch took %s", ref)
+		}
 	}
 }

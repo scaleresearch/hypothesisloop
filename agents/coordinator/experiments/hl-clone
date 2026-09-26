@@ -1,5 +1,6 @@
 #!/bin/sh
 # hl-clone [<url>@<sha>] [dir]   — defaults to $HYPOTHESISLOOP_CODE_REF and /workspace/code.
+# <url> is a git remote, or the address the platform keeps an agent's code at.
 #
 # `git clone --depth 1 --branch <sha>` does not work: a shallow clone can only name a ref, and a
 # bare commit SHA is not one. Fetching the SHA into an empty repo is the form that does, and it is
@@ -26,6 +27,20 @@ sha="${ref##*@}"
 
 mkdir -p "$dir"
 git -C "$dir" init -q
-git -C "$dir" fetch -q --depth 1 "$url" "$sha"
+case "$url" in
+*/platform-experiments/*/agents/*/code)
+	# The code of a platform experiment that has no repository: the platform keeps the commit as
+	# a git bundle. hl downloads it from the API this machine was given, as the job in a job and
+	# as the agent on an agent's machine, and git takes the commit out of the file. A bundle
+	# is whole, so there is no depth to ask for.
+	bundle="$(mktemp)"
+	API_URL="${HYPOTHESISLOOP_API_URL:-${API_URL:-}}" HL_TOKEN="${HYPOTHESISLOOP_TOKEN:-${HL_TOKEN:-}}" hl code fetch "$ref" "$bundle"
+	git -C "$dir" fetch -q "$bundle" "$sha"
+	rm -f "$bundle"
+	;;
+*)
+	git -C "$dir" fetch -q --depth 1 "$url" "$sha"
+	;;
+esac
 git -C "$dir" checkout -q FETCH_HEAD
 echo "$dir"

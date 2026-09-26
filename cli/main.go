@@ -108,6 +108,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
 		return runGroup("job", jobCommands, client, rest, stdout, stderr)
+	case "code":
+		return runGroup("code", codeCommands, client, rest, stdout, stderr)
 	case "org":
 		return runGroup("org", orgCommands, client, rest, stdout, stderr)
 	case "project":
@@ -139,6 +141,7 @@ const usage = `usage: hl <command> ...
   donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
+  code                  push | fetch CODE_REF FILE: your code, kept by the platform when the experiment has no repository
   org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID

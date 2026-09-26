@@ -50,7 +50,9 @@ job.secret_env, since a job spec is a committed file.
 metadata.agent_id is set to --agent and an empty metadata.platform_experiment_id to
 --platform-experiment. An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
-files and HEAD pushed to origin. Commit and git push only after changing a tracked file.
+files and HEAD pushed to origin. Commit and git push only after changing a tracked file. In a
+repository with no origin, of a platform experiment that has none, it is the commit as
+hl code push stored it with the platform.
 Minimal shape:
 
   metadata:
@@ -111,7 +113,7 @@ See controlplane/settings/examples/experiment-submission.yaml for the full DSL r
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = os.Getenv(platformExperimentEnv)
 	}
-	if err := fillCodeRef(metadata, ""); err != nil {
+	if err := fillCodeRef(c, metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata

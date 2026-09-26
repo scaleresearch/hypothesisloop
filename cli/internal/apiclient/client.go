@@ -87,3 +87,44 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	}
 	return resp.Header, nil
 }
+
+// bytesTimeout is for a body of tens of megabytes over a slow link.
+const bytesTimeout = 10 * time.Minute
+
+// DoBytes issues one request whose body, when non-nil, and whose answer are bytes as they are:
+// a git bundle going up or coming down.
+func (c *Client) DoBytes(method, path string, body []byte) ([]byte, error) {
+	if c.BaseURL == "" {
+		return nil, errors.New("no API URL given (set API_URL)")
+	}
+	if c.Token == "" {
+		return nil, errors.New("no token given (set HL_TOKEN)")
+	}
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, strings.TrimRight(c.BaseURL, "/")+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	client := *c.HTTP
+	client.Timeout = bytesTimeout
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: reading response: %w", method, path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(data[:min(len(data), 4<<10)]))}
+	}
+	return data, nil
+}
