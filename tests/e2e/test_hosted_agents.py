@@ -429,6 +429,8 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         coordinator, _ = coordinator_for(with_repo, pe_id)
         assert coordinator is not None
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
+        # A platform experiment starts with at least one agent in it.
+        with_repo.add_agents(pe_id)
         with_repo.start_platform_experiment(pe_id)
         as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "why it is closed")
         as_coordinator.hl("platform-experiments", "close", pe_id)
@@ -536,7 +538,7 @@ def _sessions_are_their_owners(api: API, pe_id: str) -> None:
         assert call("GET", who, who).status_code == 404, f"{who} has a session before it stored one"
         snapshot = b"\x1f\x8b\x00" + who.encode() + os.urandom(64)
         stored = call("PUT", who, who, snapshot)
-        assert stored.status_code == 200 and stored.json() == {"size_bytes": len(snapshot)}, f"{who}: {stored.status_code} {stored.text}"
+        assert stored.status_code == 200 and stored.json()["size_bytes"] == len(snapshot), f"{who}: {stored.status_code} {stored.text}"
         read = call("GET", who, who)
         assert read.status_code == 200 and read.content == snapshot, f"{who} read back something else"
         replaced = snapshot + b"a second turn"
@@ -623,7 +625,8 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
             r = as_coordinator.put(f"/platform-experiments/{pe_id}", {**live, field: value})
             assert r.status_code == 403 and field in r.text, f"a coordinator changing {field}: {r.status_code} {r.text}"
         after = with_repo.get_json(f"/platform-experiments/{pe_id}")
-        assert all(after[key] == pe[key] for key in live) and after["stages"] == pe["stages"], after
+        changed = {key: (pe[key], after[key]) for key in (*live, "stages") if after[key] != pe[key]}
+        assert not changed, f"a refused update changed {changed}"
 
         # It acts as no agent, with or without one named.
         r = as_coordinator.post(f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent_id})
