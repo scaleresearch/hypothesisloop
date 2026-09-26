@@ -225,3 +225,37 @@ def test_an_api_key_manages_members_and_joins_nothing(api: API, run_id: str):
     assert promoted["role"] == "owner"
     with_key.hl("org", "members", "remove", guest.subject)
     assert _members(with_key, org) == {owner.subject: "owner"}
+
+
+def test_an_account_creates_up_to_its_limits(api: API, run_id: str):
+    """Every person of the suite is a distinct one, so each starts with the one org of their first
+    sign-in and the one project it came with. The bounds are read from /me, not assumed."""
+    person = _person(api, run_id, "limits")
+    me = person.home.get_json("/me")
+    max_orgs, max_projects = me["limits"]["max_orgs_per_user"], me["limits"]["max_projects_per_org"]
+    assert max_orgs >= 2 and max_projects >= 2, f"limits of the deployment: {me['limits']}"
+
+    for i in range(1, max_orgs):
+        created = _call(person.home, "POST", "/orgs", {"name": f"org {i} {run_id}"})
+        assert created.status_code == 201, f"org {i + 1} of {max_orgs}: {created.status_code} {created.text}"
+    _refused(person.home, "POST", "/orgs", {"name": f"one more {run_id}"}, 409, "max_orgs_reached")
+    with pytest.raises(HLError, match="max_orgs_reached"):
+        person.home.hl("org", "create", f"one more {run_id}")
+    owned = [o for o in person.home.get_json("/me")["orgs"] if o["role"] == "owner"]
+    assert len(owned) == max_orgs, f"orgs owned after the refusal: {owned}"
+
+    org = person.home.org_id
+    for i in range(1, max_projects):
+        created = _call(person.home, "POST", f"/orgs/{org}/projects", {"name": f"project-{i}"})
+        assert created.status_code == 201, f"project {i + 1} of {max_projects}: {created.status_code} {created.text}"
+    _refused(person.home, "POST", f"/orgs/{org}/projects", {"name": "one-more"}, 409, "max_projects_reached")
+    with pytest.raises(HLError, match="max_projects_reached"):
+        person.home.hl("project", "create", "one-more")
+    held = [p for p in person.home.get_json("/me")["projects"] if p["org_id"] == org]
+    assert len(held) == max_projects, f"projects of the org after the refusal: {held}"
+
+    # Staff are held to neither bound, whoever they create for.
+    assert "limits" not in api.get_json("/me")
+    by_staff = api.post("/orgs", {"name": f"past the limit {run_id}", "owner_user_id": person.subject})
+    assert by_staff.status_code == 201, f"staff creating past a person's limit: {by_staff.status_code} {by_staff.text}"
+    assert api.post(f"/orgs/{org}/projects", {"name": "past-the-limit"}).status_code == 201

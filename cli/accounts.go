@@ -120,7 +120,9 @@ func orgCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("org create", `usage: hl org create NAME [--owner USER]
 
 Creates an org with a project named default. A signed-in person owns the org they create. A
-staff token names the owner with --owner. An API key belongs to one org and cannot create another.`, stderr)
+staff token names the owner with --owner. An API key belongs to one org and cannot create another.
+A person owns a bounded number of orgs, the first one they signed in to included: past it the
+create is refused with max_orgs_reached.`, stderr)
 	owner := fs.String("owner", "", "user id of the owner, for a staff token")
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -306,7 +308,7 @@ func projectList(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 }
 
 func projectCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("project create", "usage: hl project create NAME [--org ORG]\n\nCreates a project. Its name is unique within the org. Export its id as $HL_PROJECT to work in it.", stderr)
+	fs := newFlags("project create", "usage: hl project create NAME [--org ORG]\n\nCreates a project. Its name is unique within the org. Export its id as $HL_PROJECT to work in it. An org holds a bounded number of projects, its default one included: past it the create is refused with max_projects_reached.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {

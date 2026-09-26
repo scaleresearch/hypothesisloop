@@ -381,3 +381,23 @@ func TestARefusalWithAReasonIsPrinted(t *testing.T) {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal and no claim of a removal", code, stdout, stderr)
 	}
 }
+
+// A create past what one account may hold is refused by the platform, and the refusal is what
+// the person reads.
+func TestACreatePastAnAccountLimitPrintsTheReason(t *testing.T) {
+	for args, refusal := range map[string]string{
+		"org create one-more":                 `{"reason":"max_orgs_reached","message":"a person owns at most 3 orgs, and the owner of this one already does"}`,
+		"project create one-more --org org-1": `{"reason":"max_projects_reached","message":"an org holds at most 10 projects, and this one already does"}`,
+	} {
+		url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(refusal))
+		})
+		setAPIURL(t, url)
+		code, stdout, stderr := hl(t, strings.Fields(args)...)
+		if code != 1 || stdout != "" || !strings.Contains(stderr, "409") || !strings.Contains(stderr, refusal) {
+			t.Errorf("hl %s: exit code = %d, stdout = %q, stderr = %q, want the 409 with %s", args, code, stdout, stderr, refusal)
+		}
+	}
+}
