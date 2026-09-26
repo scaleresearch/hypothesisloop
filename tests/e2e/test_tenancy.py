@@ -1,7 +1,7 @@
 """Two orgs on one control plane: org A can neither read nor write anything of org B.
 
 Each org gets a user, an API key, a registered agent, a started platform experiment with a
-hypothesis, a job and a donation request. Every read is first made by the owner, so a 404 for the
+hypothesis and a job. Every read is first made by the owner, so a 404 for the
 other org is a refusal and never a route that answers 404 to everyone.
 """
 from __future__ import annotations
@@ -33,13 +33,12 @@ class Tenant:
     pe_id: str
     hypothesis_id: str
     job_id: str
-    donation_id: str
     cluster: str
     marker: str
 
     def identifiers(self) -> list[str]:
         return [self.org_id, self.project_id, self.agent, self.pe_id, self.hypothesis_id, self.job_id,
-                self.donation_id, self.marker]
+                self.marker]
 
 
 def _tenant(api: API, run_id: str, label: str) -> Tenant:
@@ -55,10 +54,9 @@ def _tenant(api: API, run_id: str, label: str) -> Tenant:
     # An accelerator type no local cluster has, so the job stays QUEUED: non-terminal for the job
     # token, and holding nothing.
     job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR})
-    donation_id = caller.create_donation(agent, pe_id, 0.5, f"{marker} donation")
     cluster = f"cluster-{marker}-{run_id}"
     admin.add_cluster(cluster, home["org_id"])
-    return Tenant(caller, home["org_id"], home["project_id"], agent, pe_id, hypothesis_id, job_id, donation_id, cluster, marker)
+    return Tenant(caller, home["org_id"], home["project_id"], agent, pe_id, hypothesis_id, job_id, cluster, marker)
 
 
 @pytest.fixture(scope="module")
@@ -127,9 +125,6 @@ def _list_reads(t: Tenant) -> list[str]:
         f"/hypotheses?project_id={t.project_id}",
         f"/hypotheses?agent_id={t.agent}",
         f"/hypotheses/stats?platform_experiment_id={t.pe_id}",
-        "/donations?limit=200",
-        f"/donations?platform_experiment_id={t.pe_id}",
-        f"/donations?project_id={t.project_id}",
         f"/watch/subscriptions?platform_experiment_id={t.pe_id}",
     ]
 
@@ -165,7 +160,7 @@ def test_the_owner_reads_everything_of_its_own(tenants):
             r = t.api.get(path)
             assert r.status_code == 200, f"owner GET {path}: {r.status_code} {r.text}"
         for path in ("/platform-experiments?limit=200", "/agents?limit=200", "/experiments?limit=200",
-                     "/hypotheses?limit=200", "/donations?limit=200"):
+                     "/hypotheses?limit=200"):
             r = t.api.get(path)
             assert r.status_code == 200 and t.marker in r.text, f"owner GET {path} does not list its own rows: {r.text}"
 
@@ -197,7 +192,6 @@ def test_another_org_writes_nothing(tenants):
         "job": b.api.experiment(b.job_id),
         "hypothesis": b.api.hypothesis(b.hypothesis_id),
         "hypotheses": len(b.api.hypotheses(b.pe_id)),
-        "donations": b.api.get_json(f"/donations?platform_experiment_id={b.pe_id}"),
     }
 
     body_naming_b = a.api.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", a.pe_id, a.agent)
@@ -233,9 +227,6 @@ def test_another_org_writes_nothing(tenants):
         ("POST", "/hypotheses", {"agent_id": a.agent, "platform_experiment_id": a.pe_id, "text": "told apart from another org",
                                  "links": [{"type": "builds_on", "to": a.pe_id}], "distinct_from": [b.hypothesis_id]}),
         ("POST", "/hypotheses/query", {"platform_experiment_id": b.pe_id, "cypher": "MATCH (h:Hypothesis) RETURN h.id", "params": {}}),
-        ("POST", "/donations", {"agent_id": a.agent, "platform_experiment_id": b.pe_id, "credits_want": 1, "reason": "intruding"}),
-        ("POST", f"/donations/{b.donation_id}/fulfill", {"donor_agent_id": a.agent}),
-        ("POST", f"/donations/{b.donation_id}/cancel", {}),
     ]
     for method, path, body in writes:
         r = a.api.session.request(method, a.api._url(path), json=body, timeout=30)
@@ -246,7 +237,6 @@ def test_another_org_writes_nothing(tenants):
         "job": b.api.experiment(b.job_id),
         "hypothesis": b.api.hypothesis(b.hypothesis_id),
         "hypotheses": len(b.api.hypotheses(b.pe_id)),
-        "donations": b.api.get_json(f"/donations?platform_experiment_id={b.pe_id}"),
     }
     assert after == before
     assert not b.api.metrics(b.job_id)

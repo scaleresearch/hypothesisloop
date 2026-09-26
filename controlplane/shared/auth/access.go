@@ -13,7 +13,6 @@ import (
 type Placement interface {
 	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
-	DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error)
 	AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error)
 	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
 	GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error)
@@ -167,36 +166,6 @@ func (a *Access) experiment(ctx context.Context, experimentID string) (*domain.T
 		return nil, err
 	}
 	return admitted(ctx, p, tenancy, "experiment")
-}
-
-// Donation admits the principal to one donation request.
-func (a *Access) Donation(ctx context.Context, donationID string) error {
-	_, err := a.donation(ctx, donationID)
-	return err
-}
-
-// OwnDonation admits the principal to act on a donation request as the agent that asked.
-func (a *Access) OwnDonation(ctx context.Context, donationID string) error {
-	tenancy, err := a.donation(ctx, donationID)
-	if err != nil {
-		return err
-	}
-	return ownedBy(ctx, tenancy, "donation request")
-}
-
-func (a *Access) donation(ctx context.Context, donationID string) (*domain.Tenancy, error) {
-	p, err := principal(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validID("donation request", donationID); err != nil {
-		return nil, err
-	}
-	tenancy, err := a.placement.DonationTenancy(ctx, donationID)
-	if err != nil {
-		return nil, err
-	}
-	return admitted(ctx, p, tenancy, "donation request")
 }
 
 // admitted answers for a placed row. Staff pass on an absent one with a nil tenancy.

@@ -27,7 +27,6 @@ func twoOrgs() *auth.Access {
 	return auth.NewAccess(authtest.Placement{
 		PlatformExperiments: map[string]domain.Tenancy{"pe-a": inA, "pe-a2": inA2, "pe-b": inB},
 		Experiments:         map[string]domain.Tenancy{"job-a": by(inA, "agent-a"), "job-a-other": by(inA, "agent-a-other"), "job-a2": inA2, "job-b": inB},
-		Donations:           map[string]domain.Tenancy{"don-a": by(inA, "agent-a"), "don-a-other": by(inA, "agent-a-other"), "don-b": inB},
 		Agents:              map[string]string{"agent-a": "org-a", "agent-a-other": "org-a", "agent-b": "org-b"},
 		Clusters:            map[string]string{"cluster-a": "org-a", "cluster-b": "org-b"},
 		Projects: map[string]domain.Project{
@@ -100,7 +99,6 @@ func TestAnAbsentRowAndAnotherOrgsRowReadTheSame(t *testing.T) {
 		"platform experiment": {access.PlatformExperiment(ctx, "pe-b"), access.PlatformExperiment(ctx, "pe-missing")},
 		"hypothesis":          {access.Within(ctx, "hypothesis", "pe-b"), access.Within(ctx, "hypothesis", "pe-missing")},
 		"job":                 {access.Experiment(ctx, "job-b"), access.Experiment(ctx, "job-missing")},
-		"donation":            {access.Donation(ctx, "don-b"), access.Donation(ctx, "don-missing")},
 		"agent":               {access.Agent(ctx, "agent-b"), access.Agent(ctx, "agent-unregistered")},
 		"cluster":             {access.Cluster(ctx, "cluster-b"), access.Cluster(ctx, "cluster-unregistered")},
 		"project":             {access.Project(ctx, "prj-b"), access.Project(ctx, "prj-missing")},
@@ -126,28 +124,13 @@ func TestExperimentAccess(t *testing.T) {
 	})
 }
 
-func TestAnAgentActsOnItsOwnJobsAndDonationRequestsOnly(t *testing.T) {
+func TestAnAgentActsOnItsOwnJobsOnly(t *testing.T) {
 	runChecks(t, "own job", twoOrgs().OwnExperiment, []check{
 		{"agent in pe-a", "job-a", 200}, {"agent in pe-a", "job-a-other", 403},
 		{"agent in pe-a", "job-b", 404}, {"agent in pe-a", "job-missing", 404},
 		{"user of A", "job-a-other", 200}, {"coordinator of pe-a", "job-a-other", 200}, {"key of A", "job-a-other", 200},
 		{"job job-a", "job-a", 200}, {"job job-a", "job-a-other", 403},
 		{"staff", "job-a-other", 200}, {"staff", "job-missing", 200},
-	})
-	runChecks(t, "own donation", twoOrgs().OwnDonation, []check{
-		{"agent in pe-a", "don-a", 200}, {"agent in pe-a", "don-a-other", 403}, {"agent in pe-a", "don-b", 404},
-		{"user of A", "don-a-other", 200}, {"coordinator of pe-a", "don-a-other", 200},
-		{"staff", "don-a-other", 200},
-	})
-}
-
-func TestDonationAccess(t *testing.T) {
-	runChecks(t, "donation", twoOrgs().Donation, []check{
-		{"user of A", "don-a", 200}, {"user of A", "don-b", 404},
-		{"agent in pe-a", "don-a", 200}, {"agent in pe-a", "don-b", 404},
-		{"staff", "don-b", 200},
-		{"agent in pe-a", "don-a-other", 200},
-		{"user of A", "don-missing", 404}, {"staff", "don-missing", 200},
 	})
 }
 
@@ -287,7 +270,6 @@ func TestARequestWithNoPrincipalReachesNothing(t *testing.T) {
 	for name, err := range map[string]error{
 		"platform experiment": access.PlatformExperiment(ctx, "pe-a"),
 		"job":                 access.Experiment(ctx, "job-a"),
-		"donation":            access.Donation(ctx, "don-a"),
 		"agent":               access.Agent(ctx, "agent-a"),
 		"cluster":             access.Cluster(ctx, "cluster-a"),
 		"project":             access.Project(ctx, "prj-a"),

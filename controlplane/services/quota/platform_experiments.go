@@ -95,18 +95,6 @@ type PlatformExperimentsStore interface {
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)
-	// FulfillDonationTx performs a donation transfer atomically and idempotently — locking the
-	// donation + both quota rows, verifying the donation is still open and the donor has headroom,
-	// moving the amount and marking the donation fulfilled in one transaction. observe is called
-	// inside that transaction, with the rows already locked, so the headroom check reads usage a
-	// concurrent admission can no longer change. See db.PlatformExperimentsStore.FulfillDonationTx.
-	FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, burstAmount float64, observe func(context.Context) (*domain.AgentQuota, error)) (bool, error)
-	// Donation persistence (experiment-scoped donations).
-	CreateDonationRequest(ctx context.Context, req *domain.DonationRequest) error
-	GetDonationRequest(ctx context.Context, id string) (*domain.DonationRequest, error)
-	ListDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string, limit, offset int) ([]*domain.DonationRequest, error)
-	CountDonationRequests(ctx context.Context, scope domain.TenantScope, platformExperimentID, status string) (int, error)
-	UpdateDonationStatus(ctx context.Context, id, status string) error
 }
 
 // PlatformExperimentsService manages the Platform Experiment lifecycle.

@@ -223,7 +223,7 @@ func (c Cluster) EnabledFor(orgID string) bool {
 const AgentWindDown = 120 * time.Second
 
 // Tenancy places one platform experiment: org is always derived through its project. AgentID is
-// set when what was placed is a job or a donation request, which belong to one agent.
+// set when what was placed is a job, which belongs to one agent.
 type Tenancy struct {
 	PlatformExperimentID string
 	ProjectID            string

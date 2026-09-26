@@ -418,28 +418,8 @@ ALTER TABLE hypothesis_comments ALTER COLUMN actor_kind DROP DEFAULT;
 CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_hypothesis ON hypothesis_comments(hypothesis_id);
 CREATE INDEX IF NOT EXISTS idx_hypothesis_comments_platform ON hypothesis_comments(platform_experiment_id, created_at);
 
--- ---------------------------------------------------------------------------
--- donation_requests
--- ---------------------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS donation_requests (
-    id                     TEXT             PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    agent_id               TEXT             NOT NULL REFERENCES agents(id),
-    platform_experiment_id TEXT             NOT NULL REFERENCES platform_experiments(id),
-    credits_want           DOUBLE PRECISION NOT NULL,
-    reason                 TEXT             NOT NULL,
-    status                 TEXT             NOT NULL DEFAULT 'open',
-    -- Free text here meant a typo produced a donation nobody could ever see again: every reader
-    -- filters on one of these three values, so an unrecognised one is invisible, not invalid.
-    CONSTRAINT donation_requests_status CHECK (status IN ('open', 'fulfilled', 'cancelled')),
-    CONSTRAINT donation_requests_credits_positive CHECK (credits_want > 0),
-    created_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    updated_at             TIMESTAMPTZ      NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_donation_requests_agent_id ON donation_requests(agent_id);
-CREATE INDEX IF NOT EXISTS idx_donation_requests_platform ON donation_requests(platform_experiment_id);
-CREATE INDEX IF NOT EXISTS idx_donation_requests_status   ON donation_requests(status);
+-- Agents no longer ask each other for quota: one with none left finishes.
+DROP TABLE IF EXISTS donation_requests;
 
 -- ---------------------------------------------------------------------------
 -- experiment_signups — agents enrolled in a platform experiment
@@ -536,7 +516,7 @@ CREATE TABLE IF NOT EXISTS agent_quotas (
     guaranteed_accelerator_hours    DOUBLE PRECISION NOT NULL,
     burst_accelerator_hours         DOUBLE PRECISION NOT NULL,
     -- An allocation is a quantity of hours; a negative one is a bug, not a state. Without this,
-    -- a stale-snapshot donation or a negative stage delta silently produced one, and the agent
+    -- a stale snapshot or a negative stage delta silently produced one, and the agent
     -- got rejections explaining it had "-3.2 hours remaining".
     CONSTRAINT agent_quotas_non_negative CHECK (
         guaranteed_accelerator_hours >= 0 AND burst_accelerator_hours >= 0
@@ -546,7 +526,7 @@ CREATE TABLE IF NOT EXISTS agent_quotas (
 );
 
 -- updated_at exists so a reconnecting watcher can ask "which allocations changed since my
--- cursor" — an allocation is rewritten in place by stage moves and donations, so without it the
+-- cursor" — an allocation is rewritten in place by stage moves, so without it the
 -- row carries no evidence that it ever moved. Maintained by a trigger below, not by any writer:
 -- there is one clock for this column and no write path can forget it.
 ALTER TABLE agent_quotas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
@@ -749,7 +729,7 @@ CREATE TRIGGER agent_quotas_touch BEFORE UPDATE ON agent_quotas
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_notify() RETURNS trigger AS $$
 BEGIN
     -- The value is the agent's total allocated accelerator hours and the detail its two parts:
-    -- enough for a waiting agent to see a grant, a donation or a stage move land without a read.
+    -- enough for a waiting agent to see a grant or a stage move land without a read.
     -- What is used of it comes from GET /quota. replayQuotas spells the same detail.
     PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
         (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text,

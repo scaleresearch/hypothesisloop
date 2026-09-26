@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -21,11 +20,6 @@ import (
 // small pool. Failing the transaction is recoverable — the caller retries on the next tick —
 // where hanging on the lock is not.
 const InTxObservationTimeout = 5 * time.Second
-
-// ErrDonorInsufficientQuota is returned by FulfillDonationTx when, at commit time under row
-// locks, the donor's guaranteed allocation minus its already-reserved usage cannot cover the
-// requested transfer.
-var ErrDonorInsufficientQuota = errors.New("donor has insufficient guaranteed quota")
 
 // PlatformExperimentsStore provides persistence for platform experiments,
 // agent signups, and per-agent quotas.
@@ -456,7 +450,7 @@ WHERE id=$1 AND status=$10`
 //
 // UsedByAgent carries observed consumption per cut agent, which is metrics-store data and so
 // cannot be read under the Postgres lock. That is safe in a way the allocation is not: observed
-// usage only ever moves up, whereas an allocation can move in either direction (a donation), and
+// usage only ever moves up, whereas an allocation can move in either direction, and
 // deriving "unspent" from an allocation read before the lock mints or destroys hours relative to
 // the platform budget. The allocation side is therefore read inside the transaction.
 type StageRedistribution struct {
@@ -620,7 +614,7 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 		guaranteed, burst := resourceQuotaColumns(dim.ResourceType)
 
 		// Lock every cut agent's row and read its allocation here, not from a snapshot taken
-		// before the transaction: a donation committing in between would make "unspent" wrong in
+		// before the transaction: a stage move committing in between would make "unspent" wrong in
 		// either direction, minting or destroying hours against the platform budget.
 		tiers, err := participantTiers(ctx, tx, platformExpID, cutAgentIDs)
 		if err != nil {
@@ -753,145 +747,6 @@ func (s *PlatformExperimentsStore) AgentCutAt(ctx context.Context, platformExpID
 		return nil, fmt.Errorf("platform_experiments_store.AgentCutAt: %w", err)
 	}
 	return &cutAt, nil
-}
-
-// FulfillDonationTx performs a donation transfer as a single atomic, idempotent operation: it
-// locks the donation row, verifies it is still "open", locks both quota rows, checks the donor's
-// headroom (guaranteed allocation minus its observed and reserved guaranteed hours), moves the
-// amount, and flips the donation to "fulfilled" — all in one
-// transaction under the same cross-replica advisory lock admission uses. Gating the transfer on
-// the donation still being "open" inside the tx is what makes a retry safe: a second call after a
-// crash sees "fulfilled" and returns (false, nil) instead of transferring again.
-//
-// Returns fulfilled=true when the transfer was applied, false when the donation was not open
-// (already fulfilled/cancelled — a no-op, not an error). ErrDonorInsufficientQuota is returned if
-// the donor cannot cover the amount.
-// observe reads the donor's observed usage from the metrics store and must make no pool read: the
-// transaction already holds this request's connection. It is called *inside* the transaction,
-// once both quota rows are locked, for the same reason AdmitExperimentTx takes one: usage read
-// before the lock is a snapshot a concurrent admission can invalidate, and the headroom check
-// would then pass against hours already spoken for — over-committing the donor into exhaustion
-// evictions that cannot be undone, since the transfer itself is irreversible. The donor's
-// reservations are summed on the transaction, as admission sums them.
-func (s *PlatformExperimentsStore) FulfillDonationTx(ctx context.Context, donationID, donorAgentID, recipientAgentID, platformExpID string, resourceType domain.ResourceType, amount, burstAmount float64, observe func(context.Context) (*domain.AgentQuota, error)) (fulfilled bool, err error) {
-	guaranteed, burst := resourceQuotaColumns(resourceType)
-
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// Both agents' locks, taken in a fixed order. Two donations in opposite directions between the
-	// same pair (A->B and B->A) each locked their own donor first and then reached for the other's
-	// row, which is a textbook deadlock and surfaced as a 500. Sorting makes the acquisition order
-	// identical for every transaction touching this pair, so one simply waits.
-	lockKeys := []string{donorAgentID + "/" + platformExpID, recipientAgentID + "/" + platformExpID}
-	sort.Strings(lockKeys)
-	for _, key := range lockKeys {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: acquire lock: %w", err)
-		}
-	}
-
-	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM donation_requests WHERE id=$1 FOR UPDATE`, donationID).Scan(&status); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock donation: %w", err)
-	}
-	if status != "open" {
-		return false, nil
-	}
-
-	// One statement locking both rows in agent_id order, for the same reason the advisory locks
-	// are sorted: two row locks taken in caller-dependent order is the deadlock.
-	lockQ := fmt.Sprintf(
-		`SELECT agent_id, %s, %s FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id = ANY($2) ORDER BY agent_id FOR UPDATE`,
-		guaranteed, burst)
-	rows, err := tx.Query(ctx, lockQ, platformExpID, []string{donorAgentID, recipientAgentID})
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock quota rows: %w", err)
-	}
-	var donorGuaranteed, donorBurst float64
-	var lockedDonor, lockedRecipient bool
-	for rows.Next() {
-		var agentID string
-		var g, b float64
-		if err := rows.Scan(&agentID, &g, &b); err != nil {
-			rows.Close()
-			return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: scan quota row: %w", err)
-		}
-		switch agentID {
-		case donorAgentID:
-			donorGuaranteed, donorBurst = g, b
-			lockedDonor = true
-		case recipientAgentID:
-			lockedRecipient = true
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: lock quota rows: %w", err)
-	}
-	if !lockedDonor || !lockedRecipient {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: donor or recipient has no quota row in %s", platformExpID)
-	}
-
-	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
-	observed, err := observe(observedCtx)
-	cancelObserved()
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: observed usage: %w", err)
-	}
-	if observed == nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: no observed usage for donor %s", donorAgentID)
-	}
-	var desiredGuaranteed float64
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(SUM(estimated_cost_acch), 0)
-		FROM experiments
-		WHERE agent_id=$1 AND platform_experiment_id=$2 AND capacity_tier='guaranteed'
-		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
-		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
-		donorAgentID, platformExpID).Scan(&desiredGuaranteed); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: desired usage: %w", err)
-	}
-	if donorGuaranteed-observed.UsedGuaranteedAccH-desiredGuaranteed < amount {
-		return false, ErrDonorInsufficientQuota
-	}
-
-	// Burst moves with the guaranteed hours it is derived from (burst = guaranteed x
-	// BurstFraction, see domain.AllocateQuota). Moving guaranteed alone leaves the donor holding
-	// burst headroom for hours it gave away and the recipient with none for hours it received.
-	//
-	// One figure debited and credited, never two: a donor row written before that derivation
-	// existed can hold less burst than the transfer implies, and flooring only the debit would
-	// credit the recipient hours the donor never gave up — minting allocation instead of moving
-	// it. Capping the transfer itself keeps the two sides equal by construction.
-	movedBurst := burstAmount
-	if movedBurst > donorBurst {
-		movedBurst = donorBurst
-	}
-	if movedBurst < 0 {
-		movedBurst = 0
-	}
-	debitQ := fmt.Sprintf(`UPDATE agent_quotas SET %[1]s = %[1]s - $3, %[2]s = %[2]s - $4 WHERE agent_id=$1 AND platform_experiment_id=$2`, guaranteed, burst)
-	if _, err := tx.Exec(ctx, debitQ, donorAgentID, platformExpID, amount, movedBurst); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: debit donor: %w", err)
-	}
-	// The donor is debited exactly what it gave; the recipient is credited into its own tier. A
-	// human's guaranteed hours donated to a burst-only agent stay hours, but they do not carry
-	// the donor's priority across with them — see creditIntoTier.
-	if err := creditIntoTier(ctx, tx, platformExpID, []string{recipientAgentID}, guaranteed, burst, amount, movedBurst); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: credit recipient: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE donation_requests SET status='fulfilled', updated_at=now() WHERE id=$1`, donationID); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: mark fulfilled: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.FulfillDonationTx: commit: %w", err)
-	}
-	return true, nil
 }
 
 // ErrPlatformExperimentNotFound reports an id no platform experiment has.

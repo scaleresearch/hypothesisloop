@@ -307,12 +307,6 @@ var routes = []route{
 	{method: "DELETE", path: "/platform-experiments/{id}/agents/{agent_id}", request: "/platform-experiments/<pe>/agents/<agent>", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/agents/{agent_id}/finish", request: "/platform-experiments/<pe>/agents/<agent>/finish", body: `{"reason":"nothing left"}`, rule: ownSession(agentAudience, "agent")},
 
-	// ---- donations ----
-	{method: "GET", path: "/donations", request: "/donations?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
-	{method: "POST", path: "/donations", body: `{"agent_id":"<agent>","platform_experiment_id":"<pe>","credits_want":1,"reason":"r"}`, rule: spendsAs(owned(agentAudience, reached))},
-	{method: "POST", path: "/donations/{id}/cancel", request: "/donations/<don>/cancel", rule: owned(agentAudience, reached)},
-	{method: "POST", path: "/donations/{id}/fulfill", request: "/donations/<don>/fulfill", body: `{"donor_agent_id":"agent-1"}`, rule: spendsAs(scoped(agentAudience, reached))},
-
 	// ---- catalog ----
 	{method: "GET", path: "/resource-catalog", rule: listed(agentAudience, http.StatusOK)},
 	{method: "GET", path: "/resource-catalog/capacity", rule: listed(agentAudience, metricsUnreachable)},
@@ -417,7 +411,6 @@ var cases = []struct {
 	{"a user commenting for an agent of another org", "user", "POST", "/hypotheses/hyp-own/comments", `{"agent_id":"agent-9","text":"t"}`, 404},
 	{"a user commenting for an agent nobody registered", "user", "POST", "/hypotheses/hyp-own/comments", `{"agent_id":"agent-none","text":"t"}`, 404},
 
-	{"an agent giving away another agent's quota", "agent", "POST", "/donations/don-peer/fulfill", `{"donor_agent_id":"agent-2"}`, 403},
 	{"an agent submitting a job as another agent", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","agent_id":"agent-2","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 403},
 	{"an agent submitting a job and naming neither itself nor its experiment", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, reached},
 	{"a user submitting a job for no agent", "user", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 404},

@@ -601,20 +601,6 @@ class API:
         by_reason = stats.get("evictions_by_reason") or {}
         return sum(by_class.values()), sum(by_reason.values()), by_class.get("unclassified", 0)
 
-    # ---- donations -----------------------------------------------------------------------------
-
-    def create_donation(self, agent_id: str, pe_id: str, credits_want: float, reason: str) -> str:
-        return self.post_json(
-            "/donations",
-            {"agent_id": agent_id, "platform_experiment_id": pe_id, "credits_want": credits_want, "reason": reason},
-        )["id"]
-
-    def fulfill_donation(self, donation_id: str, donor_agent_id: str) -> requests.Response:
-        return self.post(f"/donations/{donation_id}/fulfill", {"donor_agent_id": donor_agent_id})
-
-    def cancel_donation(self, donation_id: str) -> requests.Response:
-        return self.post(f"/donations/{donation_id}/cancel", {})
-
     # ---- resource catalog ------------------------------------------------------------------------
 
     def capacity(self, org_id: str = "") -> dict:

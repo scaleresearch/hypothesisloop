@@ -437,7 +437,7 @@ func writeEvent(conn *wsConn, e db.Event) error {
 // replay ran. An event below its kind's floor is such a repeat: its transaction had finished
 // before an event already sent was written, so it came earlier on this stream. At or above the
 // floor only a repeat of the same identity is dropped, which sent holds: one transaction writes
-// several events (a stage cut per agent, a quota donation pair), and each is news. Every event
+// several events (a stage cut per agent), and each is news. Every event
 // this connection writes passes through send, so it is where source.Concerns completes the
 // filter, for replay and live alike.
 type served struct {

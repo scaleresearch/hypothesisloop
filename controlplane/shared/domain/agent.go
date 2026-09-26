@@ -63,7 +63,7 @@ func ResolveQuotaTier(override, experimentDefault QuotaTier) QuotaTier {
 
 // ApplyQuotaTier is the platform's one enforcement point for where a participant's
 // (guaranteed, burst) share lands: every place that grants or credits quota (initial allocation,
-// stage-boundary redistribution, donations) must route its pair through this before writing it,
+// stage-boundary redistribution) must route its pair through this before writing it,
 // or a burst-only participant regains guaranteed quota through whichever path skipped it. A
 // burst-only participant holds its share in the burst column, and the share is the guaranteed
 // amount: burst hours are inside a share, never beside it.

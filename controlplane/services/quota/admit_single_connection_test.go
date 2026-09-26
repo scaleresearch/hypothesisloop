@@ -44,19 +44,6 @@ func (f *inTxStore) ReserveAdmittedFlavorTx(ctx context.Context, _ string, _ dom
 	return "", err
 }
 
-func (f *inTxStore) GetDonationRequest(context.Context, string) (*domain.DonationRequest, error) {
-	return &domain.DonationRequest{ID: "donation-1", AgentID: "agent-2", PlatformExperimentID: testPE.ID, CreditsWant: 1}, nil
-}
-
-func (f *inTxStore) FulfillDonationTx(ctx context.Context, _, _, _, _ string, _ domain.ResourceType, _, _ float64, observe func(context.Context) (*domain.AgentQuota, error)) (bool, error) {
-	f.inTx = true
-	defer func() { f.inTx = false }()
-	if _, err := observe(ctx); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func TestAdmissionObservesUsageWithoutASecondPoolConnection(t *testing.T) {
 	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -73,8 +60,5 @@ func TestAdmissionObservesUsageWithoutASecondPoolConnection(t *testing.T) {
 	}
 	if err := svc.ReserveAdmittedFlavor(ctx, exp.ID, "h100", 1, 1); err != nil {
 		t.Fatalf("ReserveAdmittedFlavor: got = %v, want = nil", err)
-	}
-	if err := svc.FulfillDonation(ctx, "donation-1", "agent-1"); err != nil {
-		t.Fatalf("FulfillDonation: got = %v, want = nil", err)
 	}
 }

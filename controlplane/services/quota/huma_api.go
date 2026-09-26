@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -29,7 +28,7 @@ func (e *reasonError) Error() string  { return e.Message }
 func (e *reasonError) GetStatus() int { return e.status }
 
 // RegisterHuma registers every quota-service operation (agents,
-// platform-experiments, donations, resource catalog) on the shared Huma doc.
+// platform-experiments, resource catalog) on the shared Huma doc.
 func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler) {
 	access := doc.Access
 
@@ -665,150 +664,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			ActiveAgents:         activeAgents,
 			CutAgents:            cuts,
 		}}, nil
-	})
-
-	// ---- donations ----
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "list-donations", Method: "GET", Path: "/donations",
-		Summary: "List donation requests", Tags: []string{"donations"},
-		Description: "Optional ?platform_experiment_id and ?status filters, ?limit (default 20, max 200) and ?offset, most recent " +
-			"first. Total match count is returned in the X-Total-Count response header.",
-	}, func(ctx context.Context, in *struct {
-		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only requests within this platform experiment."`
-		Status               string `query:"status" doc:"open, fulfilled or cancelled."`
-		ProjectID            string `query:"project_id" doc:"Only requests within this project's platform experiments."`
-		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
-		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
-	}) (*struct {
-		Body       []*domain.DonationRequest
-		TotalCount int `header:"X-Total-Count"`
-	}, error) {
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
-		}
-		scope, err := access.ListScope(ctx, in.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		reqs, err := peh.svc.store.ListDonationRequests(ctx, scope, in.PlatformExperimentID, in.Status, in.Limit, in.Offset)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to list donations")
-		}
-		if reqs == nil {
-			reqs = []*domain.DonationRequest{}
-		}
-		total, err := peh.svc.store.CountDonationRequests(ctx, scope, in.PlatformExperimentID, in.Status)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to count donations")
-		}
-		return &struct {
-			Body       []*domain.DonationRequest
-			TotalCount int `header:"X-Total-Count"`
-		}{Body: reqs, TotalCount: total}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "create-donation", Method: "POST", Path: "/donations",
-		Summary: "Post a donation request", Tags: []string{"donations"},
-		DefaultStatus: 201,
-		Description:   "Ask peers within a platform experiment for extra quota (credits transferred between agents).",
-	}, func(ctx context.Context, in *struct {
-		Body struct {
-			AgentID              string  `json:"agent_id"`
-			PlatformExperimentID string  `json:"platform_experiment_id"`
-			CreditsWant          float64 `json:"credits_want"`
-			Reason               string  `json:"reason"`
-		}
-	}) (*struct{ Body *domain.DonationRequest }, error) {
-		b := in.Body
-		if b.AgentID == "" || b.PlatformExperimentID == "" || b.CreditsWant <= 0 || b.Reason == "" {
-			return nil, huma.Error400BadRequest("agent_id, platform_experiment_id, credits_want (>0), and reason are required")
-		}
-		if err := access.PlatformExperiment(ctx, b.PlatformExperimentID); err != nil {
-			return nil, err
-		}
-		if err := access.ActAs(ctx, b.AgentID); err != nil {
-			return nil, err
-		}
-		if err := peh.svc.RequireActive(ctx, b.PlatformExperimentID, b.AgentID); err != nil {
-			return nil, err
-		}
-		now := time.Now().UTC()
-		req := &domain.DonationRequest{
-			ID: uuid.New().String(), AgentID: b.AgentID, PlatformExperimentID: b.PlatformExperimentID,
-			CreditsWant: b.CreditsWant, Reason: b.Reason, Status: "open", CreatedAt: now, UpdatedAt: now,
-		}
-		if err := peh.svc.store.CreateDonationRequest(ctx, req); err != nil {
-			return nil, huma.Error500InternalServerError("failed to create donation request")
-		}
-		return &struct{ Body *domain.DonationRequest }{Body: req}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "cancel-donation", Method: "POST", Path: "/donations/{id}/cancel",
-		Summary: "Cancel an open donation request", Tags: []string{"donations"},
-		Description: "Withdraws a request that has not been fulfilled. Only an 'open' request can " +
-			"be cancelled: a fulfilled one already moved quota and cannot be rewound here.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
-		if err := access.OwnDonation(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := peh.svc.store.UpdateDonationStatus(ctx, in.ID, "cancelled"); err != nil {
-			return nil, huma.Error500InternalServerError("failed to cancel donation request")
-		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "cancelled"
-		return out, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "fulfill-donation", Method: "POST", Path: "/donations/{id}/fulfill",
-		Summary: "Fulfill another agent's donation request", Tags: []string{"donations"},
-		Description: "Donor transfers credits_want from their experiment quota to the recipient's.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			DonorAgentID string `json:"donor_agent_id"`
-		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
-		if in.Body.DonorAgentID == "" {
-			return nil, huma.Error400BadRequest("donor_agent_id is required")
-		}
-		if err := access.Donation(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := access.ActAs(ctx, in.Body.DonorAgentID); err != nil {
-			return nil, err
-		}
-		if err := peh.svc.FulfillDonation(ctx, in.ID, in.Body.DonorAgentID); err != nil {
-			var donErr *DonationError
-			if errors.As(err, &donErr) {
-				return nil, huma.NewError(donationHTTPStatus(donErr.Reason), donErr.Message)
-			}
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "fulfilled"
-		return out, nil
 	})
 
 	// ---- resource catalog ----

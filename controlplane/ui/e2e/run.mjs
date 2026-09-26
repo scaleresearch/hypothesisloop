@@ -426,7 +426,7 @@ async function scenarios(browser) {
   for (const call of apiCalls) {
     assert.match(call.headers().authorization ?? '', /^Bearer ey/, `${call.url()} carries the token`)
   }
-  const listCalls = apiCalls.filter(c => /\/(experiments|platform-experiments|agents|donations)(\/stats)?(\?|$)/.test(new URL(c.url()).pathname + '?'))
+  const listCalls = apiCalls.filter(c => /\/(experiments|platform-experiments|agents)(\/stats)?(\?|$)/.test(new URL(c.url()).pathname + '?'))
   for (const call of listCalls) {
     assert.ok(new URL(call.url()).searchParams.get('project_id'), `${call.url()} names the project`)
   }
@@ -1291,7 +1291,7 @@ async function scenarios(browser) {
 
     // What the pages asked: the lists of what is in the shared experiment by its id, never
     // within a project of the reader's, nothing but reads, and nothing the API refused.
-    const inShared = sharedCalls.filter(c => /^\/(experiments|agents|donations)(\/stats)?$/.test(new URL(c.url()).pathname)
+    const inShared = sharedCalls.filter(c => /^\/(experiments|agents)(\/stats)?$/.test(new URL(c.url()).pathname)
       && new URL(c.url()).searchParams.get('platform_experiment_id') === experimentID)
     assert.ok(inShared.length > 3, 'the pages read the lists of the shared experiment')
     assert.ok(inShared.some(c => new URL(c.url()).searchParams.get('project_id') === null), 'its jobs are asked for with no project')

@@ -108,7 +108,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
 		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
-		Description: "A grant, a donation or a stage move landed. detail is its guaranteed and burst parts; what is used of it comes from GET /quota."},
+		Description: "A grant or a stage move landed. detail is its guaranteed and burst parts; what is used of it comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",

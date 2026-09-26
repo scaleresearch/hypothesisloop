@@ -44,7 +44,7 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, ag
 // goes through here.
 //
 // The hard-learned part: crediting the guaranteed column directly, which both the stage-boundary
-// release and donation fulfilment used to do, hands guaranteed quota to a burst-only participant.
+// release used to do, hands guaranteed quota to a burst-only participant.
 // Start is careful to give an agent none, and then every boundary it survived gave some back — so
 // the tier held for exactly as long as nothing happened.
 //

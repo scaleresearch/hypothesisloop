@@ -88,12 +88,11 @@ class Member:
     token: API
     hypothesis_id: str
     job_id: str
-    donation_id: str
 
 
 def _running_experiment(org: Org, caller: API, run_id: str, agents: int) -> tuple[str, list[Member]]:
     """A started platform experiment in the caller's project with that many agents, each holding
-    a hypothesis, a queued job and an open donation request."""
+    a hypothesis and a queued job."""
     names = [f"agent-{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}" for _ in range(agents)]
     for name in names:
         caller.register_agent(name)
@@ -103,8 +102,7 @@ def _running_experiment(org: Org, caller: API, run_id: str, agents: int) -> tupl
     for name in names:
         hypothesis_id = caller.register_hypothesis(pe_id, name, _claim(name))["id"]
         job_id = caller.submit_job(pe_id, name, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR})
-        donation_id = caller.create_donation(name, pe_id, 0.5, f"{org.marker} donation of {name}")
-        members.append(Member(name, caller.as_caller(admin.token(f"agent:{pe_id}/{name}")), hypothesis_id, job_id, donation_id))
+        members.append(Member(name, caller.as_caller(admin.token(f"agent:{pe_id}/{name}")), hypothesis_id, job_id))
     return pe_id, members
 
 
@@ -160,14 +158,13 @@ def test_a_project_key_reads_and_writes_nothing_of_its_orgs_other_project(org: O
             ("POST", f"/hypotheses/{other.hypothesis_id}/comments", {"agent_id": other.agent, "text": "t"}, 404),
             ("POST", f"/hypotheses/{other.hypothesis_id}/status", {"agent_id": other.agent, "status": "refuted"}, 404),
             ("POST", "/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": "MATCH (h:Hypothesis) RETURN h.id", "params": {}}, 404),
-            ("POST", f"/donations/{other.donation_id}/cancel", {}, 404),
             ("POST", f"/orgs/{org.org_id}/projects", {"name": "a third"}, 403),
             ("POST", f"/orgs/{org.org_id}/api-keys", {"name": "wider"}, 403),
         ])
-        for path in ("/platform-experiments?limit=200", "/experiments?limit=200", "/hypotheses?limit=200", "/donations?limit=200"):
+        for path in ("/platform-experiments?limit=200", "/experiments?limit=200", "/hypotheses?limit=200"):
             listed = bound.get(path)
             assert listed.status_code == 200, f"the first project's key GET {path}: {listed.status_code} {listed.text}"
-            for theirs in (pe_id, other.job_id, other.hypothesis_id, other.donation_id):
+            for theirs in (pe_id, other.job_id, other.hypothesis_id):
                 assert theirs not in listed.text, f"the first project's key GET {path} lists {theirs} of the second project"
         assert org.key.experiment(other.job_id)["status"] == "QUEUED"
         assert org.key.hypothesis(other.hypothesis_id)["status"] == "open"
@@ -202,9 +199,6 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", f"/experiments/{theirs.job_id}/summary", {"summary": "written by a rival"}, 403),
         ("POST", f"/experiments/{theirs.job_id}/metrics", SAMPLE, 403),
         ("POST", "/experiments", job_as_them, 403),
-        ("POST", f"/donations/{theirs.donation_id}/cancel", {}, 403),
-        ("POST", f"/donations/{theirs.donation_id}/fulfill", {"donor_agent_id": theirs.agent}, 403),
-        ("POST", "/donations", {"agent_id": theirs.agent, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "r"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": theirs.agent}, 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as the rival"), agent_id=theirs.agent), 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as a person"), author="Mallory"), 422),
@@ -223,8 +217,6 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
     assert org.key.experiment(theirs.job_id)["status"] == "QUEUED"
     assert not org.key.metrics(theirs.job_id)
     assert org.key.hypothesis(theirs.hypothesis_id)["status"] == "open"
-    donations = {d["id"]: d["status"] for d in org.key.get_json(f"/donations?platform_experiment_id={pe_id}")}
-    assert donations[theirs.donation_id] == "open"
     refused = ("as the rival", "as a person", "as both")
     left = [h["text"] for h in org.key.hypotheses(pe_id) if h["text"].startswith(refused)]
     assert not left, f"a refused registration left a hypothesis behind: {left}"
@@ -381,7 +373,6 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("GET", f"/experiments/{member.job_id}", None, 200),
         ("POST", "/experiments", new_job, 422),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 409),
-        ("POST", "/donations", {"agent_id": member.agent, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "r"}, 409),
     ]
     _assert_each(member.token, "the agent just after the close", in_the_window)
     submitted, text = _status(member.token, "POST", "/experiments", new_job)

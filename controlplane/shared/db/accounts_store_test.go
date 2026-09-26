@@ -351,14 +351,6 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	if err != nil || job == nil || *job != ofAgent || ended {
 		t.Fatalf("job tenancy: got = %+v ended=%v, %v, want %+v running", job, ended, err, ofAgent)
 	}
-	donationID := uuid.New().String()
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO donation_requests (id, agent_id, platform_experiment_id, credits_want, reason, status)
-VALUES ($1, $2, $3, 1, 'r', 'open')`, donationID, agentID, peID); err != nil {
-		t.Fatalf("seed donation request: %v", err)
-	}
-	if donation, err := accounts.DonationTenancy(ctx, donationID); err != nil || donation == nil || *donation != ofAgent {
-		t.Fatalf("donation tenancy: got = %+v, %v, want %+v", donation, err, ofAgent)
-	}
 
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'EVICTED', not_admitted_reason = NULL WHERE id = $1`, jobID); err != nil {
 		t.Fatalf("end job: %v", err)
@@ -451,30 +443,21 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	}
 	seedExperimentForCapTest(t, pool, "job-a-"+suffix, agentA, peA, 1, domain.StatusQueued)
 	seedExperimentForCapTest(t, pool, "job-b-"+suffix, agentB, peB, 1, domain.StatusQueued)
-	donations := NewDonationStore(pool)
-	for pe, agent := range map[string]string{peA: agentA, peB: agentB} {
-		if err := donations.CreateDonationRequest(ctx, &domain.DonationRequest{
-			ID: uuid.New().String(), AgentID: agent, PlatformExperimentID: pe, CreditsWant: 1, Reason: suffix, Status: "open",
-		}); err != nil {
-			t.Fatalf("create donation: %v", err)
-		}
-	}
 
 	for _, tc := range []struct {
-		name      string
-		scope     domain.TenantScope
-		pes       []string
-		jobs      []string
-		agents    []string
-		donations int
+		name   string
+		scope  domain.TenantScope
+		pes    []string
+		jobs   []string
+		agents []string
 	}{
-		{"org A", domain.TenantScope{OrgIDs: []string{orgA}}, []string{peA, peA2}, []string{"job-a-" + suffix}, []string{agentA}, 1},
-		{"org B", domain.TenantScope{OrgIDs: []string{orgB}}, []string{peB}, []string{"job-b-" + suffix}, []string{agentB}, 1},
-		{"both orgs", domain.TenantScope{OrgIDs: []string{orgA, orgB}}, []string{peA, peA2, peB}, []string{"job-a-" + suffix, "job-b-" + suffix}, []string{agentA, agentB}, 2},
-		{"key bound to A's second project", domain.TenantScope{OrgIDs: []string{orgA}, ProjectID: secondA.ID}, []string{peA2}, nil, nil, 0},
-		{"A's key asking for B's project", domain.TenantScope{OrgIDs: []string{orgA}, ProjectID: projectB.ID}, nil, nil, nil, 0},
-		{"agent token of B's experiment", domain.TenantScope{OrgIDs: []string{orgB}, ProjectID: projectB.ID, PlatformExperimentID: peB}, []string{peB}, []string{"job-b-" + suffix}, []string{agentB}, 1},
-		{"no org", domain.TenantScope{}, nil, nil, nil, 0},
+		{"org A", domain.TenantScope{OrgIDs: []string{orgA}}, []string{peA, peA2}, []string{"job-a-" + suffix}, []string{agentA}},
+		{"org B", domain.TenantScope{OrgIDs: []string{orgB}}, []string{peB}, []string{"job-b-" + suffix}, []string{agentB}},
+		{"both orgs", domain.TenantScope{OrgIDs: []string{orgA, orgB}}, []string{peA, peA2, peB}, []string{"job-a-" + suffix, "job-b-" + suffix}, []string{agentA, agentB}},
+		{"key bound to A's second project", domain.TenantScope{OrgIDs: []string{orgA}, ProjectID: secondA.ID}, []string{peA2}, nil, nil},
+		{"A's key asking for B's project", domain.TenantScope{OrgIDs: []string{orgA}, ProjectID: projectB.ID}, nil, nil, nil},
+		{"agent token of B's experiment", domain.TenantScope{OrgIDs: []string{orgB}, ProjectID: projectB.ID, PlatformExperimentID: peB}, []string{peB}, []string{"job-b-" + suffix}, []string{agentB}},
+		{"no org", domain.TenantScope{}, nil, nil, nil},
 	} {
 		got, err := pes.ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: tc.scope, Limit: 200})
 		if err != nil {
@@ -523,14 +506,6 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 		assertSameSet(t, tc.name+": agents", ids, tc.agents)
 		if stats, err := agents.AgentStats(ctx, AgentsFilter{Scope: tc.scope}); err != nil || stats.Total != len(tc.agents) {
 			t.Errorf("%s: agent stats: got = %+v, %v, want total %d", tc.name, stats, err, len(tc.agents))
-		}
-
-		requests, err := donations.ListDonationRequests(ctx, tc.scope, "", "", 200, 0)
-		if err != nil || len(requests) != tc.donations {
-			t.Errorf("%s: donations: got = %d, %v, want = %d", tc.name, len(requests), err, tc.donations)
-		}
-		if n, err := donations.CountDonationRequests(ctx, tc.scope, "", ""); err != nil || n != tc.donations {
-			t.Errorf("%s: count donations: got = %d, %v, want = %d", tc.name, n, err, tc.donations)
 		}
 	}
 }

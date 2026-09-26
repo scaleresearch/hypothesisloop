@@ -51,7 +51,7 @@ const (
 var (
 	worldOrgOf     = map[string]string{"prj-a1": "org-a", "prj-a2": "org-a", "prj-b": "org-b"}
 	worldProjectOf = map[string]string{"pe-a1": "prj-a1", "pe-a2": "prj-a2", "pe-b": "prj-b", worldShared: "prj-b"}
-	// Each job, donation request and hypothesis: its platform experiment and its agent.
+	// Each job and hypothesis: its platform experiment and its agent.
 	worldPlaced = map[string][2]string{
 		"own": {"pe-a1", "agent-1"}, "peer": {"pe-a1", "agent-2"}, "sibling": {"pe-a2", "agent-2"}, "foreign": {"pe-b", "agent-9"},
 		"shared": {worldShared, "agent-9"},
@@ -69,7 +69,7 @@ func (w *world) tenancy(platformExperimentID, agentID string) *domain.Tenancy {
 		Shared: platformExperimentID == worldShared}
 }
 
-// placed resolves an id of the form "<prefix>-<owner>", as every job, donation request and
+// placed resolves an id of the form "<prefix>-<owner>", as every job and
 // hypothesis of the world is named.
 func (w *world) placed(prefix, id string) *domain.Tenancy {
 	if len(id) <= len(prefix) || id[:len(prefix)] != prefix {
@@ -96,10 +96,6 @@ func (w *world) PlatformExperimentTenancy(_ context.Context, id string) (*domain
 
 func (w *world) ExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, bool, error) {
 	return w.placed("job-", id), false, nil
-}
-
-func (w *world) DonationTenancy(_ context.Context, id string) (*domain.Tenancy, error) {
-	return w.placed("don-", id), nil
 }
 
 func (w *world) AgentCutAt(context.Context, string, string) (*time.Time, error) { return nil, nil }

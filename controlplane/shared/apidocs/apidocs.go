@@ -63,7 +63,7 @@ const (
 	// is a metric, so exactly one operation carries this audience.
 	AudienceJob Audience = "job"
 	// AudienceCoordinator: the coordinator/operator/dashboard — experiment lifecycle admin
-	// (create/start/close/summary), donation administration, and other operator-only actions.
+	// (create/start/close/summary) and other operator-only actions.
 	// Admits a signed-in user, an API key, a coordinator token and staff.
 	AudienceCoordinator Audience = "coordinator"
 	// AudienceInternal: cluster-agent binaries only (the reconcile/status-push contract) —

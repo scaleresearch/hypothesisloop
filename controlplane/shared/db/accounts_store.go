@@ -541,25 +541,6 @@ WHERE e.id = $1`, experimentID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.O
 	return t, terminal, nil
 }
 
-// DonationTenancy places a donation request through its platform experiment and names the agent
-// that asked. nil when there is no such request.
-func (s *AccountsStore) DonationTenancy(ctx context.Context, donationID string) (*domain.Tenancy, error) {
-	t := &domain.Tenancy{}
-	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id, pe.shared, d.agent_id
-FROM donation_requests d
-JOIN platform_experiments pe ON pe.id = d.platform_experiment_id
-JOIN projects p ON p.id = pe.project_id
-WHERE d.id = $1`, donationID).Scan(&t.PlatformExperimentID, &t.ProjectID, &t.OrgID, &t.Shared, &t.AgentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.DonationTenancy: %w", err)
-	}
-	return t, nil
-}
-
 // AgentOrg returns the org an agent was registered in; found is false for an unknown agent.
 func (s *AccountsStore) AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT org_id FROM agents WHERE id = $1`, agentID).Scan(&orgID)

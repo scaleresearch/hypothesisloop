@@ -86,10 +86,9 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("POST", f"/platform-experiments/{pe_id}/agents", {"agent_id": agent}),
             ("DELETE", f"/platform-experiments/{pe_id}/agents/{agent}", None),
             ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent}),
-            ("POST", "/donations", {"agent_id": agent, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "intruding"}),
         ]
         listings = [f"/hypotheses?platform_experiment_id={pe_id}", f"/experiments?platform_experiment_id={pe_id}",
-                    f"/agents?platform_experiment_id={pe_id}", f"/donations?platform_experiment_id={pe_id}"]
+                    f"/agents?platform_experiment_id={pe_id}"]
 
         def refused_everything(why: str) -> None:
             for method, path, body in reads + writes:

@@ -23,7 +23,6 @@ type windDownStore struct {
 	PlatformExperimentsStore
 	status    domain.PlatformExperimentStatus
 	cut       string
-	donations []*domain.DonationRequest
 	keysAsked int
 }
 
@@ -35,11 +34,6 @@ func (s *windDownStore) IsAgentCut(_ context.Context, _, agentID string) (bool, 
 	return agentID == s.cut, nil
 }
 
-func (s *windDownStore) CreateDonationRequest(_ context.Context, req *domain.DonationRequest) error {
-	s.donations = append(s.donations, req)
-	return nil
-}
-
 func (s *windDownStore) AgentDataKey(context.Context, string, string, func(context.Context) (domain.DataKey, error)) (domain.DataKey, error) {
 	s.keysAsked++
 	return domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, nil
@@ -47,7 +41,7 @@ func (s *windDownStore) AgentDataKey(context.Context, string, string, func(conte
 
 // An agent token outlives a close or its own cut by the wind-down so its last turn can file
 // summaries. What spends or opens new work is refused through that window all the same.
-func TestACutAgentOrAClosedPlatformExperimentGetsNoDonationRequestAndNoDataKey(t *testing.T) {
+func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 	placement := authtest.Placement{
 		PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj", OrgID: "org"}},
 		Agents:              map[string]string{"agent-1": "org", "agent-cut": "org"},
@@ -83,21 +77,15 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDonationRequestAndNoDataKey(t
 			r.ServeHTTP(rec, authtest.Authorize(request))
 			return rec
 		}
-		donation := post("/donations", `{"agent_id":"`+tc.agent+`","platform_experiment_id":"pe-1","credits_want":1,"reason":"r"}`)
 		key := post("/platform-experiments/pe-1/data-key", `{"agent_id":"`+tc.agent+`"}`)
 		if tc.want == 0 {
-			if donation.Code != http.StatusCreated || key.Code != http.StatusOK || len(store.donations) != 1 || store.keysAsked != 1 {
-				t.Errorf("%s: donation %d %s, key %d %s, want both through", name, donation.Code, donation.Body, key.Code, key.Body)
+			if key.Code != http.StatusOK || store.keysAsked != 1 {
+				t.Errorf("%s: key %d %s, want it through", name, key.Code, key.Body)
 			}
 			continue
 		}
-		for what, rec := range map[string]*httptest.ResponseRecorder{"donation request": donation, "data key": key} {
-			if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.reason) {
-				t.Errorf("%s: %s got = %d %s, want = %d %s", name, what, rec.Code, rec.Body, tc.want, tc.reason)
-			}
-		}
-		if len(store.donations) != 0 || store.keysAsked != 0 {
-			t.Errorf("%s: wrote %d donation requests and asked for %d keys, want none", name, len(store.donations), store.keysAsked)
+		if key.Code != tc.want || !strings.Contains(key.Body.String(), tc.reason) || store.keysAsked != 0 {
+			t.Errorf("%s: data key got = %d %s after %d asks, want = %d %s and none", name, key.Code, key.Body, store.keysAsked, tc.want, tc.reason)
 		}
 	}
 }

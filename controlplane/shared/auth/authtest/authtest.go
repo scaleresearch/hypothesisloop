@@ -30,7 +30,6 @@ func Authorize(r *http.Request) *http.Request {
 type Placement struct {
 	PlatformExperiments map[string]domain.Tenancy
 	Experiments         map[string]domain.Tenancy
-	Donations           map[string]domain.Tenancy
 	Agents              map[string]string
 	Clusters            map[string]string
 	Projects            map[string]domain.Project
@@ -51,10 +50,6 @@ func (p Placement) PlatformExperimentTenancy(_ context.Context, id string) (*dom
 
 func (p Placement) ExperimentTenancy(_ context.Context, id string) (*domain.Tenancy, bool, error) {
 	return lookup(p.Experiments, id), false, nil
-}
-
-func (p Placement) DonationTenancy(_ context.Context, id string) (*domain.Tenancy, error) {
-	return lookup(p.Donations, id), nil
 }
 
 func (p Placement) AgentOrg(_ context.Context, id string) (string, bool, error) {
