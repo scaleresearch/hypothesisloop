@@ -71,10 +71,12 @@ func newHypothesisID() (string, error) {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
+// ErrFindingExists reports that the job already has its finding.
+var ErrFindingExists = errors.New("the job already has a summary")
+
 // CreateHypothesisFinding records the agent's post-run write-up for a job, attached to the
-// hypothesis it tested. One finding per job (UNIQUE on experiment_id in shared/db/schema.sql) — a
-// second call for the same experiment_id is a caller bug, not a legitimate "amend my
-// write-up" path, and will fail the unique constraint.
+// hypothesis it tested. A job has one finding (UNIQUE on experiment_id in shared/db/schema.sql)
+// and it is never replaced: a second one is refused with ErrFindingExists.
 func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID, summary string) (*domain.HypothesisFinding, error) {
 	id, err := newHypothesisID()
 	if err != nil {
@@ -93,6 +95,10 @@ func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesi
 INSERT INTO hypothesis_findings (id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, summary, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	if _, err := s.pool.pool.Exec(ctx, q, f.ID, f.HypothesisID, f.PlatformExperimentID, f.ExperimentID, f.AgentID, f.Summary, f.CreatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "hypothesis_findings_experiment_id_key" {
+			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", ErrFindingExists, experimentID)
+		}
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
 	}
 	return f, nil

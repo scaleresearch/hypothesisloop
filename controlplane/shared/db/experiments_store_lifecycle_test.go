@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -138,6 +139,12 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	}
 	if got, err := hyps.FindingSummary(ctx, id); err != nil || got != "it held" {
 		t.Errorf("FindingSummary: got = %q, %v, want %q", got, err, "it held")
+	}
+	if _, err := hyps.CreateHypothesisFinding(ctx, running.HypothesisID, peID, id, agentID, "it held after all"); !errors.Is(err, ErrFindingExists) {
+		t.Errorf("a second finding on the job: err = %v, want ErrFindingExists", err)
+	}
+	if got, err := hyps.FindingSummary(ctx, id); err != nil || got != "it held" {
+		t.Errorf("FindingSummary after the refused one: got = %q, %v, want the first, %q", got, err, "it held")
 	}
 }
 

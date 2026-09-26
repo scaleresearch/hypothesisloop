@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
@@ -356,5 +357,27 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 	}
 	if strings.Contains(refused.Message, "the-secret-value") {
 		t.Fatalf("the refusal repeats the secret: %s", refused.Message)
+	}
+}
+
+type summarisedJobStore struct{ finishedJobStore }
+
+func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, experimentID, _, _ string) (*domain.HypothesisFinding, error) {
+	return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", db.ErrFindingExists, experimentID)
+}
+
+// A job has one summary. A second one is the caller's to stop sending, so it is a 409 with a
+// reason to branch on and none of the store's text.
+func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
+	s := &Service{store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
+	_, err := s.WriteExperimentSummary(context.Background(), "job-1", "again")
+	refusal := admissionStatusError(err)
+	if refusal == nil || refusal.GetStatus() != http.StatusConflict {
+		t.Fatalf("a second summary: got = %v (%v), want a 409", refusal, err)
+	}
+	body, _ := json.Marshal(refusal)
+	var answer struct{ Reason, Message string }
+	if json.Unmarshal(body, &answer) != nil || answer.Reason != ReasonSummaryExists || answer.Message == "" || strings.Contains(string(body), "hypotheses_store") {
+		t.Fatalf("a second summary: body = %s, want reason %s, a message and no store text", body, ReasonSummaryExists)
 	}
 }

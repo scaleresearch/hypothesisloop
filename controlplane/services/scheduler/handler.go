@@ -487,6 +487,19 @@ func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 	return job.AcceleratorType
 }
 
+// ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
+const ReasonSummaryExists = "summary_exists"
+
+// refused is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
+type refused struct {
+	status  int
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+func (e *refused) Error() string  { return e.Message }
+func (e *refused) GetStatus() int { return e.status }
+
 // admissionStatusError maps an AdmissionError to a huma error with the historical
 // status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
 func admissionStatusError(err error) huma.StatusError {
@@ -499,6 +512,8 @@ func admissionStatusError(err error) huma.StatusError {
 		return huma.Error404NotFound(admErr.Message)
 	case "invalid_state":
 		return huma.Error409Conflict(admErr.Message)
+	case ReasonSummaryExists:
+		return &refused{status: http.StatusConflict, Reason: admErr.Reason, Message: admErr.Message}
 	default:
 		return huma.Error422UnprocessableEntity(admErr.Message)
 	}

@@ -2,10 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -157,6 +159,9 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id, summary string
 		return nil, fmt.Errorf("summary: get hypothesis: %w", err)
 	}
 	if _, err := s.store.CreateHypothesisFinding(ctx, exp.HypothesisID, exp.PlatformExperimentID, id, exp.AgentID, summary); err != nil {
+		if errors.Is(err, db.ErrFindingExists) {
+			return nil, &AdmissionError{Reason: ReasonSummaryExists, Message: "this job already has a summary, and a filed summary is not replaced"}
+		}
 		return nil, fmt.Errorf("summary: create finding: %w", err)
 	}
 	if h != nil && (h.AgentID == exp.AgentID || h.Source == domain.HypothesisSourceHuman) {
