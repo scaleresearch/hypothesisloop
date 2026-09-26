@@ -633,7 +633,7 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
         assert r.status_code == 403, f"a coordinator fetching an agent's data key: {r.status_code} {r.text}"
         r = as_coordinator.post("/donations", {"agent_id": agent_id, "platform_experiment_id": pe_id, "credits_want": 1, "reason": "r"})
         assert r.status_code == 403, f"a coordinator asking for quota as an agent: {r.status_code} {r.text}"
-        refused = as_coordinator.hl_expect("--agent", agent_id, "hypothesis", "comment", "hyp-any", "--text", "t")
+        refused = as_coordinator.hl_expect("hypothesis", "comment", "hyp-any", "--text", "t", "--agent", agent_id)
         assert refused.returncode == 1 and "coordinator" in refused.stderr, f"hl --agent under a coordinator's token: {refused.stderr}"
     finally:
         with_repo.close_platform_experiment(pe_id)
