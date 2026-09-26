@@ -908,6 +908,16 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Show start command' }).click()
   assert.equal(await page.getByTestId('secret').innerText(), command, 'asking again shows the same command')
   await page.getByRole('button', { name: 'Hide' }).click()
+  // A second cluster of the org's own: the two are a list in the order jobs are placed on them,
+  // and moving one up is written to the API as priorities.
+  const secondCluster = `ui-e2e-second-${run}`
+  const clustersAPI = `/orgs/${adaMe.orgs[0].id}/clusters`
+  assert.ok((await api(await tokenOf(ada), clustersAPI, 'POST', { name: secondCluster })).ok, 'a second cluster is registered')
+  await page.reload()
+  await page.getByRole('button', { name: `Move ${secondCluster} up` }).click()
+  await page.getByRole('button', { name: `Move ${clusterName} up` }).and(page.locator(':enabled')).waitFor()
+  const ordered = (await (await api(await tokenOf(ada), clustersAPI)).json()).filter(c => c.owned && !c.shared).map(c => c.name)
+  assert.deepEqual(ordered.slice(0, 2), [secondCluster, clusterName], 'the API lists the moved cluster first')
   assert.ok(!(await page.content()).includes(runtimeToken), 'hiding the command takes the runtime token off the page')
 
   section('the settings editor on an owned cluster, once its agent has reported')

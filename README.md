@@ -594,8 +594,11 @@ elsewhere. A job with no cluster of its org registered waits with `no_cluster_fo
 or not other clusters are connected; one whose cluster is registered and away waits for it.
 
 An org also decides the order its own clusters are used in. `hl cluster priority my-cluster 500`
-(`PATCH /orgs/{id}/clusters/{name}` with `{"priority": 500}`), or the Priority field of the
-cluster's row in Settings, sets 1 to 1000 on a cluster the org registered, 100 until it is set. A
+(`PATCH /orgs/{id}/clusters/{name}` with `{"priority": 500}`) sets 1 to 1000 on a cluster the
+org registered, 100 until it is set. In Settings the org's own clusters are a list in that
+order, reordered by dragging a row or with its up and down buttons; the page writes the
+priorities itself, one for a move where a whole number fits between the neighbours and an even
+spacing of all of them where none does. A
 shared cluster holds 0 and takes no other (422), so an org's own compute is always tried before
 the platform's. A job is placed on the highest-priority cluster that can take it, at the
 accelerator type it asked for or one it accepts, and goes down to the next priority when that one

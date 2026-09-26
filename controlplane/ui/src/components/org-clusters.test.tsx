@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -257,81 +257,55 @@ describe('turning a cluster off for the org\'s jobs', () => {
   })
 })
 
-describe('a cluster\'s priority', () => {
-  beforeEach(() => {
-    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true }]
-  })
-
-  const rowOf = async (name: RegExp) => (await screen.findByRole('cell', { name })).closest('tr')!
+// A priority was a number from 1 to 1000 typed into a field, which said nothing of what it did.
+describe('the order of the org\'s own clusters', () => {
+  const names = () => screen.getAllByRole('row').slice(1).map(r => r.querySelector('td')!.textContent!.replace(/cid-.*/, ''))
   const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] }
 
-  it('is an owner\'s to set on the org\'s own clusters, and the platform\'s is shown as coming after them', async () => {
-    show()
-    const lab = await rowOf(/^lab/)
-    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
-    expect(field.value).toBe('100')
-    expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
-
-    await userEvent.clear(field)
-    await userEvent.type(field, '500')
-    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
-    expect(setClusterPriority).toHaveBeenCalledExactlyOnceWith('org_a', 'lab', 500)
-    expect((await within(lab).findByLabelText('Priority of lab') as HTMLInputElement).value).toBe('500')
-    expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
-
-    const platform = await rowOf(/^platform-gpu/)
-    expect(within(platform).queryByLabelText(/Priority of/)).toBeNull()
-    expect(within(platform).getByText('0')).toBeTruthy()
-    expect(within(platform).getByText('used after Ada\'s own')).toBeTruthy()
+  beforeEach(() => {
+    clusters = [
+      { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true },
+      ...clusters,
+      { name: 'spare', org_id: 'org_a', shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: false },
+    ]
+    // As the API lists them: highest priority first, then by name.
+    vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters].sort((x, y) => y.priority - x.priority || x.name.localeCompare(y.name)))
   })
 
-  it('offers nothing to set for a value that is empty, unchanged or no whole number', async () => {
+  it('is changed by an owner with the buttons or by dragging, in as few writes as the priorities allow, with the platform\'s last', async () => {
     show()
-    const lab = await rowOf(/^lab/)
-    const field = within(lab).getByLabelText('Priority of lab')
-    for (const typed of ['', '100', '2.5']) {
-      await userEvent.clear(field)
-      if (typed) await userEvent.type(field, typed)
-      expect(within(lab).queryByRole('button', { name: 'Set' })).toBeNull()
-    }
-    expect(setClusterPriority).not.toHaveBeenCalled()
+    await screen.findByRole('button', { name: 'Move spare up' })
+    expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
+    expect(screen.getByText('used last, after Ada\'s own')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Move lab up' })).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('button', { name: /Move platform-gpu/ })).toBeNull()
+
+    // All three hold the default, so no whole number lies between two of them: they are spaced.
+    await userEvent.click(screen.getByRole('button', { name: 'Move spare up' }))
+    await waitFor(() => expect(vi.mocked(setClusterPriority).mock.calls).toEqual([['org_a', 'lab', 750], ['org_a', 'spare', 500], ['org_a', 'new', 250]]))
+    // Spaced, a move is one write: halfway between its new neighbours, or towards the end of the range.
+    await waitFor(() => expect(names()).toEqual(['lab', 'spare', 'new', 'platform-gpu']))
+    vi.mocked(setClusterPriority).mockClear()
+    const rows = screen.getAllByRole('row')
+    fireEvent.dragStart(rows[3])
+    fireEvent.dragOver(rows[1])
+    fireEvent.drop(rows[1])
+    await waitFor(() => expect(vi.mocked(setClusterPriority).mock.calls).toEqual([['org_a', 'new', 875]]))
+    await waitFor(() => expect(names()).toEqual(['new', 'lab', 'spare', 'platform-gpu']))
   })
 
-  it('shows the API\'s refusal and keeps what was typed', async () => {
+  it('goes back to what it was when the API refuses, with the refusal, and is only shown to a member', async () => {
     vi.mocked(setClusterPriority).mockRejectedValue(new Error('forbidden: only an owner of the org may change it'))
-    show()
-    const lab = await rowOf(/^lab/)
-    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
-    await userEvent.clear(field)
-    await userEvent.type(field, '700')
-    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
+    const shown = show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Move new up' }))
     expect(await screen.findByText('forbidden: only an owner of the org may change it')).toBeTruthy()
-    expect(field.value).toBe('700')
-    expect(within(lab).getByRole('button', { name: 'Set' })).toBeTruthy()
-    expect(setClusterPriority).toHaveBeenCalledExactlyOnceWith('org_a', 'lab', 700)
-  })
-
-  it('holds a value out of range in the field, where the browser refuses it', async () => {
-    show()
-    const lab = await rowOf(/^lab/)
-    const field = within(lab).getByLabelText('Priority of lab') as HTMLInputElement
-    await userEvent.clear(field)
-    await userEvent.type(field, '5000')
-    expect(field.validity.valid).toBe(false)
-    await userEvent.click(within(lab).getByRole('button', { name: 'Set' }))
-    expect(setClusterPriority).not.toHaveBeenCalled()
-    expect(field.value).toBe('5000')
-  })
-
-  it('is shown and not offered to a member, nor where clusters are only shown', async () => {
-    const shown = show({ as: member })
-    expect(within(await rowOf(/^lab/)).getByText('100')).toBeTruthy()
-    expect(screen.queryByLabelText(/Priority of/)).toBeNull()
+    await waitFor(() => expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu']))
     shown.unmount()
 
-    show({ manage: false })
-    expect(within(await rowOf(/^lab/)).getByText('100')).toBeTruthy()
-    expect(screen.queryByLabelText(/Priority of/)).toBeNull()
+    show({ as: member })
+    await screen.findByText('used last, after Ada\'s own')
+    expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
+    expect(screen.queryByRole('button', { name: /^Move / })).toBeNull()
   })
 })
 
