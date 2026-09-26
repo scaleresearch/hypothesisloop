@@ -39,10 +39,14 @@ export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
 # lives in localdev/lib/auth.sh and reaches compose, the scripts and the tests from here.
 export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
 REGISTRY_TLS_VERIFY ?= false
-# Empty builds for this host. Set it (linux/amd64) to build for nodes of another architecture.
-IMAGE_PLATFORM ?=
+# The platform every image is built for: the container engine's own unless set (linux/amd64 for
+# nodes of another architecture). It is always stated to the build. Left unstated, a base image
+# the engine already holds for another platform is used as it is, and the image built on it
+# starts nowhere on this machine's nodes (exec format error).
+IMAGE_PLATFORM ?= $(shell podman info --format '{{.Host.OS}}/{{.Host.Arch}}')
 
 check-tag:
+	@test -n "$(IMAGE_PLATFORM)" || { echo "make: could not ask podman for its platform; set IMAGE_PLATFORM" >&2; exit 1; }
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
 
 # data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
@@ -249,7 +253,7 @@ tt-dev-nodes-up:
 # k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
 # image; no more local save/import.
 tt-hardware-image: check-tag
-	podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
+	podman build --platform $(IMAGE_PLATFORM) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
 	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
@@ -317,7 +321,7 @@ images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	@for entry in $(IMAGE_TARGETS); do \
 		name="$${entry%%:*}"; rest="$${entry#*:}"; dockerfile="$${rest%%:*}"; ctx="$${rest#*:}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
-		podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
@@ -345,7 +349,7 @@ check-ui-build-args:
 	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make ui-image: $(arg) is required (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
 
 ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
-	podman build $(if $(IMAGE_PLATFORM),--platform $(IMAGE_PLATFORM)) $(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)="$($(arg))") \
+	podman build --platform $(IMAGE_PLATFORM) $(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)="$($(arg))") \
 		-f controlplane/build/Dockerfile.ui -t "$(REGISTRY)/hypothesisloop-ui:$(TAG)" controlplane/ui
 	podman tag "$(REGISTRY)/hypothesisloop-ui:$(TAG)" "$(REGISTRY)/hypothesisloop-ui:latest"
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:$(TAG)"
