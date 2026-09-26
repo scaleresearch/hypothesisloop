@@ -431,7 +431,7 @@ func TestAGroupListsEachCommandWithTheSynopsisOfItsOwnHelp(t *testing.T) {
 	}
 	var listing, none bytes.Buffer
 	run([]string{"job", "--help"}, &listing, &none)
-	for _, flag := range []string{"--hypothesis ID", "--env K=V", "--objective T", "--theory T", "--needs-summary"} {
+	for _, flag := range []string{"--hypothesis ID", "--env K=V", "--theory T", "--needs-summary"} {
 		if !strings.Contains(listing.String(), flag) {
 			t.Errorf("hl job --help does not name %s", flag)
 		}

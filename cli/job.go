@@ -35,7 +35,7 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--secret-env NAME ...] [--objective T] [--theory T]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--secret-env NAME ...] [--theory T]
 
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis and env, with
@@ -58,18 +58,20 @@ Minimal shape:
 
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
-    objective: "maximize val_accuracy"
   job:
     image: ...                    # leave out to run in the image of a cluster that has its own
     accelerator_type: ...         # a job on CPU states only its cores instead: cpu: 4
     accelerator_count: 1
     ...
 
+Only hypothesis_id, theory, estimated_duration_hours and, in job, a command with
+accelerator_type and accelerator_count, or cpu, are needed. cpu, memory and storage left out
+are the job's share of the node; max_retries left out is 0.
+
 See controlplane/settings/examples/experiment-submission.yaml for the full DSL reference.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
-		"objective":              fs.String("objective", "", "sets metadata.objective"),
 		"theory":                 fs.String("theory", "", "sets metadata.theory"),
 		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's or $PLATFORM_EXPERIMENT_ID)"),
 	}
