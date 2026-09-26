@@ -75,7 +75,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       <Eyebrow>Invites</Eyebrow>
       <form className="flex flex-wrap items-center gap-2" onSubmit={create}>
         <Select fieldSize="sm" aria-label="Role of the invited person" value={role} onChange={setRole} options={INVITE_ROLES} />
-        <Button size="sm" variant="primary" type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create invite link'}</Button>
+        <Button size="sm" variant="primary" type="submit" loading={busy}>Create invite link</Button>
       </form>
 
       {created && (
@@ -94,21 +94,20 @@ function Invites({ onError }: { onError: (message: string) => void }) {
 
       {listError && <ErrorMessage>Could not load invites: {listError.message}</ErrorMessage>}
       {!invites && !listError && <Loading />}
-      {invites && invites.length === 0 && <p className="text-sm text-subtle">No pending invites.</p>}
+      {invites && invites.length === 0 && <p className="text-xs text-subtle">No pending invites.</p>}
       {invites && invites.length > 0 && (
         <Table aria-label="Pending invites">
           <thead>
-            <tr><th>Invite</th><th>Role</th><th>Created by</th><th>Created</th><th>Expires</th><th /></tr>
+            <tr><th>Created by</th><th>Role</th><th>Created</th><th>Expires</th><th /></tr>
           </thead>
           <tbody>
             {invites.map(invite => (
               <tr key={invite.id}>
-                <td className="font-mono text-xs text-muted">{invite.id}</td>
-                <td className="text-xs">{invite.role}</td>
                 <td><Person id={invite.created_by} name={invite.created_by_name} self={invite.created_by === me.user_id} /></td>
-                <td className="font-mono text-xs text-muted">{when(invite.created_at)}</td>
-                <td className="font-mono text-xs text-muted">{when(invite.expires_at)}</td>
-                <td><Button size="sm" variant="danger" onClick={() => setRevoking(invite)}>Revoke</Button></td>
+                <td className="text-xs">{invite.role}</td>
+                <td className="text-xs text-muted">{when(invite.created_at)}</td>
+                <td className="text-xs text-muted">{when(invite.expires_at)}</td>
+                <td className="text-right"><Button size="sm" variant="danger" onClick={() => setRevoking(invite)}>Revoke</Button></td>
               </tr>
             ))}
           </tbody>
@@ -120,7 +119,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       {revoking && (
         <ConfirmDialog
           open
-          title={`Revoke invite ${revoking.id}?`}
+          title={`Revoke the invite ${revoking.created_by_name || revoking.created_by} created ${when(revoking.created_at)}?`}
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
           onCancel={() => setRevoking(null)}
@@ -133,8 +132,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
 }
 
 /**
- * The people of the org and, for an owner, the controls over them: roles, removal, invites. A
- * member is shown by user id, which is all the platform holds of a person.
+ * The people of the org and, for an owner, the controls over them: roles, removal, invites.
  */
 export function OrgMembers() {
   const { me, org, administers } = useTenant()
@@ -172,8 +170,7 @@ export function OrgMembers() {
   return (
     <div className="grid gap-3">
       <p className="text-sm text-muted">
-        An owner changes everything in {org.name}. A member reads everything in it and runs platform experiments.
-        People are listed by their user id: names and emails stay with the sign-in provider.
+        An owner changes everything in {org.name}. A member reads everything in it and runs experiments.
         {!administers && ' Only an owner can invite people, change a role or remove someone.'}
       </p>
       {error && <ErrorMessage>{error}</ErrorMessage>}
@@ -204,8 +201,8 @@ export function OrgMembers() {
                       )
                       : member.role}
                   </td>
-                  <td className="font-mono text-xs text-muted">{when(member.joined_at)}</td>
-                  <td>
+                  <td className="text-xs text-muted">{when(member.joined_at)}</td>
+                  <td className="text-right">
                     {self
                       ? <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Leave</Button>
                       : administers && <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Remove</Button>}
@@ -241,7 +238,7 @@ function Question({ change, onConfirm, onCancel }: { change: Change; onConfirm: 
         onCancel={onCancel}
       >
         {demotes
-          ? `${self ? 'You keep' : 'They keep'} reading everything and running platform experiments, and lose what only an owner holds: ${self ? 'your' : 'their'} API keys of the whole organization stop working and the invites ${self ? 'you' : 'they'} made are revoked.`
+          ? `${self ? 'You keep' : 'They keep'} reading everything and running experiments, and lose what only an owner holds: ${self ? 'your' : 'their'} API keys of the whole organization stop working and the invites ${self ? 'you' : 'they'} made are revoked.`
           : 'An owner changes everything in the organization: its members, invites, API keys, clusters, projects and repositories.'}
       </ConfirmDialog>
     )

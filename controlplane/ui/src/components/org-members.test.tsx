@@ -46,8 +46,11 @@ function show(as: Me = owner) {
 }
 
 async function row(id: string) {
-  const name = id.startsWith('inv_') ? 'Pending invites' : 'Members'
-  const cell = await waitFor(() => within(screen.getByRole('table', { name })).getByText(id))
+  // An invite has no name of its own on screen: the one pending invite is the only row of its table.
+  if (id.startsWith('inv_')) {
+    return within(await waitFor(() => within(screen.getByRole('table', { name: 'Pending invites' })).getAllByRole('row')[1]))
+  }
+  const cell = await waitFor(() => within(screen.getByRole('table', { name: 'Members' })).getByText(id))
   return within(cell.closest('tr')!)
 }
 
@@ -160,7 +163,7 @@ describe('an owner', () => {
 describe('inviting', () => {
   it('shows the link once, on this origin with the token in the fragment', async () => {
     show()
-    await screen.findByText('inv_1')
+    await row('inv_1')
     await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }))
     expect(createOrgInvite).toHaveBeenCalledExactlyOnceWith('org_a', 'member')
     const link = `${window.location.origin}/invite#${TOKEN}`
@@ -203,7 +206,7 @@ describe('inviting', () => {
     first.unmount()
 
     show()
-    await screen.findByText('inv_2')
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'Pending invites' })).getAllByRole('row')).toHaveLength(3))
     expect(screen.queryByTestId('secret')).toBeNull()
     expect(document.body.textContent).not.toContain(TOKEN)
   })
@@ -232,7 +235,7 @@ describe('inviting', () => {
     expect(revokeOrgInvite).not.toHaveBeenCalled()
 
     await userEvent.click((await row('inv_1')).getByRole('button', { name: 'Revoke' }))
-    expect(within(screen.getByRole('dialog')).getByText('Revoke invite inv_1?')).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText(`Revoke the invite Ada Lovelace created ${new Date(at).toLocaleString()}?`)).toBeTruthy()
     await confirm('Revoke')
     expect(revokeOrgInvite).toHaveBeenCalledExactlyOnceWith('inv_1')
     expect(await screen.findByText('No pending invites.')).toBeTruthy()
