@@ -533,6 +533,9 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	candidate := *exp
 	candidate.ResolvedJob = &resolved
 	clusterActive := false
+	if err := h.svc.recordAdmission(ctx, id, time.Now().UTC()); err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
 	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		gAvail, _, err := readFlavorCapacity(ctx, h.svc.workload, h.svc.logger)
 		if err != nil {

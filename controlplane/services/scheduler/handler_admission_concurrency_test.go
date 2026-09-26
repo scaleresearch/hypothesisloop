@@ -94,7 +94,7 @@ func TestConcurrentOperatorAdmissionsDoNotExceedClusterCapacity(t *testing.T) {
 	}
 	workload := &concurrentAdmissionWorkload{store: store}
 	registered := &hostingStore{concurrentAdmissionStore: store, clusters: map[string]domain.Cluster{"cluster-a": {Name: "cluster-a"}}}
-	handler := NewHandler(NewService(registered, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{}))
+	handler := NewHandler(admissionsUnrecorded(NewService(registered, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop())).WithLoop(noopLoop{}))
 
 	var wg sync.WaitGroup
 	results := make(chan error, 3)

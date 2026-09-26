@@ -329,6 +329,10 @@ type failingFor struct {
 	failed map[string]bool
 }
 
+func (f failingFor) RecordAdmission(ctx context.Context, id string, at time.Time) error {
+	return f.inner.RecordAdmission(ctx, id, at)
+}
+
 func (f failingFor) ObservedElapsedHours(ctx context.Context, id string, createdAt, now time.Time) (float64, error) {
 	if f.failed[id] {
 		return 0, errors.New("no series for " + id)

@@ -31,7 +31,7 @@ func TestForceAdmissionPlacesAJobOnlyOnAClusterThatHostsIt(t *testing.T) {
 			}}}
 			store := &hostingStore{concurrentAdmissionStore: admissions, clusters: map[string]domain.Cluster{tc.cluster.Name: tc.cluster}}
 			workload := &concurrentAdmissionWorkload{store: admissions}
-			handler := NewHandler(NewService(store, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{}))
+			handler := NewHandler(admissionsUnrecorded(NewService(store, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop())).WithLoop(noopLoop{}))
 
 			_, err := handler.admit(context.Background(), "job-1", "cluster-a")
 

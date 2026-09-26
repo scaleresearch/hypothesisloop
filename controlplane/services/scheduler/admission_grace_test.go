@@ -21,6 +21,7 @@ func TestAdmissionWritesResolvedGraceIntoTheClaimedJob(t *testing.T) {
 	exp.Job.CheckpointGraceSeconds = &window
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo = %v", err)

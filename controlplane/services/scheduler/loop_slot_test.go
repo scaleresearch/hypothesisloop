@@ -357,6 +357,7 @@ func TestSubmittingToASlotClusterWritesTheSlotIntoDesiredState(t *testing.T) {
 	}
 	store := &pinningStore{desired: []*domain.Experiment{pinnedTo(sized(t, c, h100Job("earlier", "6")), "h100-0")}}
 	l := NewLoop(store, submitQuota{}, live, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJob(context.Background(), exp, rented, ""); err != nil {
 		t.Fatal(err)
@@ -479,6 +480,7 @@ func (w *slotWorkload) CreateWorkload(_ context.Context, exp *domain.Experiment)
 func slotLoop(store *slotStore, c *slotFixture, observed ObservedState) (*Loop, *slotWorkload) {
 	workload := &slotWorkload{c: c, desired: append(append([]*domain.Experiment(nil), store.running...), store.submitted...)}
 	l := NewLoop(store, slotQuota{}, workload, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 	l.evictor = noopEvictor{}
 	l.disbalanceTolerance = testDisbalanceTolerance
 	l.reprioritizer = noopReprioritizer{}

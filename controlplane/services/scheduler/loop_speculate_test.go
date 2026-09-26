@@ -87,6 +87,7 @@ func (s *speculationStore) ListCapacityClaimedExperiments(_ context.Context) ([]
 
 func speculationLoop(store LoopStore) *Loop {
 	l := NewLoop(store, tickQuota{}, nil, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 	return l.WithSpeculation(15 * time.Minute)
 }
 
@@ -288,6 +289,7 @@ func TestSubmitJobSpeculativeWithNoClusterIDSkipsCapRecheck(t *testing.T) {
 	exp.ID = "exp-1"
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
@@ -315,6 +317,7 @@ func TestSubmitJobSpeculativeReChecksClusterCapAgainstFreshDesired(t *testing.T)
 		"cid-a": {MaxSpeculativeAccelerators: &cap},
 	}}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true) = %v, want nil", err)
@@ -350,6 +353,7 @@ func TestSubmitJobSpeculativeWithNoProvenFitAndNoCapDefaultsToOneJob(t *testing.
 	exp.AcceleratorCount = 2
 	store := &nilCallbackClaimStore{} // no ClusterSettings entry for cid-a: no operator cap
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, false); err != nil {
 		t.Fatalf("submitJobTo(speculative=true, provenFit=false) = %v, want nil", err)
@@ -383,6 +387,7 @@ func TestSubmitJobSpeculativeWithProvenFitAndNoCapIsUnbounded(t *testing.T) {
 	exp.AcceleratorCount = 2
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "cid-a", exp.AcceleratorType, true, true); err != nil {
 		t.Fatalf("submitJobTo(speculative=true, provenFit=true) = %v, want nil", err)
@@ -399,6 +404,7 @@ func TestSubmitJobLiveFitPassesNonNilCapacityCallback(t *testing.T) {
 	exp.ID = "exp-1"
 	store := &nilCallbackClaimStore{}
 	l := NewLoop(store, submitQuota{}, &liveWorkload{}, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 
 	if err := l.submitJobTo(context.Background(), exp, "cluster-a", "", exp.AcceleratorType, false, false); err != nil {
 		t.Fatalf("submitJobTo(speculative=false) = %v, want nil", err)
@@ -601,6 +607,7 @@ func TestSpeculativeCandidatesDisabledWithoutWithSpeculation(t *testing.T) {
 	exp := distributedExperiment(1, 2)
 	accel, resources := nodeFixture()
 	l := NewLoop(&speculationStore{}, tickQuota{}, nil, testGraceLimits, zap.NewNop()) // no WithSpeculation call
+	l.observed = fakeObserved{}
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp,
 		map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true},

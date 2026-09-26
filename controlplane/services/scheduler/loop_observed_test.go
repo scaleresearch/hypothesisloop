@@ -35,6 +35,10 @@ func (f fakeObserved) ObservedStintElapsedHours(_ context.Context, experimentID 
 	return f.stint[experimentID], nil
 }
 
+func (f fakeObserved) RecordAdmission(context.Context, string, time.Time) error {
+	return f.err
+}
+
 func (f fakeObserved) LatestExperimentNode(_ context.Context, experimentID string, _, _ time.Time) (string, bool, error) {
 	if f.err != nil {
 		return "", false, f.err

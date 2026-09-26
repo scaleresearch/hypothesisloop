@@ -15,9 +15,10 @@ type ObservedSpan struct {
 	// First and Last are the earliest and latest real observation.
 	First, Last time.Time
 	// Total is time the experiment was continuously observed running: the sum of the intervals
-	// between consecutive observations, counting an interval only when it is at most gapCap.
+	// between consecutive observations, counting an interval only when it is at most gapCap and
+	// no admission lies inside it.
 	Total time.Duration
-	// Stint is the same sum restricted to the run since the last gap longer than gapCap — what a
+	// Stint is the same sum restricted to the run since the last such break — what a
 	// job has accrued since it most recently resumed, which is what a preemption rescale must
 	// subtract so an earlier stint is not charged against the estimate twice.
 	Stint time.Duration
@@ -29,6 +30,9 @@ type ObservedSpan struct {
 // when it is at most gapCap. A longer gap means the job genuinely was not running in between
 // (preempted, between pods, node dead) and contributes nothing; the next observation simply starts
 // a new stint, so the per-interval cap *is* the stint split and no separate bookkeeping is needed.
+//
+// An admission (see RecordAdmission) breaks the run as well, however short the gap around it: a
+// job preempted and admitted again inside gapCap held nothing while it was queued.
 //
 // Both observation series count and are unioned, not required together: the runtime's liveness
 // heartbeat and the job's own reported metrics each independently prove the job was alive at their
@@ -59,20 +63,24 @@ func ObserveSpan(ctx context.Context, dbURL, experimentID string, since, now tim
 	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
 	id := quote(experimentID)
 	capMillis := gapCap.Milliseconds()
-	// DISTINCT before the window function: the two series routinely carry the same instant, and
+	// UNION before the window functions: the two series routinely carry the same instant, and
 	// duplicate rows would make multiplicity and tie ordering part of the bill.
 	query := fmt.Sprintf(`WITH obs AS (`+
-		`SELECT DISTINCT CAST(greptime_timestamp AS BIGINT) AS ts FROM %s WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
+		`SELECT CAST(greptime_timestamp AS BIGINT) AS ts, 0 AS admitted FROM %s WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
 		`UNION `+
-		`SELECT DISTINCT CAST(greptime_timestamp AS BIGINT) AS ts FROM %s WHERE job_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`+
-		`), d AS (SELECT ts, ts - LAG(ts) OVER (ORDER BY ts) AS gap FROM obs)`+
-		`, b AS (SELECT MAX(CASE WHEN gap > %d THEN ts END) AS stint_start FROM d) `+
+		`SELECT CAST(greptime_timestamp AS BIGINT) AS ts, 0 AS admitted FROM %s WHERE job_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
+		`UNION `+
+		`SELECT CAST(greptime_timestamp AS BIGINT) AS ts, 1 AS admitted FROM %s WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`+
+		`), a AS (SELECT ts, admitted, SUM(admitted) OVER (ORDER BY ts) AS attempt FROM obs)`+
+		`, d AS (SELECT ts, ts - LAG(ts) OVER (PARTITION BY attempt ORDER BY ts) AS gap FROM a WHERE admitted = 0)`+
+		`, b AS (SELECT MAX(CASE WHEN gap IS NULL OR gap > %d THEN ts END) AS stint_start FROM d) `+
 		`SELECT MIN(d.ts), MAX(d.ts), `+
 		`SUM(CASE WHEN d.gap <= %d THEN d.gap ELSE 0 END), `+
-		`SUM(CASE WHEN d.gap <= %d AND (b.stint_start IS NULL OR d.ts >= b.stint_start) THEN d.gap ELSE 0 END) `+
+		`SUM(CASE WHEN d.gap <= %d AND d.ts > b.stint_start THEN d.gap ELSE 0 END) `+
 		`FROM d CROSS JOIN b`,
 		aliveHeartbeatMetric, id, since.UnixMilli(), now.UnixMilli(),
 		ExperimentMetricValue, id, since.UnixMilli(), now.UnixMilli(),
+		admissionMetric, id, since.UnixMilli(), now.UnixMilli(),
 		capMillis, capMillis, capMillis,
 	)
 	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ObserveSpan", query, 4)

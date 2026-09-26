@@ -82,6 +82,8 @@ type ObservedState interface {
 	ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error)
 	ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error)
 	LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (node string, found bool, err error)
+	// RecordAdmission marks the start of a run, so that time queued before it is never billed.
+	RecordAdmission(ctx context.Context, experimentID string, at time.Time) error
 }
 
 // metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
@@ -96,6 +98,10 @@ func (o metricsDBObserver) ObservedElapsedHours(ctx context.Context, experimentI
 
 func (o metricsDBObserver) ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
 	return metricsdb.ObservedStintElapsedHours(ctx, o.url, experimentID, createdAt, now, o.gapCap)
+}
+
+func (o metricsDBObserver) RecordAdmission(ctx context.Context, experimentID string, at time.Time) error {
+	return metricsdb.RecordAdmission(ctx, o.url, experimentID, at)
 }
 
 func (o metricsDBObserver) LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (string, bool, error) {

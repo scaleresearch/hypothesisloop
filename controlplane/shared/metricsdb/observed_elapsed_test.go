@@ -13,8 +13,9 @@ import (
 // spanServer replays a raw observation series through the same SQL ObserveSpan issues, so these
 // tests pin the interval arithmetic itself rather than a hand-computed expectation of it.
 // Timestamps are given as durations before `now`, and may repeat: the two observation series
-// routinely carry the same instant, and de-duplication is part of what is being tested.
-func spanServer(t *testing.T, now time.Time, gapCap time.Duration, agos []time.Duration) *httptest.Server {
+// routinely carry the same instant, and de-duplication is part of what is being tested. admitted
+// is when the job was given capacity: no interval holding one counts.
+func spanServer(t *testing.T, now time.Time, gapCap time.Duration, agos []time.Duration, admitted ...time.Duration) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,15 +42,23 @@ func spanServer(t *testing.T, now time.Time, gapCap time.Duration, agos []time.D
 			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null,null,null,null]]}}]}`))
 			return
 		}
+		broken := func(from, to int64) bool {
+			for _, ago := range admitted {
+				if at := now.Add(-ago).UnixMilli(); from < at && at <= to {
+					return true
+				}
+			}
+			return to-from > gapCap.Milliseconds()
+		}
 		var total, stint, stintStart int64
 		for i := 1; i < len(ts); i++ {
-			if gap := ts[i] - ts[i-1]; gap > gapCap.Milliseconds() {
+			if broken(ts[i-1], ts[i]) {
 				stintStart = ts[i]
 			}
 		}
 		for i := 1; i < len(ts); i++ {
 			gap := ts[i] - ts[i-1]
-			if gap > gapCap.Milliseconds() {
+			if broken(ts[i-1], ts[i]) {
 				continue
 			}
 			total += gap
@@ -178,6 +187,17 @@ func TestObservedStintCountsOnlyTheRunSinceTheLastOutage(t *testing.T) {
 	if want := 3 * step.Hours(); !approxHours(hours, want) {
 		t.Fatalf("stint billed %v hours, want %v (only the run since the outage)", hours, want)
 	}
+
+	// Requeued and admitted again inside the gap cap: the two minutes it waited are nobody's.
+	requeued := spanServer(t, now, gapCap, []time.Duration{20 * time.Minute, 19 * time.Minute, 17 * time.Minute, 16 * time.Minute, 15 * time.Minute}, 18*time.Minute)
+	defer requeued.Close()
+	span, err := ObserveSpan(context.Background(), requeued.URL, "exp-1", now.Add(-30*step), now, gapCap)
+	if err != nil {
+		t.Fatalf("ObserveSpan: %v", err)
+	}
+	if !approxHours(span.Total.Hours(), 3*step.Hours()) || !approxHours(span.Stint.Hours(), 2*step.Hours()) {
+		t.Fatalf("span = total %v stint %v, want 3m and 2m: the wait between two admissions is not run time", span.Total, span.Stint)
+	}
 }
 
 // Settling promptly and settling long afterwards have to produce the same number: the samples are
@@ -271,7 +291,7 @@ func TestEnsureObservationTablesCreatesBothSeries(t *testing.T) {
 		t.Fatalf("EnsureObservationTables: got = %v, want = nil", err)
 	}
 	all := strings.Join(statements, "\n")
-	for _, table := range []string{aliveHeartbeatMetric, ExperimentMetricValue} {
+	for _, table := range []string{aliveHeartbeatMetric, admissionMetric, ExperimentMetricValue} {
 		if !strings.Contains(all, "CREATE TABLE IF NOT EXISTS "+table+" ") {
 			t.Errorf("no CREATE TABLE issued for %s", table)
 		}

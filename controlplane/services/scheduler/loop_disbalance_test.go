@@ -437,6 +437,7 @@ func TestAPendingEvictionCreditsItsNodeResources(t *testing.T) {
 	hog := disbalanceJob("hog", "14", 1)
 	now := time.Now()
 	l := NewLoop(nil, nil, nil, testGraceLimits, zap.NewNop())
+	l.observed = fakeObserved{}
 	l.pendingEvictions["hog"] = pendingEviction{
 		cluster: "cluster-a", node: "node-a", footprint: hog.Footprint(),
 		acceleratorType: disbalanceFlavor, acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,

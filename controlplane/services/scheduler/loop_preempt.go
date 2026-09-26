@@ -446,6 +446,9 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		return err
 	}
 	exp.ResolvedJob = &resolved
+	if err := l.observed.RecordAdmission(ctx, exp.ID, time.Now().UTC()); err != nil {
+		return err
+	}
 	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, capacityAvailable)
 	if err != nil {
 		return err

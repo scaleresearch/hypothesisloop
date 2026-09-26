@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -73,7 +74,7 @@ func (w *admitWorkload) CreateWorkload(_ context.Context, exp *domain.Experiment
 }
 
 func admitHandler(store *admitStore, workload *admitWorkload) *Handler {
-	return NewHandler(NewService(store, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{}))
+	return NewHandler(admissionsUnrecorded(NewService(store, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop())).WithLoop(noopLoop{}))
 }
 
 func queued(exp *domain.Experiment) *domain.Experiment {
@@ -185,4 +186,10 @@ func TestForceAdmitOntoAClusterTheJobsOrgTurnedOffIsRefused(t *testing.T) {
 	if _, err := admitHandler(store, workload).admit(context.Background(), "exp-1", rented); err != nil {
 		t.Fatalf("on a shared cluster another org turned off: %v", err)
 	}
+}
+
+// admissionsUnrecorded is a service whose admissions reach no metrics store.
+func admissionsUnrecorded(s *Service) *Service {
+	s.recordAdmission = func(context.Context, string, time.Time) error { return nil }
+	return s
 }

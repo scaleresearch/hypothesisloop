@@ -8,6 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -115,7 +116,10 @@ type Service struct {
 	settler      QuotaSettler
 	grace        domain.GraceLimits
 	metricsDBURL string
-	logger       *zap.Logger
+	// recordAdmission marks the start of a run in the metrics store, so that time queued before
+	// it is never billed.
+	recordAdmission func(ctx context.Context, experimentID string, at time.Time) error
+	logger          *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
 	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
 	// of the store at admission and nowhere else. Not enforced mid-write — that needs a gateway in
@@ -151,8 +155,11 @@ func NewService(
 		settler:      settler,
 		grace:        grace,
 		metricsDBURL: metricsDBURL,
-		logger:       logger,
-		weights:      domain.DefaultSchedulingWeights(),
+		recordAdmission: func(ctx context.Context, experimentID string, at time.Time) error {
+			return metricsdb.RecordAdmission(ctx, metricsDBURL, experimentID, at)
+		},
+		logger:  logger,
+		weights: domain.DefaultSchedulingWeights(),
 	}
 }
 
