@@ -72,6 +72,15 @@ agents:
   max_new_instances_per_answer: 10
   max_hosted_per_platform_experiment: 25
 
+# What one account may create. Staff, the platform's operators, are held to neither.
+#
+#   max_orgs_per_user     how many orgs a person may own when they create one. The home org of
+#              their first sign-in counts.
+#   max_projects_per_org  how many projects an org may hold, its default project included.
+accounts:
+  max_orgs_per_user: 3
+  max_projects_per_org: 10
+
 # Where a cluster's runtime reaches the platform. Registering a cluster returns both beside its
 # runtime token, so the command that starts the cluster's agents has one source. Both must be
 # reachable outbound from inside every cluster, so a loopback address is rejected at load.

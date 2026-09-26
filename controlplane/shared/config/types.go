@@ -244,6 +244,14 @@ type AgentsConfig struct {
 	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
 }
 
+// AccountsConfig bounds what one account creates. Staff are held to neither bound.
+type AccountsConfig struct {
+	// MaxOrgsPerUser is how many orgs a person may own when they create one.
+	MaxOrgsPerUser int `yaml:"max_orgs_per_user"`
+	// MaxProjectsPerOrg is how many projects an org may hold.
+	MaxProjectsPerOrg int `yaml:"max_projects_per_org"`
+}
+
 // RuntimesConfig is where a cluster's runtime reaches the platform. Both are handed out when a
 // cluster is registered.
 type RuntimesConfig struct {
@@ -281,6 +289,7 @@ type Config struct {
 	Services         ServicesConfig          `yaml:"services"`
 	Auth             AuthConfig              `yaml:"auth"`
 	Agents           AgentsConfig            `yaml:"agents"`
+	Accounts         AccountsConfig          `yaml:"accounts"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
 	GitHub           GitHubConfig            `yaml:"github"`
 

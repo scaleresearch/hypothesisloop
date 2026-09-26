@@ -257,6 +257,25 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsAnIncompleteAccountsSection(t *testing.T) {
+	for name, edit := range map[string][2]string{
+		"no section":        {"accounts:\n  max_orgs_per_user: 3\n  max_projects_per_org: 10\n", ""},
+		"no org bound":      {"  max_orgs_per_user: 3\n", ""},
+		"zero org bound":    {"  max_orgs_per_user: 3", "  max_orgs_per_user: 0"},
+		"no project bound":  {"  max_projects_per_org: 10\n", ""},
+		"negative projects": {"  max_projects_per_org: 10", "  max_projects_per_org: -1"},
+		"misspelled bound":  {"  max_orgs_per_user: 3", "  max_orgs_per_person: 3"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
 const githubSection = `
 github:
   app_id: 4242

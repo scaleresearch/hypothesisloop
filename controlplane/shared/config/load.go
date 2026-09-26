@@ -242,6 +242,12 @@ func (c *Config) build() error {
 	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
 		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
+	if c.Accounts.MaxOrgsPerUser <= 0 {
+		return fmt.Errorf("accounts max_orgs_per_user is required and positive: how many orgs a person may own when they create one")
+	}
+	if c.Accounts.MaxProjectsPerOrg <= 0 {
+		return fmt.Errorf("accounts max_projects_per_org is required and positive: how many projects an org may hold")
+	}
 	for key, address := range map[string]string{"api_url": c.Runtimes.APIURL, "metrics_url": c.Runtimes.MetricsURL} {
 		parsed, err := url.Parse(address)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
