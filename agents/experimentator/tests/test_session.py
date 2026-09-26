@@ -197,5 +197,50 @@ class ClaudeSessionFilesTest(unittest.TestCase):
         self.assertIn("where things stand", prompt)
 
 
+class MidTurnTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_machine_lost_inside_its_first_turn_is_resumed_in_that_turn_with_its_update_cursor(self):
+        platform = Platform()
+        old = Machine(platform)
+        setup = SimpleNamespace(workdir=str(old.workdir))
+        old.write(old.home, "projects/p/s-live.jsonl", "the turn so far\n")
+        old.write(old.workdir, ".hl-state/watch/cursor", "108202")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(old.home)}), \
+                mock.patch.object(run, "_sessions", old.sessions), mock.patch.object(run, "_live_session_id", None):
+            # No turn has ended, so no session id was saved: the first message names the session.
+            run._seen_session(setup, SimpleNamespace(subtype="init", data={"session_id": "s-live"}))
+            await run._store_session(setup)
+            self.assertEqual(platform.puts, 1)
+            await run._store_session(setup)
+            self.assertEqual(platform.puts, 1, "an unchanged turn was sent again")
+            old.write(old.home, "projects/p/s-live.jsonl", "the turn so far\nand a tool call\n")
+            await run._store_session(setup)
+            self.assertEqual(platform.puts, 2)
+
+        new = Machine(platform)
+        setup = SimpleNamespace(workdir=str(new.workdir))
+        with mock.patch.object(run, "_sessions", new.sessions), mock.patch.object(run, "_on_new_machine", False):
+            run._restore_session(setup)
+            self.assertEqual(run._restart_state(setup), ("s-live", None))
+        self.assertEqual((new.home / "projects/p/s-live.jsonl").read_text(), "the turn so far\nand a tool call\n")
+        self.assertEqual((new.workdir / ".hl-state/watch/cursor").read_text(), "108202")
+
+    async def test_a_session_rotated_out_is_not_the_one_resumed(self):
+        platform = Platform()
+        old = Machine(platform)
+        setup = SimpleNamespace(workdir=str(old.workdir))
+        with mock.patch.object(run, "_sessions", old.sessions), mock.patch.object(run, "_live_session_id", None):
+            run._seen_session(setup, SimpleNamespace(session_id="s-old"))
+            old.write(old.workdir, ".claude_compaction_handoff", "where things stand")
+            run._forget_live_session(setup)
+            await run._store_session(setup)
+        new = Machine(platform)
+        setup = SimpleNamespace(workdir=str(new.workdir))
+        with mock.patch.object(run, "_sessions", new.sessions), mock.patch.object(run, "_on_new_machine", False):
+            run._restore_session(setup)
+            resume_id, prompt = run._restart_state(setup)
+        self.assertIsNone(resume_id)
+        self.assertIn("where things stand", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

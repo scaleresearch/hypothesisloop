@@ -190,6 +190,35 @@ _sessions: session.Sessions | None = None
 
 _SESSION_ID_FILE = ".claude_session_id"
 _HANDOFF_FILE = ".claude_compaction_handoff"
+# The session a turn is in flight in, known from its first message on. It travels with the
+# snapshot, so a machine lost in the middle of a turn, the first one included, is resumed there.
+_LIVE_SESSION_FILE = ".claude_live_session_id"
+# Where hl keeps the cursor of the agent's update feed (updates.watch_env).
+_WATCH_STATE_DIR = ".hl-state"
+# How often a session is handed to the platform while a turn is in flight. A turn can last as
+# long as a job does, and nothing unchanged is sent.
+_SESSION_STORE_INTERVAL_S = 30
+
+_live_session_id: str | None = None
+_store_lock = asyncio.Lock()
+
+
+def _seen_session(setup: core.RunSetup, message) -> None:
+    """Notes the session a message belongs to as the one in flight."""
+    global _live_session_id
+    session_id = getattr(message, "session_id", None)
+    if session_id is None and isinstance(getattr(message, "data", None), dict):
+        session_id = message.data.get("session_id")
+    if session_id and session_id != _live_session_id:
+        _live_session_id = session_id
+        with open(os.path.join(setup.workdir, _LIVE_SESSION_FILE), "w") as f:
+            f.write(session_id)
+
+
+def _forget_live_session(setup: core.RunSetup) -> None:
+    global _live_session_id
+    _live_session_id = None
+    _remove_file(os.path.join(setup.workdir, _LIVE_SESSION_FILE))
 
 
 def _transcript_files(session_id: str | None) -> list[str]:
@@ -209,7 +238,19 @@ async def _store_session(setup: core.RunSetup) -> None:
     """Hands the session as it stands to the platform, unless it already holds this one."""
     if _sessions is None:
         return
-    await asyncio.to_thread(_sessions.save, [_SESSION_ID_FILE, _HANDOFF_FILE], _transcript_files(_load_resume_id(setup)))
+    workdir = Path(setup.workdir)
+    files = [_SESSION_ID_FILE, _HANDOFF_FILE, _LIVE_SESSION_FILE]
+    files += [str(path.relative_to(workdir)) for path in (workdir / _WATCH_STATE_DIR).rglob("*") if path.is_file()]
+    transcripts = {name for session_id in (_load_resume_id(setup), _live_session_id) for name in _transcript_files(session_id)}
+    async with _store_lock:
+        await asyncio.to_thread(_sessions.save, files, sorted(transcripts))
+
+
+async def _keep_session_stored(setup: core.RunSetup) -> None:
+    while True:
+        await asyncio.sleep(_SESSION_STORE_INTERVAL_S)
+        if _live_session_id:
+            await _store_session(setup)
 
 
 # Said first to a session that was restored on a machine it did not run on, until a turn there
@@ -234,6 +275,12 @@ def _restore_session(setup: core.RunSetup) -> None:
         return
     if _sessions.restore():
         _on_new_machine = True
+        live = os.path.join(setup.workdir, _LIVE_SESSION_FILE)
+        if not _load_resume_id(setup) and os.path.exists(live):
+            # The machine was lost before the turn in flight ended: that session is the one to
+            # resume, and a handoff beside it was already given to it.
+            with open(live) as f:
+                _save_resume_id(setup, f.read().strip())
         log.info("resuming session %s on a new machine", _load_resume_id(setup) or "from its handoff")
 
 
@@ -356,6 +403,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             interrupter = asyncio.ensure_future(_interrupt_on_stop(client, stopped))
             try:
                 async for message in _receive_turn(client):
+                    _seen_session(setup, message)
                     _log_message(message, setup.cfg.agent_id)
                     if isinstance(message, AssistantMessage) and message.usage and not message.parent_tool_use_id:
                         context_tokens = _context_tokens(message.usage)
@@ -435,6 +483,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 with open(_handoff_file(setup), "w") as f:
                     f.write(handoff)
                 _remove_file(_session_file(setup))
+                _forget_live_session(setup)
                 await _store_session(setup)
                 return None, True
 
@@ -477,10 +526,12 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     stop_flag = core.install_signal_handler()
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
     beat = asyncio.ensure_future(_progress.run())
+    storing = asyncio.ensure_future(_keep_session_stored(setup))
     try:
         await _run_until_stopped(setup, model, started_at, stop_flag, backoff_s)
     finally:
         beat.cancel()
+        storing.cancel()
 
 
 async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float, stop_flag: list, backoff_s: float) -> None:
