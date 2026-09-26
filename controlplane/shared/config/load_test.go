@@ -228,12 +228,14 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		"metrics url any v6":     {metrics, "  metrics_url: http://[::]:8084"},
 		"api url loopback":       {api, "  public_api_url: http://[::1]:8081"},
 		"misspelled key":         {metrics, "  metrics_url: http://metrics.example.invalid\n  metric_url: http://metrics.example.invalid"},
+		"job image named twice":  {"  - name: pytorch-cuda", "  - name: python"},
+		"job image with no ref":  {"    repository: hypothesisloop-job-tenstorrent\n", ""},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {
 			t.Fatalf("%s: the production config has no %q", name, edit[0])
 		}
-		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "metric_url") && !strings.Contains(err.Error(), "api_url") {
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "job_images") && !strings.Contains(err.Error(), "metric_url") && !strings.Contains(err.Error(), "api_url") {
 			t.Errorf("%s: Load = %v, want it refused naming the address", name, err)
 		}
 	}

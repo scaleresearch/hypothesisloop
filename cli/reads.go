@@ -105,8 +105,12 @@ what an hour on one of them costs in accelerator hours. For CPU cores (kind cpu,
 hypothesisloop.dev/cpu=core): cores_available, cores_total and acch_per_core_hour, which is 1, so
 a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
 whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
-string a job spec takes; a type with none available queues and never errors. A line with job_image is of a
-cluster that runs a job that names no image, in that one. With only_job_image it runs no other
+string a job spec takes; a type with none available queues and never errors. Last, one line per
+image the deployment offers a job to run in: job_image its name, image what job.image takes,
+carries what is installed. A type's line names in job_images the ones that suit it, so a job
+there names one of those and installs no framework. A cluster's line with job_image is of a
+cluster that runs a job that names no image, in that one, and job_image_carries says what is
+installed in it. With only_job_image it runs no other
 image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
 runs only jobs that name their image. A line with on_demand is of a cluster that rents a machine
 when a job needs one: nothing stands by, total is the most it rents at once and available is what
@@ -122,10 +126,12 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	var out struct {
-		Clusters []struct {
+		JobImages []json.RawMessage `json:"job_images"`
+		Clusters  []struct {
 			Name         string            `json:"cluster_name"`
 			JobImage     string            `json:"job_image"`
 			JobImageDef  bool              `json:"job_image_default"`
+			Carries      string            `json:"job_image_carries"`
 			OnDemand     bool              `json:"on_demand"`
 			Resources    json.RawMessage   `json:"resources"`
 			Accelerators []json.RawMessage `json:"accelerators"`
@@ -142,6 +148,9 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		prefix := []string{"cluster", cl.Name}
 		if cl.JobImage != "" {
 			prefix = append(prefix, "job_image", cl.JobImage)
+		}
+		if cl.Carries != "" {
+			prefix = append(prefix, "job_image_carries", cl.Carries)
 		}
 		if cl.JobImage != "" && !cl.JobImageDef {
 			prefix = append(prefix, "only_job_image", "true")
@@ -163,6 +172,13 @@ key and an agent token have one org and need no --org. A person in several orgs 
 				return fail(stderr, err)
 			}
 		}
+	}
+	for _, image := range out.JobImages {
+		line, err := compactJSON(json.RawMessage(strings.Replace(string(image), `"name":`, `"job_image":`, 1)))
+		if err != nil {
+			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+		}
+		fmt.Fprintln(stdout, string(line))
 	}
 	if len(out.Clusters) == 0 {
 		fmt.Fprintln(stderr, "hl: capacity: no cluster reports capacity")

@@ -74,6 +74,8 @@ type AcceleratorTypeInfo struct {
 // ResourceCatalog is the full set of resource-pricing reference data served by GET /resource-catalog.
 type ResourceCatalog struct {
 	AcceleratorTypes []AcceleratorTypeInfo `json:"accelerator_types"`
+	// JobImages is the images the deployment offers a job to run in.
+	JobImages []domain.JobImage `json:"job_images"`
 }
 
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
@@ -85,6 +87,8 @@ type ClusterCapacity struct {
 	// JobImageDefault says the cluster also runs a job in the image the job names. False with a
 	// JobImage is a cluster that runs that one image only: a job placed there names none or it.
 	JobImageDefault bool `json:"job_image_default,omitempty"`
+	// JobImageCarries is what is installed in JobImage, when it is an image the deployment offers.
+	JobImageCarries string `json:"job_image_carries,omitempty"`
 	// OnDemand says the cluster rents a machine when a job needs one and has none standing by.
 	// Its totals are then the most it rents at once, and what is available is what it may still
 	// rent. The runtime says so itself, by reporting its nodes as slots (domain.NodeSlotLabel).
@@ -110,6 +114,8 @@ type ResourceCapacity struct {
 // an agent reads this and submits the same string with nothing in between to get wrong.
 type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
+	// JobImages names the offered images that suit this type (see the answer's job_images).
+	JobImages []string `json:"job_images,omitempty"`
 	// Kind is what available and total count: devices, or for cpu cores.
 	Kind      domain.TypeKind `json:"kind"`
 	Available int64           `json:"available"`
@@ -162,6 +168,7 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	withJobImages(registered, clusters)
+	withOfferedImages(h.catalog.JobImages, clusters)
 	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, h.metricsDBURL, h.capacityFreshness)
 	if err != nil {
 		return nil, err
@@ -199,6 +206,30 @@ func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string
 	}
 	sort.Slice(clusters, func(i, j int) bool { return clusters[i].ClusterName < clusters[j].ClusterName })
 	return clusters
+}
+
+// withOfferedImages names on each capacity line the offered images that suit its type, and says
+// what a cluster's own job image carries when it is one of them. A cluster that runs its own
+// image and no other gets no names: a job there can name none of them.
+func withOfferedImages(offered []domain.JobImage, clusters []ClusterCapacity) {
+	for c := range clusters {
+		cluster := &clusters[c]
+		for _, image := range offered {
+			if cluster.JobImage != "" && image.Image == cluster.JobImage {
+				cluster.JobImageCarries = image.Carries
+			}
+		}
+		if cluster.JobImage != "" && !cluster.JobImageDefault {
+			continue
+		}
+		for a := range cluster.Accelerators {
+			for _, image := range offered {
+				if image.SuitsType(cluster.Accelerators[a].AcceleratorType) {
+					cluster.Accelerators[a].JobImages = append(cluster.Accelerators[a].JobImages, image.Name)
+				}
+			}
+		}
+	}
 }
 
 // withJobImages says of each cluster which image a job that names none runs in there and whether

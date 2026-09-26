@@ -289,6 +289,30 @@ type RuntimesConfig struct {
 	ImageTag   string `yaml:"image_tag"`
 }
 
+// JobImageConfig is one image the deployment offers a job to run in. It is named by image, a
+// whole reference, or by repository, a name under runtimes.registry at runtimes.image_tag: one
+// this deployment built and pushed with its own.
+type JobImageConfig struct {
+	Name       string   `yaml:"name"`
+	Image      string   `yaml:"image"`
+	Repository string   `yaml:"repository"`
+	Carries    string   `yaml:"carries"`
+	Suits      []string `yaml:"suits"`
+}
+
+// OfferedJobImages is the configured job images with their references resolved.
+func (c *Config) OfferedJobImages() []domain.JobImage {
+	images := make([]domain.JobImage, 0, len(c.JobImages))
+	for _, i := range c.JobImages {
+		reference := i.Image
+		if i.Repository != "" {
+			reference = c.Runtimes.Registry + "/" + i.Repository + ":" + c.Runtimes.ImageTag
+		}
+		images = append(images, domain.JobImage{Name: i.Name, Image: reference, Carries: i.Carries, Suits: i.Suits})
+	}
+	return images
+}
+
 // GitHubConfig is the GitHub App a project's repository is reached through. Left empty, the
 // deployment has no App and no repository can be attached. Set, all of it is required.
 type GitHubConfig struct {
@@ -322,6 +346,7 @@ type Config struct {
 	Planning         PlanningConfig          `yaml:"planning"`
 	Accounts         AccountsConfig          `yaml:"accounts"`
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
+	JobImages        []JobImageConfig        `yaml:"job_images"`
 	GitHub           GitHubConfig            `yaml:"github"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.

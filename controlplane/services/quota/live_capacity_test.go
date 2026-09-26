@@ -62,7 +62,7 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 		map[string]map[string]int64{"local": {"gpu.product=L40": 8}})
 
 	want := AcceleratorCapacity{AcceleratorType: "gpu.product=L40", Kind: domain.TypeKindAccelerator, Available: 3, Total: 8, AccHPerHour: 0.25}
-	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || clusters[0].Accelerators[0] != want {
+	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || !reflect.DeepEqual(clusters[0].Accelerators[0], want) {
 		t.Fatalf("capacity = %+v, want one cluster with %+v", clusters, want)
 	}
 }
@@ -97,6 +97,26 @@ func TestCapacitySaysWhichClustersRentOnDemand(t *testing.T) {
 	})
 	if clusters[0].OnDemand || !clusters[1].OnDemand || clusters[2].OnDemand {
 		t.Errorf("on demand = %v, %v, %v, want only the cluster of slots", clusters[0].OnDemand, clusters[1].OnDemand, clusters[2].OnDemand)
+	}
+
+	// Each type's line names the offered images that suit it. A cluster that runs its own image
+	// and no other names none and says what its own carries.
+	offered := []domain.JobImage{
+		{Name: "python", Image: "registry.test/job:7", Carries: "Python"},
+		{Name: "pytorch-cuda", Image: "registry.test/job-pytorch-cuda:7", Carries: "PyTorch", Suits: []string{"nvidia.com/"}},
+	}
+	nvidia := []AcceleratorCapacity{{AcceleratorType: "nvidia.com/gpu.product=L40"}}
+	clusters = []ClusterCapacity{
+		{ClusterName: "rack", Accelerators: append([]AcceleratorCapacity{{AcceleratorType: string(domain.CPUType)}}, nvidia...)},
+		{ClusterName: "rented", JobImage: "registry.test/job-pytorch-cuda:7", Accelerators: append([]AcceleratorCapacity{}, nvidia...)},
+	}
+	withOfferedImages(offered, clusters)
+	rack, rented := clusters[0].Accelerators, clusters[1]
+	if !slices.Equal(rack[0].JobImages, []string{"python"}) || !slices.Equal(rack[1].JobImages, []string{"python", "pytorch-cuda"}) {
+		t.Errorf("rack names %v for cores and %v for the L40, want python, and python with pytorch-cuda", rack[0].JobImages, rack[1].JobImages)
+	}
+	if rented.JobImageCarries != "PyTorch" || len(rented.Accelerators[0].JobImages) != 0 {
+		t.Errorf("rented carries %q and names %v, want PyTorch and no image to name", rented.JobImageCarries, rented.Accelerators[0].JobImages)
 	}
 }
 

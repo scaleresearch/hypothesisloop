@@ -290,6 +290,19 @@ func (c *Config) build() error {
 	if c.Runtimes.ImageTag == "" || strings.ContainsAny(c.Runtimes.ImageTag, " \t/:") {
 		return fmt.Errorf("runtimes image_tag %q must be the tag the runtime's images were pushed under", c.Runtimes.ImageTag)
 	}
+	offered := map[string]bool{}
+	for _, i := range c.JobImages {
+		if i.Name == "" || offered[i.Name] {
+			return fmt.Errorf("job_images: name %q is empty or listed twice", i.Name)
+		}
+		offered[i.Name] = true
+		if (i.Image == "") == (i.Repository == "") || strings.ContainsAny(i.Image+i.Repository, " \t") {
+			return fmt.Errorf("job_images %s: state image, a whole reference, or repository, a name under runtimes.registry, and one of them only", i.Name)
+		}
+		if i.Carries == "" {
+			return fmt.Errorf("job_images %s: carries is required, since what is installed is what an agent chooses the image by", i.Name)
+		}
+	}
 	if c.Auth.UIOrigin == "" {
 		return fmt.Errorf("auth ui_origin is required: the one browser origin allowed to call the API")
 	}

@@ -195,6 +195,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}
 	resourceCatalog := quota.ResourceCatalog{
 		AcceleratorTypes: acceleratorTypeInfos,
+		JobImages:        pcfg.OfferedJobImages(),
 	}
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, repos, logger).
 		WithCatalog(resourceCatalog).

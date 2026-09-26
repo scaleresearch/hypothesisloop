@@ -835,7 +835,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OrgID string `query:"org_id" doc:"The org whose clusters to read. Required only when your token reaches more than one org."`
 	}) (*struct {
 		Body struct {
-			Clusters []ClusterCapacity `json:"clusters"`
+			Clusters  []ClusterCapacity `json:"clusters"`
+			JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job may name any other image."`
 		}
 	}, error) {
 		orgID, every, err := access.PlacementOrg(ctx, in.OrgID)
@@ -848,10 +849,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		out := &struct {
 			Body struct {
-				Clusters []ClusterCapacity `json:"clusters"`
+				Clusters  []ClusterCapacity `json:"clusters"`
+				JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job may name any other image."`
 			}
 		}{}
 		out.Body.Clusters = clusters
+		out.Body.JobImages = peh.catalog.JobImages
+		if out.Body.JobImages == nil {
+			out.Body.JobImages = []domain.JobImage{}
+		}
 		return out, nil
 	})
 }

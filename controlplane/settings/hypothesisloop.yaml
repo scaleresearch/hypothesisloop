@@ -131,6 +131,33 @@ runtimes:
   registry: REPLACE-WITH-HOST-ADDRESS:5000
   image_tag: REPLACE-WITH-IMAGE-TAG
 
+# The images the deployment offers a job to run in, so that an agent need not install a
+# framework into a bare image on every run. `hl capacity` lists them and names, on each
+# accelerator type's line, the ones that suit it. A job may name any other image.
+#
+#   name        what the image is called in `hl capacity`.
+#   repository  an image this deployment builds and pushes: its name under runtimes.registry,
+#               at runtimes.image_tag. `make images` builds the bare one, `make job-images` the
+#               others, each the upstream image named below with hl, hl-clone, git and uv added
+#               (infra/images/job/Dockerfile).
+#   image       a whole reference instead, for an image built elsewhere. One of the two.
+#   carries     what is installed, which is what an agent chooses by.
+#   suits       prefixes of accelerator type names. Left out: every type.
+job_images:
+  - name: python
+    repository: hypothesisloop-job
+    carries: Python 3.13, uv, git, hl, hl-clone. No framework.
+  # From pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime, pinned by digest in the Makefile.
+  - name: pytorch-cuda
+    repository: hypothesisloop-job-pytorch-cuda
+    carries: PyTorch 2.4.0 built for CUDA 12.1 with cuDNN 9, Python 3.11, uv, git, hl, hl-clone. Runs on an NVIDIA host driver 530 or newer.
+    suits: ["nvidia.com/"]
+  # From ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0.
+  - name: tenstorrent
+    repository: hypothesisloop-job-tenstorrent
+    carries: tt-metal and ttnn v0.77.0 with device firmware, Python 3.10 in /opt/venv, uv, git, hl, hl-clone.
+    suits: ["tenstorrent.com/"]
+
 # The GitHub App a project's repository is reached through (infra/github). A person installs the
 # App on repositories they choose and attaches one to a project; agents and jobs then clone it
 # with tokens minted per repository, each good for about an hour and stored nowhere.
