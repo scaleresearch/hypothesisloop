@@ -90,6 +90,16 @@ func main() {
 	defer cancel()
 
 	log("starting: cluster=%s node=%s engine=%s control_plane=%s storage_quota_enforced=%v", clusterName, exec.NodeName(), exec.Engine(), apiURL, exec.StorageQuotaEnforced())
+	preflightCtx, preflightCancel := context.WithTimeout(ctx, 30*time.Second)
+	facts, err := exec.Preflight(preflightCtx, &http.Client{Timeout: 10 * time.Second})
+	preflightCancel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
+		os.Exit(1)
+	}
+	for _, fact := range facts {
+		log("%s", fact)
+	}
 
 	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := exec.SetupCluster(setupCtx); err != nil {

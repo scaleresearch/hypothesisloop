@@ -1,0 +1,26 @@
+# The agent links the NVIDIA management library through cgo, so it needs a C compiler for the
+# target. The compiler runs on the build host and cross-compiles, so building for another
+# platform does not emulate it.
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+ARG TARGETOS TARGETARCH
+RUN set -e; \
+    case "$TARGETARCH" in \
+      amd64) triple=x86_64-linux-gnu; package=gcc-x86-64-linux-gnu ;; \
+      arm64) triple=aarch64-linux-gnu; package=gcc-aarch64-linux-gnu ;; \
+      *) echo "bare-agent is built for amd64 and arm64, not $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    if [ "$(dpkg --print-architecture)" = "$TARGETARCH" ]; then \
+      ln -s "$(command -v gcc)" /usr/local/bin/target-cc; \
+    else \
+      apt-get update && apt-get install -y --no-install-recommends "$package" "libc6-dev-$TARGETARCH-cross" && rm -rf /var/lib/apt/lists/*; \
+      ln -s "$(command -v "$triple-gcc")" /usr/local/bin/target-cc; \
+    fi
+WORKDIR /app
+COPY . .
+COPY vendor ./vendor
+RUN CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /bare-agent ./runtime/bare-metal/cmd/bare-agent
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /bare-agent /usr/local/bin/bare-agent
+ENTRYPOINT ["bare-agent"]
