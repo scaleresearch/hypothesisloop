@@ -232,12 +232,12 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- hardware never spends the budget meant for its own bugs — while attempt_count still
     -- advances, which is what makes each requeue a distinct desired state the runtime rebuilds.
     infra_requeue_count      INTEGER           NOT NULL DEFAULT 0,
-    -- tried_clusters: this job's own speculative-failover history, as a JSON array of
-    -- {"cluster_id": ..., "at": <RFC3339>}. Appended by RequeueInfrastructureFault when a
-    -- scale-up attempt times out or a scheduling event terminally refuses it (scale_up_timeout,
-    -- flavor_mismatch); read at candidate selection to exclude a cluster this job already failed
-    -- over from within scheduler.tried_cluster_ttl_seconds. No separate failover_count: the
-    -- list itself is the cap on attempts, one entry per cluster per TTL window.
+    -- tried_clusters: the placements of this job the environment failed, as a JSON array of
+    -- {"cluster_id": ..., "at": <RFC3339>, "reason": <eviction reason code>}. Appended by
+    -- RequeueInfrastructureFault in the write that spends infra_requeue_count; read at candidate
+    -- selection to leave out a cluster that failed this job within
+    -- scheduler.tried_cluster_ttl_seconds. The list delays a return to a cluster;
+    -- infra_requeue_count is what bounds the attempts.
     tried_clusters           JSONB             NOT NULL DEFAULT '[]'::jsonb,
     -- The job's permanent object-store key, created in the store in the same transaction that
     -- inserts the row and never rotated or deleted. '' only on terminal rows that predate

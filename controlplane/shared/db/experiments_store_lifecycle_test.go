@@ -271,10 +271,10 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 		"preempted": {domain.StatusRunning, func(id string) (bool, error) { return exps.RequeuePreempted(ctx, id, 1, 1) }},
 		"retry":     {domain.StatusRunning, func(id string) (bool, error) { return exps.RequeueForRetry(ctx, id, 1) }},
 		"infrastructure-fault": {domain.StatusSubmitted, func(id string) (bool, error) {
-			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 3, "")
+			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 3)
 		}},
 		"failover": {domain.StatusSubmitted, func(id string) (bool, error) {
-			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 3, "cluster-id-1")
+			return exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionScaleUpTimeout), 3)
 		}},
 		"rollback": {domain.StatusSubmitted, func(id string) (bool, error) {
 			return true, exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation)

@@ -141,10 +141,10 @@ type SchedulerConfig struct {
 	// makes landed ranks time out and fail the job for real, charging a retry for what was only
 	// a scheduling failure.
 	ScaleUpTimeoutSeconds int `yaml:"scale_up_timeout_seconds"`
-	// TriedClusterTTLSeconds bounds how long a cluster stays excluded from a job's speculative
-	// candidates after that job failed over off it (see experiments.tried_clusters). Past the
-	// TTL the cluster is eligible again — the deadline+failover loop is the anti-thrash
-	// mechanism, this just lets it retry after the TTL rather than being excluded forever.
+	// TriedClusterTTLSeconds is how long a cluster stays out of a job's placement after the
+	// environment failed that job on it (see experiments.tried_clusters), unless no other
+	// cluster could run the job. Past the TTL the cluster is eligible again. It is a delay: what
+	// bounds a job's attempts is its infrastructure-requeue allowance.
 	TriedClusterTTLSeconds int `yaml:"tried_cluster_ttl_seconds"`
 }
 

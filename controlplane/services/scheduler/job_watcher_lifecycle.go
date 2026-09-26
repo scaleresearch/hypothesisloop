@@ -102,9 +102,9 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 //
 // On a cluster reporting autoscaler_enabled, the deadline is scale_up_timeout (per-cluster
 // override from cluster_settings, else the global default) and the eviction reason is
-// scale_up_timeout — an infrastructure fault recorded as a tried_clusters failover rather than
-// spending infra_requeue_count, so a run of slow clusters cannot exhaust a job's environment-fault
-// budget. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
+// scale_up_timeout — an infrastructure fault like any other: the job is requeued on its
+// infrastructure allowance and the cluster goes into its tried list, so it is placed elsewhere
+// next and cannot go round slow clusters for ever. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
 // deadline is that cluster's stuck-pending timeout (stuckPendingTimeoutFor) and the reason is
 // EvictionStuckPending.
 func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
@@ -120,9 +120,8 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	// clusterIDs[exp.ClusterName] can be legitimately empty either because this cluster isn't
 	// autoscaler-enabled, or because GetClusterIDs failed this pass while GetAutoscalerCapability
 	// still succeeded (the two are fetched independently in scanAndWatch). The two failure modes
-	// must not be conflated: treating the latter as "not an autoscaler cluster" would spend
-	// infra_requeue_count and skip tried_clusters for a job whose real fault is scheduler-policy,
-	// not the job's environment.
+	// must not be conflated: treating the latter as "not an autoscaler cluster" would judge a
+	// scale-up by the stuck-pending deadline and name the wrong reason.
 	onAutoscalerCluster := w.scaleUpTimeout > 0 && autoscalerEnabled[exp.ClusterName] && clusterIDs[exp.ClusterName] != ""
 	if onAutoscalerCluster {
 		timeout = w.scaleUpTimeout
@@ -226,15 +225,15 @@ func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experim
 	w.evictNotYetRunningWithFailover(ctx, exp, reason, "")
 }
 
-// evictNotYetRunningWithFailover is evictNotYetRunning plus a cluster to record as a speculative
-// scale-up failover — see ResolveTermination's triedClusterID doc. Used by the scale-up-timeout
-// and flavor_mismatch paths (autoscaler.md), which name the specific cluster that just failed to
-// deliver capacity rather than the environment in general.
+// evictNotYetRunningWithFailover is evictNotYetRunning counted as a failover when triedClusterID
+// names the cluster that just failed to deliver capacity. Used by the scale-up-timeout and
+// flavor_mismatch paths (autoscaler.md). The store records the cluster in the job's tried list
+// itself, for every infrastructure fault.
 func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, triedClusterID string) {
 	if triedClusterID != "" {
 		obsmetrics.FailoversTotal.WithLabelValues(string(reason.Code())).Inc()
 	}
-	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason), triedClusterID)
+	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
 		return

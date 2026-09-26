@@ -290,6 +290,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			continue
 		}
+		candidates = withoutFailed(candidates, clusterIDs, exp, l.triedClusterTTL, start)
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {
@@ -567,6 +568,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			continue
 		}
+		candidates = withoutFailed(candidates, clusterIDs, exp, l.triedClusterTTL, start)
 		cluster := exp.ClusterName
 		var fp domain.Footprint
 		if cluster != "" {

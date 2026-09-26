@@ -57,8 +57,11 @@ func scaleUpExperiment(nodes int, submittedAgo time.Duration) *domain.Experiment
 	}
 }
 
-func TestScaleUpDeadlinePastTimeoutEvictsWithFailover(t *testing.T) {
-	store := &lifecycleStore{}
+// A scale-up that timed out is the environment's fault: the job goes back to the queue for free
+// while its infrastructure allowance lasts, and each such requeue spends one of it. The store
+// records the cluster in the job's tried list in the same write.
+func TestScaleUpDeadlinePastTimeoutRequeuesOnTheInfrastructureAllowance(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		phase: workload.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
@@ -72,13 +75,33 @@ func TestScaleUpDeadlinePastTimeoutEvictsWithFailover(t *testing.T) {
 	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
 		t.Fatal(err)
 	}
-	// A scale-up-timeout failover requeues for free (triedClusterID set) rather than terminally
-	// evicting — see ResolveTermination's doc comment.
 	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != string(domain.EvictionScaleUpTimeout) {
 		t.Fatalf("requeuedReasons = %v, want [scale_up_timeout]", store.requeuedReasons)
 	}
-	if len(store.triedClusters) != 1 || store.triedClusters[0] != "cid-a" {
-		t.Fatalf("triedClusters = %v, want [cid-a]", store.triedClusters)
+	if store.infraRequeues != 1 || len(store.terminalReasons) != 0 {
+		t.Fatalf("infra requeues spent = %d, terminal = %v, want one spent and the job still alive", store.infraRequeues, store.terminalReasons)
+	}
+}
+
+// The allowance is the bound on a job going round its clusters: with it spent, a scale-up that
+// times out ends the job, saying why.
+func TestScaleUpDeadlineWithTheAllowanceSpentEndsTheJob(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 2, infraRequeues: 2}
+	backend := &scaleUpBackend{
+		phase: workload.JobPhasePending, scheduledNodes: 0,
+		autoscalerEnabled: map[string]bool{"cluster-a": true},
+		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
+	}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
+		WithStuckPendingTimeout(10 * time.Minute).
+		WithScaleUpTimeout(1 * time.Minute)
+	exp := scaleUpExperiment(1, 2*time.Minute)
+
+	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.requeuedReasons) != 0 || len(store.terminalReasons) != 1 || store.terminalReasons[0] != string(domain.EvictionScaleUpTimeout) {
+		t.Fatalf("requeued %v, terminal %v, want the job ended as scale_up_timeout", store.requeuedReasons, store.terminalReasons)
 	}
 }
 
@@ -103,7 +126,7 @@ func TestScaleUpDeadlineNotYetPastDoesNotEvict(t *testing.T) {
 }
 
 func TestScaleUpEarlyExitOnTerminalSchedulingReason(t *testing.T) {
-	store := &lifecycleStore{}
+	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		phase: workload.JobPhasePending, scheduledNodes: 0,
 		schedulingReason:  "NotTriggerScaleUp: max node group size reached",
@@ -124,7 +147,7 @@ func TestScaleUpEarlyExitOnTerminalSchedulingReason(t *testing.T) {
 }
 
 func TestScaleUpDeadlinePhaseIndependentPartialGangWhileRunning(t *testing.T) {
-	store := &lifecycleStore{}
+	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		// Aggregate phase already reads Running (one landed rank), but only 2 of 3 ranks bound.
 		phase: workload.JobPhaseRunning, scheduledNodes: 2,
@@ -206,26 +229,6 @@ func TestScaleUpDeadlineNonAutoscalerClusterFallsBackToStuckPending(t *testing.T
 	}
 }
 
-func TestScaleUpDeadlineInfraRequeueCountUntouchedOnFailover(t *testing.T) {
-	store := &lifecycleStore{infraCeiling: 3}
-	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
-		autoscalerEnabled: map[string]bool{"cluster-a": true},
-		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
-	}
-	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
-		WithStuckPendingTimeout(10 * time.Minute).
-		WithScaleUpTimeout(1 * time.Minute)
-	exp := scaleUpExperiment(1, 2*time.Minute)
-
-	if err := w.reconcileOne(context.Background(), exp, backend.autoscalerEnabled, backend.clusterIDs); err != nil {
-		t.Fatal(err)
-	}
-	if store.infraRequeues != 0 {
-		t.Fatalf("infra_requeue_count incremented on scale-up failover: got %d, want 0", store.infraRequeues)
-	}
-}
-
 func TestScaleUpDeadlineDisabledWithoutOptIn(t *testing.T) {
 	store := &lifecycleStore{}
 	backend := &scaleUpBackend{
@@ -253,7 +256,7 @@ func TestScaleUpDeadlineDisabledWithoutOptIn(t *testing.T) {
 // deadline still fires once it has genuinely passed.
 func TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound(t *testing.T) {
 	notFound := false
-	store := &lifecycleStore{}
+	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		phase: workload.JobPhasePending, phaseDetailFound: &notFound,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},

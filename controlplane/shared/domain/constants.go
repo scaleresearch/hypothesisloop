@@ -229,9 +229,8 @@ const (
 	// EvictionScaleUpTimeout marks a job whose gang never fully bound (scheduled_nodes < Nodes())
 	// within its placement deadline on an autoscaler-enabled cluster — either the deadline
 	// passed, or the runtime reported a terminal scheduling_reason (e.g. "NotTriggerScaleUp: max
-	// node group size reached") before that. An infrastructure fault, requeued for free, but
-	// recorded as a tried_clusters failover rather than spending infra_requeue_count — see
-	// ResolveTermination's triedClusterID and autoscaler.md.
+	// node group size reached") before that. An infrastructure fault, requeued for free on the
+	// same allowance as every other, with the cluster kept in the job's tried_clusters.
 	EvictionScaleUpTimeout EvictionReason = "scale_up_timeout"
 
 	// EvictionClusterWithdrawn is a job requeued because the cluster it was placed on stopped

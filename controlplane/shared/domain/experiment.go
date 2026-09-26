@@ -7,11 +7,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// TriedCluster records one speculative-submit failover for a job: the cluster it gave up on
-// (by runtime-derived cluster_id, never cluster_name) and when. See Experiment.TriedClusters.
+// TriedCluster records one placement of a job that the environment failed: the cluster it was on
+// (by runtime-derived cluster_id, never cluster_name), when, and the code of the eviction reason
+// that ended it. Reason is empty on entries written before it was kept, which were all scale-up
+// failovers. See Experiment.TriedClusters.
 type TriedCluster struct {
 	ClusterID string    `json:"cluster_id"`
 	At        time.Time `json:"at"`
+	Reason    string    `json:"reason,omitempty"`
 }
 
 // Experiment is an agent-submitted job within a platform experiment.
@@ -110,11 +113,12 @@ type Experiment struct {
 	// (RetriesUsed): AttemptCount is the generation counter that makes each attempt a distinct
 	// desired state, so it must advance on every requeue, while the budget must not.
 	InfraRequeueCount int `json:"infra_requeue_count"`
-	// TriedClusters is this job's own speculative-failover history: every cluster (by
-	// runtime-derived cluster_id) a scale-up attempt for this job timed out or was terminally
-	// refused on, with the time it was appended. Candidate selection excludes any entry still
-	// within scheduler.tried_cluster_ttl_seconds — this is the failover budget; there is no
-	// separate counter. Never cleared, only grown; stale entries simply age out of the TTL check.
+	// TriedClusters is this job's own history of placements the environment failed: every
+	// cluster (by runtime-derived cluster_id) it was requeued from for an infrastructure fault, a
+	// scale-up that timed out or was refused included, with the time it was appended. Placement
+	// leaves out any entry still within scheduler.tried_cluster_ttl_seconds, which is a delay and
+	// no bound: what bounds the attempts is InfraRequeueCount, spent by the same write that
+	// appends here. Never cleared, only grown; stale entries simply age out of the TTL check.
 	//
 	// Kept out of every answer of the API: a cluster's id is the name its settings are kept
 	// under, and a job tried on a shared cluster would show its org the id of a cluster another

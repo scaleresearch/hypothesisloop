@@ -41,7 +41,7 @@ type JobStatusStore interface {
 	// ResolveTermination atomically sets status and eviction_reason together in one UPDATE,
 	// guarded on from. Used by evictNeverStarted so an eviction can never persist a status
 	// change with its reason lost (e.g. a crash between the two separate writes).
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string, triedClusterID string) (domain.Termination, error)
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// RequeueForRetry returns a failed gang that is still SUBMITTED or RUNNING to QUEUED for a
 	// fresh whole-gang attempt and spends one of its max_retries, both in one guarded UPDATE.
 	// Returns false when the budget is exhausted or another writer got there first — see retryGang for why gangs are the only

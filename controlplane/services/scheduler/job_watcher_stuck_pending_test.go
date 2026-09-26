@@ -107,7 +107,7 @@ func TestAClustersOwnStuckPendingTimeoutReplacesTheGlobalOne(t *testing.T) {
 // The scale-up deadline of an autoscaler cluster is a separate setting with its own failover. A
 // stuck-pending override on the same cluster does not stretch it.
 func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {
-	store := &settingsStore{lifecycleStore: &lifecycleStore{}, settings: stuckPendingOverride(900)}
+	store := &settingsStore{lifecycleStore: &lifecycleStore{infraCeiling: 1}, settings: stuckPendingOverride(900)}
 	backend := &scaleUpBackend{
 		phase: workload.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},

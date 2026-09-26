@@ -246,7 +246,10 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 }
 
 // RecentlyTriedClusters reports the set of cluster_ids ANY experiment failed a speculative
-// scale-up attempt on within the last ttl — not just this job's own tried_clusters. autoscaler.md
+// scale-up attempt on within the last ttl — not just this job's own tried_clusters. Only those
+// two reasons count, and an entry from before reasons were kept, which was one of them: a job's
+// other infrastructure faults are in its tried list for its own next placement and say nothing
+// about what the cluster can do for another job. autoscaler.md
 // (line 109): "don't line up other jobs behind the same dead node group" needs no state of its
 // own, since every failover is already recorded on the failing job's row; this reads across all
 // of them rather than adding a second per-cluster ledger.
@@ -258,7 +261,8 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 	rows, err := s.pool.pool.Query(ctx, `
 		SELECT DISTINCT t.entry->>'cluster_id'
 		FROM experiments, jsonb_array_elements(tried_clusters) AS t(entry)
-		WHERE (t.entry->>'at')::timestamptz > $1`, since)
+		WHERE (t.entry->>'at')::timestamptz > $1
+		  AND COALESCE(t.entry->>'reason', '') IN ('', $2, $3)`, since, string(domain.EvictionScaleUpTimeout), string(domain.EvictionFlavorMismatch))
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
 	}
