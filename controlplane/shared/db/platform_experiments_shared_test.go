@@ -73,14 +73,39 @@ func TestSharingAPlatformExperimentIsReadWhereverItIsPlacedAndListed(t *testing.
 	}
 	another := domain.TenantScope{OrgIDs: []string{otherOrg}}
 	everyOrg := domain.TenantScope{AllOrgs: true}
+	yes, no := true, false
+	owner := domain.TenantScope{OrgIDs: []string{orgID}}
+	both := []string{kept, shown}
+	slices.Sort(both)
 	if got := listed(PlatformExperimentsFilter{Scope: another}); len(got) != 0 {
-		t.Fatalf("another org's own listing: got = %v, want none: a listing is the caller's own", got)
+		t.Fatalf("another org's scope alone: got = %v, want none", got)
 	}
-	if got := listed(PlatformExperimentsFilter{Scope: everyOrg, Shared: true}); !slices.Equal(got, []string{shown}) {
-		t.Fatalf("the shared ones: got = %v, want = [%s]", got, shown)
+	// What an account lists: its own and the shared ones, in one listing with one count.
+	if got := listed(PlatformExperimentsFilter{Scope: another, WithShared: true}); !slices.Equal(got, []string{shown}) {
+		t.Fatalf("another org's listing: got = %v, want = [%s], the shared one beside its own none", got, shown)
 	}
-	if got := listed(PlatformExperimentsFilter{Scope: another, Shared: true}); len(got) != 0 {
-		t.Fatalf("the shared ones within another org's own scope: got = %v, want none", got)
+	elsewhere := domain.TenantScope{OrgIDs: []string{otherOrg}, ProjectID: "prj-none-" + suffix}
+	if got := listed(PlatformExperimentsFilter{Scope: elsewhere, WithShared: true}); !slices.Equal(got, []string{shown}) {
+		t.Fatalf("another org's listing of one project: got = %v, want = [%s]: a shared one is in every project's", got, shown)
+	}
+	if got := listed(PlatformExperimentsFilter{Scope: owner, WithShared: true}); !slices.Equal(got, both) {
+		t.Fatalf("the owner's listing: got = %v, want = %v, each once", got, both)
+	}
+	if got := listed(PlatformExperimentsFilter{Scope: owner, WithShared: true, Shared: &yes}); !slices.Equal(got, []string{shown}) {
+		t.Fatalf("the owner's listing, shared only: got = %v, want = [%s]", got, shown)
+	}
+	if got := listed(PlatformExperimentsFilter{Scope: owner, WithShared: true, Shared: &no}); !slices.Equal(got, []string{kept}) {
+		t.Fatalf("the owner's listing without the shared: got = %v, want = [%s]", got, kept)
+	}
+	if got := listed(PlatformExperimentsFilter{Scope: another, WithShared: true, Shared: &no}); len(got) != 0 {
+		t.Fatalf("another org's listing without the shared: got = %v, want none", got)
+	}
+	if got := listed(PlatformExperimentsFilter{Scope: everyOrg, WithShared: true, Shared: &yes}); !slices.Equal(got, []string{shown}) {
+		t.Fatalf("staff's listing, shared only: got = %v, want = [%s]", got, shown)
+	}
+	// A token bound to one platform experiment is given no shared ones.
+	if got := listed(PlatformExperimentsFilter{Scope: another, Shared: &yes}); len(got) != 0 {
+		t.Fatalf("the shared ones within another org's scope alone: got = %v, want none", got)
 	}
 	// What a listing narrowed to the shared one is given: every org, that platform experiment.
 	narrowed := domain.TenantScope{AllOrgs: true, PlatformExperimentID: shown}
@@ -97,7 +122,7 @@ func TestSharingAPlatformExperimentIsReadWhereverItIsPlacedAndListed(t *testing.
 	if shared(shown) {
 		t.Fatal("a platform experiment is still shared after staff took it back")
 	}
-	if got := listed(PlatformExperimentsFilter{Scope: everyOrg, Shared: true}); len(got) != 0 {
-		t.Fatalf("the shared ones after the unshare: got = %v, want none", got)
+	if got := listed(PlatformExperimentsFilter{Scope: another, WithShared: true}); len(got) != 0 {
+		t.Fatalf("another org's listing after the unshare: got = %v, want none", got)
 	}
 }

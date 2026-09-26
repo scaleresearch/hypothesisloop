@@ -143,20 +143,23 @@ func TestAListingReachesASharedPlatformExperimentOnlyWhenItIsNamed(t *testing.T)
 		t.Errorf("platform experiments an unnarrowed listing draws from: got = %v, %v, want only the caller's own pe-a", ids, err)
 	}
 
-	everyOrg := domain.TenantScope{AllOrgs: true}
+	// The scope stays the caller's own; the shared ones are listed beside it for an account that reads.
+	inProject := own
+	inProject.ProjectID = "prj-a"
 	for name, tc := range map[string]struct {
-		ctx    context.Context
-		shared bool
-		want   domain.TenantScope
+		ctx        context.Context
+		projectID  string
+		want       domain.TenantScope
+		withShared bool
 	}{
-		"the caller's own platform experiments":         {auth.WithRead(user, ""), false, own},
-		"the shared ones":                               {auth.WithRead(user, ""), true, everyOrg},
-		"the shared ones, asked for by what is no read": {user, true, own},
-		"the shared ones, asked for by an agent":        {auth.WithRead(auth.WithPrincipal(context.Background(), callers["agent in pe-a"]), ""), true, callers["agent in pe-a"].Scope()},
+		"an account's listing":                 {auth.WithRead(user, ""), "", own, true},
+		"an account's listing of one project":  {auth.WithRead(user, ""), "prj-a", inProject, true},
+		"an account's request that is no read": {user, "", own, false},
+		"an agent's listing":                   {auth.WithRead(auth.WithPrincipal(context.Background(), callers["agent in pe-a"]), ""), "", callers["agent in pe-a"].Scope(), false},
 	} {
-		got, err := access.PlatformExperimentListScope(tc.ctx, "", tc.shared)
-		if err != nil || !sameScope(got, tc.want) {
-			t.Errorf("%s: scope = %+v, %v, want = %+v", name, got, err, tc.want)
+		got, withShared, err := access.PlatformExperimentListScope(tc.ctx, tc.projectID)
+		if err != nil || !sameScope(got, tc.want) || withShared != tc.withShared {
+			t.Errorf("%s: scope = %+v, with shared = %v, %v, want = %+v, %v", name, got, withShared, err, tc.want, tc.withShared)
 		}
 	}
 }

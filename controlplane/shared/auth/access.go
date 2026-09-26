@@ -32,7 +32,7 @@ type Placement interface {
 // on an id with no row and get the handler's own answer for it.
 //
 // One thing reaches past a caller's scope: a platform experiment staff shared is read by every
-// account, and only read (reaches). Every write to it, and every credential of it, is answered
+// account, and only read (reaches). It is listed beside the caller's own in every project. Every write to it, and every credential of it, is answered
 // to another org's caller as for any platform experiment of another org.
 type Access struct {
 	placement Placement
@@ -376,17 +376,16 @@ func (a *Access) ListScope(ctx context.Context, projectID string) (domain.Tenant
 }
 
 // PlatformExperimentListScope is ListScope for the listing of platform experiments themselves.
-// Asked for the shared ones, an account lists them across every org; the listing's own filter
-// keeps it to the shared ones, so a token bound to one platform experiment still sees no other.
-func (a *Access) PlatformExperimentListScope(ctx context.Context, projectID string, shared bool) (domain.TenantScope, error) {
+// withShared says the listing also holds the ones staff shared, whatever the scope: an account
+// that reads finds them beside its own in every project. A token bound to one platform
+// experiment lists no other.
+func (a *Access) PlatformExperimentListScope(ctx context.Context, projectID string) (scope domain.TenantScope, withShared bool, err error) {
 	p, err := principal(ctx)
 	if err != nil {
-		return domain.TenantScope{}, err
+		return domain.TenantScope{}, false, err
 	}
-	if shared && readsShared(ctx, p) {
-		return domain.TenantScope{AllOrgs: true, ProjectID: projectID}, nil
-	}
-	return a.ListScope(ctx, projectID)
+	scope, err = a.ListScope(ctx, projectID)
+	return scope, readsShared(ctx, p), err
 }
 
 // PlatformExperimentIDs lists the platform experiments a listing may draw from, for a store that

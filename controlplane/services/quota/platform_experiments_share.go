@@ -68,7 +68,7 @@ func RegisterShareHuma(doc *apidocs.Doc, store Sharing, logger *zap.Logger) {
 		Summary: "Show a platform experiment to every account", Tags: []string{"platform-experiments"},
 		Description: "Staff only. Every account then reads the platform experiment and everything in it through the same read routes as its own: " +
 			"its agents, jobs, hypotheses, findings, comments, metrics, logs, data listings, results and its watch stream. Nobody outside its org writes to it " +
-			"or is handed a credential of it, and it appears in no listing but GET /platform-experiments?shared=true. " +
+			"or is handed a credential of it, and GET /platform-experiments lists it for every account beside the account's own. " +
 			"What its jobs and agents wrote is shown as it is, so share only what may be read by anyone. Sharing a shared one changes nothing.",
 	}, set(true))
 	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{

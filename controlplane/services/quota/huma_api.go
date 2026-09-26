@@ -225,18 +225,22 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
 		Summary: "List platform experiments", Tags: []string{"platform-experiments"},
-		Description: "Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
+		Description: "The caller's own platform experiments, within ?project_id when given, and with them the ones " +
+			"staff shared with every account: those are in every project's listing, marked shared, read like the " +
+			"caller's own and written by their own org alone. ?shared=true keeps only the shared ones, ?shared=false " +
+			"leaves them out. A token bound to one platform experiment lists that one. " +
+			"Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
 			"?sort selects order: created_at, starts_at, name, or status, optionally prefixed with " +
 			"- for descending (default -created_at). Total match count is returned in the " +
 			"X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		Status    string `query:"status" doc:"draft, open, running or closed."`
 		Search    string `query:"q" doc:"Case-insensitive substring match against name and description."`
-		ProjectID string `query:"project_id" doc:"Only the platform experiments of this project."`
+		ProjectID string `query:"project_id" doc:"Only the platform experiments of this project, and the shared ones."`
 		Limit     int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset    int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort      string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
-		Shared    bool   `query:"shared" doc:"The platform experiments staff shared with every account, of whatever org, in place of the caller's own. Each can be read and not written."`
+		Shared    string `query:"shared" enum:"true,false" doc:"true: only the platform experiments staff shared with every account. false: none of them. Left out, the listing holds both."`
 	}) (*struct {
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
@@ -250,18 +254,22 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Limit < 0 || in.Offset < 0 {
 			return nil, huma.Error400BadRequest("limit and offset must not be negative")
 		}
-		scope, err := access.PlatformExperimentListScope(ctx, in.ProjectID, in.Shared)
+		scope, withShared, err := access.PlatformExperimentListScope(ctx, in.ProjectID)
 		if err != nil {
 			return nil, err
 		}
 		filter := db.PlatformExperimentsFilter{
-			Shared: in.Shared,
-			Scope:  scope,
-			Status: in.Status,
-			Search: in.Search,
-			Limit:  in.Limit,
-			Offset: in.Offset,
-			Sort:   in.Sort,
+			Scope:      scope,
+			WithShared: withShared,
+			Status:     in.Status,
+			Search:     in.Search,
+			Limit:      in.Limit,
+			Offset:     in.Offset,
+			Sort:       in.Sort,
+		}
+		if in.Shared != "" {
+			only := in.Shared == "true"
+			filter.Shared = &only
 		}
 		pes, err := peh.svc.store.ListPlatformExperiments(ctx, filter)
 		if err != nil {

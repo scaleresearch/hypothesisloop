@@ -173,8 +173,11 @@ type PlatformExperimentsFilter struct {
 	Search string
 	// Scope keeps the platform experiments the caller may see.
 	Scope domain.TenantScope
-	// Shared keeps the ones staff shared with every account.
-	Shared bool
+	// WithShared also keeps the ones staff shared with every account, whatever Scope says: an
+	// account lists those beside its own.
+	WithShared bool
+	// Shared, when set, keeps only the shared ones or only the others.
+	Shared *bool
 	Limit  int
 	Offset int
 	// Sort selects the ORDER BY column and direction, as "field" (ascending) or "-field"
@@ -226,10 +229,13 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 		clauses = append(clauses, fmt.Sprintf("(pe.name ILIKE $%d OR pe.description ILIKE $%d)", n, n))
 		args = append(args, "%"+filter.Search+"%")
 	}
-	if filter.Shared {
-		clauses = append(clauses, "pe.shared")
+	if filter.Shared != nil {
+		clauses = append(clauses, map[bool]string{true: "pe.shared", false: "NOT pe.shared"}[*filter.Shared])
 	}
 	if clause, scoped := tenantClause(filter.Scope, "pe.id", args); clause != "" {
+		if filter.WithShared {
+			clause = "(" + clause + " OR pe.shared)"
+		}
 		clauses, args = append(clauses, clause), scoped
 	}
 	return clauses, args
