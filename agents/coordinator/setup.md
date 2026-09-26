@@ -82,8 +82,10 @@ silently improvise.
    `hl-admin github connect ORG INSTALLATION_ID`. `GET /orgs/{id}/github-repositories` lists what
    an experiment of the org may name, and the experiment names one as `repository` (owner/name)
    when it is created (step 2). No address and no git token is handed to anyone: an agent reads
-   the address from its platform experiment (`repository_url` in `hl platform-experiments get`)
-   and does not start while the experiment names no repository.
+   the address from its platform experiment (`repository_url` in `hl platform-experiments get`).
+   An experiment may name none: its agents then start in an empty directory, `hl code push`
+   stores each commit with the platform as a git bundle, a job's `code_ref` names that commit
+   and `hl-clone` fetches it, in a job and on any agent's machine of the experiment.
    **That repository is a separate repo, and no live mirror of this one** — after editing
    `seed/`, push it to the repository's default branch too, and diff-check before spawning
    agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
@@ -156,8 +158,7 @@ platform experiment's coordinator token and briefed with
 `agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
 for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
-default applies. Both keys need `repository` in the request (`no_repository` without one) and are
-read from the request only. Creating makes the experiment and no agent. With a hosted coordinator
+default applies. Both keys are read from the request only. Creating makes the experiment and no agent. With a hosted coordinator
 and hosted agents, creating the experiment, adding the agents and `hl platform-experiments start`
 is all there is to do: the coordinator keeps the
 description true to what is learned and writes its findings as the experiment's summary
@@ -291,9 +292,8 @@ agent runs: flavor and model are resolved at that moment and never again. One ca
 
 Add `--hosted` and the platform runs them: its launcher starts one machine per agent from the
 platform's own agent image, tells the agent to take its last turn when the experiment closes or
-the agent is cut, and takes the machine down two minutes after. It is refused (`no_repository`)
-while the project has no repository attached, since a hosted agent works in the project's
-repository, and (`max_hosted_reached`) beyond the number of machines the platform runs for one
+the agent is cut, and takes the machine down two minutes after. It is refused
+(`max_hosted_reached`) beyond the number of machines the platform runs for one
 platform experiment, which `hl platform-experiments get` shows as `max_hosted` and which counts
 hosted agents of every role and a hosted coordinator. A machine whose harness exits, that the
 provider takes away, that does not come up in time, or whose harness stops reporting progress
