@@ -384,8 +384,28 @@ kubeconfig and no credential of one. A control plane started with `make dev` or
 the settings must name addresses that cluster reaches. `API_URL` and `METRICS_URL` can also be
 given to the install command directly, and `data_store.endpoint` cannot.
 
-**A Kubernetes cluster.** Needs a checkout of this repository, `helm`, `kubectl` pointed at the
-cluster, and the images in a registry every node pulls from.
+**A Kubernetes cluster.** Needs `helm`, `kubectl` pointed at the cluster, and the images in a
+registry every node pulls from. `hl cluster add my-cluster` prints the command:
+
+```bash
+hl cluster token 'my-cluster' --org 'org-1' | helm upgrade --install hypothesisloop-cluster-agent \
+  'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' --version '0.1.0+the-tag-that-was-pushed' \
+  --namespace hypothesisloop --create-namespace \
+  --set-string 'clusterName=my-cluster' \
+  --set-string 'apiURL=https://your-control-plane:8081' --set-string 'metricsURL=https://your-control-plane:8084' \
+  --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed' \
+  --set-file runtimeToken=/dev/stdin
+```
+
+`make images REGISTRY=...` pushes the chart beside the images, under `charts/` and at a version
+that carries their tag, so the command needs no checkout. It installs the release into the
+namespace `hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it
+again upgrades the release. `--kube-context` names a context other than the current one. helm
+reads the registry with the credentials of `helm registry login`, and the nodes pull the images
+with their own.
+
+From a checkout, `make cluster-agent-up` installs the same chart from `runtime/k8s/infra/chart`
+and is what local development uses:
 
 ```bash
 RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agent-up CLUSTER='my-cluster' \
@@ -394,15 +414,12 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agen
   KUBECONFIG_PATH="$HOME/.kube/config" KUBE_CONTEXT='my-cluster'
 ```
 
-`REGISTRY` and `TAG` name what `make images REGISTRY=...` pushed, and the printed command
-carries the deployment's own. Left out, they are the local development registry and the tag of
-this checkout, which only the local cluster pulls.
-`KUBECONFIG_PATH` and `KUBE_CONTEXT` default to `~/.kube/config` and its current context.
-The command installs the `runtime/k8s/infra/chart` helm release into the namespace
-`hypothesisloop`: a cluster-agent Deployment and a node-agent DaemonSet. Running it again
-upgrades the release. A cluster that holds these objects from before the chart existed (applied
-as plain manifests, no helm release) refuses the install: delete the old
-`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
+Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
+which only the local cluster pulls. A cluster that holds the runtime's objects from before the
+chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
+`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first. A
+`hypothesisloop-jobs` namespace an earlier agent created is taken over by `make
+cluster-agent-up`; the helm command refuses it, so delete it first.
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
@@ -463,9 +480,9 @@ images and `/var/lib/hypothesisloop`.
 Without a container, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent`
 on the node (it needs Go and gcc there) and runs with the same three variables.
 
-`RUNTIME_TOKEN` goes in the environment, as above, and reaches helm on stdin: a token given as
-a make argument or a flag is readable in the process list. Both commands read the token with
-`hl cluster token` when they run, so the token is in no scrollback and no shell history.
+The runtime token reaches helm on stdin and the bare-metal agent through the environment: a
+token given as a make argument or a flag is readable in the process list. Every command reads
+it with `hl cluster token` when it runs, so the token is in no scrollback and no shell history.
 
 `hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
 accelerators under the names its drivers publish. Repeat for every additional cluster.

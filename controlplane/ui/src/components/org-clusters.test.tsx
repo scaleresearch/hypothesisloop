@@ -222,7 +222,7 @@ describe('a cluster\'s start command', () => {
     const lab = (await screen.findByRole('cell', { name: /^lab/ })).closest('tr')!
     await userEvent.click(within(lab).getByRole('button', { name: 'Show start command' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab')
-    expect((await screen.findByTestId('secret')).textContent).toContain(`hl cluster token 'lab' --org 'org_a')" make cluster-agent-up CLUSTER='lab'`)
+    expect((await screen.findByTestId('secret')).textContent).toContain(`hl cluster token 'lab' --org 'org_a' | helm upgrade --install hypothesisloop-cluster-agent `)
     expect(screen.getByText(/brings it back/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/never again|only time/)
   })
@@ -248,7 +248,9 @@ describe('adding a cluster', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'edge')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      `RUNTIME_TOKEN="$(hl cluster token 'edge' --org 'org_a')" make cluster-agent-up CLUSTER='edge' API_URL='http://api.cluster.test' METRICS_URL='http://metrics.cluster.test' REGISTRY='registry.cluster.test/images' TAG='abc1234'`,
+      `hl cluster token 'edge' --org 'org_a' | helm upgrade --install hypothesisloop-cluster-agent 'oci://registry.cluster.test/images/charts/hypothesisloop-cluster-agent' --version '0.1.0+abc1234' --namespace hypothesisloop --create-namespace ` +
+      `--set-string 'clusterName=edge' --set-string 'apiURL=http://api.cluster.test' --set-string 'metricsURL=http://metrics.cluster.test' ` +
+      `--set-string 'images.registry=registry.cluster.test/images' --set-string 'images.tag=abc1234' --set-file runtimeToken=/dev/stdin`,
     )
     expect(document.body.textContent).not.toContain('hls_')
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
@@ -279,10 +281,10 @@ describe('adding a cluster', () => {
     show()
     await userEvent.type(await screen.findByLabelText('Cluster name'), 'edge')
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
-    expect((await screen.findByTestId('secret')).textContent).toContain('make cluster-agent-up')
+    expect((await screen.findByTestId('secret')).textContent).toContain('helm upgrade --install')
     await userEvent.click(screen.getByRole('button', { name: 'Bare-metal node' }))
     expect(screen.getByTestId('secret').textContent).toContain('hypothesisloop-bare-agent:')
-    expect(screen.getByTestId('secret').textContent).not.toContain('METRICS_URL')
+    expect(screen.getByTestId('secret').textContent).not.toContain('metricsURL')
     expect(registerCluster).toHaveBeenCalledTimes(1)
   })
 

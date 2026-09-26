@@ -35,11 +35,12 @@ const KIND_HINT: Record<Kind, string> = {
 
 const DETACH_NODE = 'docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent'
 
-// Both commands read the runtime token with `hl cluster token` when they run, as the command
-// `hl cluster add` prints does, so the token is on no page and in no shell history.
+// Both commands read the runtime token with `hl cluster token` when they run, as the commands
+// `hl cluster add` prints do (cli/accounts.go), so the token is on no page and in no shell history.
 function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): string {
   const name = shellQuote(cluster.name)
-  const token = `RUNTIME_TOKEN="$(hl cluster token ${name} --org ${shellQuote(orgID)})"`
+  const read = `hl cluster token ${name} --org ${shellQuote(orgID)}`
+  const token = `RUNTIME_TOKEN="$(${read})"`
   const api = `API_URL=${shellQuote(cluster.api_url)}`
   if (kind === 'bare-metal') {
     // The same command `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalCommand).
@@ -48,7 +49,17 @@ function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): st
       '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
       `-e CLUSTER_NAME=${name} -e ${api} -e RUNTIME_TOKEN ${image}`
   }
-  return `${token} make cluster-agent-up CLUSTER=${name} ${api} METRICS_URL=${shellQuote(cluster.metrics_url)} REGISTRY=${shellQuote(cluster.registry)} TAG=${shellQuote(cluster.image_tag)}`
+  const set = (key: string, value: string) => ` --set-string ${shellQuote(`${key}=${helmValue(value)}`)}`
+  return `${read} | helm upgrade --install hypothesisloop-cluster-agent ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ` +
+    `--version ${shellQuote(`0.1.0+${cluster.image_tag}`)} --namespace hypothesisloop --create-namespace` +
+    set('clusterName', cluster.name) + set('apiURL', cluster.api_url) + set('metricsURL', cluster.metrics_url) +
+    set('images.registry', cluster.registry) + set('images.tag', cluster.image_tag) +
+    ' --set-file runtimeToken=/dev/stdin'
+}
+
+// helm splits a --set-string value on commas and reads a backslash as an escape.
+function helmValue(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/,/g, '\\,')
 }
 
 /**
@@ -133,8 +144,10 @@ export function OrgClusters({ manage }: { manage: boolean }) {
           note={<>
             {kind === 'kubernetes' ? (
               <>
-                Run it from a checkout of the repository, with <span className="font-mono">kubectl</span> pointed
-                at the cluster and <span className="font-mono">hl</span> signed in as an owner of {org.name}.
+                Run it with <span className="font-mono">helm</span> installed,{' '}
+                <span className="font-mono">kubectl</span> pointed at the cluster and{' '}
+                <span className="font-mono">hl</span> signed in as an owner of {org.name}. To detach the
+                cluster: <span className="font-mono">helm uninstall hypothesisloop-cluster-agent -n hypothesisloop</span>
               </>
             ) : (
               <>

@@ -192,11 +192,25 @@ func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
 	if strings.Contains(stdout+stderr, "hls_cnVudGltZQ") {
 		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
 	}
-	want := `RUNTIME_TOKEN="$(hl cluster token 'gpu-east' --org 'org-1')" make cluster-agent-up CLUSTER='gpu-east' ` +
-		`API_URL='https://api.example/a?b=1&c=$(id)' METRICS_URL='https://metrics.example/it'\''s' ` +
-		`REGISTRY='registry.example/images' TAG='abc1234'` + "\n"
+	want := `hl cluster token 'gpu-east' --org 'org-1' | helm upgrade --install hypothesisloop-cluster-agent ` +
+		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' --version '0.1.0+abc1234' --namespace hypothesisloop --create-namespace ` +
+		`--set-string 'clusterName=gpu-east' --set-string 'apiURL=https://api.example/a?b=1&c=$(id)' --set-string 'metricsURL=https://metrics.example/it'\''s' ` +
+		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234' --set-file runtimeToken=/dev/stdin` + "\n"
 	if stdout != want {
 		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered, each quoted", stdout, want)
+	}
+}
+
+// helm splits a --set-string value on commas, so an address that holds one would install with
+// half of it.
+func TestClusterAddEscapesWhatHelmWouldSplitAValueOn(t *testing.T) {
+	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?ids=1,2","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
+	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, `--set-string 'apiURL=https://api.example/a?ids=1\,2' `) {
+		t.Fatalf("stdout = %q, want the comma escaped", stdout)
 	}
 }
 

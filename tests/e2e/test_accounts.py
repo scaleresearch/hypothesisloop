@@ -252,11 +252,14 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
 
     command = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
-        rf"""RUNTIME_TOKEN="\$\(hl cluster token '{name}' --org '{a.org_id}'\)" make cluster-agent-up CLUSTER='{name}' """
-        r"API_URL='(http://\S+:8081)' METRICS_URL='(http://\S+:8084)' REGISTRY='([^' ]+)' TAG='([^' ]+)'\n", command)
+        rf"hl cluster token '{name}' --org '{a.org_id}' \| helm upgrade --install hypothesisloop-cluster-agent "
+        r"'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' --version '0\.1\.0\+([^' ]+)' --namespace hypothesisloop --create-namespace "
+        rf"--set-string 'clusterName={name}' --set-string 'apiURL=(http://\S+:8081)' --set-string 'metricsURL=(http://\S+:8084)' "
+        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)' --set-file runtimeToken=/dev/stdin\n", command)
     assert match, f"hl cluster add printed {command!r}"
     assert "hls_" not in command, "hl cluster add prints the runtime token, which then sits in scrollback and shell history"
-    api_url, metrics_url, registry, image_tag = match.groups()
+    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag = match.groups()
+    assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"
     token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
     unregistered = a.api.hl_expect("cluster", "token", f"never-{a.marker}"[:40])

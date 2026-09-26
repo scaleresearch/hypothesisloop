@@ -403,13 +403,15 @@ func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 Registers the cluster name for the org and prints the one command that attaches it, with the
 addresses its agent reaches the platform at and the registry and tag of its images filled in.
 The command reads the cluster's runtime token with hl cluster token when it runs, so the token is
-in no terminal scrollback and no shell history; where hl is not installed, set RUNTIME_TOKEN to
-what hl cluster token NAME prints. Adding a name the org already has prints the same command
-again. A cluster takes its own org's jobs only.
+in no terminal scrollback and no shell history; where hl is not installed, hand the command
+what hl cluster token NAME prints in its place. Adding a name the org already has prints the
+same command again. A cluster takes its own org's jobs only.
 
-Without --bare-metal the command is for a Kubernetes cluster: run it from a checkout of the
-platform with helm installed and kubectl pointed at the cluster (or with KUBECONFIG_PATH=...
-KUBE_CONTEXT=... added).
+Without --bare-metal the command is for a Kubernetes cluster: run it with helm installed and
+kubectl pointed at the cluster (add --kube-context to name another). It installs the runtime's
+chart from the registry, or upgrades it. helm uninstall hypothesisloop-cluster-agent -n
+hypothesisloop detaches the cluster again: it removes the cluster here, where its jobs go back
+to the queue, and stops what it runs there.
 
 With --bare-metal it is for one node with docker, which is a cluster of its own: run it on the
 node. It starts the agent as a container that comes back after a reboot and starts jobs as
@@ -438,10 +440,28 @@ runs. hl cluster remove NAME does the same from this side, and the agent then st
 		fmt.Fprintln(stdout, bareMetalCommand(id, registered))
 		return 0
 	}
-	fmt.Fprintf(stdout, "RUNTIME_TOKEN=\"$(hl cluster token %s --org %s)\" make cluster-agent-up CLUSTER=%s API_URL=%s METRICS_URL=%s REGISTRY=%s TAG=%s\n",
-		shellQuote(registered.Name), shellQuote(id), shellQuote(registered.Name), shellQuote(registered.APIURL), shellQuote(registered.MetricsURL),
-		shellQuote(registered.Registry), shellQuote(registered.ImageTag))
+	fmt.Fprintln(stdout, kubernetesCommand(id, registered))
 	return 0
+}
+
+// kubernetesCommand installs the runtime chart that make images pushed beside the images, at
+// the version that carries their tag. helm reads the runtime token on stdin.
+func kubernetesCommand(orgID string, registered registeredCluster) string {
+	set := func(key, value string) string {
+		return " --set-string " + shellQuote(key+"="+helmValue(value))
+	}
+	return fmt.Sprintf("hl cluster token %s --org %s | helm upgrade --install hypothesisloop-cluster-agent %s --version %s --namespace hypothesisloop --create-namespace",
+		shellQuote(registered.Name), shellQuote(orgID),
+		shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"), shellQuote("0.1.0+"+registered.ImageTag)) +
+		set("clusterName", registered.Name) + set("apiURL", registered.APIURL) + set("metricsURL", registered.MetricsURL) +
+		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) +
+		" --set-file runtimeToken=/dev/stdin"
+}
+
+// helmValue writes text as one value of helm's --set-string, which splits on commas and reads a
+// backslash as an escape.
+func helmValue(text string) string {
+	return strings.NewReplacer(`\`, `\\`, ",", `\,`).Replace(text)
 }
 
 // bareMetalCommand starts the agent of a bare-metal node as a container. It is handed the

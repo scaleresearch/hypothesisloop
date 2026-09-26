@@ -763,7 +763,7 @@ async function scenarios(browser) {
   const command = await page.getByTestId('secret').innerText()
   assert.match(
     command,
-    new RegExp(`^RUNTIME_TOKEN="\\$\\(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}'\\)" make cluster-agent-up CLUSTER='${clusterName}' API_URL='https?://[^']+' METRICS_URL='https?://[^']+' REGISTRY='[^']+' TAG='[^']+'$`),
+    new RegExp(`^hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}' \\| helm upgrade --install hypothesisloop-cluster-agent 'oci://[^']+/charts/hypothesisloop-cluster-agent' --version '0\\.1\\.0\\+[^']+' --namespace hypothesisloop --create-namespace --set-string 'clusterName=${clusterName}' --set-string 'apiURL=https?://[^']+' --set-string 'metricsURL=https?://[^']+' --set-string 'images\\.registry=[^']+' --set-string 'images\\.tag=[^']+' --set-file runtimeToken=/dev/stdin$`),
     'the command is the one hl cluster add prints, with the addresses the platform answered with',
   )
   const registered = await (await api(await tokenOf(ada), `/orgs/${adaMe.orgs[0].id}/clusters`, 'POST', { name: clusterName })).json()
@@ -771,7 +771,7 @@ async function scenarios(browser) {
   assert.match(runtimeToken, /^hls_/)
   secrets.add(runtimeToken)
   assert.ok(!(await page.content()).includes(runtimeToken), 'the runtime token is nowhere on the page')
-  assert.ok(command.includes(`API_URL='${registered.api_url}' METRICS_URL='${registered.metrics_url}' REGISTRY='${registered.registry}' TAG='${registered.image_tag}'`))
+  assert.ok(command.includes(`--set-string 'apiURL=${registered.api_url}' --set-string 'metricsURL=${registered.metrics_url}' --set-string 'images.registry=${registered.registry}' --set-string 'images.tag=${registered.image_tag}'`))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
   assert.equal(
     await page.getByTestId('secret').innerText(),

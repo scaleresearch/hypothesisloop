@@ -1,6 +1,6 @@
 .PHONY: dev reset build test agent-test lint check images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up registry-prune \
-	helm-prepare helm-lint \
+	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
@@ -323,6 +323,16 @@ images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
 	done
 	$(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),echo "$(TAG)" > $(IMAGE_TAG_FILE))
+	$(MAKE) chart-push
+
+# The runtime chart goes to the registry its images are in, as an OCI artifact under charts/, so
+# a cluster is attached with one helm command and no checkout (hl cluster add prints it). Its
+# version carries TAG as build metadata, which is how the printed command names the chart that
+# matches the images.
+chart-push: check-tag
+	@package="$$(mktemp -d)" && trap 'rm -rf "$$package"' EXIT && \
+	  helm package runtime/k8s/infra/chart --version "0.1.0+$(TAG)" --app-version "$(TAG)" --destination "$$package" >/dev/null && \
+	  helm push "$$package"/hypothesisloop-cluster-agent-*.tgz "oci://$(REGISTRY)/charts" $(if $(filter false,$(REGISTRY_TLS_VERIFY)),--plain-http)
 
 # The UI image is no part of `images`: nothing the local stack runs uses it (local development
 # serves the UI with `npm run dev`), and it cannot be built without a Supabase project. Next.js
