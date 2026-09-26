@@ -65,6 +65,12 @@ type reconcileWorld struct {
 
 func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 	t.Helper()
+	return newReconcileWorldWith(t, cluster, func(base *reconcileStore) Store { return base })
+}
+
+// newReconcileWorldWith serves the handler over the store wrap makes of the world's own.
+func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) Store) *reconcileWorld {
+	t.Helper()
 	w := &reconcileWorld{store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{}}}
 	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		w.metricsWrites.Add(1)
@@ -75,7 +81,7 @@ func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 	router := chi.NewRouter()
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(w.store, time.Minute, metrics.URL, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", zap.NewNop()))
+	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", zap.NewNop()))
 	w.router = router
 	return w
 }

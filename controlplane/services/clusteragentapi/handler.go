@@ -54,6 +54,8 @@ type Store interface {
 	BindReportedID(ctx context.Context, name, reportedID string) error
 	// RecordJobImage keeps the one image the cluster's runtime says every job there runs in.
 	RecordJobImage(ctx context.Context, name, image string) error
+	// RemoveCluster ends a cluster and returns its jobs to the queue (db.ClustersStore).
+	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -389,6 +391,36 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			resp.Body.Experiments[i] = exp.ForRuntime()
 		}
 		resp.Body.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
+		return resp, nil
+	})
+
+	apidocs.Register(doc, apidocs.AudienceInternal, huma.Operation{
+		OperationID: "cluster-detach", Method: "DELETE", Path: "/{name}",
+		Summary: "Detach this cluster", Tags: []string{"cluster-agent"},
+		Description: "The cluster's own runtime ends the cluster, as its owner does with DELETE /orgs/{id}/clusters/{name}: every job placed on it goes back to the queue, " +
+			"its settings and the identity bound to it are deleted, and its runtime token is refused from then on with reason cluster_not_registered. requeued names the jobs.",
+	}, func(ctx context.Context, in *struct {
+		Name string `path:"name"`
+	}) (*struct {
+		Body struct {
+			Requeued []string `json:"requeued"`
+		}
+	}, error) {
+		requeued, err := h.store.RemoveCluster(ctx, in.Name)
+		switch {
+		case errors.Is(err, db.ErrClusterNotFound):
+			return nil, auth.NotFound("cluster")
+		case err != nil:
+			h.logger.Error("detach cluster", zap.String("cluster", in.Name), zap.Error(err))
+			return nil, huma.Error500InternalServerError(auth.InternalError)
+		}
+		h.logger.Info("cluster detached by its runtime", zap.String("cluster", in.Name), zap.Int("requeued", len(requeued)))
+		resp := &struct {
+			Body struct {
+				Requeued []string `json:"requeued"`
+			}
+		}{}
+		resp.Body.Requeued = append([]string{}, requeued...)
 		return resp, nil
 	})
 

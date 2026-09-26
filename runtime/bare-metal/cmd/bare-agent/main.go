@@ -13,10 +13,15 @@
 //	                        (must also be reachable from *inside* a workload container)
 //	SCRATCH_DIR           — filesystem Storage quotas are measured/enforced against (default /var/lib/hypothesisloop/scratch)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
+//
+// bare-agent detach, run with the same CLUSTER_NAME, API_URL and RUNTIME_TOKEN, removes this
+// node's cluster from the control plane. The running agent then stops its jobs and exits, as it
+// does when the cluster's owner removes it.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,6 +39,18 @@ const (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		if len(os.Args) != 2 || os.Args[1] != "detach" {
+			fmt.Fprintln(os.Stderr, "usage: bare-agent [detach]")
+			os.Exit(2)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		agentloop.RunDetach(ctx, binaryName, func(format string, args ...any) {
+			fmt.Printf("[bare-agent] "+format+"\n", args...)
+		})
+		return
+	}
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
 	// One URL for both polling the control plane and for the value handed to every container
 	// this agent starts as HYPOTHESISLOOP_API_URL, so it must be reachable from inside a
@@ -91,8 +108,11 @@ func main() {
 		LogTailLines:      logTailLines,
 		Log:               log,
 	}
-	a.Run(ctx)
+	err = a.Run(ctx)
 	exec.Wait()
+	if errors.Is(err, agentloop.ErrClusterRemoved) {
+		log("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
+	}
 }
 
 // parseNodeLabels parses "k1=v1,k2=v2" into a map — the bare-node equivalent of one fleet.yaml

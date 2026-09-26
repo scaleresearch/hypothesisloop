@@ -4,12 +4,17 @@
 //
 // Environment variables:
 //
+// cluster-agent detach, run with the same environment and service account, removes this
+// cluster from the control plane and stays until every job object it created here is gone. The
+// chart runs it before the release is uninstalled.
+//
 //	CLUSTER_NAME        — this cluster's stable identity
 //	API_URL             — base URL of the control-plane API
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,6 +31,14 @@ const (
 )
 
 func main() {
+	detach := false
+	if len(os.Args) > 1 {
+		if len(os.Args) != 2 || os.Args[1] != "detach" {
+			fmt.Fprintln(os.Stderr, "usage: cluster-agent [detach]")
+			os.Exit(2)
+		}
+		detach = true
+	}
 	clusterName := agentloop.RequiredEnv(binaryName, "CLUSTER_NAME")
 	// One URL for both jobs of this process: polling the control plane, and the value passed to
 	// every Job it creates as HYPOTHESISLOOP_API_URL. It must therefore be reachable from
@@ -55,14 +68,17 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	log("starting: cluster=%s control_plane=%s", clusterName, apiURL)
-
-	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
-	if err := jwc.SetupCluster(setupCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
-		os.Exit(1)
+	if detach {
+		agentloop.RunDetach(ctx, binaryName, log)
+	} else {
+		log("starting: cluster=%s control_plane=%s", clusterName, apiURL)
+		setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := jwc.SetupCluster(setupCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "cluster-agent: SetupCluster: %v\n", err)
+			os.Exit(1)
+		}
+		setupCancel()
 	}
-	setupCancel()
 
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
@@ -76,5 +92,14 @@ func main() {
 		AutoscalerEnabled: autoscalerEnabled,
 		Log:               log,
 	}
-	a.Run(ctx)
+	// After a detach the control plane refuses this cluster's token, and the same loop that
+	// keeps a cluster in step is what stops everything a removed one still holds.
+	if err := a.Run(ctx); errors.Is(err, agentloop.ErrClusterRemoved) {
+		log("cluster %s was removed from the control plane: its jobs are stopped, exiting", clusterName)
+		return
+	}
+	if detach {
+		fmt.Fprintln(os.Stderr, "cluster-agent: detach was interrupted before every job object was gone")
+		os.Exit(1)
+	}
 }

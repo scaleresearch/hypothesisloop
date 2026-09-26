@@ -249,3 +249,9 @@ type HumanWrite struct {
 	Subject              string
 	PlatformExperimentID string
 }
+
+// ReasonClusterNotRegistered is the reason on the 401 a runtime token gets once its cluster is
+// no longer registered. A runtime reads it as its cluster having been removed: it stops the
+// workloads it holds and exits. Any other 401 is a token somebody has to fix, and the runtime
+// keeps what it runs.
+const ReasonClusterNotRegistered = "cluster_not_registered"

@@ -2,6 +2,7 @@ package apidocs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // tokenTable authenticates a token by looking it up, and refuses or fails on the rest.
@@ -22,6 +24,11 @@ type tokenTable map[string]auth.Principal
 func (table tokenTable) Authenticate(_ context.Context, token string) (auth.Principal, error) {
 	if token == "broken-directory" {
 		return auth.Principal{}, errors.New("pq: database is down at 10.0.0.7")
+	}
+	if token == "removed-cluster" {
+		refusal := auth.Unauthenticated("cluster gone is not registered")
+		refusal.Reason = domain.ReasonClusterNotRegistered
+		return auth.Principal{}, refusal
 	}
 	p, ok := table[token]
 	if !ok {
@@ -204,5 +211,21 @@ func TestARefusedKindIsNamedWithItsArticle(t *testing.T) {
 		if got := withArticle(string(kind)); got != want {
 			t.Errorf("withArticle(%q) = %q, want %q", kind, got, want)
 		}
+	}
+}
+
+// The reason a runtime branches on reaches it beside the message, in the same envelope.
+func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
+	r, _ := audienceRouter(t)
+	recorder := call(r, "/internal/gone", "Bearer removed-cluster")
+	var body struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%v in %s", err, recorder.Body)
+	}
+	if recorder.Code != http.StatusUnauthorized || body.Reason != domain.ReasonClusterNotRegistered || !strings.Contains(body.Error, "not registered") {
+		t.Fatalf("status = %d body = %s, want 401 with the reason and the message", recorder.Code, recorder.Body)
 	}
 }

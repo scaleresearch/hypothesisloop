@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -60,20 +61,35 @@ type Agent struct {
 	// pass replaces it whole, and a status push reports it beside what exists.
 	unrunnableMu sync.Mutex
 	unrunnable   map[string]refusedCreate
+
+	// removed is set once the control plane said this cluster is no longer registered. From
+	// then on there is nobody to report to.
+	removed atomic.Bool
 }
+
+// ErrClusterRemoved is what Run returns once the control plane no longer knows this cluster
+// (its owner removed it, or the runtime detached it) and every workload it held is gone.
+var ErrClusterRemoved = errors.New("this cluster was removed from the control plane")
 
 type refusedCreate struct {
 	attempt int
 	why     string
 }
 
-// Run starts the reconcile and status-report loops and blocks until ctx is cancelled.
-func (a *Agent) Run(ctx context.Context) {
+// Run starts the reconcile and status-report loops and blocks until ctx is cancelled, which
+// returns nil, or until the cluster was removed and its workloads are gone, which returns
+// ErrClusterRemoved. ctx itself is left alone on that return: an executor's own operations run
+// under it and finish what they started.
+func (a *Agent) Run(ctx context.Context) error {
+	statusCtx, stopStatus := context.WithCancel(ctx)
+	defer stopStatus()
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); a.reconcileLoop(ctx) }()
-	go func() { defer wg.Done(); a.statusReportLoop(ctx) }()
+	var err error
+	go func() { defer wg.Done(); a.statusReportLoop(statusCtx) }()
+	go func() { defer wg.Done(); defer stopStatus(); err = a.reconcileLoop(ctx) }()
 	wg.Wait()
+	return err
 }
 
 // executorForPass is the executor one reconcile pass or one status push runs against: the
@@ -86,16 +102,20 @@ func (a *Agent) executorForPass(ctx context.Context) (agentexec.Executor, error)
 	return scoped.ForPass(ctx)
 }
 
-func (a *Agent) reconcileLoop(ctx context.Context) {
+func (a *Agent) reconcileLoop(ctx context.Context) error {
 	ticker := time.NewTicker(a.ReconcileInterval)
 	defer ticker.Stop()
 	for {
-		if err := a.reconcileOnce(ctx); err != nil {
+		err := a.reconcileOnce(ctx)
+		if errors.Is(err, ErrClusterRemoved) {
+			return err
+		}
+		if err != nil {
 			a.Log("reconcile: %v", err)
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 		}
 	}
@@ -107,8 +127,14 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 		return fmt.Errorf("read actual state: %w", err)
 	}
 	desired, checkpointWindow, err := a.fetchDesiredState(ctx, exec)
-	if err != nil {
+	// A removed cluster desires nothing: its jobs went back to the queue with the removal, so
+	// the pass runs on as one whose every workload is no longer desired, until none is left.
+	removed := errors.Is(err, ErrClusterRemoved)
+	if err != nil && !removed {
 		return fmt.Errorf("fetch desired state: %w", err)
+	}
+	if removed {
+		a.removed.Store(true)
 	}
 	actual, err := exec.ListManagedJobs(ctx)
 	if err != nil {
@@ -117,6 +143,17 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	auxiliary, err := exec.ListManagedAuxiliaryWorkloads(ctx)
 	if err != nil {
 		return fmt.Errorf("list local auxiliary resources: %w", err)
+	}
+	if removed {
+		// The status set also holds what is stopping and what stopped and is not reaped yet.
+		held, err := exec.ListManagedJobsForStatus(ctx)
+		if err != nil {
+			return fmt.Errorf("list local workloads: %w", err)
+		}
+		if len(held) == 0 && len(auxiliary) == 0 {
+			return ErrClusterRemoved
+		}
+		a.Log("this cluster was removed from the control plane: stopping the %d workloads it holds", len(held))
 	}
 
 	desiredByID := make(map[string]*domain.Experiment, len(desired))
@@ -203,7 +240,7 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 			break
 		}
 	}
-	if needsFinalCapture {
+	if needsFinalCapture && !removed {
 		captureCtx, cancelCapture := context.WithTimeout(ctx, finalStatusCaptureBudget)
 		a.reportStatuses(captureCtx, exec)
 		cancelCapture()
@@ -358,7 +395,9 @@ func (a *Agent) statusReportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.reportChangedStatuses(ctx)
+			if !a.removed.Load() {
+				a.reportChangedStatuses(ctx)
+			}
 		}
 	}
 }
@@ -505,7 +544,40 @@ const refusalBodyLimit = 512
 // what tells them which.
 func refusal(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
+	var said struct {
+		Reason string `json:"reason"`
+	}
+	if resp.StatusCode == http.StatusUnauthorized && json.Unmarshal(body, &said) == nil && said.Reason == domain.ReasonClusterNotRegistered {
+		return ErrClusterRemoved
+	}
 	return fmt.Errorf("control plane answered %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+}
+
+// Detach ends this cluster on the control plane, as its owner would by removing it: its jobs go
+// back to the queue, named in requeued, and its runtime token is refused from then on. The
+// running agent reads that refusal, stops the workloads it holds and exits.
+func (a *Agent) Detach(ctx context.Context) (requeued []string, err error) {
+	url := fmt.Sprintf("%s/internal/clusters/%s", a.APIURL, a.ClusterName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.Token)
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, refusal(resp)
+	}
+	var body struct {
+		Requeued []string `json:"requeued"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Requeued, nil
 }
 
 type pushStatusResponse struct {
@@ -608,4 +680,28 @@ func (a *Agent) logTailLines() int {
 		return DefaultLogTailLines
 	}
 	return a.LogTailLines
+}
+
+// RunDetach is the detach command of an agent binary: it ends the cluster named by the
+// environment the agent itself runs with and says what became of its jobs. A cluster already
+// removed is the state asked for.
+func RunDetach(ctx context.Context, binaryName string, log func(format string, args ...any)) *Agent {
+	a := &Agent{
+		ClusterName: RequiredEnv(binaryName, "CLUSTER_NAME"),
+		APIURL:      RequiredEnv(binaryName, "API_URL"),
+		Token:       RequiredEnv(binaryName, "RUNTIME_TOKEN"),
+		HTTPClient:  &http.Client{Timeout: 35 * time.Second},
+		Log:         log,
+	}
+	requeued, err := a.Detach(ctx)
+	switch {
+	case errors.Is(err, ErrClusterRemoved):
+		log("cluster %s is already removed from %s", a.ClusterName, a.APIURL)
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "%s: detach %s: %v\n", binaryName, a.ClusterName, err)
+		os.Exit(1)
+	default:
+		log("detached cluster %s from %s: %d of its jobs went back to the queue", a.ClusterName, a.APIURL, len(requeued))
+	}
+	return a
 }

@@ -8,6 +8,7 @@ package apidocs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -242,6 +243,12 @@ func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)
 func (d *Doc) refuse(ctx huma.Context, err error) {
 	var refusal *auth.Error
 	if errors.As(err, &refusal) {
+		if refusal.Reason != "" {
+			ctx.SetHeader("Content-Type", "application/json")
+			ctx.SetStatus(refusal.GetStatus())
+			_ = json.NewEncoder(ctx.BodyWriter()).Encode(refusal)
+			return
+		}
 		_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
 		return
 	}

@@ -17,9 +17,11 @@ import (
 )
 
 // Error is a refusal with the HTTP status it answers with, in the API's {"error": ...} shape.
+// Reason is set on the one refusal a client branches on (domain.ReasonClusterNotRegistered).
 type Error struct {
 	status  int
 	Message string `json:"error"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 func (e *Error) Error() string  { return e.Message }
@@ -110,7 +112,9 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, err
 		}
 		if !found {
-			return Principal{}, unauthenticated("cluster %s is not registered", p.ClusterName)
+			refusal := unauthenticated("cluster %s is not registered", p.ClusterName)
+			refusal.Reason = domain.ReasonClusterNotRegistered
+			return Principal{}, refusal
 		}
 		p.OrgIDs = []string{orgID}
 	case KindLauncher:

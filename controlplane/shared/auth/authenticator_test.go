@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -415,5 +416,33 @@ func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), InternalError) {
 		t.Fatalf("got = %d %q, want 500 with the generic body", recorder.Code, recorder.Body.String())
+	}
+}
+
+// A runtime branches on one refusal: its cluster is gone, so it stops what it runs and exits.
+// A token that fails for any other cause carries no reason, and the runtime keeps its jobs.
+func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T) {
+	a, _ := newTestAuthenticator(t)
+	handler := a.RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	for name, tc := range map[string]struct {
+		token  string
+		reason string
+	}{
+		"removed cluster": {mustMint(t, testSecret, RuntimeScope("cluster-typo")), domain.ReasonClusterNotRegistered},
+		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", RuntimeScope("cluster-a")), ""},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
+		request.Header.Set("Authorization", "Bearer "+tc.token)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: %v in %s", name, err, recorder.Body)
+		}
+		if recorder.Code != http.StatusUnauthorized || body.Reason != tc.reason {
+			t.Errorf("%s: status = %d reason = %q, want 401 and %q", name, recorder.Code, body.Reason, tc.reason)
+		}
 	}
 }

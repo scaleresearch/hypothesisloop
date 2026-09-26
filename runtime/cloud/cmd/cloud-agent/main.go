@@ -54,7 +54,9 @@ func main() {
 		LogTailLines:      cfg.LogTailLines,
 		Log:               log,
 	}
-	a.Run(ctx)
+	if err := a.Run(ctx); err != nil {
+		log("%v: everything it rented is given back, exiting", err)
+	}
 
 	leaving, cancelLeaving := context.WithTimeout(context.Background(), leaveLimit)
 	defer cancelLeaving()
