@@ -253,10 +253,10 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     command = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
         rf"""RUNTIME_TOKEN="\$\(hl cluster token '{name}' --org '{a.org_id}'\)" make cluster-agent-up CLUSTER='{name}' """
-        r"API_URL='(http://\S+:8081)' METRICS_URL='(http://\S+:8084)'\n", command)
+        r"API_URL='(http://\S+:8081)' METRICS_URL='(http://\S+:8084)' REGISTRY='([^' ]+)' TAG='([^' ]+)'\n", command)
     assert match, f"hl cluster add printed {command!r}"
     assert "hls_" not in command, "hl cluster add prints the runtime token, which then sits in scrollback and shell history"
-    api_url, metrics_url = match.groups()
+    api_url, metrics_url, registry, image_tag = match.groups()
     token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
     unregistered = a.api.hl_expect("cluster", "token", f"never-{a.marker}"[:40])
@@ -269,6 +269,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     assert a.api.hl("cluster", "add", name) == command, "adding again prints the same command"
     registered = a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})
     assert (registered["runtime_token"], registered["api_url"], registered["metrics_url"]) == (token, api_url, metrics_url)
+    assert (registered["registry"], registered["image_tag"]) == (registry, image_tag), "the command names the images the platform answered"
 
     taken = b.api.post(f"/orgs/{b.org_id}/clusters", {"name": name})
     assert taken.status_code == 409 and "hls_" not in taken.text, f"org B registering org A's cluster name: {taken.status_code} {taken.text}"

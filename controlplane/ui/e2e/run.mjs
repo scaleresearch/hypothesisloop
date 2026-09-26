@@ -422,7 +422,7 @@ async function scenarios(browser) {
   const command = await page.getByTestId('secret').innerText()
   assert.match(
     command,
-    new RegExp(`^RUNTIME_TOKEN="\\$\\(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}'\\)" make cluster-agent-up CLUSTER='${clusterName}' API_URL='https?://[^']+' METRICS_URL='https?://[^']+'$`),
+    new RegExp(`^RUNTIME_TOKEN="\\$\\(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}'\\)" make cluster-agent-up CLUSTER='${clusterName}' API_URL='https?://[^']+' METRICS_URL='https?://[^']+' REGISTRY='[^']+' TAG='[^']+'$`),
     'the command is the one hl cluster add prints, with the addresses the platform answered with',
   )
   const registered = await (await fetch(`${API}/orgs/${adaMe.orgs[0].id}/clusters`, {
@@ -434,7 +434,7 @@ async function scenarios(browser) {
   assert.match(runtimeToken, /^hls_/)
   secrets.add(runtimeToken)
   assert.ok(!(await page.content()).includes(runtimeToken), 'the runtime token is nowhere on the page')
-  assert.ok(command.includes(`API_URL='${registered.api_url}' METRICS_URL='${registered.metrics_url}'`))
+  assert.ok(command.includes(`API_URL='${registered.api_url}' METRICS_URL='${registered.metrics_url}' REGISTRY='${registered.registry}' TAG='${registered.image_tag}'`))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
   assert.equal(
     await page.getByTestId('secret').innerText(),
