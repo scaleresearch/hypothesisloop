@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { fetchPlatformExperimentQuotas, fetchExperimentStats, fetchHypothesisStats, HYPOTHESIS_STATUSES } from '@/lib/api'
@@ -8,7 +7,6 @@ import type { PlatformExperiment, AgentQuota, MetricDefinition } from '@/types'
 import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly } from '@/lib/read-only'
 import { useTenant } from '@/lib/tenant'
-import { quotaRemainingAccH } from '@/lib/quota'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
@@ -18,7 +16,6 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
-import { Table } from '@/components/ui/table'
 import { Eyebrow, Pill } from '@/components/ui/text'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 
@@ -46,12 +43,9 @@ export function PlatformExperimentCard({
 }) {
   const router = useProjectRouter()
   const { me } = useTenant()
-  const [expanded, setExpanded] = useState(false)
   const readOnly = isReadOnly(me, pe)
   const href = `/platform-experiments/${pe.id}`
 
-  // Fetched unconditionally (not gated on `expanded`) — the Budget Used stat tile above the
-  // expand toggle needs this data too, otherwise it shows 0 until the card is expanded once.
   const { data: quotas } = useSWR<AgentQuota[]>(
     ['pe-quotas', pe.id],
     () => fetchPlatformExperimentQuotas(pe.id),
@@ -99,7 +93,6 @@ export function PlatformExperimentCard({
             <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
           )}
           {!readOnly && <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>}
-          <span className="text-xs text-muted" onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}>{expanded ? '▲' : '▼'}</span>
         </div>
       </CardHeader>
 
@@ -112,29 +105,10 @@ export function PlatformExperimentCard({
           </div>
         )}
 
-        {pe.stages && pe.stages.length > 0 && (
-          <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
-            <Eyebrow className="mr-0.5">Ladder</Eyebrow>
-            {pe.stages.map((s, i) => {
-              const active = i + 1 === pe.current_stage
-              return (
-                <Pill
-                  key={i}
-                  tone={active ? 'accent' : undefined}
-                  active={active}
-                  title={`Stage ${i + 1}: spans ${s.length_pct}% of the run${s.evict_pct > 0 ? `, then cuts ${s.evict_pct}% of survivors` : ', no cut'}${s.max_job_hours ? `; no job may run longer than ${s.max_job_hours}h` : '; no job length limit'}`}
-                >
-                  {s.length_pct}% {s.evict_pct > 0 ? `→ cut ${s.evict_pct}%` : '→ no cut'}{s.max_job_hours ? ` · ≤${s.max_job_hours}h/job` : ''}
-                </Pill>
-              )
-            })}
-          </div>
-        )}
-
-        <div className="mb-3.5 grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <div>
             <Eyebrow className="block">Budget</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.budget_accelerator_hours} <span className="text-xs text-muted">AccH</span></div>
+            <div className="font-mono text-xl font-bold">{pe.budget_accelerator_hours} <span className="text-xs text-muted">{unit}</span></div>
           </div>
           <div>
             <Eyebrow className="block">Agents</Eyebrow>
@@ -159,44 +133,6 @@ export function PlatformExperimentCard({
           </div>
         </div>
 
-        {expanded && (
-          <div onClick={e => e.stopPropagation()}>
-            <div className="border-t pt-3.5">
-              <Eyebrow className="mb-2.5 block">
-                Agent Quotas — Guaranteed &amp; Burst ({unit})
-              </Eyebrow>
-              {!quotas ? (
-                <p className="text-xs text-subtle">Loading quotas…</p>
-              ) : quotas.length === 0 ? (
-                <p className="text-xs text-subtle">No quotas allocated yet.</p>
-              ) : (
-                <Table>
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th>Guaranteed</th>
-                      <th>Burst</th>
-                      <th>Remaining</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quotas.map(q => {
-                      const remaining = quotaRemainingAccH(q)
-                      return (
-                        <tr key={q.id}>
-                          <td className="font-mono text-xs font-semibold">{q.agent_id}</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)} {unit}</td>
-                          <td className="font-mono text-2xs">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)} {unit}</td>
-                          <td className={clsx('font-mono text-2xs', remaining > 0 ? 'text-success' : 'text-danger')}>{formatAccH(remaining)} {unit}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </Table>
-              )}
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   )

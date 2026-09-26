@@ -31,14 +31,11 @@ const SORT_OPTIONS = [
 ]
 
 function LiveStrip() {
-  const { org, project } = useTenant()
-  const { data: clusters, error: clustersError } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
+  const { project } = useTenant()
   // Both counts are server-side totals, not the length of a fetched page — see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
   const { data: stats, error: statsError } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
   const { data: agents, error: agentsError } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
-
-  const inUse = clusters && clustersInUse(clusters)
 
   // A count that failed to load says so, and one still loading has no colour to mislead with.
   function item(label: string, error: Error | undefined, value: string | undefined, color: string) {
@@ -47,10 +44,6 @@ function LiveStrip() {
     return { label, value, color, title: undefined }
   }
   const items = [
-    // What jobs can run on, the platform's clusters with the org's own: a person with none of
-    // their own is not without compute.
-    item(inUse?.whose ? `Clusters online (${inUse.whose})` : 'Clusters online', clustersError, inUse && `${inUse.online}/${inUse.used}`,
-      inUse && inUse.used > 0 && inUse.online === inUse.used ? semantic.success : semantic.warning),
     // A status no job holds is absent from the answer.
     item('Jobs running', statsError, stats && String(stats.by_status?.RUNNING ?? 0), semantic.success),
     item('Agents', agentsError, agents && String(agents.total), semantic.accent),
@@ -104,7 +97,7 @@ function PlatformExperimentsPageContent() {
     }),
     { refreshInterval: 10_000, keepPreviousData: true },
   )
-  // The strip reads the same key, so this is one request for both.
+  // The sidebar reads the same key, so this is one request for both.
   const { data: clusters } = useSWR(['org-clusters', org.id], () => fetchOrgClusters(org.id), { refreshInterval: 10_000 })
 
   // A new experiment opens on its own page: a draft to be planned, or one to add agents to.
