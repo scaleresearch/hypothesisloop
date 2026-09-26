@@ -26,7 +26,7 @@ func TestTheChartStartsTheCloudAgentWithAConfigAndEnvironmentItAccepts(t *testin
 	if _, err := newProvider(cfg.Provider, cfg.shapes); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	if cfg.ClusterName != "vast" || len(cfg.shapes) != 2 {
+	if cfg.ClusterName != "vast" || len(cfg.shapes) != 1 {
 		t.Errorf("loaded cluster %q with %d shapes, want the values' config as it was written", cfg.ClusterName, len(cfg.shapes))
 	}
 }

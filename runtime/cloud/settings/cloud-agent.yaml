@@ -49,8 +49,3 @@ shapes:
     memory: 64Gi
     storage: 200Gi
     max_instances: 2
-  - name: cpu
-    cpu: "8"
-    memory: 32Gi
-    storage: 100Gi
-    max_instances: 4

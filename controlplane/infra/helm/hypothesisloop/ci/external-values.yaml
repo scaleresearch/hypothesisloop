@@ -73,11 +73,6 @@ cloudAgent:
         memory: 32Gi
         storage: 100Gi
         max_instances: 2
-      - name: cpu
-        cpu: "4"
-        memory: 16Gi
-        storage: 50Gi
-        max_instances: 2
 agentLauncher:
   enabled: true
   secretEnv: [CLAUDE_CODE_OAUTH_TOKEN, FLY_API_TOKEN]

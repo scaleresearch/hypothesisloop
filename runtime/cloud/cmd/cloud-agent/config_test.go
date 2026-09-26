@@ -36,7 +36,7 @@ func TestTheShippedConfigLoadsIntoShapesTheExecutorAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.shapes) != 2 || cfg.shapes[0].CPUMillis != 16000 || cfg.shapes[0].MemoryBytes != 64<<30 || cfg.shapes[1].Accelerators != 0 {
+	if len(cfg.shapes) != 1 || cfg.shapes[0].CPUMillis != 16000 || cfg.shapes[0].MemoryBytes != 64<<30 || cfg.shapes[0].Accelerators != 1 {
 		t.Fatalf("shapes = %+v", cfg.shapes)
 	}
 	if cfg.ReconcileIntervalSeconds != 10 || cfg.StatusIntervalSeconds != 10 || cfg.LogTailLines != 100 || cfg.Namespace != "main" {
