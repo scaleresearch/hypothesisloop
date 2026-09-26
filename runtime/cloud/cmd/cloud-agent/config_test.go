@@ -100,3 +100,21 @@ func TestAProviderThisBinaryWasNotBuiltWithIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want one naming the config key and the provider", err)
 	}
 }
+
+// The rented cluster's settings set every shape's max_instances far above what is asked for at
+// once. The executor must still accept them: the instance index is part of a name of bounded
+// length.
+func TestTheVastConfigLoadsIntoShapesTheExecutorAccepts(t *testing.T) {
+	cfg, err := loadConfig("../../settings/cloud-agent.vast.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shape := range cfg.shapes {
+		if shape.MaxInstances < 100 {
+			t.Errorf("shape %s: max_instances = %d, want it far above what experiments ask for at once", shape.Name, shape.MaxInstances)
+		}
+	}
+	if _, err := cloudexec.New(cfg.executor(fake.New())); err != nil {
+		t.Fatal(err)
+	}
+}
