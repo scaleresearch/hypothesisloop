@@ -31,6 +31,7 @@ import type { StagesStatus } from '@/lib/api'
 import { quotaRemainingAccH } from '@/lib/quota'
 import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, AgentMetricSeries } from '@/types'
 import { ExperimentAgents } from '@/components/experiment-agents'
+import { HostedMachines } from '@/components/hosted-machines'
 import { Card, CardHeader, CardContent, InsetCard } from '@/components/ui/card'
 import { Badge, Dot, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -707,6 +708,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
           </div>
         }
       />
+
+      <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
 
       {readOnly && (
         <p role="note" className="-mt-3 mb-4 text-xs text-muted">
