@@ -56,8 +56,10 @@ var apiKeyCommands = []subcommand{
 
 var clusterCommands = []subcommand{
 	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
-	{"list", "the clusters an org's jobs run on and whether each is connected", clusterList},
+	{"list", "the clusters an org's jobs run on, whether each is connected and whether the org has it enabled", clusterList},
 	{"token", "print the runtime token of a cluster the org registered", clusterToken},
+	{"disable", "turn a cluster off for the org's jobs: none is placed there, the ones running finish", clusterDisable},
+	{"enable", "turn a cluster on again for the org's jobs", clusterEnable},
 	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity},
 	{"remove", "end a cluster: requeue its jobs and refuse its runtime token", clusterRemove},
 }
@@ -479,6 +481,25 @@ runtime reports next. The settings kept under the old id are deleted.`, stderr)
 	return onCluster(c, fs, args, "DELETE", "/identity", stdout, stderr)
 }
 
+func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
+
+Turns a cluster off for the org's jobs: from now on none of them is placed on it. The cluster is
+any that hl cluster list shows, one the org registered or one the platform shares, and the
+decision is this org's alone. Its jobs already placed there are not touched and run to their
+end. A job that waits because the org turned off every cluster it could use reads
+not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`, stderr)
+	return onCluster(c, fs, args, "POST", "/disable", stdout, stderr)
+}
+
+func clusterEnable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster enable", `usage: hl cluster enable NAME [--org ORG]
+
+Turns a cluster on again for the org's jobs after hl cluster disable, which is how every cluster
+starts.`, stderr)
+	return onCluster(c, fs, args, "POST", "/enable", stdout, stderr)
+}
+
 func clusterRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("cluster remove", `usage: hl cluster remove NAME [--org ORG]
 
@@ -504,7 +525,7 @@ func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest str
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, with whether an agent is connected now.", stderr)
+	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

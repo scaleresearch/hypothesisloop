@@ -79,6 +79,8 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
 		{[]string{"cluster", "remove", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east", nil},
 		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
+		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
+		{[]string{"cluster", "enable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/enable", nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			calls := accountsServer(t, nil, `{"id":"x","projects":[],"api_keys":[],"clusters":[],"name":"gpu-east","runtime_token":"hls_t"}`)
@@ -128,6 +130,7 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
 			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
 			{"cluster", "token", "x"}, {"cluster", "remove", "x"}, {"cluster", "forget-identity", "x"},
+			{"cluster", "disable", "x"}, {"cluster", "enable", "x"},
 			{"org", "members", "list"}, {"org", "members", "set-role", "u-1", "member"}, {"org", "members", "remove", "u-1"},
 			{"org", "invites", "create"}, {"org", "invites", "list"},
 		} {
@@ -240,6 +243,37 @@ func TestARefusalFromTheAccountsAPIIsPrintedAndFails(t *testing.T) {
 	}
 }
 
+func TestClusterListShowsWhichClustersTheOrgTurnedOff(t *testing.T) {
+	accountsServer(t, nil, `{"clusters":[{"name":"gpu-east","owned":true,"enabled":true},{"name":"platform","shared":true,"enabled":false}]}`)
+	code, stdout, stderr := hl(t, "cluster", "list", "--org", "org-1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"name":"gpu-east"`) || !strings.Contains(lines[0], `"enabled":true`) ||
+		!strings.Contains(lines[1], `"name":"platform"`) || !strings.Contains(lines[1], `"enabled":false`) {
+		t.Fatalf("listed = %s, want gpu-east enabled and platform not, one a line", stdout)
+	}
+}
+
+func TestClusterDisablePrintsTheClusterAndARefusalFails(t *testing.T) {
+	accountsServer(t, nil, `{"name":"platform","shared":true,"enabled":false}`)
+	code, stdout, stderr := hl(t, "cluster", "disable", "platform", "--org", "org-1")
+	if code != 0 || !strings.Contains(stdout, `"enabled":false`) {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the cluster printed as turned off", code, stdout, stderr)
+	}
+
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"reason":"not_found","message":"cluster not found"}`))
+	}))
+	code, stdout, stderr = hl(t, "cluster", "enable", "of-another-org", "--org", "org-1")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "cluster not found") {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal", code, stdout, stderr)
+	}
+}
+
 func TestAnEmptyListSaysSoOnStderr(t *testing.T) {
 	accountsServer(t, nil, `{"clusters":[],"api_keys":[],"projects":[]}`)
 	for _, group := range []string{"cluster", "api-key", "project"} {
@@ -254,7 +288,7 @@ func TestAccountGroupsListTheirCommands(t *testing.T) {
 	setAPIURL(t, "http://unused")
 	for group, commands := range map[string][]string{
 		"org": {"list", "create NAME", "rename NAME", "members <command>", "invites <command>"}, "project": {"list", "create NAME", "rename NAME"},
-		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "forget-identity NAME", "remove NAME"},
+		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
 	} {
 		code, stdout, _ := hl(t, group, "--help")
 		if code != 0 {
