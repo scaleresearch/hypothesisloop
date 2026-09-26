@@ -253,6 +253,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
+		NeedsSummary         bool   `query:"needs_summary" doc:"Count only completed experiments no summary was filed for, the ones GET /experiments?needs_summary=true lists."`
 		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
 	}) (*struct{ Body *domain.ExperimentStats }, error) {
 		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
@@ -281,6 +282,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Status:               domain.ExperimentStatus(in.Status),
 			Since:                since,
 			Search:               in.Search,
+			NeedsSummary:         in.NeedsSummary,
 		}, in.GroupBy)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
