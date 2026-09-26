@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
   ApiError, addHumanHypothesisComment, registerCluster, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings, setClusterEnabled, setClusterPriority,
+  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, updateCluster, setClusterEnabled, setClusterOrder,
   registerHumanHypothesis, revokeAPIKey,
   acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
 } from '@/lib/api'
@@ -127,13 +127,13 @@ describe('a cluster turned off or on for an org\'s jobs', () => {
   })
 })
 
-describe('a cluster\'s priority', () => {
-  it('is a PATCH of the cluster with the one field', async () => {
-    fetchMock().mockResolvedValue(answer(200, { name: 'lab', priority: 500, requeued: [] }))
-    await setClusterPriority('org_b', 'lab', 500)
-    expect(sent().init.method).toBe('PATCH')
-    expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/lab')
-    expect(sent().body).toEqual({ priority: 500 })
+describe('the order of an org\'s clusters', () => {
+  it('is one PUT of every name, answered with the clusters in that order', async () => {
+    fetchMock().mockResolvedValue(answer(200, { clusters: [{ name: 'lab' }, { name: 'edge' }] }))
+    await expect(setClusterOrder('org_b', ['lab', 'edge'])).resolves.toEqual([{ name: 'lab' }, { name: 'edge' }])
+    expect(sent().init.method).toBe('PUT')
+    expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/order')
+    expect(sent().body).toEqual({ names: ['lab', 'edge'] })
   })
 })
 
@@ -187,9 +187,7 @@ describe('a failure carries the API\'s own words', () => {
 
   it('from the {"reason","message"} envelope', async () => {
     fetchMock().mockResolvedValue(answer(409, { reason: 'experiment_started', message: 'experiment_started: experiment is running' }))
-    await expect(putClusterSettings('c1', {
-      scale_up_timeout_seconds: null, max_speculative_accelerators: null, stuck_pending_timeout_seconds: 60,
-    })).rejects.toMatchObject({ status: 409, message: 'experiment_started: experiment is running' })
+    await expect(updateCluster('org_a', 'c1', { stuck_pending_timeout_seconds: 60 })).rejects.toMatchObject({ status: 409, message: 'experiment_started: experiment is running' })
   })
 
   it('from a body that is not JSON', async () => {
@@ -227,10 +225,10 @@ describe('what a person writes is theirs by their session: no body names who wro
 })
 
 describe('registering a cluster', () => {
-  it('answers with the cluster, its addresses and its runtime token, and nothing else of the answer', async () => {
-    const installedWith = { api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234', job_image: 'registry.cluster.test/images/hypothesisloop-job:abc1234' }
-    fetchMock().mockResolvedValue(answer(200, { name: 'edge', org_id: 'org_a', shared: false, runtime_token: 'hls_runtime', ...installedWith }))
-    await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', runtime_token: 'hls_runtime', ...installedWith })
+  it('answers with the cluster, its attach commands and its runtime token, and nothing else of the answer', async () => {
+    const attach_commands = { kubernetes: "sh -c 'helm' sh", bare_metal: "sudo sh -c 'install' sh" }
+    fetchMock().mockResolvedValue(answer(200, { name: 'edge', org_id: 'org_a', shared: false, runtime_token: 'hls_runtime', api_url: 'http://api.cluster.test', attach_commands }))
+    await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', runtime_token: 'hls_runtime', attach_commands })
     expect(sent().body).toEqual({ name: 'edge' })
   })
 })

@@ -5,7 +5,6 @@ import { createProject, renameOrg, renameProject } from '@/lib/api'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
-import { OrgClusters } from '@/components/org-clusters'
 import { OrgGitHub } from '@/components/org-github'
 import { OrgMembers } from '@/components/org-members'
 import { Button } from '@/components/ui/button'
@@ -13,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { TextLink } from '@/components/ui/link'
 
 /** A name with a Save beside it. `save` rejects with the API's own reason, which is shown. */
 function NameForm({ label, initial, action, placeholder, save }: {
@@ -120,11 +120,11 @@ export default function SettingsPage() {
   const { org, project, administers } = useTenant()
   return (
     <div>
-      <PageHeader title="Settings" description={`${org.name}: its name, projects, members, API keys, clusters and GitHub accounts.`} />
+      <PageHeader title="Settings" description={`${org.name}: its name, projects, members, API keys and GitHub accounts.`} />
 
       {!administers && (
         <p className="mb-4 text-sm text-muted">
-          You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys, clusters and GitHub accounts.
+          You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and GitHub accounts.
         </p>
       )}
 
@@ -148,12 +148,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>Clusters</CardHeader>
-        <CardContent scrollX>
-          <OrgClusters manage />
-        </CardContent>
-      </Card>
+      <p className="mb-4 text-sm text-muted">
+        The clusters of {org.name} are managed on <TextLink href="/cluster">Compute Resources</TextLink>.
+      </p>
 
       <Card id={GITHUB_CARD} className="scroll-mt-4">
         <CardHeader>GitHub</CardHeader>

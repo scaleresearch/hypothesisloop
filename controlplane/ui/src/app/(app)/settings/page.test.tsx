@@ -10,7 +10,6 @@ import type { Me } from '@/types'
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))
-vi.mock('@/components/org-clusters', () => ({ OrgClusters: () => <p>clusters</p> }))
 vi.mock('@/components/org-members', () => ({ OrgMembers: () => <p>members</p> }))
 vi.mock('@/components/org-github', () => ({ OrgGitHub: () => <p>github accounts</p> }))
 
@@ -112,10 +111,10 @@ describe('creating a project', () => {
 })
 
 describe('a member of the org', () => {
-  it('sees its clusters and that the rest is an owner\'s, with nothing to change', () => {
+  it('sees its members and where its clusters are, and that the rest is an owner\'s, with nothing to change', () => {
     show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member' }] })
-    expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys, clusters and GitHub accounts/)).toBeTruthy()
-    expect(screen.getByText('clusters')).toBeTruthy()
+    expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys and GitHub accounts/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Compute Resources' }).getAttribute('href')).toContain('/cluster')
     expect(screen.getByText('members')).toBeTruthy()
     expect(screen.queryByText('api keys')).toBeNull()
     expect(screen.queryByLabelText('Organization name')).toBeNull()

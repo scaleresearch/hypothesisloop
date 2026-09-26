@@ -166,15 +166,15 @@ export default function ClusterPage() {
     <div>
       <PageHeader
         title="Compute Resources"
-        description="The clusters your jobs can run on. The control plane never connects to a
-          cluster directly: each cluster runs its own cluster-agent, which polls here for work
-          and reports its own presence via heartbeat."
+        description="The clusters your jobs can run on, which an owner adds, orders and removes here.
+          The control plane never connects to a cluster directly: each cluster runs its own
+          cluster-agent, which polls here for work and reports its own presence via heartbeat."
       />
 
       <Card>
         <CardHeader>Clusters {org.name} can run on</CardHeader>
         <CardContent scrollX>
-          <OrgClusters manage={false} />
+          <OrgClusters />
         </CardContent>
       </Card>
       <LiveCapacity />

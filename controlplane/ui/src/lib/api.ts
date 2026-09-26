@@ -152,39 +152,28 @@ export async function setClusterEnabled(orgID: string, name: string, enabled: bo
   await apiSend('POST', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}/${enabled ? 'enable' : 'disable'}`)
 }
 
-// Where a cluster the org registered stands among the ones its jobs are placed on: 1 to 1000,
-// higher first. It orders placements from then on and moves no job.
-export async function setClusterPriority(orgID: string, name: string, priority: number): Promise<void> {
-  await apiSend('PATCH', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}`, { priority })
+// The order the org's jobs are placed on the clusters it registered, every one of them named once,
+// first placed first. The API writes the whole order or none of it, and answers the clusters.
+export function setClusterOrder(orgID: string, names: string[]): Promise<OrgCluster[]> {
+  return apiSend<{ clusters: OrgCluster[] }>('PUT', `/orgs/${orgID}/clusters/order`, { names }).then(r => r.clusters)
+}
+
+// Changes the fields named on a cluster the org registered: its settings, where 0 puts one back
+// on the scheduler's default, and shared, which staff alone decide.
+export async function updateCluster(orgID: string, name: string, change: ClusterSettings & { shared?: boolean }): Promise<void> {
+  await apiSend('PATCH', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}`, change)
+}
+
+// Ends a cluster: its jobs go back to the queue and its runtime token is refused from then on.
+export async function removeCluster(orgID: string, name: string): Promise<void> {
+  await apiSend('DELETE', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}`)
 }
 
 // Registering a name the org already owns changes nothing and answers the same. The answer's
 // runtime token is left behind here, so no page holds it.
 export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {
   const registered = await apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
-  return {
-    name: registered.name,
-    runtime_token: registered.runtime_token,
-    api_url: registered.api_url,
-    metrics_url: registered.metrics_url,
-    registry: registered.registry,
-    image_tag: registered.image_tag,
-    job_image: registered.job_image,
-  }
-}
-
-// Per-cluster autoscaler-speculation overrides — null fields mean "use the global scheduler
-// default." Keyed by cluster_id (survives a rename), not cluster_name.
-export function fetchClusterSettings(clusterID: string): Promise<ClusterSettings> {
-  return apiFetch<ClusterSettings>(`/clusters/${clusterID}/settings`)
-}
-
-// The body replaces the whole row: a null field falls back to the scheduler default.
-export function putClusterSettings(
-  clusterID: string,
-  req: Required<Omit<ClusterSettings, 'cluster_id'>>,
-): Promise<ClusterSettings> {
-  return apiSend<ClusterSettings>('PUT', `/clusters/${clusterID}/settings`, req)
+  return { name: registered.name, runtime_token: registered.runtime_token, attach_commands: registered.attach_commands }
 }
 
 

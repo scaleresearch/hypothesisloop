@@ -49,9 +49,9 @@ beforeEach(() => {
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 4, by_status: { RUNNING: 4 } } as never)
   vi.mocked(fetchUnsummarizedJobIDs).mockResolvedValue(new Set())
   vi.mocked(fetchOrgClusters).mockResolvedValue([
-    { name: 'lab', org_id: 'org_a', shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: true },
-    { name: 'edge', org_id: 'org_a', shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: false },
-    { name: 'platform-gpu', shared: true, enabled: true, priority: 0, created_at: at, owned: false, connected: true },
+    { name: 'lab', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: true, autoscaler_enabled: false },
+    { name: 'edge', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false },
+    { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false },
   ])
 })
 

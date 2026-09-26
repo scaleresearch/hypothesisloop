@@ -314,7 +314,7 @@ export interface ClusterInfo {
   // Stable fingerprint the runtime derives live (kube-system namespace UID / machine-id) —
   // unlike cluster_name, survives a rename. Empty for a cluster whose agent build predates this
   // or that hasn't reported within the freshness window. Everything scheduler-side that must
-  // survive a rename (cluster_settings, tried_clusters) keys on this, never on cluster_name.
+  // survive a rename (tried_clusters) keys on this, never on cluster_name.
   cluster_id: string
   last_seen_at: string
   connected: boolean
@@ -337,13 +337,15 @@ export interface ClustersResponse {
   clusters: ClusterInfo[]
 }
 
-// Operator overrides for one cluster's autoscaler-speculation behaviour — see PUT
-// /clusters/{cluster_id}/settings. Null fields mean "use the global scheduler default."
+// What the org that registered a cluster sets on it in place of the scheduler's defaults. A field
+// that is absent uses the default.
 export interface ClusterSettings {
-  cluster_id: string
-  scale_up_timeout_seconds?: number | null
-  max_speculative_accelerators?: number | null
-  stuck_pending_timeout_seconds?: number | null
+  // Seconds a job placed ahead of capacity waits for the cluster's autoscaler, under 1800.
+  scale_up_timeout_seconds?: number
+  // The most accelerators that jobs placed ahead of capacity hold on the cluster at once.
+  max_speculative_accelerators?: number
+  // Seconds a job admitted to the cluster may stay unplaced before it is evicted.
+  stuck_pending_timeout_seconds?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -546,40 +548,31 @@ export interface CreatedAPIKey extends APIKey {
 }
 
 // A cluster an org's jobs can be placed on: one it registered, or one of another org that the
-// platform shares with every org. cluster_id is the identity its runtime reported, the key of its
-// settings, absent until its agent first connects. A shared cluster of another org comes without
-// org_id and cluster_id.
-export interface OrgCluster {
+// platform shares with every org, which comes without org_id and settings.
+export interface OrgCluster extends ClusterSettings {
   name: string
   org_id?: string
   // The platform places every org's jobs on a shared cluster. Staff decide it.
   shared: boolean
-  // Where the cluster stands among the ones a job is placed on, higher first. The org sets 1 to
-  // 1000 on a cluster it registered; a shared cluster holds 0, after every org's own.
-  priority: number
   // Whether the org's jobs are placed on the cluster. An owner of the org turns it off and on,
   // for this org alone; jobs already running there finish.
   enabled: boolean
-  cluster_id?: string
   created_at: string
   // The org registered the cluster and may change its settings.
   owned: boolean
   connected: boolean
+  // The connected agent reports an autoscaler that adds nodes for waiting jobs.
+  autoscaler_enabled: boolean
 }
 
-// A registered cluster, what its agent is started with and its runtime token, which is shown
-// beside the command that asks for it on the machine.
+export type ClusterKind = 'kubernetes' | 'bare_metal'
+
+// A registered cluster, the command that attaches it for each kind of runtime, and its runtime
+// token, which is shown beside the command that asks for it on the machine.
 export interface RegisteredCluster {
   name: string
   runtime_token: string
-  // Where the cluster's agent reaches the API and sends metrics.
-  api_url: string
-  metrics_url: string
-  // The registry and tag the agent's images are pulled under.
-  registry: string
-  image_tag: string
-  // The platform's job image: where a job that names no image runs on this cluster.
-  job_image: string
+  attach_commands: Record<ClusterKind, string>
 }
 
 // What became of the machine the platform runs for a hosted agent or a coordinator, as its

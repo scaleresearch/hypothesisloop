@@ -113,15 +113,15 @@ async function main() {
     }
     await page.reload()
     await page.waitForLoadState('networkidle')
-    for (const cluster of off) {
-      const use = page.getByRole('switch', { name: `Use ${cluster} for the jobs of ${org.name}` })
-      if (await use.count() === 0) { note(`Settings lists no switch for ${cluster}`); continue }
-      if (await use.isChecked()) await use.click()
-      await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for the jobs of ${org.name}`)
-    }
     await shot(page, 'settings-github-and-clusters')
     await page.goto(`${UI}/cluster`)
     await page.waitForLoadState('networkidle')
+    for (const cluster of off) {
+      const use = page.getByRole('switch', { name: `Use ${cluster} for the jobs of ${org.name}` })
+      if (await use.count() === 0) { note(`Compute Resources lists no switch for ${cluster}`); continue }
+      if (await use.isChecked()) await use.click()
+      await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for the jobs of ${org.name}`)
+    }
     await shot(page, 'compute-resources')
     await page.goto(`${UI}/platform-experiments`)
     await page.waitForLoadState('networkidle')
