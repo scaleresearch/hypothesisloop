@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/lib/api'
@@ -80,6 +80,9 @@ describe('a shared platform experiment of another org', () => {
     show('project=prj_1', { ...closed, close_reason: 'closed_by_request', closed_by: { kind: 'user', id: 'u2', name: 'Grace' } })
     expect((await screen.findByText(/closed early by/)).textContent).toContain('Grace')
     expect(screen.queryByText('reached its end time')).toBeNull()
+    cleanup()
+    show('project=prj_1', { ...closed, close_reason: 'planning_limit_reached' })
+    expect(await screen.findByText(/its planner proposed nothing within the planning limit/)).toBeTruthy()
   })
 
   it('shows its agents and no control that writes', async () => {

@@ -219,7 +219,7 @@ export interface PlatformExperiment {
   // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
   // closed before reasons were kept.
   closed_at?: string
-  close_reason?: 'end_time_reached' | 'closed_by_request'
+  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired'
   closed_by?: Actor
   created_at: string
 }

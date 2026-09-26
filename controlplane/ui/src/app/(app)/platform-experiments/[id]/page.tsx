@@ -52,9 +52,16 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
 }
 
+const CLOSED_BY_THE_PLATFORM: Partial<Record<NonNullable<PlatformExperiment['close_reason']>, string>> = {
+  end_time_reached: 'reached its end time',
+  planning_limit_reached: 'never ran: its planner proposed nothing within the planning limit',
+  proposal_expired: 'never ran: nobody took up its planner\'s answer in time',
+}
+
 /** Why a closed experiment closed. Nothing for one closed before reasons were kept. */
 function CloseReason({ pe }: { pe: PlatformExperiment }) {
-  if (pe.close_reason === 'end_time_reached') return <span className="text-xs text-subtle">reached its end time</span>
+  const byThePlatform = pe.close_reason && CLOSED_BY_THE_PLATFORM[pe.close_reason]
+  if (byThePlatform) return <span className="text-xs text-subtle">{byThePlatform}</span>
   if (pe.close_reason !== 'closed_by_request' || !pe.closed_by) return null
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-subtle" title={pe.closed_at && formatDate(pe.closed_at)}>
