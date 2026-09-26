@@ -250,10 +250,20 @@ class NewMachineNoteTest(unittest.TestCase):
     # A restored coordinator was told to check out its branch, and it has none.
     def test_an_agent_is_sent_to_its_branch_and_a_coordinator_is_not(self):
         from types import SimpleNamespace
-        agent = run._new_machine_note(SimpleNamespace(flavor="generalist"))
-        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator"))
+        agent = run._new_machine_note(SimpleNamespace(flavor="generalist"), "https://github.com/acme/model.git")
+        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator"), "https://github.com/acme/model.git")
         for note in (agent, coordinator):
             self.assertIn("The machine you ran on was replaced", note)
         self.assertIn("check out your branch", agent)
         self.assertNotIn("branch", coordinator)
         self.assertIn("summary", coordinator)
+
+    # With no repository there is nothing to clone: the platform holds what the agent pushed.
+    def test_with_no_repository_an_agent_takes_its_code_back_from_its_last_job(self):
+        from types import SimpleNamespace
+        agent = run._new_machine_note(SimpleNamespace(flavor="generalist"), "")
+        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator"), "")
+        self.assertIn("hl-clone <code_ref of your last job>", agent)
+        for note in (agent, coordinator):
+            self.assertIn("The machine you ran on was replaced", note)
+            self.assertNotIn("lone the repository", note)

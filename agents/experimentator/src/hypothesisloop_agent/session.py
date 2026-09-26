@@ -29,7 +29,7 @@ class Sessions:
     A snapshot is the files the backend names: its own state in the working directory and the
     model CLI's transcript under the CLI's home. It is stored after a turn when it changed and
     restored before the first turn on a machine that has none. The working tree is no part of
-    it: the repository is cloned again and holds what the agent pushed.
+    it: the repository, or with none the platform, holds what the agent pushed and is read again.
     """
 
     def __init__(self, client: api_client.PlatformClient, cfg: config.Config, workdir: str, model_home: str):

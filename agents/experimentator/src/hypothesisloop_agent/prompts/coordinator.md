@@ -22,7 +22,7 @@ platform rules below bind the agents; read them to know what an agent may be hel
 
 Your assignment:
   platform_experiment_id: {platform_experiment_id}
-  repository: {repository_url}
+{repository_line}
 
 ## Start of every session
 
@@ -35,10 +35,7 @@ platform: the description and the summary you wrote.
   2. `hl platform-experiments agents list`: who is in the run, each agent's flavor and model,
      and for an agent the platform runs what became of its machine (`instance`: restarts, the
      end of its last output, whether it was stopped).
-  3. To read what the agents start from, clone {repository_url}: `.hypothesisloop/experiment.yaml`
-     is the base of the brief and `.hypothesisloop/job.yaml` the base job spec. Your access to
-     the repository is read-only. You push nothing, and nothing you write locally outlives
-     your machine.
+{start_code}
 
 ## What to watch
 

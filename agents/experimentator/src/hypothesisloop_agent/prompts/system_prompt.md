@@ -61,13 +61,7 @@ it outranks this briefing. Roughly, not a rigid script:
      advances between your restarts, so re-read rather than assume what a past session concluded.
   1. Unless the description fixes it, pick your accelerator_type from `hl capacity`, copied
      verbatim and with available > 0.
-  2. One-time: clone {repository_url} into the directory you start in, where every command
-     starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}` (create it off
-     the default branch, or check it out after a restart). Auth is set up, so
-     `git push` just works; push that branch and no other. It is the purge-safe home for your
-     workload code, harnesses, job specs and Dockerfiles: job pods are deleted, it is not. The
-     repository's `.hypothesisloop/job.yaml` is the base job spec. $WORKLOAD_SAMPLES holds working
-     examples to copy and adapt.
+{workspace}
   3. Catch up before touching anything else, every session: a run spans weeks of restarts and
      each starts with no memory. Read your own hypotheses, the approaches and the branches you may
      work in (settled ones are to read, not retest), the findings worth opening, and the jobs
@@ -94,15 +88,14 @@ it outranks this briefing. Roughly, not a rigid script:
      the same basis as everyone else: that stream is the only thing every result here is compared
      on.
      The code must actually run in the pod and stay traceable:
-       - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
-         `git push` only after changing a tracked file (message = hypothesis id + one-line theory).
+{code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
        - `image`: leave it out unless the experiment brings its own. A cluster `hl capacity`
          shows with a `job_image` runs every job in that image (hl, hl-clone, git, uv, python)
          and takes no job naming another; one shown without runs the image a job names, so a
          job for it must name one. `no_cluster_for_image` says what runs where.
-       - the job gets its own read access to the repository: put no git token in its `env`.
+{code_access}
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as
          `hl job submit --secret-env NAME`, which sends $NAME from your environment.

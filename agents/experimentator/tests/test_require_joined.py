@@ -137,11 +137,16 @@ class StartupTest(PlatformCase):
         ])
         self.assertIn("clone https://github.com/acme/model.git", setup.system_prompt)
 
-    def test_prepare_stops_when_the_platform_experiment_names_no_repository(self):
+    # An agent of a platform experiment that names no repository used to exit at startup.
+    def test_with_no_repository_the_agent_starts_and_is_told_where_its_code_goes(self):
         FakePlatform.repository_url = ""
-        with self.assertRaises(SystemExit) as ctx:
-            self.prepare()
-        self.assertIn("names no repository", str(ctx.exception))
+        setup = self.prepare()
+        self.assertEqual(setup.repository_url, "")
+        flat = " ".join(setup.system_prompt.split())
+        self.assertIn("this experiment has no repository. Run `git init` in the directory you start in", flat)
+        self.assertIn("`hl code push` stores your committed HEAD with the platform", flat)
+        self.assertNotIn("git push", flat)
+        self.assertNotIn("github", flat)
 
     def test_the_repository_address_is_the_platforms_and_never_the_environments(self):
         setup = self.prepare(CODE_REPO_URL="git://example.invalid/other", GIT_TOKEN="a-token")
