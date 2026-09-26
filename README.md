@@ -385,24 +385,18 @@ kubeconfig and no credential of one. A control plane started with `make dev` or
 the settings must name addresses that cluster reaches. `API_URL` and `METRICS_URL` can also be
 given to the install command directly, and `data_store.endpoint` cannot.
 
-**A Kubernetes cluster.** Needs `helm` 3.17 or newer, `kubectl` pointed at the cluster, and the
-images in a registry every node pulls from. `hl cluster add my-cluster`, or the UI, shows the
-command and below it the cluster's runtime token:
+**A Kubernetes cluster.** Needs `helm`, `kubectl` pointed at the cluster, and the images in a
+registry every node pulls from. `hl cluster add my-cluster` prints the command:
 
 ```bash
-sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" --namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' \
-  sh 'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' '0.1.0+the-tag-that-was-pushed' \
+hl cluster token 'my-cluster' --org 'org-1' | helm upgrade --install hypothesisloop-cluster-agent \
+  'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' --version '0.1.0+the-tag-that-was-pushed' \
+  --namespace hypothesisloop --create-namespace \
   --set-string 'clusterName=my-cluster' \
   --set-string 'apiURL=https://your-control-plane:8081' --set-string 'metricsURL=https://your-control-plane:8084' \
   --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed' \
-  --set-string 'jobImage=registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
+  --set-file runtimeToken=/dev/stdin
 ```
-
-The command is complete and holds no token. It asks for the token, without echo, and hands it to
-helm on standard input, so the token is in no shell history and no process's arguments, and the
-machine needs neither `hl` nor an API key. `jobImage` is the platform's job image, where a job
-that names no image runs; name another image there, or leave the value out for a cluster that
-takes only jobs that name their image.
 
 `make images REGISTRY=...` pushes the chart beside the images, under `charts/` and at a version
 that carries their tag, so the command needs no checkout. It installs the release into the
@@ -431,7 +425,9 @@ RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agen
 Left out, `REGISTRY` and `TAG` are the local development registry and the tag of this checkout,
 which only the local cluster pulls. A cluster that holds the runtime's objects from before the
 chart existed (applied as plain manifests, no helm release) refuses the install: delete the old
-`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first.
+`hypothesisloop-cluster-agent` Deployment and `hypothesisloop-node-agent` DaemonSet first. A
+`hypothesisloop-jobs` namespace an earlier agent created is taken over by `make
+cluster-agent-up`; the helm command refuses it, so delete it first.
 The cluster-agent tolerates the `hypothesisloop.io/no-workload` taint and the control-plane
 role and no other taint, so it needs one node free of other taints.
 
@@ -462,12 +458,11 @@ the same way.
 
 **A bare-metal node.** Needs docker or podman, systemd and root on the node, and glibc 2.17 or
 newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-metal choice,
-shows the command to run on the node and below it the cluster's runtime token.
+shows two things: the command to run on the node and the cluster's runtime token.
 
 ```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' \
-  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed' \
-  'registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' \
+  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
 ```
 
 The node's engine copies the agent's binary out of the image that carries it; no container is
@@ -516,7 +511,9 @@ From a checkout, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/b
 needs Go and gcc) and runs in the foreground with `CLUSTER_NAME`, `API_URL` and `RUNTIME_TOKEN`
 in its environment.
 
-`hl cluster token my-cluster` prints a cluster's runtime token again at any time.
+A Kubernetes cluster's runtime token reaches helm on stdin: a token given as a make argument or
+a flag is readable in the process list. Its command reads the token with `hl cluster token` when
+it runs, so the token is in no scrollback and no shell history.
 
 `hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
 accelerators under the names its drivers publish. Repeat for every additional cluster.
