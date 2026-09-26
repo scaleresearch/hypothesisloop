@@ -228,7 +228,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   return (
     <div>
       <PageHeader
-        back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
+        back={{ label: 'Experiments', onClick: () => router.push('/platform-experiments') }}
         title={draft.name}
         description={<span className="text-xs text-subtle">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</span>}
       />

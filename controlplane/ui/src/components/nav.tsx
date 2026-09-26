@@ -17,7 +17,7 @@ import { Logo } from '@/components/ui/logo'
 import { InlineError } from '@/components/ui/status-message'
 
 const navItems = [
-  { href: '/platform-experiments', label: 'Platform Experiments', icon: FlaskConical },
+  { href: '/platform-experiments', label: 'Experiments',          icon: FlaskConical },
   { href: '/hypotheses',           label: 'Hypotheses',           icon: Lightbulb    },
   { href: '/agents',               label: 'Research Agents',      icon: Bot          },
   { href: '/jobs',                 label: 'Jobs',                 icon: ListTree     },

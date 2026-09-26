@@ -102,7 +102,7 @@ function unshare(platformExperimentID) {
 
 // A project's list of platform experiments with none of the project's own in it: the empty
 // state, or on a stack whose owner shares some, those and nothing else.
-function noneOfItsOwn(page, emptyState = 'has no platform experiments yet') {
+function noneOfItsOwn(page, emptyState = 'None yet. Write what you want to find out above') {
   return page.getByText(emptyState).or(page.getByText('Shared · read only').first()).first()
 }
 
@@ -236,7 +236,7 @@ async function choose(page, field, option) {
 }
 
 // Clicks the GitHub sign-in button and follows the redirects back into the app.
-async function signIn(page, user, landing = `${UI}/console`) {
+async function signIn(page, user, landing = `${UI}/platform-experiments`) {
   people.set(user.id, user)
   await configure({ nextUser: user })
   await page.getByRole('button', { name: 'Continue with GitHub' }).click()
@@ -379,11 +379,11 @@ async function scenarios(browser) {
   section('a way back that leads off the site is dropped, signed out and signed in')
   const HOSTILE = ['/%09/evil.example', '/%0A/evil.example', '/%5Cevil.example', '%2F%2Fevil.example', 'https%3A%2F%2Fevil.example']
   await visitorPage.goto(`${UI}/login?next=${HOSTILE[0]}`)
-  await signIn(visitorPage, eve, `${UI}/console`)
+  await signIn(visitorPage, eve)
   assert.equal(new URL((await idpState()).authorizeRequests.at(-1)).searchParams.get('redirect_to'), `${UI}/auth/callback?next=%2Fconsole`)
   for (const next of HOSTILE) {
     await visitorPage.goto(`${UI}/login?next=${next}`)
-    await visitorPage.waitForURL(`${UI}/console`)
+    await visitorPage.waitForURL(`${UI}/platform-experiments`)
   }
 
   section('the landing page offers a signed-in visitor the console')
@@ -391,7 +391,7 @@ async function scenarios(browser) {
   assert.equal(await visitorPage.getByRole('link', { name: 'Sign in' }).count(), 0)
   await shot(visitorPage, 'landing-signed-in')
   await visitorPage.getByRole('link', { name: 'Console' }).click()
-  await visitorPage.waitForURL(`${UI}/console`)
+  await visitorPage.waitForURL(`${UI}/platform-experiments`)
   await visitor.close()
 
   const context = await newContext(browser)
@@ -432,7 +432,7 @@ async function scenarios(browser) {
   }
 
   section('a first-time user lands in their own org and default project, on one sentence to start from')
-  await page.goto(`${UI}/console`)
+  await page.goto(`${UI}/platform-experiments`)
   await page.getByText(`New experiment in ${ada.name} / default`).waitFor()
   await page.getByLabel('What do you want to find out?').waitFor()
   await page.getByText('None yet. Write what you want to find out above').waitFor()
@@ -441,12 +441,12 @@ async function scenarios(browser) {
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
   await shot(page, 'first-run-home')
-  await page.getByRole('link', { name: 'Platform Experiments' }).click()
+  await page.getByRole('link', { name: 'Experiments', exact: true }).click()
   await noneOfItsOwn(page).waitFor()
   await shot(page, 'first-run-empty-project')
 
   section('creating a platform experiment in the selected project')
-  await page.getByRole('button', { name: /New Experiment|Create the first platform experiment/ }).first().click()
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const experimentName = `ui-e2e-${run}`
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(experimentName)
   await choose(page, page.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
@@ -561,8 +561,8 @@ async function scenarios(browser) {
   await page.unroute(agentsAPI)
 
   section('home: Advanced opens the full form in a dialog, and the new experiment is created and started from there')
-  await page.goto(`${UI}/console`)
-  await page.getByRole('heading', { name: 'Platform experiments of default' }).waitFor()
+  await page.goto(`${UI}/platform-experiments`)
+  await page.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
   await page.getByText(experimentName).first().waitFor()
   assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Advanced')
   await shot(page, 'home-with-experiments')
@@ -644,7 +644,7 @@ async function scenarios(browser) {
 
   // Fills the form in the home dialog for hosted agents and presses Create and run.
   async function createAndRunFromHome(name, researchers) {
-    await page.goto(`${UI}/console`)
+    await page.goto(`${UI}/platform-experiments`)
     await page.getByRole('button', { name: 'Advanced', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
@@ -737,7 +737,7 @@ async function scenarios(browser) {
     if (path.endsWith('/metrics')) return json([{ experiment_id: 'job-baseline', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.8, metric_basis: 'raw' }])
     return json([])
   })
-  await page.goto(`${UI}/console`)
+  await page.goto(`${UI}/platform-experiments`)
   await page.getByLabel('What do you want to find out?').fill(draftGoal)
   await page.getByRole('button', { name: 'Plan this experiment' }).click()
   await page.waitForURL(u => u.pathname === `/platform-experiments/${draftID}`)
@@ -819,9 +819,10 @@ async function scenarios(browser) {
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project', 'the switcher names the record\'s project')
   await page.goto(`${UI}/settings?project=${secondProjectID}`)
   await page.getByLabel('Name of project second').waitFor()
-  await page.getByRole('link', { name: 'Platform Experiments' }).click()
+  await page.getByRole('link', { name: 'Experiments', exact: true }).click()
   await page.waitForURL(/\/platform-experiments\?project=/)
-  await noneOfItsOwn(page, 'second has no platform experiments yet').waitFor()
+  await page.getByText(/New experiment in .+ \/ second$/).waitFor()
+  await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0, 'the other project\'s experiment is not listed')
   await shot(page, 'switched-project-is-empty')
   await selectInNav(page, 'Project', 'Default project')
@@ -1103,8 +1104,8 @@ async function scenarios(browser) {
     ].filter(r => r.repository.includes(q))
     return route.fulfill({ headers: { ...cors, 'X-Total-Count': String(found.length) }, json: found })
   })
-  await page.getByRole('link', { name: 'Platform Experiments' }).click()
-  await page.getByRole('button', { name: /New Experiment|Create the first platform experiment/ }).first().click()
+  await page.getByRole('link', { name: 'Experiments', exact: true }).click()
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const repositoryField = page.getByLabel('Repository')
   await repositoryField.click()
   await page.getByRole('option', { name: 'No repository' }).waitFor()
@@ -1137,7 +1138,8 @@ async function scenarios(browser) {
   assert.equal(adaOrgs.filter(o => o.name === `${ada.name} Second`).length, 1, 'a double click created one org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), `${ada.name} Second`, 'the new org is selected')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
-  await noneOfItsOwn(page, `${ada.name} Second / Default project has no platform experiments yet`).waitFor()
+  await page.getByText(`New experiment in ${ada.name} Second / Default project`).waitFor()
+  await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0)
   await shot(page, 'second-org-is-empty')
   await page.getByRole('link', { name: 'Settings' }).click()
@@ -1232,7 +1234,7 @@ async function scenarios(browser) {
     otherPage.on('response', record)
 
     const listed = otherPage.waitForResponse(experimentsList)
-    await otherPage.getByRole('link', { name: 'Platform Experiments', exact: true }).click()
+    await otherPage.getByRole('link', { name: 'Experiments', exact: true }).click()
     const list = await listed
     const asked = new URL(list.url()).searchParams
     assert.ok(bobProjects.includes(asked.get('project_id')), 'the list is the one of the reader\'s own project')
@@ -1243,7 +1245,7 @@ async function scenarios(browser) {
     const card = otherPage.locator('[role="link"]', { hasText: sharedName })
     await card.getByText('Shared · read only').waitFor()
     assert.equal(await card.getByRole('button', { name: 'Edit' }).count(), 0, 'a shared experiment of another org offers no edit')
-    await otherPage.getByRole('button', { name: '+ New Experiment' }).waitFor()
+    await otherPage.getByRole('button', { name: 'Advanced', exact: true }).waitFor()
     await shot(otherPage, 'shared-in-the-list', card)
 
     section('shared: it opens on the experiment page from the reader\'s own project, with nothing to change')
@@ -1307,9 +1309,9 @@ async function scenarios(browser) {
     assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/close`, 'POST')).status, 404)
 
     section('shared: it does not count as the reader\'s own, and the pickers offer it')
-    await otherPage.goto(`${UI}/console`)
+    await otherPage.goto(`${UI}/platform-experiments`)
     await otherPage.getByText('New experiment in').waitFor()
-    await otherPage.getByRole('heading', { name: /^Platform experiments of / }).waitFor()
+    await otherPage.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
     await otherPage.goto(`${UI}/jobs`)
     await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
     await otherPage.getByPlaceholder('All experiments').click()
@@ -1405,7 +1407,7 @@ async function scenarios(browser) {
   await signIn(danPage, dan, `${UI}/invite`)
   await shot(danPage, 'invite-offered')
   await danPage.getByRole('button', { name: 'Accept invite' }).click()
-  await danPage.waitForURL(`${UI}/console?project=${labProject}`)
+  await danPage.waitForURL(`${UI}/platform-experiments?project=${labProject}`)
   const danID = (await (await api(await tokenOf(dan), '/me')).json()).user_id
   assert.match(danID, /^[\w-]+$/)
   assert.deepEqual(await pendingInvites(), [], 'an accepted invite is no longer pending')
@@ -1483,7 +1485,7 @@ async function scenarios(browser) {
     assert.deepEqual(settingsReads, [], 'and the page asks for no settings the API would refuse')
     assert.equal((await api(await tokenOf(bob), `/clusters/${clusterID}/settings`)).status, 403, 'which it does refuse')
     await shot(otherPage, 'member-cluster-page', memberRow)
-    await otherPage.getByRole('link', { name: 'Platform Experiments' }).click()
+    await otherPage.getByRole('link', { name: 'Experiments', exact: true }).click()
     await otherPage.getByText(`${experimentName}-edited`).first().waitFor()
 
     const appReads = []

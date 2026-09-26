@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchExperimentStats, fetchHypothesisStats, fetchPlatformExperimentQuotas, fetchPlatformExperimentsPage } from '@/lib/api'
+import { fetchAgentsPage, fetchExperimentStats, fetchHypothesisStats, fetchOrgClusters, fetchPlatformExperimentQuotas, fetchPlatformExperimentsPage } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/platform-experiments/page'
 import { PlatformExperimentStatus } from '@/types'
@@ -14,7 +14,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', () => ({
   fetchPlatformExperimentsPage: vi.fn(), fetchPlatformExperimentQuotas: vi.fn(),
-  fetchExperimentStats: vi.fn(), fetchHypothesisStats: vi.fn(),
+  fetchExperimentStats: vi.fn(), fetchHypothesisStats: vi.fn(), fetchOrgClusters: vi.fn(), fetchAgentsPage: vi.fn(), apiSend: vi.fn(),
   createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
   HYPOTHESIS_STATUSES: ['open', 'confirmed', 'refuted', 'inconclusive'],
 }))
@@ -54,6 +54,8 @@ beforeEach(() => {
   vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
+  vi.mocked(fetchOrgClusters).mockResolvedValue([])
+  vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })
 })
 
 describe('the platform experiments of a project', () => {
@@ -81,11 +83,12 @@ describe('the platform experiments of a project', () => {
     expect(fetchExperimentStats).toHaveBeenCalledWith({ project_id: 'prj_platform', platform_experiment_id: 'pe-x', group_by: 'hypothesis' })
   })
 
-  it('keep the way to create one\'s own when all there is is shared', async () => {
+  it('keep the way to start one\'s own when all there is is shared', async () => {
     vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({ items: [experiment('pe-x', 'Vision benchmark', 'prj_platform', true)], total: 1 })
     show()
     await screen.findByText('Vision benchmark')
-    expect(screen.getByRole('button', { name: '+ New Experiment' })).toBeTruthy()
-    expect(screen.queryByText(/has no platform experiments yet/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Plan this experiment' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Advanced' })).toBeTruthy()
+    expect(screen.queryByText(/None yet/)).toBeNull()
   })
 })

@@ -6,13 +6,14 @@ import {
   apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubInstallations, fetchOrgClusters, fetchPlatformExperimentsPage,
 } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import Home from '@/app/(app)/console/page'
+import PlatformExperimentsPage from '@/app/(app)/platform-experiments/page'
 import type { Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: navigation.push, replace: vi.fn() }),
+  usePathname: () => '/platform-experiments',
   useSearchParams: () => new URLSearchParams('project=prj_1'),
 }))
 vi.mock('@/lib/api', async importActual => ({
@@ -40,7 +41,7 @@ function show() {
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <TenantContext.Provider value={resolved.tenant}><Home /></TenantContext.Provider>
+      <TenantContext.Provider value={resolved.tenant}><PlatformExperimentsPage /></TenantContext.Provider>
     </SWRConfig>,
   )
 }
@@ -62,7 +63,7 @@ beforeEach(() => {
 
 // The form asks for metrics, a budget and dates before anything exists, so the page starts
 // from a sentence and keeps the form for who wants to state all of that themselves.
-describe('the home page', () => {
+describe('the experiments page', () => {
   it('starts an experiment from one sentence, in an empty project and in one with experiments', async () => {
     vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
     for (const existing of [[], [experiment('pe-0')]]) {
@@ -113,18 +114,18 @@ describe('the home page', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('lists the newest experiments with the shared ones and leads to the rest, or says it could not read them', async () => {
-    own = Array.from({ length: 4 }, (_, i) => experiment(`pe-${i}`))
-    shared = [experiment('pe-shared', { project_id: 'prj_other', shared: true }), experiment('pe-shared-2', { project_id: 'prj_other', shared: true })]
+  it('lists the experiments under the goal box, or says it could not read them and keeps the box', async () => {
+    own = [experiment('pe-0'), experiment('pe-1')]
+    shared = [experiment('pe-shared', { project_id: 'prj_other', shared: true })]
     const { unmount } = show()
-    expect(await screen.findByRole('heading', { name: 'Platform experiments of default' })).toBeTruthy()
-    expect(screen.getAllByRole('article').map(a => a.textContent)).toEqual(['pe-0', 'pe-1', 'pe-2', 'pe-3', 'pe-shared (shared)'])
-    expect(screen.getByRole('link', { name: 'All 6 platform experiments →' }).getAttribute('href')).toBe('/platform-experiments?project=prj_1')
+    expect(await screen.findByRole('heading', { name: 'Experiments' })).toBeTruthy()
+    await screen.findByText('pe-0')
+    expect(screen.getAllByRole('article').map(a => a.textContent)).toEqual(['pe-0', 'pe-1', 'pe-shared (shared)'])
     unmount()
 
     vi.mocked(fetchPlatformExperimentsPage).mockRejectedValue(new Error('API unreachable'))
     show()
-    expect(await screen.findByText('Could not load the platform experiments of default: API unreachable')).toBeTruthy()
+    expect(await screen.findByText('Could not load the experiments of default: API unreachable')).toBeTruthy()
     expect(screen.getByLabelText('What do you want to find out?')).toBeTruthy()
   })
 })
