@@ -127,14 +127,3 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		t.Fatalf("stderr = %q, want the empty roster said out loud", stderr.String())
 	}
 }
-
-func TestSignupPointsAtTheOneWayToJoin(t *testing.T) {
-	got := recordingServer(t, func(int, recorded) any { return nil })
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"signup", "--platform-experiment", "pe-1", "--agent", "jane"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("exit %d, want 2", code)
-	}
-	if !strings.Contains(stderr.String(), "platform-experiments agents add") || len(*got) != 0 {
-		t.Fatalf("stderr = %q, requests = %+v", stderr.String(), *got)
-	}
-}

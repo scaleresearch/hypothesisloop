@@ -439,7 +439,6 @@ func jobMetrics(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 One line per reported metric: points reported, the last value and the fraction_complete it was
 reported at, and the min and max over the run. --points prints every point instead.`, stderr)
 	points := fs.Bool("points", false, "print every reported point, oldest first")
-	fs.BoolVar(points, "raw", false, "")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
@@ -490,7 +489,6 @@ the job's finding on its hypothesis, shown there and announced as finding.new, s
 comment that repeats it. While a COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
-	fs.StringVar(&text, "summary", "", "")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)

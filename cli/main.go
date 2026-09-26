@@ -87,9 +87,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch cmd {
 	case "register":
 		return cmdRegister(client, rest, stdout, stderr)
-	case "signup":
-		fmt.Fprintln(stderr, "hl: an agent joins through hl platform-experiments agents add PE (--agent ID for one registered with hl register)")
-		return 2
 	case "platform-experiments":
 		return cmdPlatformExperiments(client, rest, stdout, stderr)
 	case "quota":
@@ -120,9 +117,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runGroup("cluster", clusterCommands, client, rest, stdout, stderr)
 	case "watch":
 		return cmdWatch(apiURL, token, rest, stdout, stderr)
-	case "experiments", "experiment":
-		fmt.Fprintln(stderr, "hl: an experiment is a job here: hl job list, hl job status ID, hl job submit FILE")
-		return 2
 	default:
 		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage)
 		return 2
@@ -528,7 +522,7 @@ where your jobs write. The same key every time; it does not expire. Any S3 clien
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
-	*pe = orEnv(*pe, platformExperimentEnv)
+	*pe = experimentOf(c, *pe)
 	var err error
 	if *agent, err = writingAgent(c, *agent); err != nil {
 		return fail(stderr, err)
@@ -582,8 +576,6 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return cmdPlatformExperimentsDecline(c, args[1:], stdout, stderr)
 		case "get":
 			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
-		case "results":
-			return cmdResults(c, args[1:], stdout, stderr)
 		case "agents":
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
@@ -716,7 +708,7 @@ A coordinator's token changes the description only.`, stderr)
 			*id, operands = operands[0], operands[1:]
 		}
 	}
-	*id = orEnv(*id, platformExperimentEnv)
+	*id = experimentOf(c, *id)
 	if *id == "" || len(operands) > 1 {
 		return parseExit(misuse(fs, "want PE or $"+platformExperimentEnv+", and at most one FIELDS.yaml"))
 	}
@@ -776,7 +768,7 @@ again. Each proposal replaces the one before. Once stored the draft waits for a 
 	if err != nil {
 		return parseExit(err)
 	}
-	id := orEnv(*pe, platformExperimentEnv)
+	id := experimentOf(c, *pe)
 	if id == "" || len(operands) > 1 {
 		return parseExit(misuse(fs, "want --pe or $"+platformExperimentEnv+", and at most one FILE"))
 	}
@@ -810,7 +802,7 @@ before no longer stands. The person may answer with a revision, which starts you
 	if err != nil {
 		return parseExit(err)
 	}
-	id := orEnv(*pe, platformExperimentEnv)
+	id := experimentOf(c, *pe)
 	if id == "" || len(operands) > 0 || strings.TrimSpace(*reason) == "" {
 		return parseExit(misuse(fs, "want --reason, and --pe or $"+platformExperimentEnv))
 	}
@@ -827,7 +819,7 @@ func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stder
 
 The platform experiment (default $PLATFORM_EXPERIMENT_ID): its status, description, metrics,
 stages and current_stage.`, stderr)
-	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -865,7 +857,7 @@ func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, std
 Ends the platform experiment (default $PLATFORM_EXPERIMENT_ID) for good: every job still running
 is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
 summary can still be written afterwards.`, stderr)
-	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -886,7 +878,7 @@ the whole text; hl platform-experiments get shows it as summary. It can be writt
 experiment runs and after it closed.`, stderr)
 	text := fs.String("text", "", "the summary")
 	file := fs.String("file", "", "read the summary from this file, - for stdin")
-	id, err := parseOne(fs, args, "PE", os.Getenv(platformExperimentEnv), "id")
+	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -1013,8 +1005,8 @@ func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--settle SECONDS] [--follow | --no-wait]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
-Prints events, one JSON object per line. With $AGENT_ID set and no --experiment or --all, the
-agent's own resources, resuming from where its last watch stopped. --all resumes the same way.`, stderr)
+Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
+or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
@@ -1028,18 +1020,18 @@ agent's own resources, resuming from where its last watch stopped. --all resumes
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
 	since := fs.Int64("since", 0, "resume from this cursor instead of the saved one: replays from it, the events at it included, before going live")
-	watchURL := fs.String("url", apiURL, "platform API base URL (default $API_URL)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 
 	if *experiment == "" {
-		*platformExperiment = orEnv(*platformExperiment, platformExperimentEnv)
+		c := apiclient.New(apiURL, token)
+		*platformExperiment = experimentOf(c, *platformExperiment)
 		if readsEveryAgent(token, *agent) {
 			*all = true
 		}
 		if !*all {
-			*agent = orEnv(*agent, agentEnv)
+			*agent = agentOf(c, *agent)
 		}
 	}
 
@@ -1058,7 +1050,7 @@ agent's own resources, resuming from where its last watch stopped. --all resumes
 	}
 
 	return watchclient.Run(watchclient.Options{
-		URL:                *watchURL,
+		URL:                apiURL,
 		Token:              token,
 		Experiment:         *experiment,
 		PlatformExperiment: *platformExperiment,

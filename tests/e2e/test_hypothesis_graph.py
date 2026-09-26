@@ -391,7 +391,7 @@ def _start_watch(api, tmp_path: Path, name: str, *args: str) -> tuple[subprocess
     out_path, err_path = tmp_path / f"{name}.jsonl", tmp_path / f"{name}.err"
     with out_path.open("w") as out_f, err_path.open("w") as err_f:
         proc = subprocess.Popen(
-            [str(api.hl_bin), "watch", "--url", api.base_url, *args], stdout=out_f, stderr=err_f, text=True
+            [str(api.hl_bin), "watch", *args], stdout=out_f, stderr=err_f, text=True, env={**os.environ, "API_URL": api.base_url}
         )
     return proc, out_path, err_path
 
@@ -460,7 +460,7 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
 
 def _watch_as(api, agent: str, pe_id: str, state_dir: Path) -> subprocess.CompletedProcess:
     env = {**api.hl_env(), "AGENT_ID": agent, "PLATFORM_EXPERIMENT_ID": pe_id, "HL_STATE_DIR": str(state_dir)}
-    return subprocess.run([str(api.hl_bin), "watch", "--url", api.base_url, "--timeout", "10"],
+    return subprocess.run([str(api.hl_bin), "watch", "--timeout", "10"],
                           capture_output=True, text=True, env=env, timeout=30)
 
 

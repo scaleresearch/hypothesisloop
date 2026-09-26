@@ -269,7 +269,7 @@ def test_watch_stays_inside_the_callers_org(tenants):
         assert _watch_status(a.api, None, query) == 401
         assert _watch_status(a.api, a.api.token + "x", query) == 401
 
-    watched = a.api.hl_expect("watch", "--url", a.api.base_url, "--platform-experiment", b.pe_id, "--timeout", "5")
+    watched = a.api.hl_expect("watch", "--platform-experiment", b.pe_id, "--timeout", "5")
     assert watched.returncode != 0 and "404" in watched.stderr, watched.stderr
     assert not watched.stdout.strip()
 

@@ -515,7 +515,7 @@ func TestJobSummary(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	for _, args := range [][]string{
 		{"job", "summary", "job-1", "--text", `LR 0.1 "won": +2%`},
-		{"job", "summary", "--id", "job-1", "--summary", `LR 0.1 "won": +2%`},
+		{"job", "summary", "--id", "job-1", "--text", `LR 0.1 "won": +2%`},
 	} {
 		if code := run(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("%v: exit code = %d, stderr = %s", args, code, stderr.String())
@@ -791,9 +791,8 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 		{[]string{"hypothesis", "comments", "--help"}, 2, "hl hypothesis get ID"},
 		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
 		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
-		{[]string{"platform-experiments", "results"}, 0, "no standing on val_accuracy yet"},
-		{[]string{"experiments", "list", "--platform-experiment-id", "pe-1"}, 2, "hl job list"},
-		{[]string{"job", "metrics", "job-1", "--raw"}, 0, "no metric reported yet"},
+		{[]string{"results"}, 0, "no standing on val_accuracy yet"},
+		{[]string{"job", "metrics", "job-1", "--points"}, 0, "no metric reported yet"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(tc.args, &stdout, &stderr)

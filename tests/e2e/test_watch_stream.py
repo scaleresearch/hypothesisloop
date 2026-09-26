@@ -115,8 +115,8 @@ def watch(tmp_path: Path, api):
         out_f = out_path.open("w")
         err_f = err_path.open("w")
         proc = subprocess.Popen(
-            [str(api.hl_bin), "watch", "--url", api.base_url, *args],
-            stdout=out_f, stderr=err_f, text=True,
+            [str(api.hl_bin), "watch", *args],
+            stdout=out_f, stderr=err_f, text=True, env={**os.environ, "API_URL": api.base_url},
         )
         started.append((proc, out_f, err_f))
         return Watcher(proc, out_path, err_path)
