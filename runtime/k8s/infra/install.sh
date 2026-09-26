@@ -3,7 +3,8 @@
 # metrics, cluster-agent Deployment, the only component with credentials to this cluster's API)
 # on a target Kubernetes cluster where training jobs run. Run once per cluster; re-running
 # upgrades it in place. The chart installs the hypothesisloop-jobs namespace and the
-# PriorityClasses of job pods too.
+# PriorityClasses of job pods too. --take-ownership makes a jobs namespace that an agent from
+# before the chart created the release's.
 #
 # Parameters (env vars; see chart/values.yaml for what each value means):
 #   CLUSTER_NAME       -> clusterName (required)
@@ -37,17 +38,9 @@ if [[ -z "${KUBE_CONTEXT}" ]]; then
   KUBE_CONTEXT="$(kubectl config current-context)"
 fi
 
-# A cluster installed before the chart owned the jobs namespace has one its agent created, and
-# helm installs over an object only once it is marked as this release's.
-if kubectl --context "${KUBE_CONTEXT}" get namespace hypothesisloop-jobs >/dev/null 2>&1; then
-  kubectl --context "${KUBE_CONTEXT}" label namespace hypothesisloop-jobs --overwrite app.kubernetes.io/managed-by=Helm >/dev/null
-  kubectl --context "${KUBE_CONTEXT}" annotate namespace hypothesisloop-jobs --overwrite \
-    meta.helm.sh/release-name=hypothesisloop-cluster-agent meta.helm.sh/release-namespace=hypothesisloop >/dev/null
-fi
-
 echo "==> Installing cluster agent on cluster '${CLUSTER_NAME}' (context: ${KUBE_CONTEXT}, API: ${API_URL})"
 helm upgrade --install hypothesisloop-cluster-agent "${SCRIPT_DIR}/chart" \
-  --kube-context "${KUBE_CONTEXT}" --namespace hypothesisloop --create-namespace \
+  --kube-context "${KUBE_CONTEXT}" --namespace hypothesisloop --create-namespace --take-ownership \
   --set-string clusterName="${CLUSTER_NAME}" \
   --set-string apiURL="${API_URL}" \
   --set-string metricsURL="${METRICS_URL}" \

@@ -57,6 +57,11 @@ func TestInstallHandsHelmTheRuntimeTokenOnStdinAndNeverAsAnArgument(t *testing.T
 	if !strings.Contains(string(args), "clusterName=edge") {
 		t.Errorf("helm arguments = %q, want the other values still set", args)
 	}
+	// A cluster that ran the runtime before the chart owned the jobs namespace has one no release
+	// owns, and helm refuses to install over it unless told to take it.
+	if !strings.Contains(string(args), "--take-ownership\n") {
+		t.Errorf("helm arguments = %q, want an older install's jobs namespace taken over", args)
+	}
 }
 
 // make echoes a recipe before running it, so the token must not be spelled into one.
