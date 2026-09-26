@@ -131,8 +131,8 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		status int
 		reason string
 	}{
-		"a model without a coordinator":      {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a model no name can be":             {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model no name can be":        {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 	} {
 		store, create := hostingAPI(t, tc.repos)
 		code, out := create(with(tc.more))
@@ -189,17 +189,6 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 			HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
 		}
 	}
-	whole := func(more map[string]any) map[string]any {
-		body := map[string]any{
-			"name": "n", "description": "the brief, amended", "budget_accelerator_hours": 5, "max_agents": 3, "report_interval_seconds": 30,
-			"starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-02-01T00:00:00Z",
-			"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize", "role": "ranking"}},
-		}
-		for key, value := range more {
-			body[key] = value
-		}
-		return body
-	}
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store := &createdStore{created: []*domain.PlatformExperiment{live()}}
@@ -215,7 +204,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)
 		}
-		req := authtest.Authorize(httptest.NewRequest("PUT", "/platform-experiments/pe-1", &payload))
+		req := authtest.Authorize(httptest.NewRequest("PATCH", "/platform-experiments/pe-1", &payload))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -225,8 +214,10 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	}
 	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "prj-a", PlatformExperimentID: "pe-1"}
 
-	code, out, stored := put(coordinator, whole(nil))
-	if code != http.StatusOK || stored.Description != "the brief, amended" || stored.BudgetAcceleratorHours != 5 || !stored.EndsAt.Equal(ends) {
+	code, out, stored := put(coordinator, map[string]any{"description": "the brief, amended"})
+	want := live()
+	want.Description = "the brief, amended"
+	if code != http.StatusOK || !reflect.DeepEqual(stored, want) {
 		t.Fatalf("a coordinator amending the description: got = %d %v, stored %+v", code, out, stored)
 	}
 	for field, more := range map[string]map[string]any{
@@ -234,13 +225,14 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		"max_agents":                  {"max_agents": 30},
 		"ends_at":                     {"ends_at": "2031-01-01T00:00:00Z"},
 		"starts_at":                   {"starts_at": "2030-01-02T00:00:00Z"},
-		"stages":                      {"stages": []map[string]any{{"length_pct": 50, "evict_pct": 50}, {"length_pct": 50, "evict_pct": 0}}},
 		"max_concurrent_accelerators": {"max_concurrent_accelerators": 8},
 		"report_interval_seconds":     {"report_interval_seconds": 60},
 		"metrics":                     {"metrics": []map[string]any{{"key": "loss", "direction": "minimize", "role": "ranking"}}},
 		"name":                        {"name": "another"},
 	} {
-		code, out, stored := put(coordinator, whole(more))
+		// Even at its live value: the field is not a coordinator's to send.
+		more["description"] = "the brief, amended"
+		code, out, stored := put(coordinator, more)
 		message, _ := out["message"].(string)
 		if code != http.StatusForbidden || out["reason"] != "coordinator_changes_description_only" || !strings.Contains(message, field) {
 			t.Errorf("a coordinator changing %s: got = %d %v, want 403 naming the field", field, code, out)
@@ -249,7 +241,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 			t.Errorf("a coordinator changing %s: stored %+v, want nothing changed, the description included", field, stored)
 		}
 		// The same body from the people who created it is theirs to send.
-		if code, out, _ := put(auth.Principal(ownerOfA), whole(more)); code != http.StatusOK {
+		if code, out, _ := put(auth.Principal(ownerOfA), more); code != http.StatusOK {
 			t.Errorf("an owner changing %s: got = %d %v, want 200", field, code, out)
 		}
 	}

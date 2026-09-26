@@ -369,18 +369,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "update-platform-experiment", Method: "PUT", Path: "/platform-experiments/{id}",
-		Summary: "Update a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Amends an experiment while it is open or running. While open, every field including " +
-			"`metrics` is editable — a mis-specified ranking metric can be fixed in place instead of closing " +
-			"the experiment and discarding every agent's hypotheses and baseline work. Once running, only " +
-			"`name` and `description` can be amended; budgets, `max_agents`, `metrics`, `report_interval_seconds` " +
-			"and the schedule are locked because admission and stage decisions have already been made against " +
-			"them. Rejected once the experiment is closed. A coordinator's token changes `description` only: " +
-			"a body that differs from the live experiment in any other field answers 403.",
+		OperationID: "update-platform-experiment", Method: "PATCH", Path: "/platform-experiments/{id}",
+		Summary: "Change fields of a platform experiment", Tags: []string{"platform-experiments"},
+		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
+			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
+			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"409 experiment_not_editable for a draft or a closed one, 422 invalid_field for a value that cannot be taken. " +
+			"A coordinator's token changes `description` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
+			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
-		Body UpdatePlatformExperimentRequest
+		Body PlatformExperimentPatch
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
@@ -388,19 +387,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		// A coordinator's token is handed to a machine the platform rents, so it changes the
 		// brief and nothing a run's cost or length follows from.
 		if caller, _ := auth.FromContext(ctx); caller.Kind == auth.KindCoordinator {
-			pe, err := peh.svc.UpdateDescription(ctx, in.ID, in.Body.fields())
-			var refused *signupRefusal
-			if errors.As(err, &refused) {
-				return nil, peh.refusal("update platform experiment", err)
+			if others := in.Body.beyondTheBrief(true); len(others) > 0 {
+				return nil, &reasonError{status: http.StatusForbidden, Reason: "coordinator_changes_description_only",
+					Message: "a coordinator's token changes the description and nothing else, and the body also carries: " + strings.Join(others, ", ") + ". Leave them out"}
 			}
-			if err != nil {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 		}
-		pe, err := peh.svc.Update(ctx, in.ID, in.Body.fields())
+		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
+		var refused *reasonError
+		if errors.As(err, &refused) {
+			return nil, refused
+		}
 		if err != nil {
-			return nil, huma.Error400BadRequest(err.Error())
+			return nil, peh.refusal("update platform experiment", err)
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})

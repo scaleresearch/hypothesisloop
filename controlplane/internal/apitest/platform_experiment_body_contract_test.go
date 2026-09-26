@@ -7,8 +7,8 @@ import (
 
 // The two bodies of a platform experiment require different things, and each set is load-bearing.
 //
-// An update takes the body as the whole truth: a field left out of it would be written as empty,
-// so everything a platform experiment always has is required, and from_repo is no field of it.
+// An update takes only the fields that change, so it requires none, and what is fixed at
+// creation is no field of it.
 //
 // A create may leave to the repository's experiment file what the file can state, so those are
 // not required by the schema (the handler requires them when from_repo is not set). What a run
@@ -21,9 +21,7 @@ func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 		absent       []string
 	}{
 		{"post", "/platform-experiments", []string{"budget_accelerator_hours", "ends_at", "max_agents"}, nil},
-		{"put", "/platform-experiments/{id}", []string{
-			"budget_accelerator_hours", "description", "ends_at", "max_agents", "metrics", "name", "report_interval_seconds", "starts_at",
-		}, []string{"from_repo"}},
+		{"patch", "/platform-experiments/{id}", nil, []string{"from_repo", "project_id", "repository", "agent_image", "stages", "default_quota_tier"}},
 	} {
 		schema := bodySchema(t, spec, tc.method, tc.path)
 		var required []string

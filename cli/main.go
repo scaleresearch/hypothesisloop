@@ -132,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   register              --id ID --kind agent|human
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list
+  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update [PE] --description-file F | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -588,7 +588,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update PE [FILE] | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update [PE] --description-file F | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -696,41 +696,68 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
 // is editable; once running, only name and description are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update PE [FILE|-]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [PE] [--description-file FILE] [--description TEXT] [--name NAME] [FIELDS.yaml]
 
-FILE is shaped exactly like 'hl platform-experiments create's body (see
-controlplane/settings/examples/experiment.yaml). While the platform experiment is still open,
-every field including metrics is editable; once running, only name and description may change
-and any other field that differs from the live value is rejected, so update from the file the
-experiment was created with (or set the named fields to the live values).`, stderr)
+Changes the fields you name and leaves every other as it is. The brief is one command:
+
+  hl platform-experiments update --description-file brief.md
+
+FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
+budget_accelerator_hours, max_agents, ends_at, metrics, report_interval_seconds. While the
+platform experiment is open any of them can change; once it runs only name and description do.
+A coordinator's token changes the description only.`, stderr)
 	id := fs.String("id", "", "")
+	name := fs.String("name", "", "the new name")
+	description := fs.String("description", "", "the new description")
+	descriptionFile := fs.String("description-file", "", "read the new description from this file, - for stdin")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
 	}
+	// One operand that is a file on disk is FIELDS.yaml with the experiment from the environment.
 	if *id == "" && len(operands) > 0 {
-		*id, operands = operands[0], operands[1:]
+		if _, statErr := os.Stat(operands[0]); len(operands) == 2 || statErr != nil {
+			*id, operands = operands[0], operands[1:]
+		}
 	}
+	*id = orEnv(*id, platformExperimentEnv)
 	if *id == "" || len(operands) > 1 {
-		return parseExit(misuse(fs, "want PE and at most one FILE"))
+		return parseExit(misuse(fs, "want PE or $"+platformExperimentEnv+", and at most one FIELDS.yaml"))
 	}
-	path := "-"
+	if *description != "" && *descriptionFile != "" {
+		return parseExit(misuse(fs, "--description and --description-file are two ways to say one thing"))
+	}
+	body := map[string]any{}
 	if len(operands) == 1 {
-		path = operands[0]
+		if body, err = readYAMLBody(operands[0]); err != nil {
+			fmt.Fprintf(stderr, "hl: %s\n", err)
+			return 2
+		}
 	}
-	body, err := readYAMLBody(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "hl: %s\n", err)
-		return 2
+	if *name != "" {
+		body["name"] = *name
 	}
-	if _, ok := body["starts_at"]; !ok {
-		body["starts_at"] = "0001-01-01T00:00:00Z"
+	if *description != "" {
+		body["description"] = *description
 	}
-	if _, ok := body["ends_at"]; !ok {
-		body["ends_at"] = "0001-01-01T00:00:00Z"
+	if *descriptionFile != "" {
+		var raw []byte
+		if *descriptionFile == "-" {
+			raw, err = io.ReadAll(os.Stdin)
+		} else {
+			raw, err = os.ReadFile(*descriptionFile)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "hl: %s\n", err)
+			return 2
+		}
+		body["description"] = string(raw)
+	}
+	if len(body) == 0 {
+		return parseExit(misuse(fs, "nothing to change: name a field"))
 	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(*id), body, &out); err != nil {
+	if err := c.Do("PATCH", "/platform-experiments/"+url.PathEscape(*id), body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

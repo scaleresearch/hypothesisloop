@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 	"time"
 
@@ -110,141 +109,103 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	return pe, nil
 }
 
-// Update applies editable field changes to an existing platform experiment.
-func (s *PlatformExperimentsService) Update(ctx context.Context, id string, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
+// refuseUpdate is a patch the caller can fix.
+func refuseUpdate(status int, reason, format string, args ...any) error {
+	return &reasonError{status: status, Reason: reason, Message: fmt.Sprintf(format, args...)}
+}
+
+// Update changes the fields the patch carries and no others. While the experiment is open every
+// field of the patch can change. Once it runs, only the name and the description can: admission
+// and the stage ladder have already acted on the rest. A closed one, and a draft, which its
+// planner's proposal fills, take no patch.
+func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patch PlatformExperimentPatch) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if pe == nil {
-		return nil, fmt.Errorf("not_found")
+		return nil, refuseUpdate(404, "experiment_not_found", "no platform experiment %s", id)
+	}
+	if patch.empty() {
+		return nil, refuseUpdate(422, "nothing_to_change", "the body names no field: send the fields that change")
 	}
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, fmt.Errorf("experiment_not_editable: can only edit open or running experiments (status: %s)", pe.Status)
+		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
+	if locked := patch.beyondTheBrief(false); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+		return nil, refuseUpdate(409, "experiment_running", "only name and description change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	}
+	invalid := func(format string, args ...any) error { return refuseUpdate(422, "invalid_field", format, args...) }
 	expectedStatus := pe.Status
-	// Name/Description are informational only — an operator amending the brief mid-run cannot
-	// corrupt anything already committed to quota/admission/stage state. Every other field feeds
-	// admission math (budgets, max_agents), stage transitions (metrics), or scheduling (report
-	// interval, window) that has already been acted on once the experiment is running, so those
-	// stay locked to the open status exactly as before.
-	if req.Name != "" {
-		pe.Name = req.Name
+	if patch.Name != nil {
+		if strings.TrimSpace(*patch.Name) == "" {
+			return nil, invalid("name must not be empty")
+		}
+		pe.Name = *patch.Name
 	}
-	pe.Description = req.Description
-	if pe.Status == domain.PlatformExpRunning {
-		// The form always echoes every field back (so an old CPU budget isn't silently zeroed,
-		// see the UI comment above the submit payload), so "field is set" alone can't detect
-		// intent to change it — it would reject on every single running-status edit, including
-		// pure name/description ones. Compare against what's already stored instead: only an
-		// actual attempted change to a locked field is rejected.
-		// datetime-local inputs (the only client today) round-trip at minute precision, so an
-		// unmodified schedule field comes back coarser than what's stored; compare at that
-		// granularity rather than false-flagging every running-status edit as a schedule change.
-		const timePrecision = time.Minute
-		var locked []string
-		lock := func(field string, changed bool) {
-			if changed {
-				locked = append(locked, field)
-			}
+	if patch.Description != nil {
+		pe.Description = *patch.Description
+	}
+	if patch.BudgetAcceleratorHours != nil {
+		if *patch.BudgetAcceleratorHours <= 0 {
+			return nil, invalid("budget_accelerator_hours must be positive")
 		}
-		lock("budget_accelerator_hours", req.BudgetAcceleratorHours > 0 && req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours)
-		lock("max_agents", req.MaxAgents > 0 && req.MaxAgents != pe.MaxAgents)
-		lock("metrics", req.Metrics != nil && !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics))
-		lock("report_interval_seconds", req.ReportIntervalSeconds > 0 && req.ReportIntervalSeconds != pe.ReportIntervalSeconds)
-		lock("starts_at", !req.StartsAt.IsZero() && !req.StartsAt.Truncate(timePrecision).Equal(pe.StartsAt.Truncate(timePrecision)))
-		lock("ends_at", !req.EndsAt.IsZero() && !req.EndsAt.Truncate(timePrecision).Equal(pe.EndsAt.Truncate(timePrecision)))
-		lock("hypothesis_submit_policy", req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy)
-		lock("job_submit_policy", req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
-		lock("max_concurrent_accelerators", req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
-		if len(locked) > 0 {
-			return nil, fmt.Errorf("experiment_running: only name and description can be amended once running; these fields differ from the live experiment: %s; set them to the live values", strings.Join(locked, ", "))
+		pe.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
+	}
+	if patch.MaxAgents != nil {
+		if *patch.MaxAgents <= 0 {
+			return nil, invalid("max_agents must be positive")
 		}
-	} else {
-		if req.BudgetAcceleratorHours > 0 {
-			pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
+		pe.MaxAgents = *patch.MaxAgents
+	}
+	if patch.Metrics != nil {
+		if err := domain.ValidateMetricDefinitions(*patch.Metrics); err != nil {
+			return nil, invalid("metrics: %s", err)
 		}
-		if req.MaxAgents > 0 {
-			pe.MaxAgents = req.MaxAgents
+		if err := domain.RequireRankingMetric(*patch.Metrics); err != nil {
+			return nil, invalid("metrics: %s", err)
 		}
-		if req.Metrics != nil {
-			if err := domain.ValidateMetricDefinitions(req.Metrics); err != nil {
-				return nil, fmt.Errorf("platform_experiments.Update: %w", err)
-			}
-			if err := domain.RequireRankingMetric(req.Metrics); err != nil {
-				return nil, fmt.Errorf("platform_experiments.Update: %w", err)
-			}
-			pe.Metrics = req.Metrics
+		pe.Metrics = *patch.Metrics
+	}
+	if patch.ReportIntervalSeconds != nil {
+		if *patch.ReportIntervalSeconds <= 0 {
+			return nil, invalid("report_interval_seconds must be positive")
 		}
-		if req.ReportIntervalSeconds > 0 {
-			pe.ReportIntervalSeconds = req.ReportIntervalSeconds
+		pe.ReportIntervalSeconds = *patch.ReportIntervalSeconds
+	}
+	if patch.StartsAt != nil {
+		pe.StartsAt = *patch.StartsAt
+	}
+	if patch.EndsAt != nil {
+		if patch.EndsAt.IsZero() {
+			return nil, invalid("ends_at must be a time: a platform experiment always has an end")
 		}
-		if !req.StartsAt.IsZero() {
-			pe.StartsAt = req.StartsAt
+		pe.EndsAt = *patch.EndsAt
+	}
+	if patch.HypothesisSubmitPolicy != nil {
+		policy, err := domain.ParseSubmitterPolicy(*patch.HypothesisSubmitPolicy)
+		if err != nil {
+			return nil, invalid("hypothesis_submit_policy: %s", err)
 		}
-		if !req.EndsAt.IsZero() {
-			pe.EndsAt = req.EndsAt
+		pe.HypothesisSubmitPolicy = policy
+	}
+	if patch.JobSubmitPolicy != nil {
+		policy, err := domain.ParseSubmitterPolicy(*patch.JobSubmitPolicy)
+		if err != nil {
+			return nil, invalid("job_submit_policy: %s", err)
 		}
-		if req.HypothesisSubmitPolicy != "" {
-			policy, err := domain.ParseSubmitterPolicy(req.HypothesisSubmitPolicy)
-			if err != nil {
-				return nil, fmt.Errorf("platform_experiments.Update: hypothesis_submit_policy: %w", err)
-			}
-			pe.HypothesisSubmitPolicy = policy
+		pe.JobSubmitPolicy = policy
+	}
+	if patch.MaxConcurrentAccelerators != nil {
+		if *patch.MaxConcurrentAccelerators <= 0 {
+			return nil, invalid("max_concurrent_accelerators must be positive")
 		}
-		if req.JobSubmitPolicy != "" {
-			policy, err := domain.ParseSubmitterPolicy(req.JobSubmitPolicy)
-			if err != nil {
-				return nil, fmt.Errorf("platform_experiments.Update: job_submit_policy: %w", err)
-			}
-			pe.JobSubmitPolicy = policy
-		}
-		if req.MaxConcurrentAccelerators != nil {
-			if *req.MaxConcurrentAccelerators <= 0 {
-				return nil, fmt.Errorf("platform_experiments.Update: max_concurrent_accelerators must be positive")
-			}
-			pe.MaxConcurrentAccelerators = req.MaxConcurrentAccelerators
-		}
+		pe.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
 	}
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
 	return pe, nil
-}
-
-// UpdateDescription is the update a coordinator's token may make: the description and nothing
-// else. Every other field decides what the run spends or how long it lasts, which is stated by
-// whoever created it, so a body that differs from the live experiment in one of them is refused.
-func (s *PlatformExperimentsService) UpdateDescription(ctx context.Context, id string, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if pe == nil {
-		return nil, fmt.Errorf("not_found")
-	}
-	var differs []string
-	differ := func(field string, changed bool) {
-		if changed {
-			differs = append(differs, field)
-		}
-	}
-	differ("name", req.Name != pe.Name)
-	differ("budget_accelerator_hours", req.BudgetAcceleratorHours != pe.BudgetAcceleratorHours)
-	differ("max_agents", req.MaxAgents != pe.MaxAgents)
-	differ("metrics", !domain.MetricDefinitionsEqual(req.Metrics, pe.Metrics))
-	differ("report_interval_seconds", req.ReportIntervalSeconds != pe.ReportIntervalSeconds)
-	differ("starts_at", !req.StartsAt.Truncate(time.Minute).Equal(pe.StartsAt.Truncate(time.Minute)))
-	differ("ends_at", !req.EndsAt.Truncate(time.Minute).Equal(pe.EndsAt.Truncate(time.Minute)))
-	differ("stages", len(req.Stages) > 0 && !reflect.DeepEqual(req.Stages, pe.Stages))
-	differ("hypothesis_submit_policy", req.HypothesisSubmitPolicy != "" && domain.SubmitterPolicy(req.HypothesisSubmitPolicy) != pe.HypothesisSubmitPolicy)
-	differ("job_submit_policy", req.JobSubmitPolicy != "" && domain.SubmitterPolicy(req.JobSubmitPolicy) != pe.JobSubmitPolicy)
-	differ("default_quota_tier", req.DefaultQuotaTier != "" && domain.QuotaTier(req.DefaultQuotaTier) != pe.DefaultQuotaTier)
-	differ("max_concurrent_accelerators", req.MaxConcurrentAccelerators != nil && (pe.MaxConcurrentAccelerators == nil || *req.MaxConcurrentAccelerators != *pe.MaxConcurrentAccelerators))
-	if len(differs) > 0 {
-		return nil, refuseSignup(403, "coordinator_changes_description_only", "a coordinator's token changes the description and nothing else, and these fields differ from the live experiment: %s. Send them at their live values (hl platform-experiments get)", strings.Join(differs, ", "))
-	}
-	return s.Update(ctx, id, CreatePlatformExperimentRequest{Description: req.Description})
 }
 
 func maxHostedReached(limit int) string {

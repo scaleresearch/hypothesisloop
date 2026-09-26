@@ -198,35 +198,49 @@ func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// UpdatePlatformExperimentRequest is the body of PUT /platform-experiments/{id}. The form sends
-// every field back, so each one a platform experiment always has is required: a body that left
-// description out would otherwise read as clearing it.
-type UpdatePlatformExperimentRequest struct {
-	// ProjectID is accepted so that the file a platform experiment was created from can be sent
-	// back as it is. The project is fixed at creation and this changes nothing.
-	ProjectID                 string                    `json:"project_id,omitempty"`
-	Name                      string                    `json:"name"`
-	Description               string                    `json:"description"`
-	BudgetAcceleratorHours    float64                   `json:"budget_accelerator_hours"`
-	MaxAgents                 int                       `json:"max_agents"`
-	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
-	Metrics                   []domain.MetricDefinition `json:"metrics"`
-	ReportIntervalSeconds     int                       `json:"report_interval_seconds"`
-	StartsAt                  time.Time                 `json:"starts_at"`
-	EndsAt                    time.Time                 `json:"ends_at"`
-	Stages                    []domain.Stage            `json:"stages,omitempty"`
-	HypothesisSubmitPolicy    string                    `json:"hypothesis_submit_policy,omitempty"`
-	JobSubmitPolicy           string                    `json:"job_submit_policy,omitempty"`
-	DefaultQuotaTier          string                    `json:"default_quota_tier,omitempty"`
+// PlatformExperimentPatch is the body of PATCH /platform-experiments/{id}: the fields that
+// change, and no others. A field left out keeps its value, so a description is cleared only by
+// sending it empty. The project, the repository, the agent image, the stages and the default
+// quota tier are fixed at creation and are no fields of it.
+type PlatformExperimentPatch struct {
+	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
+	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from. The one field a coordinator's token changes."`
+	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
+	MaxAgents                 *int                       `json:"max_agents,omitempty"`
+	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
+	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
+	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
+	StartsAt                  *time.Time                 `json:"starts_at,omitempty"`
+	EndsAt                    *time.Time                 `json:"ends_at,omitempty"`
+	HypothesisSubmitPolicy    *string                    `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy           *string                    `json:"job_submit_policy,omitempty"`
 }
 
-func (r UpdatePlatformExperimentRequest) fields() CreatePlatformExperimentRequest {
-	return CreatePlatformExperimentRequest{
-		Name: r.Name, Description: r.Description, BudgetAcceleratorHours: r.BudgetAcceleratorHours, MaxAgents: r.MaxAgents,
-		MaxConcurrentAccelerators: r.MaxConcurrentAccelerators, Metrics: r.Metrics, ReportIntervalSeconds: r.ReportIntervalSeconds,
-		StartsAt: r.StartsAt, EndsAt: r.EndsAt, Stages: r.Stages, HypothesisSubmitPolicy: r.HypothesisSubmitPolicy,
-		JobSubmitPolicy: r.JobSubmitPolicy, DefaultQuotaTier: r.DefaultQuotaTier,
+// beyondTheBrief names the fields the patch carries other than name and description (and name
+// too when alsoName is set): the ones a running experiment no longer takes, and with the name
+// the ones a coordinator's token never sets.
+func (p PlatformExperimentPatch) beyondTheBrief(alsoName bool) []string {
+	var out []string
+	carried := func(field string, set bool) {
+		if set {
+			out = append(out, field)
+		}
 	}
+	carried("name", alsoName && p.Name != nil)
+	carried("budget_accelerator_hours", p.BudgetAcceleratorHours != nil)
+	carried("max_agents", p.MaxAgents != nil)
+	carried("max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil)
+	carried("metrics", p.Metrics != nil)
+	carried("report_interval_seconds", p.ReportIntervalSeconds != nil)
+	carried("starts_at", p.StartsAt != nil)
+	carried("ends_at", p.EndsAt != nil)
+	carried("hypothesis_submit_policy", p.HypothesisSubmitPolicy != nil)
+	carried("job_submit_policy", p.JobSubmitPolicy != nil)
+	return out
+}
+
+func (p PlatformExperimentPatch) empty() bool {
+	return p.Name == nil && p.Description == nil && len(p.beyondTheBrief(false)) == 0
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.

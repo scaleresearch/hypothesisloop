@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -295,147 +296,84 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 	}
 }
 
-// PUT has its own body. A partial one is refused whole: taken as it stands it would clear the
-// description, and from_repo is no field of it.
-func TestAPartialUpdateIsRefusedAndClearsNothing(t *testing.T) {
-	whole := func() map[string]any {
-		return map[string]any{
-			"name": "renamed", "description": "a new brief", "budget_accelerator_hours": 5, "max_agents": 3,
-			"report_interval_seconds": 10, "starts_at": "2026-06-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
-			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
-		}
-	}
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
-		repos := &fakeRepositories{}
-		store, call := repoAPI(t, authtest.Staff, repos)
-		stored := func() *domain.PlatformExperiment { return store.created[0] }
-		store.created = []*domain.PlatformExperiment{{
+// The update was a PUT that had to carry every field at its live value, so changing the brief
+// meant reading the experiment, rebuilding its whole body and sending it back. It is a PATCH of
+// the fields that change.
+func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
+	starts, ends := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	live := func(status domain.PlatformExperimentStatus) *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "kept", Description: "the brief agents work from", Status: status,
-			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
-			StartsAt: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), EndsAt: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
-		}}
-		for name, body := range map[string]map[string]any{
-			"a name alone":               {"name": "x"},
-			"a description alone":        {"description": "y"},
-			"everything but description": func() map[string]any { b := whole(); delete(b, "description"); return b }(),
-			"from_repo beside the rest":  func() map[string]any { b := whole(); b["from_repo"] = true; return b }(),
-		} {
-			rec := call("PUT", "/platform-experiments/pe-1", body)
-			if rec.Code != http.StatusUnprocessableEntity {
-				t.Errorf("%s, %s: got = %d %s, want 422", status, name, rec.Code, rec.Body)
-			}
-			if stored().Name != "kept" || stored().Description != "the brief agents work from" {
-				t.Fatalf("%s, %s: the stored experiment became %q / %q", status, name, stored().Name, stored().Description)
-			}
-		}
-		if rec := call("PUT", "/platform-experiments/pe-1", whole()); rec.Code != http.StatusOK || stored().Name != "renamed" || stored().Description != "a new brief" {
-			t.Errorf("%s: a whole update: got = %d %s, stored %q / %q", status, rec.Code, rec.Body, stored().Name, stored().Description)
-		}
-		if len(repos.asked) != 0 {
-			t.Fatalf("%s: an update read the repository: %v", status, repos.asked)
+			Repository: testRepository, AgentImage: "image:1", BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
+			StartsAt: starts, EndsAt: ends, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}
 	}
-}
+	repos := &fakeRepositories{}
+	store, call := repoAPI(t, authtest.Staff, repos)
+	patch := func(status domain.PlatformExperimentStatus, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
+		t.Helper()
+		store.created = []*domain.PlatformExperiment{live(status)}
+		rec := call("PATCH", "/platform-experiments/pe-1", body)
+		out := map[string]any{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out, store.created[0]
+	}
 
-// The repository and the image are the experiment's own, stated at create and by nothing else.
-func TestCreateNamesTheRepositoryAndTheAgentImage(t *testing.T) {
-	whole := func(more map[string]any) map[string]any {
-		body := map[string]any{
-			"project_id": "prj-a", "name": "by hand", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3,
-			"report_interval_seconds": 10, "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
-			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
+	// One field changes and every other keeps its value, running or not.
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+		code, out, stored := patch(status, map[string]any{"description": "a new brief"})
+		want := live(status)
+		want.Description = "a new brief"
+		if code != http.StatusOK || !reflect.DeepEqual(stored, want) {
+			t.Fatalf("%s, the description alone: got = %d %v, stored %+v", status, code, out, stored)
 		}
-		for key, value := range more {
-			body[key] = value
+	}
+	// A description is cleared by sending it empty, and by nothing else.
+	if code, _, stored := patch(domain.PlatformExpOpen, map[string]any{"description": "", "name": "renamed"}); code != http.StatusOK || stored.Description != "" || stored.Name != "renamed" {
+		t.Errorf("an empty description and a name: got = %d, stored %q / %q", code, stored.Name, stored.Description)
+	}
+	// While it is open, what a run costs and how it is judged can still change.
+	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
+		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "ends_at": "2027-02-01T00:00:00Z",
+		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
+	})
+	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || stored.MaxAgents != 6 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
+		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.Description != "the brief agents work from" {
+		t.Errorf("an open experiment's fields: got = %d %v, stored %+v", code, out, stored)
+	}
+
+	for name, c := range map[string]struct {
+		status       domain.PlatformExperimentStatus
+		body         map[string]any
+		code         int
+		reason, says string
+	}{
+		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "ends_at": "2028-01-01T00:00:00Z"}, 409, "experiment_running", "budget_accelerator_hours, ends_at"},
+		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
+		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
+		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_field", "name"},
+		"no ranked metric":              {domain.PlatformExpOpen, map[string]any{"metrics": []map[string]any{}}, 422, "invalid_field", "metrics"},
+		"a concurrency cap of zero":     {domain.PlatformExpOpen, map[string]any{"max_concurrent_accelerators": 0}, 422, "invalid_field", "max_concurrent_accelerators"},
+		"the repository, fixed":         {domain.PlatformExpOpen, map[string]any{"description": "d", "repository": "other/one"}, 422, "", ""},
+		"the image, fixed":              {domain.PlatformExpOpen, map[string]any{"description": "d", "agent_image": "other:1"}, 422, "", ""},
+		"from_repo, which is no update": {domain.PlatformExpOpen, map[string]any{"description": "d", "from_repo": true}, 422, "", ""},
+	} {
+		code, out, stored := patch(c.status, c.body)
+		message, _ := out["message"].(string)
+		if code != c.code || (c.reason != "" && out["reason"] != c.reason) || !strings.Contains(message, c.says) {
+			t.Errorf("%s: got = %d %v, want %d %s naming %q", name, code, out, c.code, c.reason, c.says)
 		}
-		return body
-	}
-	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call := repoAPI(t, ownerOfA, repos)
-	rec := call("POST", "/platform-experiments", whole(map[string]any{"repository": "acme/model", "agent_image": "registry.example/team/agent:v2"}))
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != http.StatusCreated || err != nil {
-		t.Fatalf("got = %d %s, want 201", rec.Code, rec.Body)
-	}
-	if out["repository"] != testRepository || out["repository_url"] != "https://github.com/Acme/Model.git" || out["agent_image"] != "registry.example/team/agent:v2" {
-		t.Fatalf("answer = %v, want the repository as GitHub names it, its clone address and the image", out)
-	}
-	if _, old := out["code_repo_url"]; old {
-		t.Fatalf("the answer still carries code_repo_url: %v", out)
-	}
-	if pe := store.created[0]; pe.Repository != testRepository || pe.AgentImage != "registry.example/team/agent:v2" {
-		t.Fatalf("stored = %+v", pe)
+		if !reflect.DeepEqual(stored, live(c.status)) {
+			t.Errorf("%s: a refused update changed the experiment to %+v", name, stored)
+		}
 	}
 	if len(repos.asked) != 0 {
-		t.Fatalf("a create without from_repo read the experiment file: %v", repos.asked)
+		t.Fatalf("an update read the repository: %v", repos.asked)
 	}
-
-	// Neither is needed: an experiment its owner runs by hand names no repository and no image.
-	rec = call("POST", "/platform-experiments", whole(nil))
-	bare := map[string]any{}
-	_ = json.Unmarshal(rec.Body.Bytes(), &bare)
-	if _, named := bare["repository_url"]; rec.Code != http.StatusCreated || named || store.created[1].Repository != "" || store.created[1].AgentImage != "" {
-		t.Fatalf("without either: got = %d %s", rec.Code, rec.Body)
-	}
-
-	for name, tc := range map[string]struct {
-		more   map[string]any
-		reason string
-	}{
-		"a repository the org does not reach": {map[string]any{"repository": "rival/secret"}, "repository_not_reachable"},
-		"an image with a space":               {map[string]any{"agent_image": "agent image"}, "invalid_agent_image"},
-		"an image with a newline":             {map[string]any{"agent_image": "agent\nENV=x"}, "invalid_agent_image"},
-		"an image too long to be one":         {map[string]any{"agent_image": strings.Repeat("a", domain.MaxAgentImageLength+1)}, "invalid_agent_image"},
-		"from_repo with no repository":        {map[string]any{"from_repo": true}, "no_repository"},
-	} {
-		rec := call("POST", "/platform-experiments", whole(tc.more))
-		var refused map[string]any
-		_ = json.Unmarshal(rec.Body.Bytes(), &refused)
-		if rec.Code != http.StatusUnprocessableEntity || refused["reason"] != tc.reason || len(store.created) != 2 {
-			t.Errorf("%s: got = %d %s, want 422 %s and nothing created", name, rec.Code, rec.Body, tc.reason)
-		}
-	}
-}
-
-// Any agent's token can push to the branch the file is read from: the file cannot move the
-// experiment to another repository or put another image on its machines.
-func TestTheExperimentFileNamesNeitherRepositoryNorImage(t *testing.T) {
-	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase + "agent_image: registry.example/of-the-file\n"}}
-	store, call := repoAPI(t, ownerOfA, repos)
-	if rec := call("POST", "/platform-experiments", run(nil)); rec.Code != http.StatusCreated || store.created[0].AgentImage != "" {
-		t.Fatalf("an image in the file: got = %d %s, created %+v, want it left unread", rec.Code, rec.Body, store.created)
-	}
-	repos.files["prj-a"] = experimentBase + "repository: rival/secret\n"
-	if rec := call("POST", "/platform-experiments", run(nil)); rec.Code != http.StatusUnprocessableEntity || len(store.created) != 1 {
-		t.Fatalf("a repository in the file: got = %d %s, want 422", rec.Code, rec.Body)
-	}
-}
-
-// Both are fixed at create: an update has no field for either.
-func TestAnUpdateCannotMoveTheRepositoryOrTheImage(t *testing.T) {
-	store, call := repoAPI(t, authtest.Staff, &fakeRepositories{})
-	store.created = []*domain.PlatformExperiment{{
-		ID: "pe-1", ProjectID: "prj-a", Name: "kept", Status: domain.PlatformExpOpen, Repository: testRepository, AgentImage: "image:1",
-		BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10, EndsAt: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
-	}}
-	whole := map[string]any{
-		"name": "renamed", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3,
-		"report_interval_seconds": 10, "starts_at": "2026-06-01T00:00:00Z", "ends_at": "2027-01-01T00:00:00Z",
-		"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
-	}
-	for _, field := range []string{"repository", "agent_image"} {
-		body := map[string]any{field: "other/one"}
-		for key, value := range whole {
-			body[key] = value
-		}
-		if rec := call("PUT", "/platform-experiments/pe-1", body); rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("an update with %s: got = %d %s, want 422", field, rec.Code, rec.Body)
-		}
-	}
-	if rec := call("PUT", "/platform-experiments/pe-1", whole); rec.Code != http.StatusOK || store.created[0].Repository != testRepository || store.created[0].AgentImage != "image:1" {
-		t.Fatalf("a whole update: got = %d %s, stored %+v, want the repository and image kept", rec.Code, rec.Body, store.created[0])
+	// The whole-body PUT is gone.
+	if rec := call("PUT", "/platform-experiments/pe-1", map[string]any{"description": "d"}); rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("PUT: got = %d, want 405", rec.Code)
 	}
 }
 
