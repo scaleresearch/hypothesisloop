@@ -31,8 +31,10 @@ _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-exper
 def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
     """hl's own listing of its commands and of the subcommands the briefing leans on."""
     groups = _HL_HELP_COORDINATOR if coordinates else _HL_HELP_PLANNER if plans else _HL_HELP
+    # hl prints the help of a group on stdout and the help of one command on stderr.
     return "\n\n".join(
-        subprocess.run(["hl", *group, "--help"], check=True, capture_output=True, text=True).stdout.strip()
+        subprocess.run(["hl", *group, "--help"], check=True, text=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.strip()
         for group in groups)
 
 

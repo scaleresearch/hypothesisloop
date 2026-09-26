@@ -98,7 +98,10 @@ class BriefingTest(unittest.TestCase):
     def test_the_commands_listed_for_a_coordinator_are_the_ones_that_change_roster_and_brief(self):
         asked = []
 
-        def fake_run(command, **_):
+        def fake_run(command, **how):
+            # One command's help is on stderr: read from stdout alone, a planner was never
+            # shown the proposal file and a coordinator never how to add an agent.
+            self.assertEqual(how["stderr"], core.subprocess.STDOUT)
             asked.append(command[1:-1])
             return mock.Mock(stdout="usage\n")
 
