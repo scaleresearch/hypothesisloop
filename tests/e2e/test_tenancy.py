@@ -106,7 +106,9 @@ def _list_reads(t: Tenant) -> list[str]:
     """Every list and aggregate read, asked for a tenant's rows in each way its filters allow."""
     return [
         "/platform-experiments?limit=200",
-        f"/platform-experiments?project_id={t.project_id}",
+        # A project's listing also holds what staff shared with every account, which is nobody's
+        # leak and may be there from any run before this one.
+        f"/platform-experiments?project_id={t.project_id}&shared=false",
         f"/platform-experiments?q={t.marker}",
         "/agents?limit=200",
         f"/agents?platform_experiment_id={t.pe_id}",

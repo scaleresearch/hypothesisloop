@@ -23,7 +23,8 @@ METRICS = [
 
 @pytest.mark.parallel
 def test_secret_env_reaches_the_workload_and_no_read_of_the_job(api, experiment, run_id, deadline):
-    agent = make_agent(api, run_id, "secret-env")
+    # The label is no part of what the reads are searched for: an agent id is in every one of them.
+    agent = make_agent(api, run_id, "sealed")
     pe_id = experiment("secret-env", [agent], budget=1.0, metrics=METRICS)
     secret = f"secret-{uuid.uuid4().hex}"
 

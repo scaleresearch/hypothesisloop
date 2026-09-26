@@ -44,6 +44,15 @@ if [[ -n "${others}" ]]; then
   exit 1
 fi
 
+# The tenancy tests make orgs that own no cluster and read what such an org is told. A cluster the
+# platform shares with every org gives each of them one.
+shared="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/orgs/default/clusters" |
+  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["shared"]))')"
+if [[ -n "${shared}" ]]; then
+  echo "e2e: the platform shares clusters with every org (${shared}), so no org of the suite is one without a cluster. End the sharing for the run: hl-admin cluster share NAME off" >&2
+  exit 1
+fi
+
 # The cluster's runtime and the workload the tests' jobs run are images, pushed and installed by
 # make reload under one tag. A test job names that tag, so both must be there under it.
 if [[ ! -s localdev/.image-tag ]]; then

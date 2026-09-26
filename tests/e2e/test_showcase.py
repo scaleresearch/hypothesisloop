@@ -166,4 +166,6 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         assert unshared.status_code == 200 and unshared.json()["shared"] is False, unshared.text
         assert api.post(f"/platform-experiments/pe-none-{uuid.uuid4().hex}/share").status_code == 404
     finally:
+        # A shared platform experiment is in every account's listing until staff take it back.
+        admin.share_platform_experiment(pe_id, False)
         a.api.close_platform_experiment(pe_id)
