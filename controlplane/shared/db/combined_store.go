@@ -21,7 +21,6 @@ type Store struct {
 	*PlatformExperimentsStore
 	*ClusterQueueStore
 	*HypothesesStore
-	*ClusterSettingsStore
 	*ClustersStore
 
 	// usage is the sole read/write path for agent quota consumption (used_guaranteed_*/
@@ -50,7 +49,6 @@ func NewStore(pool *Pool, metricsDBURL string, maxInfraRequeues int) *Store {
 		PlatformExperimentsStore: NewPlatformExperimentsStore(pool),
 		ClusterQueueStore:        NewClusterQueueStore(pool),
 		HypothesesStore:          NewHypothesesStore(pool),
-		ClusterSettingsStore:     NewClusterSettingsStore(pool),
 		ClustersStore:            NewClustersStore(pool),
 		usage:                    metricsdb.NewUsageTracker(metricsDBURL),
 	}

@@ -52,7 +52,8 @@ type Clusters interface {
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
 	SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error)
 	SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error)
-	SetClusterPriority(ctx context.Context, name string, priority int) (*domain.Cluster, error)
+	SetClusterOrder(ctx context.Context, orgID string, names []string) error
+	SetClusterSettings(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error)
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
@@ -73,6 +74,7 @@ type Handler struct {
 	accounts      Accounts
 	clusters      Clusters
 	connected     Connectivity
+	autoscalers   Connectivity
 	signingSecret string
 	runtimes      RuntimeAddresses
 	limits        Limits
@@ -87,6 +89,12 @@ type Handler struct {
 type Limits struct {
 	MaxOrgsPerUser    int `json:"max_orgs_per_user" doc:"How many orgs a person may own when they create one. The orgs of this answer with role owner are the ones that count."`
 	MaxProjectsPerOrg int `json:"max_projects_per_org" doc:"How many projects one org may hold. The projects of this answer with that org_id are the ones that count."`
+}
+
+// WithAutoscalers tells the handler which connected clusters report an autoscaler, by name.
+func (h *Handler) WithAutoscalers(autoscalers Connectivity) *Handler {
+	h.autoscalers = autoscalers
+	return h
 }
 
 func NewHandler(accounts Accounts, clusters Clusters, connected Connectivity, signingSecret string, runtimes RuntimeAddresses, limits Limits, logger *zap.Logger) *Handler {
@@ -128,28 +136,28 @@ type CreatedAPIKey struct {
 }
 
 // ClusterView is a registered cluster as the API shows it to one org. ClusterID is the identity
-// its runtime reported, the key of its settings, absent until its agent first connects.
+// its runtime reported, absent until its agent first connects.
 type ClusterView struct {
 	Name      string    `json:"name"`
 	OrgID     string    `json:"org_id,omitempty"`
 	Shared    bool      `json:"shared" doc:"The platform places every org's jobs on a shared cluster. Staff decide it."`
 	Enabled   bool      `json:"enabled" doc:"Whether the jobs of the org in the path are placed on the cluster. True until an owner of that org turns the cluster off, which no other org sees or is bound by."`
-	Priority  int       `json:"priority" doc:"Where the cluster stands among the ones a job may be placed on: a job goes to the highest priority that can take it, and to a lower one when that is full. The org that registered the cluster sets 1 to 1000, 100 until it does. A shared cluster holds 0, so an org's own clusters are tried first."`
 	ClusterID string    `json:"cluster_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	domain.ClusterSettings
 }
 
 // viewOf shows a cluster as orgID has it.
 func viewOf(c *domain.Cluster, orgID string) ClusterView {
-	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), Priority: c.Priority, ClusterID: c.ReportedID, CreatedAt: c.CreatedAt}
+	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), ClusterID: c.ReportedID, CreatedAt: c.CreatedAt, ClusterSettings: c.ClusterSettings}
 }
 
 // viewFor shows a cluster as orgID has it to one caller. A cluster the caller does not know keeps
-// its owner and the identity its settings are kept under to itself.
+// its owner, its identity and its settings to itself.
 func viewFor(c *domain.Cluster, orgID string, caller auth.Principal) ClusterView {
 	view := viewOf(c, orgID)
 	if !caller.KnowsCluster(*c) {
-		view.OrgID, view.ClusterID = "", ""
+		view.OrgID, view.ClusterID, view.ClusterSettings = "", "", domain.ClusterSettings{}
 	}
 	return view
 }
@@ -157,25 +165,57 @@ func viewFor(c *domain.Cluster, orgID string, caller auth.Principal) ClusterView
 // RegisteredCluster is a cluster with everything its agents are started with.
 type RegisteredCluster struct {
 	ClusterView
-	RuntimeToken string `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
-	APIURL       string `json:"api_url" doc:"The address this cluster's agents reach the API at."`
-	MetricsURL   string `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
-	Registry     string `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
-	ImageTag     string `json:"image_tag" doc:"The tag of the agents' images."`
-	JobImage     string `json:"job_image" doc:"The platform's job image, published beside the agents' images: where a job that names no image runs on this cluster once its agent is started with it."`
+	RuntimeToken string         `json:"runtime_token" doc:"The token this cluster's agents start with. Derived from the cluster's name, so it can be read again at any time by registering the name again."`
+	APIURL       string         `json:"api_url" doc:"The address this cluster's agents reach the API at."`
+	MetricsURL   string         `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
+	Registry     string         `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
+	ImageTag     string         `json:"image_tag" doc:"The tag of the agents' images."`
+	JobImage     string         `json:"job_image" doc:"The platform's job image, published beside the agents' images: where a job that names no image runs on this cluster once its agent is started with it."`
+	Attach       AttachCommands `json:"attach_commands" doc:"The command that attaches the cluster, for each kind of runtime, built from the fields above. It asks for runtime_token."`
 }
 
 // ListedCluster is a cluster an org can use, whether the org has it on for its jobs, and whether
 // its agent is connected right now.
 type ListedCluster struct {
 	ClusterView
-	Owned     bool `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id and cluster_id are left out."`
-	Connected bool `json:"connected"`
+	Owned             bool `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id and settings are left out."`
+	Connected         bool `json:"connected"`
+	AutoscalerEnabled bool `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
 }
 
 // listed shows a cluster to a caller listing the clusters of orgID.
-func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected bool) ListedCluster {
-	return ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected}
+func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool) ListedCluster {
+	return ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler}
+}
+
+type clusterList struct {
+	Body struct {
+		Clusters []ListedCluster `json:"clusters"`
+	}
+}
+
+// listClusters answers the clusters the jobs of orgID run on, in the order a job is placed.
+func (h *Handler) listClusters(ctx context.Context, orgID string, caller auth.Principal) (*clusterList, error) {
+	clusters, err := h.clusters.ClustersHosting(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	connected, err := h.connected(ctx)
+	if err != nil {
+		return nil, err
+	}
+	autoscalers := map[string]bool{}
+	if h.autoscalers != nil {
+		if autoscalers, err = h.autoscalers(ctx); err != nil {
+			return nil, err
+		}
+	}
+	out := &clusterList{}
+	out.Body.Clusters = make([]ListedCluster, len(clusters))
+	for i, c := range clusters {
+		out.Body.Clusters[i] = listed(c, orgID, caller, connected[c.Name], connected[c.Name] && autoscalers[c.Name])
+	}
+	return out, nil
 }
 
 // WithdrawnCluster is a cluster after it stopped taking jobs it held, with the jobs that went
@@ -235,8 +275,6 @@ func (h *Handler) answer(op string, err error) error {
 		return conflict(ReasonMaxOrgsReached, fmt.Sprintf("a person owns at most %d orgs, and the owner of this one already does", h.limits.MaxOrgsPerUser))
 	case errors.Is(err, db.ErrMaxProjectsReached):
 		return conflict(ReasonMaxProjectsReached, fmt.Sprintf("an org holds at most %d projects, and this one already does", h.limits.MaxProjectsPerOrg))
-	case errors.Is(err, db.ErrClusterShared):
-		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
 		return huma.Error409Conflict(err.Error())
 	default:
@@ -478,7 +516,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "register-cluster", Method: "POST", Path: "/orgs/{id}/clusters",
 		Summary: "Register a cluster for an org", Tags: []string{"clusters"},
 		Description: "A cluster exists for the platform once its name is registered, and takes the jobs of its org only. " +
-			"Returns what its agents are started with: the runtime token and the two addresses they reach the platform at. " +
+			"Returns what its agents are started with: the runtime token, the two addresses they reach the platform at, and attach_commands, the complete command that starts them on a Kubernetes cluster and on a bare-metal node. " +
 			"The token is derived from the name, so it is never lost: registering a name the org already owns changes nothing " +
 			"and returns the same token and addresses. A name another org owns answers 409.",
 	}, func(ctx context.Context, in *struct {
@@ -499,47 +537,54 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
+		registered := RegisteredCluster{
 			ClusterView: viewOf(cluster, in.ID), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
 			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
 			JobImage: h.runtimes.Registry + "/hypothesisloop-job:" + h.runtimes.ImageTag,
-		}}, nil
+		}
+		registered.Attach = attachCommands(registered)
+		return &struct{ Body RegisteredCluster }{Body: registered}, nil
 	})
 
 	route(doc, h, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
 		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
-		Description: "The clusters the org registered and the ones the platform shares with every org, in the order a job is placed on them (priority, then name), with whether an agent is connected right now " +
+		Description: "The clusters the org registered and the ones the platform shares with every org, in the order a job is placed on them, with whether an agent is connected right now " +
 			"and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-	}) (*struct {
-		Body struct {
-			Clusters []ListedCluster `json:"clusters"`
-		}
-	}, error) {
+	}) (*clusterList, error) {
 		caller, err := h.policy.readOrg(ctx, in.ID)
 		if err != nil {
 			return nil, err
 		}
-		clusters, err := h.clusters.ClustersHosting(ctx, in.ID)
+		return h.listClusters(ctx, in.ID, caller)
+	})
+
+	route(doc, h, huma.Operation{
+		OperationID: "order-clusters", Method: "PUT", Path: "/orgs/{id}/clusters/order",
+		Summary: "Set the order an org's jobs are placed on its clusters", Tags: []string{"clusters"},
+		Description: "names is every cluster the org registered and the platform does not share, each once, first placed first: anything else answers 422 and changes nothing. " +
+			"A job is placed on the first cluster that can take it as the scheduler reads capacity at that moment, and on a later one when that is full or has just failed it. " +
+			"The order holds for placements from then on and moves no job that is placed. A cluster registered afterwards comes last until it is ordered, " +
+			"and the clusters the platform shares come after every one of the org's own. Answers the clusters as the list does, in the new order.",
+	}, func(ctx context.Context, in *struct {
+		ID   string `path:"id"`
+		Body struct {
+			Names []string `json:"names" doc:"The org's own clusters, first placed first."`
+		}
+	}) (*clusterList, error) {
+		caller, err := h.access.OrgAdmin(ctx, in.ID)
 		if err != nil {
 			return nil, err
 		}
-		connected, err := h.connected(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := &struct {
-			Body struct {
-				Clusters []ListedCluster `json:"clusters"`
+		if err := h.clusters.SetClusterOrder(ctx, in.ID, in.Body.Names); err != nil {
+			if errors.Is(err, db.ErrClusterOrder) {
+				return nil, huma.Error422UnprocessableEntity(err.Error())
 			}
-		}{}
-		out.Body.Clusters = make([]ListedCluster, len(clusters))
-		for i, c := range clusters {
-			out.Body.Clusters[i] = listed(c, in.ID, caller, connected[c.Name])
+			return nil, err
 		}
-		return out, nil
+		return h.listClusters(ctx, in.ID, caller)
 	})
 
 	for _, use := range []struct {
@@ -581,20 +626,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	route(doc, h, huma.Operation{
 		OperationID: "update-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
-		Summary: "Set a cluster's priority, or share it with every org", Tags: []string{"clusters"},
+		Summary: "Change a cluster: its scheduler settings, or whether every org shares it", Tags: []string{"clusters"},
 		Description: "Takes the fields that change, at least one. " +
-			"priority is set by an owner of the org that registered the cluster, an API key of the whole org, or staff: 1 to 1000, higher first. " +
-			"A job is placed on the highest-priority cluster that can take it as the scheduler reads capacity at that moment, and on a lower one when the higher is full or has just failed it. " +
-			"It orders placements from then on and moves no job that is placed. A shared cluster holds priority 0, the platform's, and a priority for one answers 422. " +
 			"shared is staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster " +
 			"go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, " +
-			"and none of them spends a retry. requeued names them. The cluster is then at priority 100 again unless the same call names another.",
+			"and none of them spends a retry. requeued names them. The cluster then comes last among its org's own until the org orders them. " +
+			"scale_up_timeout_seconds, max_speculative_accelerators and stuck_pending_timeout_seconds are the cluster's own values in place of the scheduler's defaults, " +
+			"for a cluster whose nodes appear when a job asks for them: each takes a value, or 0 to go back to the default.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Name string `path:"name"`
 		Body struct {
-			Shared   *bool `json:"shared,omitempty" doc:"Staff only."`
-			Priority *int  `json:"priority,omitempty" doc:"1 to 1000, higher first."`
+			Shared *bool `json:"shared,omitempty" doc:"Staff only."`
+			domain.ClusterSettings
 		}
 	}) (*struct{ Body WithdrawnCluster }, error) {
 		if in.Body.Shared != nil {
@@ -606,16 +650,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, err
 		}
-		if in.Body.Shared == nil && in.Body.Priority == nil {
-			return nil, huma.Error422UnprocessableEntity("name what changes: priority or shared")
+		if in.Body.Shared == nil && in.Body.ClusterSettings.Empty() {
+			return nil, huma.Error422UnprocessableEntity("name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators or stuck_pending_timeout_seconds")
 		}
-		if in.Body.Priority != nil {
-			if err := domain.ValidateClusterPriority(*in.Body.Priority); err != nil {
-				return nil, huma.Error422UnprocessableEntity(err.Error())
-			}
-			if shared := cluster.Shared; (in.Body.Shared == nil && shared) || (in.Body.Shared != nil && *in.Body.Shared) {
-				return nil, db.ErrClusterShared
-			}
+		if err := domain.ValidateClusterSettings(in.Body.ClusterSettings); err != nil {
+			return nil, huma.Error422UnprocessableEntity(err.Error())
 		}
 		var requeued []string
 		if in.Body.Shared != nil {
@@ -623,8 +662,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				return nil, err
 			}
 		}
-		if in.Body.Priority != nil {
-			if cluster, err = h.clusters.SetClusterPriority(ctx, in.Name, *in.Body.Priority); err != nil {
+		if !in.Body.ClusterSettings.Empty() {
+			if cluster, err = h.clusters.SetClusterSettings(ctx, in.Name, in.Body.ClusterSettings); err != nil {
 				return nil, err
 			}
 		}
@@ -657,7 +696,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Forget the identity a cluster's runtime reported", Tags: []string{"clusters"},
 		Description: "A cluster is bound to the first cluster_id its runtime reports, and a runtime reporting any other is refused. After the machines " +
 			"behind a name are rebuilt they report a new one: forget the old identity here and the cluster binds to what its runtime reports next. " +
-			"The settings kept under the old identity are deleted with it.",
+			"The cluster keeps its name, priority and settings.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Name string `path:"name"`

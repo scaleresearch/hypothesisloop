@@ -307,12 +307,21 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         "org A reads the capacity of a cluster that is neither its own nor shared"
     )
 
-    settings = f"/clusters/{runtime.cluster_id}/settings"
-    assert a.api.put(settings, {"stuck_pending_timeout_seconds": 600}).status_code == 200
-    assert a.api.get_json(settings)["stuck_pending_timeout_seconds"] == 600
-    for r in (b.api.get(settings), b.api.put(settings, {"stuck_pending_timeout_seconds": 1})):
+    # A cluster's settings are fields of the named cluster: a change names the ones that change.
+    def settings() -> dict:
+        own = next(c for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"] if c["name"] == name)
+        return {k: v for k, v in own.items() if k.endswith("_seconds") or k == "max_speculative_accelerators"}
+
+    own_path = f"/orgs/{a.org_id}/clusters/{name}"
+    assert json.loads(a.api.hl("cluster", "settings", name, "--stuck-pending-timeout", "600"))["stuck_pending_timeout_seconds"] == 600
+    assert a.api.patch(own_path, {"max_speculative_accelerators": 4}).status_code == 200
+    assert a.api.patch(own_path, {"max_speculative_accelerators": 0}).status_code == 200
+    assert settings() == {"stuck_pending_timeout_seconds": 600}, "a change touched a setting it did not name, or 0 did not clear one"
+    for r in (b.api.patch(own_path, {"stuck_pending_timeout_seconds": 1}), b.api.patch(f"/orgs/{b.org_id}/clusters/{name}", {"stuck_pending_timeout_seconds": 1})):
         assert r.status_code == 404, f"org B on the settings of org A's cluster: {r.status_code} {r.text}"
-    assert api.get_json(settings)["stuck_pending_timeout_seconds"] == 600
+    assert a.api.patch(own_path, {"scale_up_timeout_seconds": 1800}).status_code == 422
+    assert a.api.get(f"/clusters/{runtime.cluster_id}/settings").status_code == 404, "the route keyed by what a runtime reports is still served"
+    assert settings() == {"stuck_pending_timeout_seconds": 600}
 
     for caller in (a.api, b.api):
         assert caller.post("/experiments/reprioritize").status_code == 403, "a tenant triggered the pass over every org's queue"
@@ -400,15 +409,12 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         eventually("org B's job says its org has no cluster", waiting_for_a_cluster, deadline=deadline, interval=2,
                    accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
 
-        # Forgetting the identity deletes the settings kept under it and lets the cluster bind again.
+        # Forgetting the identity lets the cluster bind again and keeps its settings, which are the name's.
         assert b.api.hl_expect("cluster", "forget-identity", name).returncode != 0, "org B cleared the identity of org A's cluster"
         assert json.loads(a.api.hl("cluster", "forget-identity", name)).get("cluster_id", "") == ""
         rebuilt = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(f"other-{runtime.cluster_id}"))
         assert rebuilt.status_code == 200, f"binding to a new identity after the old one was forgotten: {rebuilt.status_code} {rebuilt.text}"
-        assert a.api.get(settings).status_code == 404, "the forgotten identity still reaches settings"
-        assert a.api.get_json(f"/clusters/other-{runtime.cluster_id}/settings").get("stuck_pending_timeout_seconds") != 600, (
-            "the settings of the old identity came along to the new one"
-        )
+        assert settings() == {"stuck_pending_timeout_seconds": 600}, "forgetting the identity lost the cluster's settings"
 
         removed = json.loads(a.api.hl("cluster", "remove", name))
         assert removed["requeued"] == [job_a], f"removing the cluster requeued {removed['requeued']}, want the job placed on it"
@@ -537,8 +543,14 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
     def path(name: str) -> str:
         return f"/orgs/{a.org_id}/clusters/{name}"
 
-    def ranked() -> list[tuple[str, int]]:
-        return [(c["name"], c["priority"]) for c in _lines(a.api.hl("cluster", "list")) if c["name"] in runtimes]
+    order_path = f"/orgs/{a.org_id}/clusters/order"
+
+    def ranked() -> list[str]:
+        return [c["name"] for c in _lines(a.api.hl("cluster", "list")) if c["name"] in runtimes]
+
+    def others() -> list[str]:
+        """The clusters org A ranks besides the two of this test, in their order."""
+        return [c["name"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"] if c["owned"] and not c["shared"] and c["name"] not in runtimes]
 
     def placed(job_id: str) -> str:
         def read() -> dict:
@@ -558,19 +570,21 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
     try:
         for runtime in runtimes.values():
             assert runtime.reconcile() == []
-        assert ranked() == [(low, 100), (high, 100)], "clusters do not start at priority 100, listed by name"
+        assert ranked() == [low, high], "clusters that were never ordered are not listed by name"
+        assert "priority" not in a.api.get(f"/orgs/{a.org_id}/clusters").text, "the list answers the number the order is kept as"
 
-        for body in ({"priority": 0}, {"priority": 1001}, {"priority": -1}, {}):
-            refused = _status(a.api, "PATCH", path(high), body)
-            assert refused.status_code == 422, f"PATCH {body}: {refused.status_code} {refused.text}"
-        assert _status(b.api, "PATCH", path(high), {"priority": 5}).status_code == 404, "org B ranked org A's cluster"
+        for names in ([high], [high, high, low], [high, low, "never-registered"], []):
+            refused = _status(a.api, "PUT", order_path, {"names": names and [*names, *others()]})
+            assert refused.status_code == 422, f"PUT order {names}: {refused.status_code} {refused.text}"
+        assert _status(a.api, "PATCH", path(high), {"priority": 5}).status_code == 422, "a priority is still taken on a cluster"
+        assert _status(b.api, "PUT", order_path, {"names": [high, low]}).status_code == 404, "org B ordered org A's clusters"
         assert _status(a.api, "PATCH", path(high), {"shared": True}).status_code == 403, "an org shared its own cluster"
-        assert a.api.hl_expect("cluster", "priority", high, "1001").returncode != 0
-        assert ranked() == [(low, 100), (high, 100)], "a refused request changed a priority"
+        assert a.api.hl_expect("cluster", "order", high).returncode != 0
+        assert ranked() == [low, high], "a refused request changed the order"
 
-        ranked_first = json.loads(a.api.hl("cluster", "priority", high, "500"))
-        assert ranked_first["priority"] == 500 and ranked_first["requeued"] == [], f"hl cluster priority answered {ranked_first}"
-        assert ranked() == [(high, 500), (low, 100)], "the listing is not in placement order"
+        answered = [c["name"] for c in _lines(a.api.hl("cluster", "order", high, low, *others()))]
+        assert answered[:2] == [high, low], f"hl cluster order answered {answered}"
+        assert ranked() == [high, low], "the listing is not in placement order"
 
         # Each faked node holds two jobs: the higher cluster fills first, then the lower takes one.
         first, second = submit(), submit()
@@ -579,26 +593,26 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
         assert placed(third) == low, "a job waited for the full higher cluster, or went nowhere, with room on the lower one"
 
         # The order changes for what is placed from now on. What is placed stays.
-        a.api.hl("cluster", "priority", low, "900")
-        assert ranked() == [(low, 900), (high, 500)]
+        a.api.hl("cluster", "order", low, high, *others())
+        assert ranked() == [low, high]
         a.api.cancel_job(first)
         fourth = submit()
         assert placed(fourth) == low, "a job went to the cluster that is now ranked second, with room on the first"
         assert a.api.experiment(second)["cluster_name"] == high, "a job that was placed moved when the order changed"
 
-        # A shared cluster holds the platform's priority, after every org's own, and takes no other.
+        # A shared cluster comes after every org's own and is in no org's order.
+        a.api.hl("cluster", "order", high, low, *others())
         admin.share_cluster(high, True)
         try:
-            assert dict(ranked())[high] == 0 and ranked()[-1][0] == high, f"a shared cluster is ranked {ranked()}"
-            for caller in (a.api, api):
-                refused = _status(caller, "PATCH", path(high), {"priority": 700})
-                assert refused.status_code == 422 and "shared" in refused.text, f"a priority for a shared cluster: {refused.status_code} {refused.text}"
-            seen_by_b = {c["name"]: c for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]}
-            assert seen_by_b[high]["priority"] == 0
-            assert all(c["priority"] >= 1 for c in seen_by_b.values() if c["owned"] and not c["shared"]), "an org's own cluster is not ranked above the platform's"
+            assert ranked() == [low, high], f"a shared cluster is ranked {ranked()}"
+            refused = _status(a.api, "PUT", order_path, {"names": [high, low, *others()]})
+            assert refused.status_code == 422, f"an order naming a shared cluster: {refused.status_code} {refused.text}"
+            seen_by_b = b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]
+            shared_at = [c["name"] for c in seen_by_b].index(high)
+            assert all(i < shared_at for i, c in enumerate(seen_by_b) if c["owned"] and not c["shared"]), "an org's own cluster is listed after the platform's"
         finally:
             admin.share_cluster(high, False)
-        assert dict(ranked())[high] == 100, "a cluster no longer shared did not return to the default priority"
+        assert ranked() == [low, high], "a cluster no longer shared did not come last among its org's own"
     finally:
         for name in runtimes:
             _status(api, "DELETE", path(name))

@@ -206,7 +206,8 @@ hl project list | create vision | rename --project prj-1 language
 hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
 hl cluster token my-cluster | forget-identity my-cluster | remove my-cluster
-hl cluster priority my-cluster 500                         # where the org's own cluster stands, 1 to 1000, higher first
+hl cluster order my-cluster other-cluster                  # the order the org's jobs are placed on its own clusters
+hl cluster settings my-cluster --stuck-pending-timeout 900 # a cluster's own value in place of a scheduler default; 0 clears it
 hl cluster disable my-cluster | enable my-cluster          # turn a cluster off or on for the org's jobs; running ones finish
 hl watch                                                   # next batch of news on your own jobs and hypotheses
 hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
@@ -592,28 +593,27 @@ to the queue in the same step, keep their retries, get their checkpoint window a
 elsewhere. A job with no cluster of its org registered waits with `no_cluster_for_org` whether
 or not other clusters are connected; one whose cluster is registered and away waits for it.
 
-An org also decides the order its own clusters are used in. `hl cluster priority my-cluster 500`
-(`PATCH /orgs/{id}/clusters/{name}` with `{"priority": 500}`) sets 1 to 1000 on a cluster the
-org registered, 100 until it is set. In Settings the org's own clusters are a list in that
-order, reordered by dragging a row or with its up and down buttons; the page writes the
-priorities itself, one for a move where a whole number fits between the neighbours and an even
-spacing of all of them where none does. A
-shared cluster holds 0 and takes no other (422), so an org's own compute is always tried before
-the platform's. A job is placed on the highest-priority cluster that can take it, at the
-accelerator type it asked for or one it accepts, and goes down to the next priority when that one
-is full: it never waits for a higher cluster while a lower one has room. A guaranteed job first
-asks a higher-priority cluster that scales up to do so, and takes the lower one if the scale-up
+An org also decides the order its own clusters are used in. `hl cluster order first second`
+(`PUT /orgs/{id}/clusters/order` with `{"names": ["first", "second"]}`) names every cluster the
+org registered once, first placed first, and the API writes the whole order or none of it. On
+Compute Resources the org's own clusters are a list in that order, reordered by dragging a row
+or with its up and down buttons. A cluster registered later comes last until it is ordered. A
+shared cluster is in no org's order and comes after all of them, so an org's own compute is always tried before
+the platform's. A job is placed on the first cluster in the order that can take it, at the
+accelerator type it asked for or one it accepts, and goes down to the next when that one
+is full: it never waits for an earlier cluster while a later one has room. A guaranteed job first
+asks an earlier cluster that scales up to do so, and takes the later one if the scale-up
 times out. The order is the scheduler's reading of capacity when it places the job: room that
-frees on a higher cluster a moment later does not move it, and running jobs never move. A cluster
+frees on an earlier cluster a moment later does not move it, and running jobs never move. A cluster
 that failed a job (an infrastructure fault, a scale-up that timed out) is left out of that job's
 next placement for `scheduler.tried_cluster_ttl_seconds` unless no other cluster could run it, and
 every such requeue spends the job's infrastructure allowance, so a job cannot go round its
-clusters for ever. `hl cluster list` shows `priority` and lists the clusters in that order.
+clusters for ever. `hl cluster list` lists the clusters in that order.
 
 An org decides which of those clusters its jobs use. `hl cluster disable my-cluster`
 (`POST /orgs/{id}/clusters/{name}/disable`) turns a cluster off for the org's jobs, one it
 registered or one the platform shares, and `hl cluster enable` (`.../enable`) turns it on again;
-an owner does the same with the switch on the cluster's row in Settings. The decision is that
+an owner does the same with the switch on the cluster's row on Compute Resources. The decision is that
 org's alone: a shared cluster one org turned off still takes every other org's jobs. From then on
 no job of the org is placed there, by the scheduler or by `POST /experiments/{id}/admit`, which
 answers 409 `cluster_disabled`. The org's jobs already placed there are not touched and run to
@@ -647,9 +647,10 @@ the settings kept under the old id.
 `hl capacity` and `GET /resource-catalog/capacity` show the clusters one org's jobs can land on:
 the org's own and the shared ones, without the ones the org turned off. A key or an agent token has one org; a person in several
 names it with `--org` or `?org_id=`. `hl cluster list` shows every cluster the org can use, whether each
-is connected and whether the org has it `enabled`; `owned` marks the ones your org registered and may change. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
-registered the cluster and stay reachable while its agent is away; `cluster_id` is the identity
-the cluster's runtime reported, shown by `hl cluster list` once it has connected.
+is connected and whether the org has it `enabled`; `owned` marks the ones your org registered and may change. A cluster's scheduler settings (`hl cluster settings`, `PATCH /orgs/{id}/clusters/{name}` with the fields that change) belong to the org that
+registered the cluster and are set by its name, before its agent connects too: how long a job may
+stay unplaced there, and for a cluster with an autoscaler how long a job waits for a node and how
+many accelerators may be waited for at once. On Compute Resources they sit behind Advanced on the cluster's row.
 
 The clusters of the local stack (`local`, `box-a`, `k3s-nvidia`) are registered for the
 org `default` by `make controlplane-up`.

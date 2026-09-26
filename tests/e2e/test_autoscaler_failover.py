@@ -7,7 +7,7 @@ concurrency cap) without needing cloud infra. Per autoscaler.md's own "New e2e" 
 CLUSTER_EXCLUSIVE: toggles AUTOSCALER_ENABLED on the shared cluster-agent Deployment for the
 whole module, which would change admission behaviour for any job submitted by a concurrently
 running parallel-lane test. Every path through setup/teardown restores AUTOSCALER_ENABLED=false
-and any cluster_settings this module wrote, in `finally`, so it never leaves the shared dev
+and any cluster settings this module wrote, in `finally`, so it never leaves the shared dev
 cluster in autoscaler mode for a scenario that runs after it.
 """
 from __future__ import annotations
@@ -103,7 +103,7 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
     # Either way it must not run, and the first job must not be displaced for it.
     cluster_id = api.cluster_id_for_name(cluster_agent_name())
     assert cluster_id
-    api.put_cluster_settings_ok(cluster_id, max_speculative_accelerators=8)
+    api.set_cluster_settings(cluster_agent_name(), max_speculative_accelerators=8)
 
     second = api.submit_job(
         pe_id, agent, hours=0.02,
@@ -124,7 +124,7 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
         )
     api.cancel_job(second)
     api.cancel_job(big)
-    api.put_cluster_settings_ok(cluster_id)  # clear the cap so it doesn't leak into later tests
+    api.set_cluster_settings(cluster_agent_name())  # clear the cap so it doesn't leak into later tests
 
 
 def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experiment, run_id, deadline):
@@ -146,7 +146,7 @@ def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experime
     cluster_id = api.cluster_id_for_name(cluster_name)
     assert cluster_id, f"cluster {cluster_name!r} has not reported a cluster_id yet"
 
-    api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=15)
+    api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=15)
     try:
         agent = make_agent(api, run_id, "asc-timeout")
         pe_id = experiment("autoscaler-timeout", [agent], budget=5.0)
@@ -189,7 +189,7 @@ def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experime
         assert _reason(final) == "no_scalable_capacity"
         api.cancel_job(job_id)
     finally:
-        api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=None)
+        api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=None)
 
 
 def test_partial_gang_completes_or_evicts_wholly_on_deadline(api, experiment, run_id, deadline):
@@ -218,7 +218,7 @@ def test_partial_gang_completes_or_evicts_wholly_on_deadline(api, experiment, ru
     from support.cluster import cordon_node
     cordon_node(cordoned)
     try:
-        api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=20)
+        api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=20)
         agent = make_agent(api, run_id, "asc-gang")
         pe_id = experiment("autoscaler-gang", [agent], budget=5.0)
 
@@ -248,7 +248,7 @@ def test_partial_gang_completes_or_evicts_wholly_on_deadline(api, experiment, ru
         api.cancel_job(job_id)
     finally:
         uncordon_node(cordoned)
-        api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=None)
+        api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=None)
 
 
 def test_partial_gang_evicted_wholly_past_deadline(api, experiment, run_id, deadline):
@@ -270,7 +270,7 @@ def test_partial_gang_evicted_wholly_past_deadline(api, experiment, run_id, dead
     cordoned = solo_nodes[0]
     cordon_node(cordoned)
     try:
-        api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=15)
+        api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=15)
         agent = make_agent(api, run_id, "asc-gang-evict")
         pe_id = experiment("autoscaler-gang-evict", [agent], budget=5.0)
 
@@ -299,7 +299,7 @@ def test_partial_gang_evicted_wholly_past_deadline(api, experiment, run_id, dead
         api.cancel_job(job_id)
     finally:
         uncordon_node(cordoned)
-        api.put_cluster_settings_ok(cluster_id, scale_up_timeout_seconds=None)
+        api.set_cluster_settings(cluster_agent_name(), scale_up_timeout_seconds=None)
 
 
 def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadline):
@@ -371,7 +371,7 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
 def test_cluster_identity_survives_agent_restart(api):
     """Scenario 5 (restart form): cluster_id is derived live from the kube-system namespace UID,
     not generated/persisted by the runtime -- restarting the cluster-agent process must not change
-    it, so cluster_settings and tried-history keep applying across a restart. Renaming CLUSTER_NAME
+    it, so the cluster's settings and tried-history keep applying across a restart. Renaming CLUSTER_NAME
     itself is not exercised here: it would leave the shared dev cluster-agent Deployment under a
     different name for every other e2e scenario that reads cluster_agent_name(), which is a much
     larger blast radius than this lane's own cleanup can safely undo; the restart alone already
@@ -380,7 +380,7 @@ def test_cluster_identity_survives_agent_restart(api):
     before = api.cluster_id_for_name(cluster_name)
     assert before, f"cluster {cluster_name!r} has not reported a cluster_id yet"
 
-    api.put_cluster_settings_ok(before, max_speculative_accelerators=3)
+    api.set_cluster_settings(cluster_name, max_speculative_accelerators=3)
     try:
         import subprocess
         from support.cluster import CLUSTER_NS
@@ -401,9 +401,9 @@ def test_cluster_identity_survives_agent_restart(api):
         )
         assert after == before, "cluster_id must be stable across a runtime restart (kube-system UID is immutable)"
 
-        settings = api.get_json(f"/clusters/{before}/settings")
-        assert settings.get("max_speculative_accelerators") == 3, (
-            "cluster_settings row must still apply to the same cluster_id after the agent restarted"
+        settings = next(c for c in api.get_json("/orgs/default/clusters")["clusters"] if c["name"] == cluster_name)
+        assert settings.get("max_speculative_accelerators") == 3 and settings.get("cluster_id") == before, (
+            "the cluster's settings must still apply to it after the agent restarted"
         )
     finally:
-        api.put_cluster_settings_ok(before, max_speculative_accelerators=None)
+        api.set_cluster_settings(cluster_name, max_speculative_accelerators=None)

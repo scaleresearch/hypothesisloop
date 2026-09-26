@@ -3,113 +3,79 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-func TestAClusterIsRegisteredAtTheDefaultPriorityAndItsOrgChangesIt(t *testing.T) {
+// An org orders the clusters it registered in one step, a refused order changes nothing, and a
+// shared cluster holds the platform's priority, after every org's own.
+func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	registered, err := w.clusters.GetCluster(ctx, w.ofA)
-	if err != nil || registered.Priority != domain.DefaultClusterPriority {
-		t.Fatalf("a registered cluster: priority %d, %v, want %d", registered.Priority, err, domain.DefaultClusterPriority)
-	}
-	for _, priority := range []int{domain.ClusterPriorityMin, 250, domain.ClusterPriorityMax} {
-		set, err := w.clusters.SetClusterPriority(ctx, w.ofA, priority)
-		if err != nil || set.Priority != priority {
-			t.Fatalf("SetClusterPriority(%d) = %+v, %v", priority, set, err)
-		}
-	}
-	again, err := w.clusters.RegisterCluster(ctx, w.ofA, w.orgA)
-	if err != nil || again.Priority != domain.ClusterPriorityMax {
-		t.Fatalf("registering the name again: priority %d, %v, want the one its org set kept", again.Priority, err)
-	}
-	for _, priority := range []int{domain.SharedClusterPriority, -1, domain.ClusterPriorityMax + 1} {
-		if _, err := w.clusters.SetClusterPriority(ctx, w.ofA, priority); err == nil {
-			t.Fatalf("SetClusterPriority(%d) was accepted", priority)
-		}
-	}
-	if _, err := w.clusters.SetClusterPriority(ctx, w.unregisteredName, 5); !errors.Is(err, ErrClusterNotFound) {
-		t.Fatalf("a priority for a name nobody registered: %v, want ErrClusterNotFound", err)
-	}
-	if kept, _ := w.clusters.GetCluster(ctx, w.ofA); kept.Priority != domain.ClusterPriorityMax {
-		t.Fatalf("after the refused priorities: %d, want the last accepted one", kept.Priority)
-	}
-}
-
-// A shared cluster is the platform's: it holds the priority below every org's own, whatever its
-// org had set, and no org sets another on it.
-func TestASharedClusterHoldsThePlatformsPriorityUntilTheSharingEnds(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	if _, err := w.clusters.SetClusterPriority(ctx, w.ofA, 700); err != nil {
-		t.Fatal(err)
-	}
-	shared, _, err := w.clusters.SetClusterShared(ctx, w.ofA, true)
-	if err != nil || shared.Priority != domain.SharedClusterPriority {
-		t.Fatalf("a cluster once shared: priority %d, %v, want %d", shared.Priority, err, domain.SharedClusterPriority)
-	}
-	if _, err := w.clusters.SetClusterPriority(ctx, w.ofA, 700); !errors.Is(err, ErrClusterShared) {
-		t.Fatalf("a priority for a shared cluster: %v, want ErrClusterShared", err)
-	}
-	if still, _ := w.clusters.GetCluster(ctx, w.ofA); still.Priority != domain.SharedClusterPriority {
-		t.Fatalf("after the refused priority: %d, want %d", still.Priority, domain.SharedClusterPriority)
-	}
-	if again, _, err := w.clusters.SetClusterShared(ctx, w.ofA, true); err != nil || again.Priority != domain.SharedClusterPriority {
-		t.Fatalf("sharing it again: %+v, %v", again, err)
-	}
-	unshared, _, err := w.clusters.SetClusterShared(ctx, w.ofA, false)
-	if err != nil || unshared.Priority != domain.DefaultClusterPriority {
-		t.Fatalf("once the sharing ended: priority %d, %v, want %d", unshared.Priority, err, domain.DefaultClusterPriority)
-	}
-	// Ending a sharing that is not on leaves what the org set.
-	if _, err := w.clusters.SetClusterPriority(ctx, w.ofA, 300); err != nil {
-		t.Fatal(err)
-	}
-	if kept, _, err := w.clusters.SetClusterShared(ctx, w.ofA, false); err != nil || kept.Priority != 300 {
-		t.Fatalf("ending a sharing that was not on: priority %d, %v, want 300", kept.Priority, err)
-	}
-}
-
-func TestClustersAreListedInTheOrderPlacementTriesThem(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	second, third := "a-second-"+w.suffix, "z-first-"+w.suffix
+	second, third := "a-second-"+w.suffix, "z-third-"+w.suffix
 	for _, name := range []string{second, third} {
 		if _, err := w.clusters.RegisterCluster(ctx, name, w.orgA); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := w.clusters.SetClusterPriority(ctx, third, 500); err != nil {
-		t.Fatal(err)
-	}
 	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofB, true); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := w.clusters.ClustersHosting(ctx, w.orgA)
-	if err != nil {
+	listed := func() []string {
+		t.Helper()
+		clusters, err := w.clusters.ClustersHosting(ctx, w.orgA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, c := range clusters {
+			if c.OrgID == w.orgA || c.Name == w.ofB {
+				names = append(names, c.Name)
+			}
+		}
+		return names
+	}
+	if got, want := listed(), []string{second, w.ofA, third, w.ofB}; !slices.Equal(got, want) {
+		t.Fatalf("before any order: listed %v, want by name with the shared one last, %v", got, want)
+	}
+	if err := w.clusters.SetClusterOrder(ctx, w.orgA, []string{third, w.ofA, second}); err != nil {
 		t.Fatal(err)
 	}
-	var mine []string
-	for _, c := range listed {
-		if c.OrgID == w.orgA || c.Name == w.ofB {
-			mine = append(mine, c.Name)
+	ordered := []string{third, w.ofA, second, w.ofB}
+	for what, order := range map[string][]string{
+		"one left out": {third, w.ofA}, "one twice": {third, third, w.ofA}, "the shared cluster": {third, w.ofA, second, w.ofB}, "another org's order": nil,
+	} {
+		org := w.orgA
+		if order == nil {
+			org, order = w.orgB, []string{third}
+		}
+		if err := w.clusters.SetClusterOrder(ctx, org, order); !errors.Is(err, ErrClusterOrder) {
+			t.Errorf("%s: got = %v, want = %v", what, err, ErrClusterOrder)
 		}
 	}
-	// 500 first, then the two at the default by name, then the shared one at 0.
-	want := []string{third, second, w.ofA, w.ofB}
-	if len(mine) != len(want) {
-		t.Fatalf("listed %v, want %v", mine, want)
+	if got := listed(); !slices.Equal(got, ordered) {
+		t.Fatalf("listed %v, want %v", got, ordered)
 	}
-	for i := range want {
-		if mine[i] != want[i] {
-			t.Fatalf("listed %v, want %v", mine, want)
+	// A cluster registered after the order comes last among the org's own, and registering a name
+	// again keeps its place.
+	late := "a-late-" + w.suffix
+	for _, name := range []string{late, third} {
+		if _, err := w.clusters.RegisterCluster(ctx, name, w.orgA); err != nil {
+			t.Fatal(err)
 		}
+	}
+	if got, want := listed(), []string{third, w.ofA, second, late, w.ofB}; !slices.Equal(got, want) {
+		t.Fatalf("with a cluster registered later: listed %v, want %v", got, want)
 	}
 	registered, err := w.clusters.RegisteredClusters(ctx)
-	if err != nil || registered[third].Priority != 500 || registered[w.ofB].Priority != domain.SharedClusterPriority {
-		t.Fatalf("priorities as admission reads them: %d and %d, %v", registered[third].Priority, registered[w.ofB].Priority, err)
+	if err != nil || registered[third].Priority <= registered[second].Priority || registered[w.ofB].Priority != domain.SharedClusterPriority {
+		t.Fatalf("priorities as admission reads them: %d, %d and %d, %v", registered[third].Priority, registered[second].Priority, registered[w.ofB].Priority, err)
+	}
+	// Ending a sharing puts the cluster back among its org's own, at the default.
+	if unshared, _, err := w.clusters.SetClusterShared(ctx, w.ofB, false); err != nil || unshared.Priority != domain.DefaultClusterPriority {
+		t.Fatalf("once the sharing ended: %+v, %v, want priority %d", unshared, err, domain.DefaultClusterPriority)
 	}
 }
 

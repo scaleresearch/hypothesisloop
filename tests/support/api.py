@@ -242,32 +242,13 @@ class API:
                 return c["cluster_id"] or None
         return None
 
-    def put_cluster_settings(
-        self, cluster_id: str, *, scale_up_timeout_seconds: int | None = None,
-        max_speculative_accelerators: int | None = None,
-        stuck_pending_timeout_seconds: int | None = None,
-    ) -> requests.Response:
-        body: dict[str, Any] = {}
-        if scale_up_timeout_seconds is not None:
-            body["scale_up_timeout_seconds"] = scale_up_timeout_seconds
-        if max_speculative_accelerators is not None:
-            body["max_speculative_accelerators"] = max_speculative_accelerators
-        if stuck_pending_timeout_seconds is not None:
-            body["stuck_pending_timeout_seconds"] = stuck_pending_timeout_seconds
-        return self.put(f"/clusters/{cluster_id}/settings", body)
-
-    def put_cluster_settings_ok(
-        self, cluster_id: str, *, scale_up_timeout_seconds: int | None = None,
-        max_speculative_accelerators: int | None = None,
-        stuck_pending_timeout_seconds: int | None = None,
-    ) -> None:
-        r = self.put_cluster_settings(
-            cluster_id,
-            scale_up_timeout_seconds=scale_up_timeout_seconds,
-            max_speculative_accelerators=max_speculative_accelerators,
-            stuck_pending_timeout_seconds=stuck_pending_timeout_seconds,
-        )
-        r.raise_for_status()
+    def set_cluster_settings(self, cluster_name: str, *, org_id: str = "default", **settings: int | None) -> None:
+        """Changes the settings named on a cluster of org_id; None puts one back on the scheduler's
+        default, and naming none puts all three back."""
+        names = settings or dict.fromkeys(
+            ("scale_up_timeout_seconds", "max_speculative_accelerators", "stuck_pending_timeout_seconds"))
+        body = {name: settings.get(name) or 0 for name in names}
+        self.patch(f"/orgs/{org_id}/clusters/{cluster_name}", body).raise_for_status()
 
     def signup(self, pe_id: str, agent_id: str, role: str | None = None, quota_tier: str | None = "guaranteed") -> requests.Response:
         # Default "guaranteed", not the server's own kind-based default: an e2e-registered agent

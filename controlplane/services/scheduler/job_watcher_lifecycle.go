@@ -57,7 +57,7 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 var errClusterNotReporting = errors.New("the job's cluster reports no id this pass")
 
 // stuckPendingTimeoutFor is the stuck-pending deadline of the cluster exp was admitted to: the
-// value its operator set in cluster_settings, and the global one where none is set. The settings
+// value its operator set in the cluster's settings, and the global one where none is set. The settings
 // row is read at the moment a stuck-pending decision is made and nowhere else, so a job with no
 // such decision pending is never held up by a read that fails.
 //
@@ -101,7 +101,7 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 // schedulingReason names a terminal scale-up refusal. See autoscaler.md's "Watching" section.
 //
 // On a cluster reporting autoscaler_enabled, the deadline is scale_up_timeout (per-cluster
-// override from cluster_settings, else the global default) and the eviction reason is
+// override from the cluster's settings, else the global default) and the eviction reason is
 // scale_up_timeout — an infrastructure fault like any other: the job is requeued on its
 // infrastructure allowance and the cluster goes into its tried list, so it is placed elsewhere
 // next and cannot go round slow clusters for ever. On every other cluster (or when this deployment never called WithScaleUpTimeout), the

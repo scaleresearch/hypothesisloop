@@ -126,11 +126,6 @@ func (w *world) GetCluster(_ context.Context, name string) (*domain.Cluster, err
 	return &domain.Cluster{Name: name, OrgID: org}, nil
 }
 
-// A cluster's reported id is its name in this world.
-func (w *world) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
-	return w.GetCluster(ctx, reportedID)
-}
-
 // GetAPIKey knows one key of each org, key-of-<org>, made by a person, and the org key that calls.
 func (w *world) GetAPIKey(_ context.Context, id string) (*domain.APIKey, error) {
 	if id == "key-a" {

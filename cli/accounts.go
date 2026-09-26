@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
@@ -60,7 +59,8 @@ var clusterCommands = []subcommand{
 	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
 	{"list", "the clusters an org's jobs run on, whether each is connected and whether the org has it enabled", clusterList},
 	{"token", "print the runtime token of a cluster the org registered", clusterToken},
-	{"priority", "set where a cluster the org registered stands among the ones its jobs are placed on, 1 to 1000, higher first", clusterPriority},
+	{"order", "set the order the org's jobs are placed on the clusters it registered, first placed first", clusterOrder},
+	{"settings", "set a cluster's own scale-up timeout, speculative cap or stuck-pending timeout in place of the scheduler's defaults", clusterSettings},
 	{"disable", "turn a cluster off for the org's jobs: none is placed there, the ones running finish", clusterDisable},
 	{"enable", "turn a cluster on again for the org's jobs", clusterEnable},
 	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity},
@@ -393,11 +393,10 @@ func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 type registeredCluster struct {
 	Name         string `json:"name"`
 	RuntimeToken string `json:"runtime_token"`
-	APIURL       string `json:"api_url"`
-	MetricsURL   string `json:"metrics_url"`
-	Registry     string `json:"registry"`
-	ImageTag     string `json:"image_tag"`
-	JobImage     string `json:"job_image"`
+	Attach       struct {
+		Kubernetes string `json:"kubernetes"`
+		BareMetal  string `json:"bare_metal"`
+	} `json:"attach_commands"`
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -444,59 +443,12 @@ hl cluster remove NAME detaches from this side: the agent stops its jobs and sta
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
-	command := kubernetesCommand(registered)
+	command := registered.Attach.Kubernetes
 	if *bareMetal {
-		command = bareMetalCommand(registered)
+		command = registered.Attach.BareMetal
 	}
 	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", command, registered.Name, registered.RuntimeToken)
 	return 0
-}
-
-// kubernetesScript reads the runtime token, without echo when a person types it, and hands it
-// to helm on standard input, so it is in no shell history and no process's arguments. helm
-// installs the runtime chart that make images pushed beside the images, and with
-// --take-ownership takes over the jobs namespace an install from before the chart created.
-// $1 is the chart, $2 its version, the rest the chart's values.
-const kubernetesScript = `[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
-	`chart="$1" version="$2"; shift 2; ` +
-	`printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
-	`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"`
-
-// kubernetesCommand attaches a Kubernetes cluster and holds no token.
-func kubernetesCommand(registered registeredCluster) string {
-	set := func(key, value string) string {
-		return " --set-string " + shellQuote(key+"="+helmValue(value))
-	}
-	return fmt.Sprintf("sh -c %s sh %s %s", shellQuote(kubernetesScript),
-		shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"), shellQuote("0.1.0+"+registered.ImageTag)) +
-		set("clusterName", registered.Name) + set("apiURL", registered.APIURL) + set("metricsURL", registered.MetricsURL) +
-		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) + set("jobImage", registered.JobImage)
-}
-
-// helmValue writes text as one value of helm's --set-string, which splits on commas and reads a
-// backslash as an escape.
-func helmValue(text string) string {
-	return strings.NewReplacer(`\`, `\\`, ",", `\,`).Replace(text)
-}
-
-// bareMetalScript runs on the node as root. The node's engine copies the agent out of the image
-// that carries it, with no container started, and the agent installs itself: it knows its own
-// unit and settings file, and asks for the runtime token on standard input. It is staged
-// beside its place because a running agent's binary cannot be written over. $1 is the cluster
-// name, $2 the API address, $3 the image that carries the agent and $4 the job image.
-const bareMetalScript = `engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
-	`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
-	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"`
-
-// bareMetalCommand installs the agent of a bare-metal node and holds no token.
-func bareMetalCommand(registered registeredCluster) string {
-	return fmt.Sprintf("sudo sh -c %s sh %s %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
-		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag), shellQuote(registered.JobImage))
-}
-
-// shellQuote writes text as one word of a POSIX shell command, whatever it holds.
-func shellQuote(text string) string {
-	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
 }
 
 func clusterToken(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -544,37 +496,75 @@ func clusterForgetIdentity(c *apiclient.Client, args []string, stdout, stderr io
 
 A cluster is bound to the first cluster id its runtime reports, and a runtime reporting another is
 refused. After the machines behind a name are rebuilt, run this: the cluster binds to the id its
-runtime reports next. The settings kept under the old id are deleted.`, stderr)
+runtime reports next. The cluster keeps its name, its place in the order and its settings.`, stderr)
 	return onCluster(c, fs, args, "DELETE", "/identity", stdout, stderr)
 }
 
-func clusterPriority(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster priority", `usage: hl cluster priority NAME VALUE [--org ORG]
+func clusterOrder(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster order", `usage: hl cluster order NAME... [--org ORG]
 
-Sets where a cluster the org registered stands among the ones its jobs are placed on: 1 to 1000,
-higher first, 100 until it is set. A job goes to the highest-priority cluster that can take it as
-the scheduler reads capacity at that moment, and to a lower one when that is full or has just
-failed it. A guaranteed job first asks a higher cluster that scales up to do so, and takes a lower
-one when that times out. A cluster the platform shares holds 0 and takes no other, so an org's
-own clusters are tried before it. Jobs that are placed do not move. hl cluster list shows the
-priorities, in the order placement goes by.`, stderr)
+Sets the order the org's jobs are placed on the clusters it registered: name every one of them
+once, first placed first. A job goes to the first cluster that can take it as the scheduler reads
+capacity at that moment, and to a later one when that is full or has just failed it. A guaranteed
+job first asks an earlier cluster that scales up to do so, and takes a later one when that times
+out. A cluster registered afterwards comes last until it is ordered, and the clusters the platform
+shares come after all of the org's own. Jobs that are placed do not move. Prints the clusters in
+the new order, as hl cluster list does.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	operands, err := parseOperands(fs, args)
+	names, err := parseOperands(fs, args)
 	if err != nil {
 		return parseExit(err)
 	}
-	if len(operands) != 2 {
-		return parseExit(misuse(fs, "want NAME and a priority, got %d operands", len(operands)))
-	}
-	priority, err := strconv.Atoi(operands[1])
-	if err != nil {
-		return parseExit(misuse(fs, "the priority must be a whole number, got %s", operands[1]))
+	if len(names) == 0 {
+		return parseExit(misuse(fs, "name the org's clusters in the order to place jobs on them"))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(operands[0])), map[string]int{"priority": priority}, "", "", stdout, stderr)
+	return call(c, "PUT", orgPath(id, "/clusters/order"), map[string][]string{"names": names}, "clusters", "", stdout, stderr)
+}
+
+func clusterSettings(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("cluster settings", `usage: hl cluster settings NAME [--scale-up-timeout SECONDS] [--speculative-cap N] [--stuck-pending-timeout SECONDS] [--org ORG]
+
+Sets what a cluster the org registered uses in place of the scheduler's defaults. They matter for a
+cluster whose nodes appear when a job asks for them. Only the flags given change, and 0 puts one
+back on the default. hl cluster list shows the ones that are set.`, stderr)
+	org := fs.String("org", "", orgFlagHelp)
+	body := map[string]int{}
+	for flag, field := range map[string]string{
+		"scale-up-timeout":      "scale_up_timeout_seconds",
+		"speculative-cap":       "max_speculative_accelerators",
+		"stuck-pending-timeout": "stuck_pending_timeout_seconds",
+	} {
+		fs.Func(flag, clusterSettingHelp[flag], func(text string) error {
+			n, err := strconv.Atoi(text)
+			if err != nil || n < 0 {
+				return fmt.Errorf("want a whole number, or 0 for the default")
+			}
+			body[field] = n
+			return nil
+		})
+	}
+	name, err := parseOne(fs, args, "NAME", "", "name")
+	if err != nil {
+		return parseExit(err)
+	}
+	if len(body) == 0 {
+		return parseExit(misuse(fs, "name a setting to change"))
+	}
+	id, err := resolveOrg(c, *org)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(name)), body, "", "", stdout, stderr)
+}
+
+var clusterSettingHelp = map[string]string{
+	"scale-up-timeout":      "seconds a job placed ahead of capacity waits for the cluster's autoscaler to bring a node, under 1800",
+	"speculative-cap":       "the most accelerators that jobs placed ahead of capacity hold on the cluster at once",
+	"stuck-pending-timeout": "seconds a job admitted to the cluster may stay unplaced before it is evicted as stuck_pending",
 }
 
 func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -621,7 +611,7 @@ func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest str
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, in the order a job is placed on them (priority, then name; see hl cluster priority), with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
+	fs := newFlags("cluster list", "usage: hl cluster list [--org ORG]\n\nThe clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the platform shares with every org, in the order a job is placed on them (see hl cluster order), with whether an agent is connected now and whether the org has the cluster on for its jobs (enabled; see hl cluster disable).", stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

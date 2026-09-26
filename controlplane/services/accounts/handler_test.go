@@ -681,6 +681,36 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 		}
 	}
 
+	// The commands are complete and hold no token: each asks for it when it runs, so it is in no
+	// scrollback and no shell history. What the platform fills in is one shell word each, and a
+	// comma, which helm splits a --set-string value on, is escaped.
+	tricky := RegisteredCluster{ClusterView: ClusterView{Name: "gpu-east"}, RuntimeToken: want, APIURL: "https://api.example/a?ids=1,2&c=$(id)", MetricsURL: "https://metrics.example/it's",
+		Registry: "registry.example/images", ImageTag: "abc1234", JobImage: "registry.example/images/hypothesisloop-job:abc1234"}
+	commands := attachCommands(tricky)
+	wantKubernetes := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
+		`chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
+		`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' sh ` +
+		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' '0.1.0+abc1234' ` +
+		`--set-string 'clusterName=gpu-east' --set-string 'apiURL=https://api.example/a?ids=1\,2&c=$(id)' --set-string 'metricsURL=https://metrics.example/it'\''s' ` +
+		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234' --set-string 'jobImage=registry.example/images/hypothesisloop-job:abc1234'`
+	wantBareMetal := `sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
+		`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
+		`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh ` +
+		`'gpu-east' 'https://api.example/a?ids=1,2&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234' 'registry.example/images/hypothesisloop-job:abc1234'`
+	if commands.Kubernetes != wantKubernetes {
+		t.Fatalf("kubernetes command: got = %q, want = %q", commands.Kubernetes, wantKubernetes)
+	}
+	if commands.BareMetal != wantBareMetal {
+		t.Fatalf("bare-metal command: got = %q, want = %q", commands.BareMetal, wantBareMetal)
+	}
+	var registered RegisteredCluster
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "gpu-east"}, http.StatusOK, &registered)
+	plain := registered
+	plain.Attach = AttachCommands{}
+	if registered.Attach != attachCommands(plain) || !strings.Contains(registered.Attach.BareMetal, "'gpu-east' 'https://api.test.invalid'") || strings.Contains(registered.Attach.Kubernetes+registered.Attach.BareMetal, "hls_") {
+		t.Fatalf("attach commands answered: %+v, want the two built from the answer, without the token", registered.Attach)
+	}
+
 	rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": "gpu-east"})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("a name another org owns: got = %d %s, want = 409", rec.Code, rec.Body)
@@ -926,6 +956,36 @@ func TestANameHoldsNoControlCharacterWhateverItNames(t *testing.T) {
 	}
 }
 
+// The scheduler settings are fields of the named cluster: its org's owners change the ones a
+// request names, 0 puts one back on the default, and only those who know the cluster read them.
+func TestAClustersSettingsAreChangedByNameOneFieldAtATime(t *testing.T) {
+	w := newWorld(t)
+	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
+	w.ok("owner", "PATCH", path, map[string]any{"scale_up_timeout_seconds": 600, "max_speculative_accelerators": 8}, http.StatusOK, nil)
+	var cluster ClusterView
+	w.ok("org-key", "PATCH", path, map[string]any{"max_speculative_accelerators": 0, "stuck_pending_timeout_seconds": 900}, http.StatusOK, &cluster)
+	if cluster.ScaleUpTimeoutSeconds == nil || *cluster.ScaleUpTimeoutSeconds != 600 || cluster.MaxSpeculativeAccelerators != nil || cluster.StuckPendingTimeoutSeconds == nil || *cluster.StuckPendingTimeoutSeconds != 900 {
+		t.Fatalf("after two changes: got = %+v, want the first timeout kept, the cap cleared and the second timeout set", cluster.ClusterSettings)
+	}
+	for _, refused := range []map[string]any{{}, {"scale_up_timeout_seconds": 1800}, {"stuck_pending_timeout_seconds": -1}, {"cluster_id": "uid"}} {
+		if rec := w.call("owner", "PATCH", path, refused); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("PATCH %v: got = %d %s, want = 422", refused, rec.Code, rec.Body)
+		}
+	}
+	for caller, want := range map[string]int{"member": http.StatusForbidden, "outsider": http.StatusNotFound} {
+		if rec := w.call(caller, "PATCH", path, map[string]any{"stuck_pending_timeout_seconds": 1}); rec.Code != want {
+			t.Errorf("%s changing them: got = %d %s, want = %d", caller, rec.Code, rec.Body, want)
+		}
+	}
+	w.ok("staff", "PATCH", path, map[string]any{"shared": true}, http.StatusOK, nil)
+	for caller, org := range map[string]string{"member": w.orgA, "outsider": w.orgB} {
+		rec := w.call(caller, "GET", "/orgs/"+org+"/clusters", nil)
+		if got := strings.Contains(rec.Body.String(), `"scale_up_timeout_seconds":600`); rec.Code != http.StatusOK || got != (org == w.orgA) {
+			t.Errorf("%s listing the clusters of %s: %d, settings shown = %v, want them shown to the cluster's own org alone: %s", caller, org, rec.Code, got, rec.Body)
+		}
+	}
+}
+
 func TestOnlyStaffShareAClusterAndOnlyUnderItsOwnOrg(t *testing.T) {
 	w := newWorld(t)
 	var cluster ClusterView
@@ -1049,105 +1109,49 @@ func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
 	}
 }
 
-// The org that registered a cluster ranks it among its own. The platform's shared cluster holds
-// the priority below all of them and nobody ranks it.
-func TestAnOrgSetsThePriorityOfAClusterItRegistered(t *testing.T) {
+// The org that registered clusters orders them in one step. The platform's shared cluster comes
+// after all of them and nobody orders it.
+func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
 	w := newWorld(t)
-	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
-	var view WithdrawnCluster
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-first"}, http.StatusOK, nil)
-	for _, set := range []struct {
-		caller   string
-		priority int
-	}{{"owner", 1}, {"org-key", 1000}, {"staff", 250}} {
-		w.ok(set.caller, "PATCH", path, map[string]any{"priority": set.priority}, http.StatusOK, &view)
-		if view.Priority != set.priority || view.Shared || len(view.Requeued) != 0 || view.Requeued == nil {
-			t.Fatalf("%s set priority %d: got = %+v", set.caller, set.priority, view)
-		}
-	}
-	w.ok("owner", "PATCH", "/orgs/"+w.orgA+"/clusters/zz-first", map[string]any{"priority": 900}, http.StatusOK, nil)
-
+	path := "/orgs/" + w.orgA + "/clusters/order"
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-last-by-name"}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
 	var listed struct {
 		Clusters []ListedCluster `json:"clusters"`
+	}
+	names := func() string {
+		out := make([]string, len(listed.Clusters))
+		for i, c := range listed.Clusters {
+			out[i] = c.Name
+		}
+		return strings.Join(out, ",")
+	}
+	want := "zz-last-by-name," + w.clusterA + "," + w.clusterB
+	for _, caller := range []string{"owner", "org-key", "staff"} {
+		w.ok(caller, "PUT", path, map[string]any{"names": []string{"zz-last-by-name", w.clusterA}}, http.StatusOK, &listed)
+		if names() != want {
+			t.Fatalf("ordered by %s: got = %s, want = %s", caller, names(), want)
+		}
+	}
+	for what, order := range map[string][]string{
+		"one left out": {w.clusterA}, "one twice": {w.clusterA, w.clusterA, "zz-last-by-name"}, "none": {},
+		"the shared one": {w.clusterA, "zz-last-by-name", w.clusterB}, "a name nobody has": {w.clusterA, "zz-last-by-name", "never-registered"},
+	} {
+		if rec := w.call("owner", "PUT", path, map[string]any{"names": order}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: got = %d %s, want = 422", what, rec.Code, rec.Body)
+		}
+	}
+	for caller, status := range map[string]int{"member": http.StatusForbidden, "project-key": http.StatusForbidden, "outsider": http.StatusNotFound} {
+		if rec := w.call(caller, "PUT", path, map[string]any{"names": []string{w.clusterA, "zz-last-by-name"}}); rec.Code != status {
+			t.Errorf("%s: got = %d %s, want = %d", caller, rec.Code, rec.Body, status)
+		}
 	}
 	w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
-	if len(listed.Clusters) != 2 || listed.Clusters[0].Name != "zz-first" || listed.Clusters[0].Priority != 900 ||
-		listed.Clusters[1].Name != w.clusterA || listed.Clusters[1].Priority != 250 {
-		t.Fatalf("clusters of org a: got = %+v, want zz-first at 900 before %s at 250", listed.Clusters, w.clusterA)
+	if names() != want {
+		t.Fatalf("after the refused orders: got = %s, want = %s", names(), want)
 	}
-
-	for name, body := range map[string]map[string]any{
-		"zero": {"priority": 0}, "negative": {"priority": -5}, "over the range": {"priority": 1001}, "no field": {},
-	} {
-		if rec := w.call("owner", "PATCH", path, body); rec.Code != http.StatusUnprocessableEntity {
-			t.Errorf("%s: got = %d %s, want = 422", name, rec.Code, rec.Body)
-		}
-	}
-	for name, tc := range map[string]struct {
-		caller, path string
-		want         int
-	}{
-		"a member":                       {"member", path, http.StatusForbidden},
-		"a key bound to one project":     {"project-key", path, http.StatusForbidden},
-		"a person of another org":        {"outsider", path, http.StatusNotFound},
-		"an owner, another org's":        {"owner", "/orgs/" + w.orgA + "/clusters/" + w.clusterB, http.StatusNotFound},
-		"an owner, under another org":    {"owner", "/orgs/" + w.orgB + "/clusters/" + w.clusterB, http.StatusNotFound},
-		"an owner, a name nobody has":    {"owner", "/orgs/" + w.orgA + "/clusters/never-registered", http.StatusNotFound},
-		"an owner sharing with priority": {"owner", path, http.StatusForbidden},
-	} {
-		body := map[string]any{"priority": 7}
-		if name == "an owner sharing with priority" {
-			body["shared"] = false
-		}
-		if rec := w.call(tc.caller, "PATCH", tc.path, body); rec.Code != tc.want {
-			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
-		}
-	}
-	if got := w.store.clusters[w.clusterA].Priority; got != 250 {
-		t.Fatalf("after the refused requests: priority %d, want 250", got)
-	}
-}
-
-func TestASharedClusterHoldsThePlatformsPriorityAndTakesNoOther(t *testing.T) {
-	w := newWorld(t)
-	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
-	var view WithdrawnCluster
-	w.ok("owner", "PATCH", path, map[string]any{"priority": 600}, http.StatusOK, nil)
-	w.ok("staff", "PATCH", path, map[string]any{"shared": true}, http.StatusOK, &view)
-	if !view.Shared || view.Priority != domain.SharedClusterPriority {
-		t.Fatalf("a cluster once shared: got = %+v, want priority %d", view, domain.SharedClusterPriority)
-	}
-	for _, caller := range []string{"owner", "org-key", "staff"} {
-		rec := w.call(caller, "PATCH", path, map[string]any{"priority": 600})
-		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "shared cluster") {
-			t.Fatalf("%s setting the priority of a shared cluster: got = %d %s, want = 422 saying why", caller, rec.Code, rec.Body)
-		}
-	}
-	if rec := w.call("staff", "PATCH", path, map[string]any{"shared": true, "priority": 600}); rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("sharing a cluster at an org's priority: got = %d %s, want = 422", rec.Code, rec.Body)
-	}
-	if rec := w.call("outsider", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterA, map[string]any{"priority": 600}); rec.Code != http.StatusNotFound {
-		t.Fatalf("another org ranking the shared cluster: got = %d %s, want = 404", rec.Code, rec.Body)
-	}
-
-	// Every org sees it after its own.
-	var listed struct {
-		Clusters []ListedCluster `json:"clusters"`
-	}
-	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
-	if len(listed.Clusters) != 2 || listed.Clusters[0].Name != w.clusterB || listed.Clusters[0].Priority != domain.DefaultClusterPriority ||
-		listed.Clusters[1].Name != w.clusterA || listed.Clusters[1].Priority != domain.SharedClusterPriority {
-		t.Fatalf("clusters of org b: got = %+v, want its own at the default before the shared one at 0", listed.Clusters)
-	}
-
-	w.ok("staff", "PATCH", path, map[string]any{"shared": false}, http.StatusOK, &view)
-	if view.Shared || view.Priority != domain.DefaultClusterPriority {
-		t.Fatalf("once the sharing ended: got = %+v, want priority %d", view, domain.DefaultClusterPriority)
-	}
-	w.ok("staff", "PATCH", path, map[string]any{"shared": true}, http.StatusOK, nil)
-	w.ok("staff", "PATCH", path, map[string]any{"shared": false, "priority": 42}, http.StatusOK, &view)
-	if view.Shared || view.Priority != 42 {
-		t.Fatalf("ending the sharing and ranking in one call: got = %+v, want priority 42", view)
+	if strings.Contains(w.call("member", "GET", "/orgs/"+w.orgA+"/clusters", nil).Body.String(), `"priority"`) {
+		t.Fatal("the list answers the number the order is kept as")
 	}
 }
 

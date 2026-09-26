@@ -316,7 +316,7 @@ scheduler:
   # evicts it (reason stuck_pending) and fully refunds its reservation. Bounds capacity held by
   # jobs that never actually start (e.g. unschedulable). A job's own checkpoint window is added,
   # since a requeued job cannot start before its previous pod has finished checkpointing.
-  # Overridable per cluster via cluster_settings, for a cluster whose nodes boot slowly.
+  # Overridable per cluster in the cluster's settings, for a cluster whose nodes boot slowly.
   stuck_pending_timeout_seconds: 300
 
   # How long a placed job may stay pending (image pull, container creation) before the same eviction.
@@ -345,7 +345,7 @@ scheduler:
   # Global default deadline for an autoscaler-enabled cluster to deliver capacity for a
   # SUBMITTED/RUNNING job's incomplete gang before job_watcher evicts it (reason
   # scale_up_timeout) and fails it over to the next candidate cluster. Overridable per cluster
-  # via cluster_settings. Must be < 1800: PyTorch's default rendezvous store timeout is 30
+  # in the cluster's settings. Must be < 1800: PyTorch's default rendezvous store timeout is 30
   # minutes, and waiting past that turns a scheduling failure into a real job failure.
   scale_up_timeout_seconds: 600
 

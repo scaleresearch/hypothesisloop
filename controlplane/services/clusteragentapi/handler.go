@@ -313,7 +313,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("invalid memory or storage capacity values")
 		}
 
-		// cluster_settings are kept under the id a runtime reports, so an id is one cluster's and
+		// The scheduler knows a connected cluster by the id its runtime reports, so an id is one cluster's and
 		// a cluster has one. A runtime stating another is refused before anything it reports is
 		// recorded.
 		if report.ClusterID != "" {
@@ -576,7 +576,7 @@ type capacityReport struct {
 	// ClusterID is a stable fingerprint the runtime derives live and never persists itself: the
 	// kube-system namespace UID on k8s, /etc/machine-id on bare metal. Unlike ClusterName (an
 	// operator-typed label that can be renamed or duplicated), this identifies the cluster across
-	// a rename — everything scheduler-side that must survive a rename (cluster_settings,
+	// a rename — everything scheduler-side that must survive a rename (the cluster's settings,
 	// tried_clusters) keys on it instead of the name.
 	ClusterID             string `json:"cluster_id"`
 	RAMAvailableBytes     int64  `json:"ram_available_bytes"`

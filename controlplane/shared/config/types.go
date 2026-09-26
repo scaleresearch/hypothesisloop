@@ -136,7 +136,7 @@ type SchedulerConfig struct {
 	// ScaleUpTimeoutSeconds is the global default deadline a SUBMITTED/RUNNING job with an
 	// incomplete gang (scheduled_nodes < Nodes()) is given on an autoscaler-enabled cluster
 	// before job_watcher evicts it with reason scale_up_timeout and fails it over to the next
-	// candidate cluster (see cluster_settings for the per-cluster override). Must be < 1800:
+	// candidate cluster (see domain.ClusterSettings for the per-cluster override). Must be < 1800:
 	// PyTorch's default rendezvous store timeout is 30 minutes, and a scale-up wait past that
 	// makes landed ranks time out and fail the job for real, charging a retry for what was only
 	// a scheduling failure.

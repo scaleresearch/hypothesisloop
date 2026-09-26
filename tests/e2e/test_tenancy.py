@@ -365,15 +365,19 @@ def test_cluster_settings_belong_to_the_clusters_org(tenants, api):
     """The connected clusters of the local stack belong to the default org, which neither tenant
     is in."""
     a, _ = tenants
-    connected = [c for c in _default_orgs_clusters(api) if c["cluster_id"]]
+    connected = _default_orgs_clusters(api)
     assert connected, "no connected cluster to check settings access against"
+
+    def listed() -> list:
+        return api.get_json("/orgs/default/clusters")["clusters"]
+
+    before = listed()
     for cluster in connected:
-        path = f"/clusters/{cluster['cluster_id']}/settings"
-        before = api.get_json(path)
-        assert a.api.get(path).status_code == 404
-        assert a.api.put(path, {"scale_up_timeout_seconds": 61}).status_code == 404
-        assert a.api.post(f"/experiments/{a.job_id}/admit", {"cluster_name": cluster["cluster_name"]}).status_code == 404
-        assert api.get_json(path) == before
+        name = cluster["cluster_name"]
+        for path in (f"/orgs/default/clusters/{name}", f"/orgs/{a.org_id}/clusters/{name}"):
+            assert a.api.patch(path, {"scale_up_timeout_seconds": 61}).status_code == 404
+        assert a.api.post(f"/experiments/{a.job_id}/admit", {"cluster_name": name}).status_code == 404
+    assert listed() == before
 
 
 def test_requests_without_a_valid_token_are_refused(tenants, api):

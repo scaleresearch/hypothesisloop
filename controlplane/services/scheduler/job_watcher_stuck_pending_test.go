@@ -14,7 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
-// settingsStore is lifecycleStore with cluster_settings rows and a list of SUBMITTED experiments.
+// settingsStore is lifecycleStore with clusters' settings and a list of SUBMITTED experiments.
 type settingsStore struct {
 	*lifecycleStore
 	settings    map[string]*domain.ClusterSettings
@@ -58,7 +58,7 @@ func (b idsBackend) GetClusterIDs(context.Context) (map[string]string, error) {
 var clusterA = map[string]string{"cluster-a": "cid-a"}
 
 func stuckPendingOverride(seconds int) map[string]*domain.ClusterSettings {
-	return map[string]*domain.ClusterSettings{"cid-a": {ClusterID: "cid-a", StuckPendingTimeoutSeconds: &seconds}}
+	return map[string]*domain.ClusterSettings{"cid-a": {StuckPendingTimeoutSeconds: &seconds}}
 }
 
 var errPhase = errors.New("no snapshot")

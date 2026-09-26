@@ -186,7 +186,7 @@ END $$;
 
 -- Accelerators this platform experiment may hold in flight (SUBMITTED+RUNNING) at once, across
 -- all its agents' jobs. NULL = use the config default (quota.default_max_concurrent_accelerators).
--- Speculative submission (see cluster_settings below) makes capacity appear on demand and removes
+-- Speculative submission (see the settings of a cluster, below) makes capacity appear on demand and removes
 -- the live-capacity ceiling that used to bound concurrency implicitly — this is the replacement.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_concurrent_accelerators INTEGER;
 
@@ -619,46 +619,6 @@ CREATE TABLE IF NOT EXISTS platform_experiment_stage_advances (
 );
 
 -- ---------------------------------------------------------------------------
--- cluster_settings — per-cluster operator overrides for autoscaler speculation. Keyed by
--- cluster_id (kube-system namespace UID / machine-id — see runtime/k8s cluster-agent), not
--- cluster_name: a rename or a duplicate display name must not split or merge these settings.
--- Settings only, nothing observed: cluster liveness, autoscaler_enabled and the rest live in the
--- metrics store (see queuebackend.GetAutoscalerCapability) and are never duplicated here. A row
--- exists only once an operator sets a value; absent = global scheduler.scale_up_timeout_seconds
--- and no per-cluster speculative cap.
--- ---------------------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS cluster_settings (
-    cluster_id                   TEXT        PRIMARY KEY,
-    scale_up_timeout_seconds     INTEGER,
-    max_speculative_accelerators INTEGER,
-    -- How long a job admitted to this cluster may stay unplaced before it is evicted as
-    -- stuck_pending, in place of the global scheduler.stuck_pending_timeout_seconds. A cluster of
-    -- rented instances boots slowly and sets it longer.
-    stuck_pending_timeout_seconds INTEGER,
-    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT cluster_settings_scale_up_timeout CHECK (
-        scale_up_timeout_seconds IS NULL OR
-        (scale_up_timeout_seconds > 0 AND scale_up_timeout_seconds < 1800)
-    ),
-    CONSTRAINT cluster_settings_max_speculative_accelerators CHECK (
-        max_speculative_accelerators IS NULL OR max_speculative_accelerators > 0
-    ),
-    CONSTRAINT cluster_settings_stuck_pending_timeout CHECK (
-        stuck_pending_timeout_seconds IS NULL OR stuck_pending_timeout_seconds > 0
-    )
-);
-
-ALTER TABLE cluster_settings ADD COLUMN IF NOT EXISTS stuck_pending_timeout_seconds INTEGER;
-DO $$ BEGIN
-    ALTER TABLE cluster_settings ADD CONSTRAINT cluster_settings_stuck_pending_timeout CHECK (
-        stuck_pending_timeout_seconds IS NULL OR stuck_pending_timeout_seconds > 0
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
--- ---------------------------------------------------------------------------
 -- Change notification — the source of GET /watch's live event stream
 -- ---------------------------------------------------------------------------
 --
@@ -999,7 +959,7 @@ CREATE INDEX IF NOT EXISTS idx_clusters_org ON clusters(org_id);
 -- staff set it. Without it a cluster takes the jobs of its own org alone.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT false;
 -- reported_id is the identity the cluster's runtime states about itself, bound to the name on
--- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
+-- its first report. The scheduler knows a connected cluster by it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
 -- job_image is the image a job that names none runs in on the cluster, as its runtime last
 -- reported it. Empty for a cluster that runs only jobs that name their image. Placement reads it.
@@ -1018,6 +978,25 @@ DO $$ BEGIN
     );
 EXCEPTION
     WHEN duplicate_object THEN NULL;
+END $$;
+
+-- What the org that registered a cluster sets on it in place of the scheduler's defaults
+-- (domain.ClusterSettings). NULL is the default. They were rows of cluster_settings, keyed by
+-- reported_id, which no cluster had before its agent first connected.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS scale_up_timeout_seconds INTEGER
+    CHECK (scale_up_timeout_seconds > 0 AND scale_up_timeout_seconds < 1800);
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS max_speculative_accelerators INTEGER
+    CHECK (max_speculative_accelerators > 0);
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS stuck_pending_timeout_seconds INTEGER
+    CHECK (stuck_pending_timeout_seconds > 0);
+DO $$ BEGIN
+    IF to_regclass('cluster_settings') IS NOT NULL THEN
+        UPDATE clusters c SET scale_up_timeout_seconds = s.scale_up_timeout_seconds,
+                              max_speculative_accelerators = s.max_speculative_accelerators,
+                              stuck_pending_timeout_seconds = s.stuck_pending_timeout_seconds
+        FROM cluster_settings s WHERE s.cluster_id = c.reported_id;
+        DROP TABLE cluster_settings;
+    END IF;
 END $$;
 
 -- An org turns a cluster on or off for its own jobs, whether the cluster is its own or one the

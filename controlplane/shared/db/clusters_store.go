@@ -15,8 +15,6 @@ var (
 	// ErrClusterNameTaken reports that another org already registered the cluster name.
 	ErrClusterNameTaken = errors.New("cluster name is registered to another org")
 	ErrClusterNotFound  = errors.New("cluster is not registered")
-	// ErrClusterShared reports a priority asked for a shared cluster, which holds the platform's.
-	ErrClusterShared = errors.New("a shared cluster holds the platform's priority, below every org's own clusters")
 	// ErrClusterIDBound reports a runtime stating an identity another registered cluster holds.
 	ErrClusterIDBound = errors.New("cluster id is bound to another registered cluster")
 	// ErrClusterIDChanged reports a runtime stating an identity other than the one its cluster
@@ -75,11 +73,13 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 }
 
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, job_image_default, created_at,
+	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.JobImageDefault, &c.CreatedAt, &c.DisabledOrgs); err != nil {
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.JobImageDefault, &c.CreatedAt,
+		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -266,24 +266,77 @@ ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, by)
 	return cluster, nil
 }
 
-// SetClusterPriority records where its org ranks a cluster among the ones its jobs may be placed
-// on. It orders placements from here on and moves no job. A shared cluster is ErrClusterShared.
-func (s *ClustersStore) SetClusterPriority(ctx context.Context, name string, priority int) (*domain.Cluster, error) {
-	if err := domain.ValidateClusterPriority(priority); err != nil {
+// ErrClusterOrder is an order that does not name every cluster its org ranks exactly once.
+var ErrClusterOrder = errors.New("the order must name every cluster the org registered and does not share, each once")
+
+// SetClusterOrder ranks the clusters orgID registered, first placed first, in one step: all of
+// them take their new priority or none does. names must be exactly the clusters the org ranks,
+// which leaves out one the platform shares. It orders placements from here on and moves no job.
+// A cluster registered later starts at DefaultClusterPriority, behind an order of up to 900.
+func (s *ClustersStore) SetClusterOrder(ctx context.Context, orgID string, names []string) error {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("clusters_store.SetClusterOrder: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `SELECT name FROM clusters WHERE org_id = $1 AND NOT shared FOR UPDATE`, orgID)
+	if err != nil {
+		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+	}
+	ranked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+	}
+	if err := domain.ValidateClusterOrder(ranked, names); err != nil {
+		return fmt.Errorf("%w: %w", ErrClusterOrder, err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE clusters c SET priority = $2 + 1 - o.place
+FROM unnest($1::text[]) WITH ORDINALITY AS o(name, place) WHERE c.name = o.name`, names, domain.ClusterPriorityMax); err != nil {
+		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("clusters_store.SetClusterOrder: commit: %w", err)
+	}
+	return nil
+}
+
+// SetClusterSettings changes the settings of a cluster that change names: a value sets the field
+// and 0 puts it back on the scheduler's default. The fields it leaves nil stay as they are.
+func (s *ClustersStore) SetClusterSettings(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
+	if err := domain.ValidateClusterSettings(change); err != nil {
 		return nil, err
 	}
 	cluster, err := scanCluster(s.pool.pool.QueryRow(ctx, `
-UPDATE clusters SET priority = CASE WHEN shared THEN priority ELSE $2 END WHERE name = $1 RETURNING `+clusterColumns, name, priority))
+UPDATE clusters SET
+	scale_up_timeout_seconds = CASE WHEN $2::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($2::int, 0) END,
+	max_speculative_accelerators = CASE WHEN $3::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($3::int, 0) END,
+	stuck_pending_timeout_seconds = CASE WHEN $4::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($4::int, 0) END
+WHERE name = $1 RETURNING `+clusterColumns, name, change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClusterNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterPriority: %w", err)
-	}
-	if cluster.Shared {
-		return nil, ErrClusterShared
+		return nil, fmt.Errorf("clusters_store.SetClusterSettings: %w", err)
 	}
 	return cluster, nil
+}
+
+// GetClusterSettings reads the settings of the cluster bound to the id its runtime reports, which
+// is how the scheduler knows a connected cluster. Nil for an id bound to no cluster and for a
+// cluster with nothing set: the scheduler's defaults apply.
+func (s *ClustersStore) GetClusterSettings(ctx context.Context, reportedID string) (*domain.ClusterSettings, error) {
+	cs := &domain.ClusterSettings{}
+	err := s.pool.pool.QueryRow(ctx, `
+SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds FROM clusters WHERE reported_id = $1`, reportedID).
+		Scan(&cs.ScaleUpTimeoutSeconds, &cs.MaxSpeculativeAccelerators, &cs.StuckPendingTimeoutSeconds)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.Empty()) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.GetClusterSettings: %w", err)
+	}
+	return cs, nil
 }
 
 func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, error) {
@@ -299,7 +352,7 @@ func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, e
 }
 
 // RemoveCluster ends a cluster: every job placed on it returns to the queue, its settings and
-// the identity bound to it go, and the name is registered to nobody, so its runtime token is
+// the identity bound to it go with its row, and the name is registered to nobody, so its runtime token is
 // refused from here on. requeued names the jobs.
 func (s *ClustersStore) RemoveCluster(ctx context.Context, name string) (requeued []string, err error) {
 	tx, err := s.pool.pool.Begin(ctx)
@@ -313,10 +366,7 @@ func (s *ClustersStore) RemoveCluster(ctx context.Context, name string) (requeue
 	if requeued, err = withdraw(ctx, tx, name, ""); err != nil {
 		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
 	}
-	tag, err := tx.Exec(ctx, `
-WITH removed AS (DELETE FROM clusters WHERE name = $1 RETURNING reported_id),
-     settings AS (DELETE FROM cluster_settings WHERE cluster_id IN (SELECT reported_id FROM removed))
-SELECT 1 FROM removed`, name)
+	tag, err := tx.Exec(ctx, `DELETE FROM clusters WHERE name = $1`, name)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
 	}
@@ -330,7 +380,7 @@ SELECT 1 FROM removed`, name)
 }
 
 // BindReportedID records the identity a registered cluster's runtime states about itself, once.
-// The settings of a cluster are kept under that identity, so it is one cluster's and stays its:
+// The scheduler knows a connected cluster by that identity, so it is one cluster's and stays its:
 // an identity another cluster holds is refused with ErrClusterIDBound, and a cluster stating
 // another identity than its own with ErrClusterIDChanged until its owner clears the binding
 // (ClearReportedID).
@@ -366,28 +416,15 @@ func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID str
 	return nil
 }
 
-// ClearReportedID forgets the identity bound to a cluster and deletes the settings kept under
-// it, so nobody who later states that identity inherits them. The cluster binds again on its
-// runtime's next report.
+// ClearReportedID forgets the identity bound to a cluster, which binds again on its runtime's
+// next report. Its settings are the named cluster's and stay.
 func (s *ClustersStore) ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.ClearReportedID: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, `
-DELETE FROM cluster_settings WHERE cluster_id = (SELECT reported_id FROM clusters WHERE name = $1 FOR UPDATE)`, name); err != nil {
-		return nil, fmt.Errorf("clusters_store.ClearReportedID: settings: %w", err)
-	}
-	c, err := scanCluster(tx.QueryRow(ctx, `UPDATE clusters SET reported_id = NULL WHERE name = $1 RETURNING `+clusterColumns, name))
+	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `UPDATE clusters SET reported_id = NULL WHERE name = $1 RETURNING `+clusterColumns, name))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClusterNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.ClearReportedID: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("clusters_store.ClearReportedID: commit: %w", err)
 	}
 	return c, nil
 }

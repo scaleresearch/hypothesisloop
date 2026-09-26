@@ -230,7 +230,7 @@ func TestSpeculativeCandidatesRespectsMaxSpeculativeAccelerators(t *testing.T) {
 	accel, resources := nodeFixture()
 	cap := 3
 	store := &speculationStore{settings: map[string]*domain.ClusterSettings{
-		"cid-a": {ClusterID: "cid-a", MaxSpeculativeAccelerators: &cap},
+		"cid-a": {MaxSpeculativeAccelerators: &cap},
 	}}
 	l := speculationLoop(store)
 	autoscaler := map[string]bool{"cluster-a": true}

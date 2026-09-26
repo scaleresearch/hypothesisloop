@@ -220,58 +220,6 @@ func (a *Access) Cluster(ctx context.Context, name string) error {
 	return a.administers(ctx, p, cluster.OrgID)
 }
 
-// ClusterByID admits the principal to administer the registered cluster bound to the id its
-// runtime reported, which is the key its settings are kept under. An id that could not be one,
-// an id bound to no cluster and a cluster outside the caller's reach are all not found, for staff
-// too: settings exist only under an id the platform bound, never under one a request states.
-func (a *Access) ClusterByID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
-	p, cluster, err := a.clusterByID(ctx, reportedID)
-	if err != nil || p.Kind == KindStaff {
-		return cluster, err
-	}
-	return cluster, a.administers(ctx, p, cluster.OrgID)
-}
-
-// ReadClusterByID admits the principal to read the settings of that cluster: whoever reads its
-// org as a whole, so a member too. What is not found is what ClusterByID does not find.
-func (a *Access) ReadClusterByID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
-	p, cluster, err := a.clusterByID(ctx, reportedID)
-	if err != nil {
-		return nil, err
-	}
-	switch p.Kind {
-	case KindUser, KindKey, KindStaff:
-		return cluster, nil
-	default:
-		return nil, forbidden("forbidden: a " + string(p.Kind) + " token does not read a cluster's settings")
-	}
-}
-
-func (a *Access) clusterByID(ctx context.Context, reportedID string) (Principal, *domain.Cluster, error) {
-	p, err := principal(ctx)
-	if err != nil {
-		return p, nil, err
-	}
-	if domain.ValidateClusterID(reportedID) != nil {
-		return p, nil, NotFound("cluster")
-	}
-	cluster, err := a.placement.ClusterByReportedID(ctx, reportedID)
-	if err != nil {
-		return p, nil, err
-	}
-	if cluster == nil {
-		return p, nil, NotFound("cluster")
-	}
-	if p.Kind == KindStaff {
-		return p, cluster, nil
-	}
-	scope := p.Scope()
-	if !scope.AdmitsOrg(cluster.OrgID) || scope.ProjectID != "" || scope.PlatformExperimentID != "" {
-		return p, nil, NotFound("cluster")
-	}
-	return p, cluster, nil
-}
-
 // ProjectAdmin admits the caller to change one project, and returns it. A project the caller
 // does not see, whether it is another org's, a sibling of the one its key is bound to, or
 // absent, is not found before anything else is read.

@@ -147,7 +147,7 @@ func (l *Loop) speculativeCandidates(
 	return out, provenFitByCluster, nil
 }
 
-// clusterSpeculativeCap reads max_speculative_accelerators from cluster_settings, nil meaning no
+// clusterSpeculativeCap reads max_speculative_accelerators from the cluster's settings, nil meaning no
 // per-cluster cap (only the platform experiment's max_concurrent_accelerators bounds it — see
 // autoscaler.md's concurrency-cap section, enforced in step 6, not here).
 func (l *Loop) clusterSpeculativeCap(ctx context.Context, clusterID string) (*int, error) {

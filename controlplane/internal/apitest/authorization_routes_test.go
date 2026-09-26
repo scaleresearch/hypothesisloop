@@ -2,7 +2,6 @@ package apitest
 
 import (
 	"net/http"
-	"strings"
 )
 
 // rule is the answer a route gives a caller for an object of the given owner.
@@ -250,8 +249,6 @@ var routes = []route{
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached), sharedRead: true},
 
 	// ---- cluster settings ----
-	{method: "GET", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", rule: orgRead(coordinatorAudience, http.StatusNotFound, reached)},
-	{method: "PUT", path: "/clusters/{cluster_id}/settings", request: "/clusters/<cluster>/settings", body: `{}`, rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
 
 	// ---- hypotheses ----
 	{method: "POST", path: "/hypotheses", body: `{"agent_id":"<agent>","platform_experiment_id":"<pe>","text":"t","links":[{"type":"builds_on","to":"<pe>"}]}`, rule: owned(agentAudience, reached)},
@@ -338,7 +335,8 @@ var routes = []route{
 	{method: "POST", path: "/invites/accept", body: `{"token":"hli_t"}`, rule: only(persons, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", body: `{"name":"cluster-new"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "GET", path: "/orgs/{id}/clusters", request: "/orgs/<org>/clusters", rule: orgRead(people, http.StatusForbidden, reached)},
-	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"priority":5}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "PATCH", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", body: `{"stuck_pending_timeout_seconds":600}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "PUT", path: "/orgs/{id}/clusters/order", request: "/orgs/<org>/clusters/order", body: `{"names":[]}`, rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}", request: "/orgs/<org>/clusters/<cluster>", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters/{name}/disable", request: "/orgs/<org>/clusters/<cluster>/disable", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters/{name}/enable", request: "/orgs/<org>/clusters/<cluster>/enable", rule: orgLevel(people, http.StatusForbidden, reached)},
@@ -401,9 +399,6 @@ var cases = []struct {
 	{"capacity of an org that does not exist, from staff", "staff", "GET", "/resource-catalog/capacity?org_id=org-never", "", 404},
 	{"capacity of the caller's own org, named", "user", "GET", "/resource-catalog/capacity?org_id=org-a", "", metricsUnreachable},
 	{"capacity of one org, from staff", "staff", "GET", "/resource-catalog/capacity?org_id=org-b", "", metricsUnreachable},
-	{"settings under a cluster id that is a path", "staff", "GET", "/clusters/id%2F..%2Fother/settings", "", 404},
-	{"settings written under a cluster id no runtime could report", "staff", "PUT", "/clusters/id%20with%20spaces/settings", `{}`, 404},
-	{"settings written under an overlong cluster id", "staff", "PUT", "/clusters/" + strings.Repeat("a", 200) + "/settings", `{}`, 404},
 
 	{"an agent registering a hypothesis under a name it states", "agent", "POST", "/hypotheses", `{"author":"Mallory","platform_experiment_id":"pe-a1","text":"t","links":[{"type":"builds_on","to":"pe-a1"}]}`, 422},
 	{"an agent registering as itself and under a name", "agent", "POST", "/hypotheses", `{"agent_id":"agent-1","author":"Mallory","platform_experiment_id":"pe-a1","text":"t","links":[{"type":"builds_on","to":"pe-a1"}]}`, 422},
@@ -442,13 +437,12 @@ var cases = []struct {
 	{"a member removing the owner", member, "DELETE", "/orgs/org-a/members/user-a", "", 403},
 	{"a member creating a key of one project", member, "POST", "/orgs/org-a/api-keys", `{"name":"n","project_id":"prj-a1"}`, reached},
 	{"a member creating a key of the whole org", member, "POST", "/orgs/org-a/api-keys", `{"name":"n"}`, 403},
-	{"a member writing a cluster's settings", member, "PUT", "/clusters/cluster-a/settings", `{}`, 403},
 	{"an owner sharing the org's cluster with every org", "user", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true}`, 403},
-	{"an org key sharing the org's cluster", "org key", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true,"priority":5}`, 403},
+	{"an org key sharing the org's cluster", "org key", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true,"stuck_pending_timeout_seconds":5}`, 403},
 	{"staff sharing a cluster", "staff", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true}`, reached},
-	{"a member setting a cluster's priority", member, "PATCH", "/orgs/org-a/clusters/cluster-a", `{"priority":5}`, 403},
-	{"an owner setting the priority of another org's cluster", "user", "PATCH", "/orgs/org-a/clusters/cluster-b", `{"priority":5}`, 404},
-	{"an owner setting a priority under an org that is not theirs", "user", "PATCH", "/orgs/org-b/clusters/cluster-b", `{"priority":5}`, 404},
+	{"a member changing a cluster's settings", member, "PATCH", "/orgs/org-a/clusters/cluster-a", `{"stuck_pending_timeout_seconds":5}`, 403},
+	{"an owner changing the settings of another org's cluster", "user", "PATCH", "/orgs/org-a/clusters/cluster-b", `{"stuck_pending_timeout_seconds":5}`, 404},
+	{"an owner ordering the clusters of an org that is not theirs", "user", "PUT", "/orgs/org-b/clusters/order", `{"names":["cluster-b"]}`, 404},
 	{"a member turning a cluster off for the org's jobs", member, "POST", "/orgs/org-a/clusters/cluster-a/disable", "", 403},
 	{"a project key turning a cluster on for the org's jobs", "project key", "POST", "/orgs/org-a/clusters/cluster-a/enable", "", 403},
 	{"an owner turning off a cluster of another org that is not shared", "user", "POST", "/orgs/org-a/clusters/cluster-b/disable", "", 404},

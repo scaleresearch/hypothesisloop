@@ -327,15 +327,43 @@ func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool)
 	return &out, requeued, nil
 }
 
-func (s *memStore) SetClusterPriority(_ context.Context, name string, priority int) (*domain.Cluster, error) {
+func (s *memStore) SetClusterOrder(_ context.Context, orgID string, names []string) error {
+	var ranked []string
+	for name, c := range s.clusters {
+		if c.OrgID == orgID && !c.Shared {
+			ranked = append(ranked, name)
+		}
+	}
+	if err := domain.ValidateClusterOrder(ranked, names); err != nil {
+		return fmt.Errorf("%w: %w", db.ErrClusterOrder, err)
+	}
+	for i, name := range names {
+		s.clusters[name].Priority = domain.ClusterPriorityMax - i
+	}
+	return nil
+}
+
+func (s *memStore) SetClusterSettings(_ context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
 	c, ok := s.clusters[name]
 	if !ok {
 		return nil, db.ErrClusterNotFound
 	}
-	if c.Shared {
-		return nil, db.ErrClusterShared
+	for _, f := range []struct {
+		to   **int
+		from *int
+	}{
+		{&c.ScaleUpTimeoutSeconds, change.ScaleUpTimeoutSeconds},
+		{&c.MaxSpeculativeAccelerators, change.MaxSpeculativeAccelerators},
+		{&c.StuckPendingTimeoutSeconds, change.StuckPendingTimeoutSeconds},
+	} {
+		switch {
+		case f.from == nil:
+		case *f.from == 0:
+			*f.to = nil
+		default:
+			*f.to = f.from
+		}
 	}
-	c.Priority = priority
 	out := *c
 	return &out, nil
 }

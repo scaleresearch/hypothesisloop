@@ -128,9 +128,10 @@ type Cluster struct {
 	// JobImageDefault says the cluster's runtime runs a job in whatever image the job names, so
 	// JobImage is only where a job that names none runs. False with a JobImage is a runtime that
 	// boots one fixed image and can run no other, as one that rents machines does.
-	JobImageDefault bool      `json:"job_image_default,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	DisabledOrgs    []string  `json:"-"`
+	JobImageDefault bool `json:"job_image_default,omitempty"`
+	ClusterSettings
+	CreatedAt    time.Time `json:"created_at"`
+	DisabledOrgs []string  `json:"-"`
 }
 
 // The priorities a cluster holds. DefaultClusterPriority is the one a cluster is registered with.
@@ -141,10 +142,24 @@ const (
 	DefaultClusterPriority = 100
 )
 
-// ValidateClusterPriority refuses a priority an org cannot give a cluster it registered.
-func ValidateClusterPriority(priority int) error {
-	if priority < ClusterPriorityMin || priority > ClusterPriorityMax {
-		return fmt.Errorf("priority must be %d to %d", ClusterPriorityMin, ClusterPriorityMax)
+// ValidateClusterOrder checks that order names each of the ranked clusters exactly once and
+// nothing else.
+func ValidateClusterOrder(ranked, order []string) error {
+	if len(order) > ClusterPriorityMax {
+		return fmt.Errorf("an order holds at most %d clusters", ClusterPriorityMax)
+	}
+	left := make(map[string]bool, len(ranked))
+	for _, name := range ranked {
+		left[name] = true
+	}
+	for _, name := range order {
+		if !left[name] {
+			return fmt.Errorf("%s is named twice or is not a cluster the org ranks", name)
+		}
+		delete(left, name)
+	}
+	for name := range left {
+		return fmt.Errorf("%s is missing", name)
 	}
 	return nil
 }

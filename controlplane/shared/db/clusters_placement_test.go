@@ -32,7 +32,7 @@ func newTwoOrgs(t *testing.T) *twoOrgs {
 	_, w.orgB = newTestUserHome(t, accounts)
 	w.ofA, w.ofB, w.unregisteredName = "of-a-"+w.suffix, "of-b-"+w.suffix, "nobodys-"+w.suffix
 	w.peA, w.peB, w.agent = "pe-a-"+w.suffix, "pe-b-"+w.suffix, "agent-"+w.suffix
-	createTestAgent(t, pool, w.agent, domain.AgentKindHuman)
+	createTestAgent(t, pool, w.agent)
 	createTestPEIn(t, pool, w.peA, defaultProjectOf(t, accounts, w.orgA).ID)
 	createTestPEIn(t, pool, w.peB, defaultProjectOf(t, accounts, w.orgB).ID)
 	for name, org := range map[string]string{w.ofA: w.orgA, w.ofB: w.orgB} {
@@ -130,7 +130,7 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 	clusters, exps := NewClustersStore(pool), NewExperimentsStore(pool)
 	suffix := uuid.New().String()[:8]
 	agent, pe := "agent-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, agent, domain.AgentKindHuman)
+	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
 	for i, name := range []string{"local-" + suffix, "second-" + suffix} {
 		if _, err := clusters.RegisterCluster(context.Background(), name, "default"); err != nil {
@@ -263,13 +263,12 @@ func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
 func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	settings := NewClusterSettingsStore(w.pool)
 	id := "id-a-" + w.suffix
 	if err := w.clusters.BindReportedID(ctx, w.ofA, id); err != nil {
 		t.Fatal(err)
 	}
 	timeout := 600
-	if err := settings.PutClusterSettings(ctx, &domain.ClusterSettings{ClusterID: id, StuckPendingTimeoutSeconds: &timeout}); err != nil {
+	if _, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
 		t.Fatal(err)
 	}
 	submitted := w.placed(t, "a-submitted", w.peA, w.ofA, domain.StatusSubmitted)
@@ -297,7 +296,7 @@ func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *test
 	if got, err := w.clusters.GetCluster(ctx, w.ofA); err != nil || got != nil {
 		t.Fatalf("the removed cluster: got = %+v, %v, want no row, so its runtime token names nothing", got, err)
 	}
-	if got, err := settings.GetClusterSettings(ctx, id); err != nil || got != nil {
+	if got, err := w.clusters.GetClusterSettings(ctx, id); err != nil || got != nil {
 		t.Fatalf("settings of the removed cluster: got = %+v, %v, want none", got, err)
 	}
 	if got, err := w.clusters.ClusterByReportedID(ctx, id); err != nil || got != nil {
@@ -311,7 +310,7 @@ func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *test
 	if err := w.clusters.BindReportedID(ctx, w.ofA, id); err != nil {
 		t.Fatalf("bind the old identity to the new cluster: %v", err)
 	}
-	if got, err := settings.GetClusterSettings(ctx, id); err != nil || got != nil {
+	if got, err := w.clusters.GetClusterSettings(ctx, id); err != nil || got != nil {
 		t.Fatalf("settings under the old identity: got = %+v, %v, want none inherited", got, err)
 	}
 }
@@ -319,7 +318,6 @@ func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *test
 func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	settings := NewClusterSettingsStore(w.pool)
 	idA, rebuilt := "id-a-"+w.suffix, "id-a-rebuilt-"+w.suffix
 
 	for _, invalid := range []string{"", "has/slash", "has space", "nul\x00byte", "../up", string(make([]byte, domain.MaxClusterIDLength+1))} {
@@ -343,9 +341,21 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 		t.Fatalf("after the refusals the cluster is bound to %q, want %q", got.ReportedID, idA)
 	}
 
-	timeout := 600
-	if err := settings.PutClusterSettings(ctx, &domain.ClusterSettings{ClusterID: idA, StuckPendingTimeoutSeconds: &timeout}); err != nil {
+	// A cluster's settings are set by name, before any agent connects too, and read by the
+	// scheduler under the identity bound to it. A field left out stays, and 0 clears one.
+	timeout, limit, zero := 600, 8, 0
+	if _, err := w.clusters.SetClusterSettings(ctx, w.ofB, domain.ClusterSettings{MaxSpeculativeAccelerators: &limit}); err != nil {
+		t.Fatalf("settings of a cluster no agent has connected to: %v", err)
+	}
+	if _, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout, MaxSpeculativeAccelerators: &limit}); err != nil {
 		t.Fatal(err)
+	}
+	changed, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{MaxSpeculativeAccelerators: &zero})
+	if err != nil || changed.MaxSpeculativeAccelerators != nil || changed.StuckPendingTimeoutSeconds == nil || *changed.StuckPendingTimeoutSeconds != timeout {
+		t.Fatalf("clearing one setting: got = %+v, %v, want the cap gone and the timeout kept", changed, err)
+	}
+	if got, err := w.clusters.GetClusterSettings(ctx, idA); err != nil || got == nil || *got.StuckPendingTimeoutSeconds != timeout || got.MaxSpeculativeAccelerators != nil {
+		t.Fatalf("settings under the bound identity: got = %+v, %v, want the timeout alone", got, err)
 	}
 	if _, err := w.clusters.ClearReportedID(ctx, w.unregisteredName); !errors.Is(err, ErrClusterNotFound) {
 		t.Fatalf("clear for an unregistered name: got = %v, want = %v", err, ErrClusterNotFound)
@@ -354,15 +364,16 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	if err != nil || cleared.ReportedID != "" || cleared.OrgID != w.orgA {
 		t.Fatalf("clear: got = %+v, %v, want the cluster with no identity", cleared, err)
 	}
-	if got, err := settings.GetClusterSettings(ctx, idA); err != nil || got != nil {
-		t.Fatalf("settings under a cleared identity: got = %+v, %v, want them deleted", got, err)
+	if cleared.StuckPendingTimeoutSeconds == nil {
+		t.Fatal("clearing the identity took the settings of the named cluster with it")
 	}
-	// The identity the cluster gave up is free. Whoever states it next gets no settings with it.
+	// The identity the cluster gave up is free. Whoever states it next is read with its own
+	// settings, never the ones of the cluster that held the identity before.
 	if err := w.clusters.BindReportedID(ctx, w.ofB, idA); err != nil {
 		t.Fatalf("bind a released identity: %v", err)
 	}
-	if got, err := settings.GetClusterSettings(ctx, idA); err != nil || got != nil {
-		t.Fatalf("settings inherited with a released identity: got = %+v, %v, want none", got, err)
+	if got, err := w.clusters.GetClusterSettings(ctx, idA); err != nil || got == nil || got.StuckPendingTimeoutSeconds != nil || *got.MaxSpeculativeAccelerators != limit {
+		t.Fatalf("settings under a released identity: got = %+v, %v, want those of the cluster it is bound to now", got, err)
 	}
 	if err := w.clusters.BindReportedID(ctx, w.ofA, rebuilt); err != nil {
 		t.Fatalf("bind the rebuilt cluster after clearing: %v", err)

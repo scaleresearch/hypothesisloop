@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -80,7 +79,8 @@ func TestAccountCommandsCallTheirEndpoints(t *testing.T) {
 		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters", map[string]any{"name": "gpu-east"}},
 		{[]string{"cluster", "remove", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east", nil},
 		{[]string{"cluster", "forget-identity", "gpu-east", "--org", "org-1"}, "DELETE", "/orgs/org-1/clusters/gpu-east/identity", nil},
-		{[]string{"cluster", "priority", "gpu-east", "250", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/gpu-east", map[string]any{"priority": 250}},
+		{[]string{"cluster", "order", "gpu-east", "gpu-west", "--org", "org-1"}, "PUT", "/orgs/org-1/clusters/order", map[string]any{"names": []string{"gpu-east", "gpu-west"}}},
+		{[]string{"cluster", "settings", "gpu-east", "--stuck-pending-timeout", "900", "--speculative-cap", "0", "--org", "org-1"}, "PATCH", "/orgs/org-1/clusters/gpu-east", map[string]any{"max_speculative_accelerators": 0, "stuck_pending_timeout_seconds": 900}},
 		{[]string{"cluster", "disable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/disable", nil},
 		{[]string{"cluster", "enable", "gpu-east", "--org", "org-1"}, "POST", "/orgs/org-1/clusters/gpu-east/enable", nil},
 	} {
@@ -132,7 +132,7 @@ func TestACommandNeedingAnOrgNamesNoneWhenTheTokenReachesSeveral(t *testing.T) {
 			{"project", "list"}, {"project", "create", "x"}, {"org", "rename", "x"}, {"api-key", "list"},
 			{"api-key", "create", "x"}, {"cluster", "list"}, {"cluster", "add", "x"},
 			{"cluster", "token", "x"}, {"cluster", "remove", "x"}, {"cluster", "forget-identity", "x"},
-			{"cluster", "disable", "x"}, {"cluster", "enable", "x"}, {"cluster", "priority", "x", "5"},
+			{"cluster", "disable", "x"}, {"cluster", "enable", "x"}, {"cluster", "order", "x"},
 			{"org", "members", "list"}, {"org", "members", "set-role", "u-1", "member"}, {"org", "members", "remove", "u-1"},
 			{"org", "invites", "create"}, {"org", "invites", "list"},
 		} {
@@ -183,67 +183,21 @@ func TestAPIKeyCreateNeverNarrowsTheKeyFromTheEnvironment(t *testing.T) {
 	}
 }
 
-const registeredAnswer = `{"name":"%s","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's","registry":"registry.example/images","image_tag":"abc1234","job_image":"registry.example/images/hypothesisloop-job:abc1234"}`
-
-// The printed command lands in scrollback and, once run, in shell history, so it carries no
-// token: it asks for the token, which is printed below it, when it runs. It is complete, with
-// what the platform answered quoted as one word each, and needs no hl on the machine.
-func TestClusterAddPrintsTheCompleteCommandForAKubernetesClusterAndItsToken(t *testing.T) {
-	accountsServer(t, nil, fmt.Sprintf(registeredAnswer, "gpu-east"))
-	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
-	}
-	command, rest, _ := strings.Cut(stdout, "\n")
-	if strings.Contains(command, "hls_") || strings.Contains(command, "hl cluster token") {
-		t.Fatalf("the command holds the token or reads it with hl: %q", command)
-	}
-	want := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
-		`chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
-		`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' sh ` +
-		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' '0.1.0+abc1234' ` +
-		`--set-string 'clusterName=gpu-east' --set-string 'apiURL=https://api.example/a?b=1&c=$(id)' --set-string 'metricsURL=https://metrics.example/it'\''s' ` +
-		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234' --set-string 'jobImage=registry.example/images/hypothesisloop-job:abc1234'`
-	if command != want {
-		t.Fatalf("command: got = %q, want = %q", command, want)
-	}
-	if rest != "\nIt asks for the runtime token of gpu-east:\nhls_cnVudGltZQ.c2ln\n" {
-		t.Fatalf("after the command: %q, want the token shown once below it", rest)
-	}
-}
-
-// helm splits a --set-string value on commas, so an address that holds one would install with
-// half of it.
-func TestClusterAddEscapesWhatHelmWouldSplitAValueOn(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?ids=1,2","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
-	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
-	}
-	if !strings.Contains(stdout, `--set-string 'apiURL=https://api.example/a?ids=1\,2' `) {
-		t.Fatalf("stdout = %q, want the comma escaped", stdout)
-	}
-}
-
-// A bare-metal node has neither hl nor an API key, so its command reads nothing from the
-// platform: the token is shown once beside it and the command asks for it on the node.
-func TestClusterAddPrintsTheCommandThatInstallsABareMetalNodesAgentAndItsToken(t *testing.T) {
-	accountsServer(t, nil, fmt.Sprintf(registeredAnswer, "gpu-box"))
-	code, stdout, stderr := hl(t, "cluster", "add", "gpu-box", "--bare-metal", "--org", "org-1")
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
-	}
-	command, rest, _ := strings.Cut(stdout, "\n")
-	if strings.Contains(command, "hls_") || strings.Contains(command, "hl cluster token") {
-		t.Fatalf("the node's command holds the token or reads it with hl: %q", command)
-	}
-	if !strings.HasPrefix(command, `sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) ||
-		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh `) ||
-		!strings.HasSuffix(command, ` sh 'gpu-box' 'https://api.example/a?b=1&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234' 'registry.example/images/hypothesisloop-job:abc1234'`) {
-		t.Fatalf("command = %q", command)
-	}
-	if rest != "\nIt asks for the runtime token of gpu-box:\nhls_cnVudGltZQ.c2ln\n" {
-		t.Fatalf("after the command: %q, want the token shown once beside it", rest)
+// The command is the platform's: hl prints the one it answered for the kind asked for, untouched,
+// and the token it asks for below it. The command holds no token, so none lands in shell history.
+func TestClusterAddPrintsTheCommandThePlatformAnsweredAndTheTokenItAsksFor(t *testing.T) {
+	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","runtime_token":"hls_cnVudGltZQ.c2ln","attach_commands":{"kubernetes":"sh -c 'helm it'\\''s' sh","bare_metal":"sudo sh -c 'install' sh"}}`)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"cluster", "add", "gpu-east", "--org", "org-1"}, `sh -c 'helm it'\''s' sh`},
+		{[]string{"cluster", "add", "gpu-east", "--bare-metal", "--org", "org-1"}, `sudo sh -c 'install' sh`},
+	} {
+		code, stdout, stderr := hl(t, tc.args...)
+		if want := tc.want + "\n\nIt asks for the runtime token of gpu-east:\nhls_cnVudGltZQ.c2ln\n"; code != 0 || stdout != want {
+			t.Fatalf("hl %s: exit code = %d, stderr = %s, stdout = %q, want = %q", strings.Join(tc.args, " "), code, stderr, stdout, want)
+		}
 	}
 }
 
@@ -321,13 +275,13 @@ func TestClusterDisablePrintsTheClusterAndARefusalFails(t *testing.T) {
 	}
 }
 
-func TestClusterPriorityAsksForANameAndAWholeNumberAndPrintsARefusal(t *testing.T) {
-	calls := accountsServer(t, nil, `{"name":"gpu-east","priority":250}`)
+func TestClusterOrderAndSettingsAskForWhatTheyChangeAndPrintARefusal(t *testing.T) {
+	calls := accountsServer(t, nil, `{"clusters":[{"name":"gpu-east"}]}`)
 	for _, args := range [][]string{
-		{"cluster", "priority", "gpu-east", "--org", "org-1"},
-		{"cluster", "priority", "gpu-east", "high", "--org", "org-1"},
-		{"cluster", "priority", "gpu-east", "2.5", "--org", "org-1"},
-		{"cluster", "priority", "gpu-east", "1", "2", "--org", "org-1"},
+		{"cluster", "order", "--org", "org-1"},
+		{"cluster", "settings", "gpu-east", "--org", "org-1"},
+		{"cluster", "settings", "gpu-east", "--scale-up-timeout", "soon", "--org", "org-1"},
+		{"cluster", "settings", "--speculative-cap", "4", "--org", "org-1"},
 	} {
 		if code, stdout, _ := hl(t, args...); code != 2 || stdout != "" {
 			t.Errorf("hl %s: exit code = %d, stdout = %q, want a usage error", strings.Join(args, " "), code, stdout)
@@ -336,19 +290,19 @@ func TestClusterPriorityAsksForANameAndAWholeNumberAndPrintsARefusal(t *testing.
 	if len(*calls) != 0 {
 		t.Fatalf("a command that does not parse reached the API: %+v", *calls)
 	}
-	code, stdout, stderr := hl(t, "cluster", "priority", "gpu-east", "250", "--org", "org-1")
-	if code != 0 || !strings.Contains(stdout, `"priority":250`) {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the cluster printed with its priority", code, stdout, stderr)
+	code, stdout, stderr := hl(t, "cluster", "order", "gpu-east", "--org", "org-1")
+	if code != 0 || stdout != `{"name":"gpu-east"}`+"\n" {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the clusters in their order, one per line", code, stdout, stderr)
 	}
 
-	// The range and the shared cluster are the API's to refuse, and it says why.
+	// Which clusters an order must name is the API's to refuse, and it says why.
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_, _ = w.Write([]byte(`{"reason":"invalid_request","message":"a shared cluster holds the platform's priority, below every org's own clusters"}`))
+		_, _ = w.Write([]byte(`{"reason":"invalid_request","message":"gpu-west is missing"}`))
 	}))
-	code, stdout, stderr = hl(t, "cluster", "priority", "platform", "5", "--org", "org-1")
-	if code != 1 || stdout != "" || !strings.Contains(stderr, "shared cluster holds the platform's priority") {
+	code, stdout, stderr = hl(t, "cluster", "order", "gpu-east", "--org", "org-1")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "gpu-west is missing") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q, want the refusal", code, stdout, stderr)
 	}
 }
@@ -367,7 +321,7 @@ func TestAccountGroupsListTheirCommands(t *testing.T) {
 	setAPIURL(t, "http://unused")
 	for group, commands := range map[string][]string{
 		"org": {"list", "create NAME", "rename NAME", "members <command>", "invites <command>"}, "project": {"list", "create NAME", "rename NAME"},
-		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "priority NAME VALUE", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
+		"api-key": {"create NAME", "list", "revoke ID"}, "cluster": {"add NAME", "list", "token NAME", "order NAME...", "settings NAME", "disable NAME", "enable NAME", "forget-identity NAME", "remove NAME"},
 	} {
 		code, stdout, _ := hl(t, group, "--help")
 		if code != 0 {
