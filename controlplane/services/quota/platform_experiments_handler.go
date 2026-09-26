@@ -28,6 +28,8 @@ type PlatformExperimentsHandler struct {
 	launch AgentLaunch
 	// What a draft may spend, DefaultPlanning unless WithPlanning set another.
 	planning Planning
+	// baseline reads what a proposal's baseline job did; readBaseline unless a test sets another.
+	baseline baselineReader
 
 	// repos reaches the repositories a project's org connected on GitHub.
 	repos Repositories
@@ -35,7 +37,9 @@ type PlatformExperimentsHandler struct {
 
 // NewPlatformExperimentsHandler constructs the handler.
 func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos Repositories, logger *zap.Logger) *PlatformExperimentsHandler {
-	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: DefaultPlanning}
+	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: DefaultPlanning}
+	h.baseline = h.readBaseline
+	return h
 }
 
 // WithCatalog attaches the resource catalog served by GET /resource-catalog.

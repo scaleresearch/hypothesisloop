@@ -33,6 +33,11 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	handler := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}}})
+	if drafts, ok := store.(*draftStore); ok {
+		handler.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
+			return drafts.baseline, nil
+		}
+	}
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
 	return svc, func(method, path string, body any) (int, map[string]any) {
@@ -178,6 +183,9 @@ type draftStore struct {
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 
+	// baseline is what the platform's records say of the job a proposal names.
+	baseline *Baseline
+
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
 }
@@ -242,6 +250,10 @@ func draftWithPlanner() *draftStore {
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, EndsAt: time.Now().Add(time.Minute),
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
+		baseline: &Baseline{
+			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted},
+			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
+		},
 	}
 }
 
@@ -421,5 +433,57 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
 	if code, _ := propose("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusForbidden || store.created[0].Status != domain.PlatformExpDraft {
 		t.Errorf("the planner accepting its own proposal: got = %d, want 403", code)
+	}
+}
+
+// What a proposal says of its baseline is checked against what the job did: the person who
+// accepts reads "baseline 1.8" as measured.
+func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *testing.T) {
+	gated := map[string]any{"experiment": map[string]any{
+		"name": "n", "description": "d", "report_interval_seconds": 30,
+		"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}, {"key": "exact_match", "direction": "maximize", "role": "constraint", "bound": 1}},
+	}}
+	store := draftWithPlanner()
+	_, call := planningAPI(t, store, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(gated)); code != http.StatusOK {
+		t.Fatalf("a baseline that holds the gate: got = %d %v, want 200", code, out)
+	}
+
+	for name, c := range map[string]struct {
+		more   map[string]any
+		change func(*Baseline)
+		reason string
+	}{
+		"no job named":                  {map[string]any{"baseline_job_id": ""}, func(*Baseline) {}, "no_baseline"},
+		"a job of someone else":         {nil, func(b *Baseline) { b.Job.AgentID = "ag-other" }, "no_baseline"},
+		"a job of another experiment":   {nil, func(b *Baseline) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
+		"a job that failed":             {nil, func(b *Baseline) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
+		"nothing filed":                 {nil, func(b *Baseline) { b.Finding = false }, "baseline_without_finding"},
+		"a metric nothing reports":      {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
+		"a gate the baseline fails":     {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
+		"a type nobody has now":         {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
+		"a budget below one run apiece": {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
+	} {
+		store := draftWithPlanner()
+		c.change(store.baseline)
+		_, call := planningAPI(t, store, thePlanner)
+		code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(c.more))
+		if code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].ProposedAt != nil {
+			t.Errorf("%s: got = %d %v, want 422 %s and nothing stored", name, code, out, c.reason)
+		}
+	}
+
+	missing := draftWithPlanner()
+	missing.baseline = nil
+	_, call = planningAPI(t, missing, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusUnprocessableEntity || out["reason"] != "no_baseline" {
+		t.Errorf("a job that does not exist: got = %d %v, want 422 no_baseline", code, out)
+	}
+	// A run on CPU alone names no type, and none has to be reachable.
+	cpu := draftWithPlanner()
+	cpu.baseline.Reachable = map[string]bool{}
+	_, call = planningAPI(t, cpu, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": ""})); code != http.StatusOK {
+		t.Errorf("a proposal for CPU alone: got = %d %v, want 200", code, out)
 	}
 }

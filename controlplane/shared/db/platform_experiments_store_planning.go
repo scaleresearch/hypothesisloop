@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -48,6 +49,14 @@ INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, 
 VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
 		signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
+	}
+	// The planner's quota is the draft's whole budget, the planning allowance: its baseline job
+	// is admitted against it like any job against its agent's quota.
+	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+		ID: uuid.New().String(), AgentID: planner.ID, PlatformExperimentID: pe.ID,
+		GuaranteedAcceleratorHours: pe.BudgetAcceleratorHours, CreatedAt: pe.CreatedAt,
+	})...); err != nil {
+		return fmt.Errorf("platform_experiments_store.CreateDraft: allocate the planner's quota: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
@@ -129,4 +138,13 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: commit: %w", err)
 	}
 	return nil
+}
+
+// JobHasFinding says a finding was filed for the job.
+func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experimentID string) (bool, error) {
+	var found bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM hypothesis_findings WHERE experiment_id = $1)`, experimentID).Scan(&found); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.JobHasFinding: %w", err)
+	}
+	return found, nil
 }

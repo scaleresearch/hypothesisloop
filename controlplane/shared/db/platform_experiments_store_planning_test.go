@@ -48,6 +48,13 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	if err != nil || signup == nil || signup.Name != "Planner" || signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || !signup.Hosted {
 		t.Fatalf("planner signed up as %+v, %v", signup, err)
 	}
+	// The planner's quota is the planning allowance, and no finding is filed for a job yet.
+	if quota, err := pes.GetAgentQuota(ctx, planner, pe); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.5 || quota.BurstAcceleratorHours != 0 {
+		t.Fatalf("planner's quota = %+v, %v, want the draft's 0.5 accelerator-hours", quota, err)
+	}
+	if found, err := pes.JobHasFinding(ctx, "job-"+uuid.New().String()[:8]); err != nil || found {
+		t.Fatalf("a job nobody filed for: got = %v, %v", found, err)
+	}
 	drafts, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpDraft)
 	if err != nil {
 		t.Fatal(err)

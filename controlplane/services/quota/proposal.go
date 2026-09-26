@@ -33,7 +33,7 @@ type Proposal struct {
 
 	// BaselineJobID is the planner's completed job that measured the baseline. Its numbers are
 	// read from the metrics store when the proposal is shown, never copied here.
-	BaselineJobID string `json:"baseline_job_id,omitempty"`
+	BaselineJobID string `json:"baseline_job_id" doc:"The planner's own completed job in this draft that measured the baseline, with its finding filed."`
 	// AcceleratorType is the catalog type the jobs are sized for. Empty for a run on CPU alone.
 	AcceleratorType string `json:"accelerator_type,omitempty"`
 
@@ -182,7 +182,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours and agents are proposed, and the person who accepts states them. " +
 			"The proposal is checked before it is stored and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
-			"invalid_cost, invalid_agents, unknown_accelerator_type, missing_explanation, too_long. Stored, it replaces the one before, marks the draft proposed " +
+			"invalid_cost, invalid_agents, unknown_accelerator_type, missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
+			"no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -191,7 +192,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if _, err := h.requirePlanner(ctx, in.ID); err != nil {
+		plannerID, err := h.requirePlanner(ctx, in.ID)
+		if err != nil {
 			return nil, err
 		}
 		pe, err := h.svc.store.GetPlatformExperiment(ctx, in.ID)
@@ -204,7 +206,21 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		if _, err := h.checkProposal(in.Body, pe.MaxHosted); err != nil {
+		experiment, err := h.checkProposal(in.Body, pe.MaxHosted)
+		if err != nil {
+			return nil, err
+		}
+		if in.Body.BaselineJobID == "" {
+			return nil, refusedProposal("no_baseline", "baseline_job_id is required: the job that measured the baseline, completed, with its finding filed")
+		}
+		baseline, err := h.baseline(ctx, pe, in.Body.BaselineJobID)
+		if err != nil {
+			return nil, h.refusal("read baseline", err)
+		}
+		if baseline != nil && baseline.Job != nil && baseline.Job.PlatformExperimentID != in.ID {
+			baseline = nil
+		}
+		if err := checkBaseline(in.Body, experiment, plannerID, baseline); err != nil {
 			return nil, err
 		}
 		stored, err := json.Marshal(in.Body)

@@ -37,6 +37,8 @@ type PlatformExperimentsStore interface {
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
 	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
+	// JobHasFinding says a finding was filed for the job.
+	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
