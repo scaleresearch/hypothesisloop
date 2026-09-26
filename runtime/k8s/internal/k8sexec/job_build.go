@@ -1,6 +1,7 @@
 package k8sexec
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -337,7 +338,7 @@ func (c *JobWorkloadClient) compileJob(exp *domain.Experiment, placement Acceler
 	command, args := workloadenv.Command(spec, group)
 	container := corev1.Container{
 		Name:  "experiment",
-		Image: spec.Image,
+		Image: cmp.Or(spec.Image, c.jobImage),
 		// IfNotPresent rather than k8s's default (Always for :latest-tagged images): otherwise
 		// a locally-built image is ignored and the kubelet always attempts a registry pull,
 		// which fails on any cluster without a real registry behind the image reference.

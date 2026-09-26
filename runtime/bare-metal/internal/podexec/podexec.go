@@ -46,6 +46,9 @@ const (
 // implicit defaults.
 type Config struct {
 	APIURL string
+	// JobImage is the image a job that names none runs in. Empty on a node that takes only jobs
+	// that name their image.
+	JobImage string
 	// ClusterName is the cluster this node is, stamped on every container it starts.
 	ClusterName string
 	// StorageDir is measured as this node's storage in place of the engine's store. It is for
@@ -63,6 +66,9 @@ type Config struct {
 type Executor struct {
 	apiURL     string
 	storageDir string
+	// jobImage is reported to the control plane, which then places here the jobs that name no
+	// image, or name this one.
+	jobImage string
 	// clusterName scopes everything this executor lists, stops and removes (LabelCluster).
 	clusterName string
 	nodeLabels  map[string]string
@@ -202,6 +208,7 @@ func New(cfg Config) (*Executor, error) {
 	return &Executor{
 		apiURL:               cfg.APIURL,
 		clusterName:          cfg.ClusterName,
+		jobImage:             cfg.JobImage,
 		storageDir:           storageDir,
 		nodeLabels:           labels,
 		nodeName:             nodeName,

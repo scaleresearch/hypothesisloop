@@ -10,6 +10,8 @@
 //
 //	CLUSTER_NAME        — this cluster's stable identity
 //	API_URL             — base URL of the control-plane API
+//	JOB_IMAGE           — the image a job that names none runs in; set, the cluster takes those
+//	                      jobs and the ones that name this image, and no job that names another
 package main
 
 import (
@@ -55,7 +57,7 @@ func main() {
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
 
-	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
+	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL, JobImage: os.Getenv("JOB_IMAGE")})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
 		os.Exit(1)

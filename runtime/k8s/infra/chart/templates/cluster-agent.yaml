@@ -117,6 +117,8 @@ spec:
               value: {{ required "clusterName is required" .Values.clusterName | quote }}
             - name: API_URL
               value: {{ required "apiURL is required" .Values.apiURL | quote }}
+            - name: JOB_IMAGE
+              value: {{ .Values.jobImage | quote }}
             - name: RUNTIME_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -40,12 +40,18 @@ type Config struct {
 	KubeconfigPath string
 	KubeContext    string
 	APIURL         string
+	// JobImage is the image a job that names none runs in. Empty on a cluster that takes only
+	// jobs that name their image.
+	JobImage string
 }
 
 type JobWorkloadClient struct {
 	kube   kubernetes.Interface
 	dyn    dynamic.Interface
 	apiURL string
+	// jobImage is reported to the control plane, which then places here the jobs that name no
+	// image, or name this one.
+	jobImage string
 }
 
 func New(cfg Config) (*JobWorkloadClient, error) {
@@ -69,5 +75,5 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
-	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL}, nil
+	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL, jobImage: cfg.JobImage}, nil
 }

@@ -120,3 +120,24 @@ func TestStorageIsMeasuredOnTheEnginesStoreOrNotAtAll(t *testing.T) {
 		t.Fatalf("a store that is not on this host: err = %v, want it to name the setting that replaces it", err)
 	}
 }
+
+// A node given a job image tells the control plane, which then sends it the jobs that name no
+// image, and those run in it. A job that names its own keeps its own.
+func TestAJobThatNamesNoImageRunsInTheNodesJobImage(t *testing.T) {
+	e := &Executor{apiURL: "http://example.invalid:8083", jobImage: "registry.example/job:1"}
+	if e.JobImage() != "registry.example/job:1" {
+		t.Fatalf("job image reported = %q", e.JobImage())
+	}
+	named := sizedExperiment()
+	unnamed := sizedExperiment()
+	unnamed.Job.Image = ""
+	for exp, want := range map[*domain.Experiment]string{named: "example.invalid/workload", unnamed: "registry.example/job:1"} {
+		cs, err := e.BuildContainerSpec(exp, Placement{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cs.Image != want {
+			t.Errorf("job image %q runs in %q, want %q", exp.Job.Image, cs.Image, want)
+		}
+	}
+}

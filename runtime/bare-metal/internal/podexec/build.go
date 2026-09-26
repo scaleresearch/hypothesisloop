@@ -1,6 +1,7 @@
 package podexec
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -205,7 +206,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	command, args := workloadenv.Command(spec, group)
 	cs := containerSpec{
 		Name:           containerName(exp.ID),
-		Image:          spec.Image,
+		Image:          cmp.Or(spec.Image, e.jobImage),
 		Command:        command,
 		Args:           args,
 		Env:            env,
@@ -299,5 +300,5 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 // BuildContainerSpec, which is an admission-time answer given at execution time.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
 
-// JobImage is empty: a container runs in the image its job names.
-func (e *Executor) JobImage() string { return "" }
+// JobImage is the image a job that names none runs in here, when the node was given one.
+func (e *Executor) JobImage() string { return e.jobImage }
