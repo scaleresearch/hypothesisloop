@@ -102,14 +102,19 @@ def roster(api: API, pe_id: str) -> dict[str, dict]:
     return {a["agent_id"]: a for a in api.agents(pe_id)}
 
 
-def test_an_agent_is_hosted_only_in_a_platform_experiment_that_names_a_repository(api: API, run_id: str):
+def test_an_agent_is_hosted_in_a_platform_experiment_that_names_no_repository(api: API, run_id: str):
     project = api
     pe_id = project.create_platform_experiment(f"hosted-no-repo-{run_id}", 1.0, 5)
     try:
+        # With no repository the agent starts in an empty directory and the platform keeps the
+        # code it pushes, so hosting it needs none.
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
-        assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"hosted with no repository: {r.status_code} {r.text}"
-        assert "names no repository" in r.json()["message"], r.text
-        assert project.agents(pe_id) == [], "a refused hosted join left agents behind"
+        assert r.status_code == 201, f"hosted with no repository: {r.status_code} {r.text}"
+        hosted = r.json()["agents"][0]
+        assert hosted["hosted"] and hosted["launcher"], hosted
+        assert "repository_url" not in project.get_json(f"/platform-experiments/{pe_id}")
+        assert project.remove_agent(pe_id, hosted["agent_id"]).status_code == 200
+        assert project.agents(pe_id) == [], "the hosted agent was not removed"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
         # runs is resolved here and shown: the default flavor and the platform's default model.
@@ -328,10 +333,11 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
         assert before[agent]["name"] in ending, f"{agent} is not left to end after the close"
 
 
-def test_a_coordinator_is_hosted_only_in_a_project_with_a_repository(api: API, run_id: str):
+def test_a_coordinator_is_hosted_in_a_project_with_no_repository(api: API, run_id: str):
     project = api
     r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_hosted=True)
-    assert r.status_code == 409 and r.json()["reason"] == "no_repository", f"{r.status_code} {r.text}"
+    assert r.status_code == 201 and r.json()["coordinator_hosted"] is True and "repository_url" not in r.json(), f"{r.status_code} {r.text}"
+    project.close_platform_experiment(r.json()["id"])
     r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_model="some-model")
     assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
 

@@ -86,34 +86,12 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 		if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
 			return nil, err
 		}
-		if err := s.requireRepository(ctx, platformExpID); err != nil {
-			return nil, err
-		}
 	}
 	if req.AgentID != "" {
 		return s.joinRegistered(ctx, platformExpID, req, signup)
 	}
 	return s.spawn(ctx, platformExpID, req, signup)
 }
-
-// requireRepository refuses to host an agent in a platform experiment that names no repository:
-// the agent clones it before its first turn, and a machine rented for it would only start and
-// exit.
-func (s *PlatformExperimentsService) requireRepository(ctx context.Context, platformExpID string) error {
-	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
-	if err != nil {
-		return fmt.Errorf("platform_experiments.AddAgent: %w", err)
-	}
-	if pe == nil {
-		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
-	}
-	if pe.Repository == "" {
-		return errNoRepository
-	}
-	return nil
-}
-
-var errNoRepository = refuseSignup(409, "no_repository", "the platform experiment names no repository, and a hosted agent or coordinator works in one: create it with repository set")
 
 // requireLauncher refuses to host anything while the launcher config gives new machines to is
 // not registered: its token would be refused, and nothing would ever start.
@@ -143,9 +121,6 @@ func (h *PlatformExperimentsHandler) withHosting(ctx context.Context, req Create
 	}
 	if err := h.svc.requireLauncher(ctx, h.launch.Launcher); err != nil {
 		return req, err
-	}
-	if req.Repository == "" {
-		return req, errNoRepository
 	}
 	_, model, err := domain.ResolveAgentLaunch("", req.CoordinatorModel, h.launch.DefaultModel, nil)
 	if err != nil {
@@ -308,8 +283,8 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"The answer is agents, a list holding that one agent. " +
-			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut; it is refused " +
-			"with 409 no_repository when the platform experiment names no repository, since the agent works in it. " +
+			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut. " +
+			"In a platform experiment that names no repository it starts in an empty directory and the platform keeps the code it pushes (hl code push). " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN, beside AGENT_ID and PLATFORM_EXPERIMENT_ID. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +

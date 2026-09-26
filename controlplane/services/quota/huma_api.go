@@ -173,8 +173,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
-			"It needs repository (409 no_repository without one), is not read from the file, and is fixed from then on. " +
+			"It is not read from the file, and is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, " +
+			"Left out, agents start in an empty directory and the platform keeps the code each pushes, one git bundle per commit, which is what a job's code_ref then names. With repository, " +
 			"and repository_url in the answer is where from. An installation of the platform's GitHub App that the org connected must cover it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +

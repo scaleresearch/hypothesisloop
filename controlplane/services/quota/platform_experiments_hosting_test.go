@@ -131,7 +131,6 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		status int
 		reason string
 	}{
-		"a coordinator without a repository": {map[string]any{"coordinator_hosted": true}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 409, "no_repository"},
 		"a model without a coordinator":      {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 		"a model no name can be":             {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 	} {
@@ -160,6 +159,14 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	store, create = hostingAPI(t, &fakeRepositories{})
 	if code, out := create(with(nil)); code != http.StatusCreated || len(store.created) != 1 {
 		t.Fatalf("nothing hosted and no repository: got = %d %v, want 201", code, out)
+	}
+
+	// A hosted coordinator needed a repository to clone. With none it starts in an empty
+	// directory, and the platform keeps the code the agents push.
+	store, create = hostingAPI(t, &fakeRepositories{})
+	if code, out := create(with(map[string]any{"coordinator_hosted": true})); code != http.StatusCreated || len(store.created) != 1 ||
+		store.created[0].Repository != "" || !store.created[0].CoordinatorHosted || out["repository_url"] != nil {
+		t.Fatalf("a hosted coordinator and no repository: got = %d %v, want it created with no repository", code, out)
 	}
 
 	store, create = hostingAPI(t, attached)

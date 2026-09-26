@@ -561,28 +561,25 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()))
 }
 
-func TestAHostedAgentIsRefusedWhenItsPlatformExperimentNamesNoRepository(t *testing.T) {
+// Hosting needed a repository to clone, and a person with an idea and no repository could not
+// start. The agent now starts in an empty directory and the platform keeps what it pushes.
+func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.pe.Repository = ""
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", Kind: domain.AgentKindAgent, OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-		if code != http.StatusConflict || out["reason"] != "no_repository" {
-			t.Fatalf("%s: got = %d %v, want = 409 no_repository", body, code, out)
+		if code != http.StatusCreated && code != http.StatusOK {
+			t.Fatalf("%s: got = %d %v, want it joined", body, code, out)
 		}
-		if message := out["message"].(string); !strings.Contains(message, "names no repository") || !strings.Contains(message, "repository set") {
-			t.Errorf("%s: the refusal does not say what is missing or what to do: %q", body, message)
+		if agent := joined(t, out)[0]; agent["hosted"] != true || agent["launcher"] == nil {
+			t.Errorf("%s: joined as %v, want hosted with a launcher", body, agent)
 		}
 	}
-	if len(store.signups) != 0 || len(store.agents) != 1 {
-		t.Fatalf("a refused hosted join left %d signups and %d agents behind", len(store.signups), len(store.agents)-1)
+	if len(store.signups) != 2 {
+		t.Fatalf("%d signups, want both agents", len(store.signups))
 	}
-	// An agent the caller runs itself needs nothing of the platform's to start, and joins.
-	addEach(t, r, 2, `{}`)
-	// In an experiment that names one the same hosted request goes through.
-	store.pe.Repository = "acme/model"
-	addEach(t, r, 2, `{"hosted":true}`)
 }
 
 func TestFlavorAndModelAreResolvedWhenAnAgentJoinsAndStored(t *testing.T) {
