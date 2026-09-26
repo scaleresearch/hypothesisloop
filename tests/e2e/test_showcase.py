@@ -54,6 +54,8 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         posted = a.api.post_hypothesis(pe_id, text=f"a showcase claim {uuid.uuid4().hex[:8]}", agent_id=agent)
         assert posted.status_code in (200, 201), f"hypothesis: {posted.status_code} {posted.text}"
         hyp_id = posted.json()["id"]
+        # Started, since an agent's quota exists from the start on and is one of the reads.
+        a.api.start_platform_experiment(pe_id)
 
         # What another org reads of it. Every one of these is a read route an org uses for its own.
         reads = [
@@ -77,7 +79,11 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("POST", f"/hypotheses/{hyp_id}/comments", {"author": "Mallory", "text": "an intruding comment"}),
             ("POST", f"/hypotheses/{hyp_id}/links", {"author": "Mallory", "type": "related", "to": pe_id}),
             ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed"}),
-            ("PUT", f"/platform-experiments/{pe_id}", {"name": "taken over"}),
+            # A whole body: one that is not is refused for its shape before anyone's reach is looked at.
+                ("PUT", f"/platform-experiments/{pe_id}", {
+                    "name": "taken over", "description": "taken over", "budget_accelerator_hours": 1, "max_agents": 2,
+                    "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
+                    "starts_at": "0001-01-01T00:00:00Z", "ends_at": "2099-01-01T00:00:00Z"}),
             ("POST", f"/platform-experiments/{pe_id}/start", None),
             ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}),
             ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),
