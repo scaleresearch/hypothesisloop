@@ -32,7 +32,7 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
     return (
       <p className="text-sm text-muted">
         No GitHub account is connected to {org.name}, so this experiment has no repository.{' '}
-        <TextLink href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
+        <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
       </p>
     )
   }

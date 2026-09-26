@@ -11,10 +11,13 @@ export function Link({ href, ...props }: Omit<ComponentProps<typeof NextLink>, '
   return <NextLink href={projectHref(href)} {...props} />
 }
 
-/** How a link in running text or a table cell reads, for an anchor that is no in-app Link. */
+/** How a link that stands alone reads, a record's name in a table cell, for an anchor that is no in-app Link. */
 export const textLinkClass = 'rounded-sm text-accent hover:underline'
 
-/** An in-app link that reads as one: the name of a record in a table, a way on in a sentence. */
-export function TextLink({ className, ...props }: ComponentProps<typeof Link>) {
-  return <Link className={clsx(textLinkClass, className)} {...props} />
+/** How a link inside a sentence reads: underlined, so colour is not all that tells it from the words around it. */
+export const inlineLinkClass = 'rounded-sm text-accent underline decoration-accent/50 underline-offset-2 hover:decoration-accent'
+
+/** An in-app link that reads as one. `inline` is for a link inside a sentence. */
+export function TextLink({ inline, className, ...props }: ComponentProps<typeof Link> & { inline?: boolean }) {
+  return <Link className={clsx(inline ? inlineLinkClass : textLinkClass, className)} {...props} />
 }
