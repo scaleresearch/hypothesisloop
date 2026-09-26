@@ -151,15 +151,16 @@ browser reaches that copy as `http://localhost:3000` through a proxy of the run,
 the one origin the API allows. It refuses a stack that rents compute (`make dev-hosted`) and one
 whose lock another run holds, and it closes, removes or revokes what it created when it ends.
 
-### Repository
+### GitHub
 
-Settings, then Repository, attaches a GitHub repository to the selected project: an owner names
-the repository as `owner/name` and confirms on GitHub who they are, and the platform finds the
-installation of its GitHub App that covers the repository. A link on the page leads to installing
-the App where it is not installed yet. GitHub returns to `<ui origin>/settings/repository`, so the
-App's callback URL and its setup URL must be that address (`infra/github/app-manifest.json`). The
-page builds the address from the origin it is served on and takes the App's addresses from
-`GET /github/app`. A deployment without a GitHub App says so on the page.
+Settings, then GitHub, connects an installation of the platform's GitHub App to the org: an owner
+installs the App on a GitHub account, choosing its repositories there, and confirms on GitHub who
+they are. From then on a platform experiment of the org names any repository the installation
+covers, picked when the experiment is created. GitHub returns to
+`<ui origin>/settings/repository`, so the App's callback URL and its setup URL must be that
+address (`infra/github/app-manifest.json`). The page builds the address from the origin it is
+served on and takes the App's addresses from `GET /github/app`. A deployment without a GitHub App
+says so on the page.
 
 Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
 the provider switched on in Supabase.
@@ -449,6 +450,17 @@ to the queue in the same step, keep their retries, get their checkpoint window a
 elsewhere. A job with no cluster of its org registered waits with `no_cluster_for_org` whether
 or not other clusters are connected; one whose cluster is registered and away waits for it.
 
+An org decides which of those clusters its jobs use. `hl cluster disable my-cluster`
+(`POST /orgs/{id}/clusters/{name}/disable`) turns a cluster off for the org's jobs, one it
+registered or one the platform shares, and `hl cluster enable` (`.../enable`) turns it on again;
+an owner does the same with the switch on the cluster's row in Settings. The decision is that
+org's alone: a shared cluster one org turned off still takes every other org's jobs. From then on
+no job of the org is placed there, by the scheduler or by `POST /experiments/{id}/admit`, which
+answers 409 `cluster_disabled`. The org's jobs already placed there are not touched and run to
+their end. A job whose org turned off every cluster it could use waits with
+`not_admitted_reason: clusters_disabled`. `enabled` in `hl cluster list` shows the state, and a
+cluster that is off is left out of `hl capacity`.
+
 A platform experiment can be shared the same way, as a showcase a new account opens instead of
 an empty screen. Staff share one with `hl-admin platform-experiment share pe-123` or
 `POST /platform-experiments/{id}/share`, and take it back with `unshare`. Every account then
@@ -472,9 +484,9 @@ another is refused with 409. After the machines behind a name are rebuilt, the o
 the settings kept under the old id.
 
 `hl capacity` and `GET /resource-catalog/capacity` show the clusters one org's jobs can land on:
-the org's own and the shared ones. A key or an agent token has one org; a person in several
-names it with `--org` or `?org_id=`. `hl cluster list` shows the same clusters and whether each
-is connected; `owned` marks the ones your org registered and may change. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
+the org's own and the shared ones, without the ones the org turned off. A key or an agent token has one org; a person in several
+names it with `--org` or `?org_id=`. `hl cluster list` shows every cluster the org can use, whether each
+is connected and whether the org has it `enabled`; `owned` marks the ones your org registered and may change. Cluster settings (`PUT /clusters/{cluster_id}/settings`) belong to the org that
 registered the cluster and stay reachable while its agent is away; `cluster_id` is the identity
 the cluster's runtime reported, shown by `hl cluster list` once it has connected.
 
