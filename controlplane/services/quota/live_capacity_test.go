@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -87,5 +88,22 @@ func TestCapacityShowsOnlyTheClustersThatTakeTheOrgsJobs(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("%s: got = %v, want = %v", org, got, want)
 		}
+	}
+}
+
+func TestCapacitySaysWhichClustersRunEveryJobInOneImage(t *testing.T) {
+	registered := map[string]domain.Cluster{
+		"rented": {Name: "rented", OrgID: "org-a", JobImage: "registry.test/platform-job:7"},
+		"k8s":    {Name: "k8s", OrgID: "org-a"},
+	}
+	clusters := []ClusterCapacity{{ClusterName: "k8s"}, {ClusterName: "phantom"}, {ClusterName: "rented"}}
+	withJobImages(registered, clusters)
+	raw, err := json.Marshal(clusters)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"cluster_name":"k8s","accelerators":null},{"cluster_name":"phantom","accelerators":null},{"cluster_name":"rented","job_image":"registry.test/platform-job:7","accelerators":null}]`
+	if string(raw) != want {
+		t.Fatalf("got  = %s\nwant = %s", raw, want)
 	}
 }

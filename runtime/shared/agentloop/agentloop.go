@@ -265,6 +265,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 		"node_resources_total_by_node":  nodeResourcesTotal,
 		"node_labels_by_node":           nodeLabels,
 		"multi_node_capable":            exec.SupportsMultiNodeJobs(),
+		"job_image":                     exec.JobImage(),
 		"autoscaler_enabled":            a.AutoscalerEnabled,
 		"cluster_id":                    clusterID,
 		"ram_available_bytes":           ramAvail, "ram_total_bytes": ramTotal,

@@ -61,7 +61,7 @@ func burstVictim(id string, flavor domain.AcceleratorType) *domain.Experiment {
 		EstimatedDurationHours: 10,
 		EstimatedCostAccH:      10,
 		CreatedAt:              time.Now().Add(-time.Hour),
-		Job:                    domain.JobSpec{AcceleratorType: flavor, AcceleratorCount: 1, NumNodes: 1},
+		Job:                    domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: 1, NumNodes: 1},
 	}
 }
 

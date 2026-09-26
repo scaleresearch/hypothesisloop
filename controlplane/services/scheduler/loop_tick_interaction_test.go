@@ -381,7 +381,7 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 			exp := &domain.Experiment{
 				ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", CapacityTier: tier,
 				AcceleratorType: h100, AcceleratorCount: 1,
-				Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
+				Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
 			}
 			store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
 			l := NewLoop(store, tickQuota{}, shareWorkload{}, testGraceLimits, zap.NewNop())
@@ -411,7 +411,7 @@ func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
 		return &domain.Experiment{
 			ID: id, AgentID: agent, PlatformExperimentID: "pe-1", CapacityTier: domain.CapacityGuaranteed,
 			AcceleratorType: h100, AcceleratorCount: 1,
-			Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
+			Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorType: h100, AcceleratorCount: 1},
 		}
 	}
 	store := &summaryOwedStore{noRunningListStore{t: t, queued: []*domain.Experiment{
@@ -460,7 +460,7 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 				exp := &domain.Experiment{
 					ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", CapacityTier: tier,
 					AcceleratorType: h100, AcceleratorCount: count,
-					Job: domain.JobSpec{AcceleratorType: h100, AcceleratorCount: count},
+					Job: domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: h100, AcceleratorCount: count},
 				}
 				store := &noRunningListStore{t: t, queued: []*domain.Experiment{exp}}
 				l := NewLoop(store, tickQuota{}, fullWorkload{}, testGraceLimits, zap.NewNop())
@@ -578,7 +578,7 @@ func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType,
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
 		AcceleratorType: flavor, AcceleratorCount: count,
-		Job: domain.JobSpec{CPU: cpu, AcceleratorType: flavor, AcceleratorCount: count},
+		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, AcceleratorType: flavor, AcceleratorCount: count},
 	}
 }
 

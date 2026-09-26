@@ -93,9 +93,14 @@ it outranks this briefing. Roughly, not a rigid script:
      The code must actually run in the pod and stay traceable:
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
          `git push` only after changing a tracked file (message = hypothesis id + one-line theory).
-       - make the pod run exactly that code: `image` = the experiment's base runtime image and a
-         `command` that clones the injected $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and
-         prints the directory. The job gets its own read access to the repository, so put no git
+       - make the pod run exactly that code: a `command` that clones the injected
+         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
+       - `image`: leave it out unless the experiment brings its own. `hl capacity` shows a
+         `job_image` on the clusters that run every job in the platform's own image (hl, hl-clone,
+         git, uv and python): a job with no `image` runs there, in that image, and a job that
+         names any other image is never placed there. A cluster shown without `job_image` runs a
+         job in the image it names, so a job for it must name one. A job no cluster can run waits
+         with `not_admitted_reason` `no_cluster_for_image`, which says what runs where. The job gets its own read access to the repository, so put no git
          token in the job's `env`.
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as

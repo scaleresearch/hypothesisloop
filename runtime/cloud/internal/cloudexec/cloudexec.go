@@ -157,3 +157,7 @@ func (e *Executor) GetClusterID(context.Context) (string, error) { return e.clus
 // SupportsMultiNodeJobs is false: a job is one instance, and instances of one account share no
 // network a distributed job could rendezvous over.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
+
+// JobImage is the image every instance boots, which carries the wrapper a job's command runs
+// under.
+func (e *Executor) JobImage() string { return e.jobImage }

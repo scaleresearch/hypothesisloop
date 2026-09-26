@@ -296,3 +296,6 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 // placed here — before, such a job was admitted, held a reservation, and only then failed at
 // BuildContainerSpec, which is an admission-time answer given at execution time.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
+
+// JobImage is empty: a container runs in the image its job names.
+func (e *Executor) JobImage() string { return "" }

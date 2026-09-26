@@ -71,7 +71,10 @@ type ResourceCatalog struct {
 
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
 type ClusterCapacity struct {
-	ClusterName  string                `json:"cluster_name"`
+	ClusterName string `json:"cluster_name"`
+	// JobImage is the one image every job on the cluster runs in. A job placed there names no
+	// image or exactly this one. Absent, the cluster runs a job in the image the job names.
+	JobImage     string                `json:"job_image,omitempty"`
 	Accelerators []AcceleratorCapacity `json:"accelerators"`
 }
 
@@ -108,16 +111,25 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	clusters := buildClusterCapacity(available, total)
+	registered, err := h.clusters.RegisteredClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	withJobImages(registered, clusters)
 	// Staff see every name that reports, registered or not: a runtime started under a name
 	// nobody registered is theirs to notice.
 	if every {
 		return clusters, nil
 	}
-	registered, err := h.clusters.RegisteredClusters(ctx)
-	if err != nil {
-		return nil, err
-	}
 	return placeableBy(orgID, registered, clusters), nil
+}
+
+// withJobImages says of each cluster that runs every job in one image which image that is, so
+// that a submitter reads from the same answer what to ask for and whether to name an image.
+func withJobImages(registered map[string]domain.Cluster, clusters []ClusterCapacity) {
+	for i := range clusters {
+		clusters[i].JobImage = registered[clusters[i].ClusterName].JobImage
+	}
 }
 
 // placeableBy keeps the clusters that take jobs of orgID: its own and the shared ones that it has

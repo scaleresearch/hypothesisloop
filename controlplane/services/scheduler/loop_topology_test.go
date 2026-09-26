@@ -9,7 +9,7 @@ import (
 func distributedExperiment(nodes, acceleratorsPerNode int) *domain.Experiment {
 	return &domain.Experiment{
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
-		Job: domain.JobSpec{NumNodes: nodes, AcceleratorCount: acceleratorsPerNode,
+		Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: nodes, AcceleratorCount: acceleratorsPerNode,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
 	}
 }

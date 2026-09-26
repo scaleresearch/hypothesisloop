@@ -89,7 +89,7 @@ func TestConcurrentOperatorAdmissionsDoNotExceedClusterCapacity(t *testing.T) {
 			Status:           domain.StatusQueued,
 			AcceleratorType:  "nvidia.com/gpu.product=NVIDIA-L40",
 			AcceleratorCount: 4,
-			Job:              domain.JobSpec{AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40"},
+			Job:              domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40"},
 		}
 	}
 	workload := &concurrentAdmissionWorkload{store: store}

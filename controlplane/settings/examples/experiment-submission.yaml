@@ -15,6 +15,9 @@
 
 job:
   # --- What to run -------------------------------------------------------------------
+  # Leave image out to run in the platform's own job image: the job is then placed only on a
+  # cluster that runs every job in one image (hl capacity shows it as job_image). A job that
+  # names an image is placed only where that image can run.
   image: myregistry.example.com/my-training-image:latest
   command: ["python", "train.py"]
   env:

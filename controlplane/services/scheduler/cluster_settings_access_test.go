@@ -105,7 +105,7 @@ func TestForceAdmissionPlacesAJobOnlyOnAClusterThatHostsIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			admissions := &concurrentAdmissionStore{experiments: map[string]*domain.Experiment{"job-1": {
 				ID: "job-1", OrgID: "org-a", Status: domain.StatusQueued, AcceleratorType: l40, AcceleratorCount: 4,
-				Job: domain.JobSpec{AcceleratorType: l40},
+				Job: domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: l40},
 			}}}
 			store := &hostingStore{concurrentAdmissionStore: admissions, clusters: map[string]domain.Cluster{tc.cluster.Name: tc.cluster}}
 			workload := &concurrentAdmissionWorkload{store: admissions}

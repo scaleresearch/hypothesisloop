@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,8 @@ type Store interface {
 	// itself. It refuses one another cluster holds (db.ErrClusterIDBound) and one other than
 	// the cluster's own (db.ErrClusterIDChanged).
 	BindReportedID(ctx context.Context, name, reportedID string) error
+	// RecordJobImage keeps the one image the cluster's runtime says every job there runs in.
+	RecordJobImage(ctx context.Context, name, image string) error
 }
 
 // Handler serves the cluster-agent-facing API.
@@ -330,6 +333,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 		}
 
+		// Placement reads the image, so it is kept before the capacity that makes the cluster a
+		// candidate.
+		if len(report.JobImage) > domain.MaxJobImageLength {
+			return nil, huma.Error400BadRequest("job_image is longer than " + strconv.Itoa(domain.MaxJobImageLength) + " characters")
+		}
+		if err := h.store.RecordJobImage(ctx, clusterName, report.JobImage); err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+
 		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
 			ClusterName: clusterName, At: time.Now().UTC(),
 			CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
@@ -517,6 +529,11 @@ type capacityReport struct {
 	// is the safe reading: a cluster that has not said it can run distributed work does not get
 	// distributed work.
 	MultiNodeCapable bool `json:"multi_node_capable"`
+	// JobImage is the one image every job on this cluster runs in, for a runtime that boots its
+	// own (agentexec.Executor.JobImage). Absent means each job runs in the image it names.
+	// Placement reads it: a job naming no image goes only where one is fixed, and a job naming
+	// one only where that image runs.
+	JobImage string `json:"job_image,omitempty"`
 	// AutoscalerEnabled is whether this cluster sits behind a native autoscaler (cluster-autoscaler
 	// / Karpenter) that reacts to Pending pods. Operator-set on the agent deployment
 	// (AUTOSCALER_ENABLED), fail-closed: absent (false) means the scheduler never speculatively

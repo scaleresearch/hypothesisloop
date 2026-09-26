@@ -952,6 +952,9 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT fa
 -- reported_id is the identity the cluster's runtime states about itself, bound to the name on
 -- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
+-- job_image is the one image every job on the cluster runs in, as its runtime last reported it.
+-- Empty for a cluster that runs each job in the image the job names. Placement reads it.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image TEXT NOT NULL DEFAULT '';
 
 -- An org turns a cluster on or off for its own jobs, whether the cluster is its own or one the
 -- platform shares. A row is the org's decision that none of its jobs is placed on the cluster

@@ -133,7 +133,7 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 	}
 	// A grouped job of one node is resolved on its group.
 	grouped := h100Job("grouped", "")
-	grouped.Job = domain.JobSpec{Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", AcceleratorCount: 1, AcceleratorType: h100}}}
+	grouped.Job = domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", AcceleratorCount: 1, AcceleratorType: h100}}}
 	if job := sized(t, c, grouped).EffectiveJob(); job.Groups[0].CPU != "8" || job.Groups[0].Memory != "32Gi" || grouped.Job.Groups[0].CPU != "2" {
 		t.Fatalf("grouped job resolved to %+v, submitted %+v", job.Groups[0], grouped.Job.Groups[0])
 	}

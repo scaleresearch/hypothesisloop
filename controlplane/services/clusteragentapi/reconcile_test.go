@@ -32,6 +32,7 @@ type reconcileStore struct {
 	boundTo   map[string]string
 	bindErr   error
 	binds     []string
+	jobImages []string
 }
 
 func (s *reconcileStore) ListDesiredWorkloads(_ context.Context, cluster string) ([]*domain.Experiment, error) {
@@ -40,6 +41,11 @@ func (s *reconcileStore) ListDesiredWorkloads(_ context.Context, cluster string)
 
 func (s *reconcileStore) ListRecentlyUndesiredWorkloads(_ context.Context, cluster string, _ time.Duration) ([]*domain.Experiment, error) {
 	return s.undesired[cluster], nil
+}
+
+func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string) error {
+	s.jobImages = append(s.jobImages, name+"="+image)
+	return nil
 }
 
 func (s *reconcileStore) BindReportedID(_ context.Context, name, id string) error {
@@ -234,5 +240,27 @@ func TestReconcileHandsARuntimeTheSecretEnvOfItsJobs(t *testing.T) {
 	}
 	if answer.Experiments[1].Job.SecretEnv != nil || strings.Count(rec.Body.String(), "the-secret-value") != 2 {
 		t.Fatalf("the secret is handed with a job it is not of: %s", rec.Body)
+	}
+}
+
+// The image a runtime runs every job in is kept on each report, and a runtime that reports none
+// clears it: placement reads the cluster as it last described itself.
+func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
+	w := newReconcileWorld(t, "of-a")
+	report := idleReport("id-of-a")
+	report["job_image"] = "registry.test/platform-job:7"
+	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusOK {
+		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	if rec := w.reconcile(t, "of-a", idleReport("id-of-a")); rec.Code != http.StatusOK {
+		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	if want := []string{"of-a=registry.test/platform-job:7", "of-a="}; !slices.Equal(w.store.jobImages, want) {
+		t.Fatalf("recorded %v, want %v", w.store.jobImages, want)
+	}
+	written := w.metricsWrites.Load()
+	report["job_image"] = strings.Repeat("i", domain.MaxJobImageLength+1)
+	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusBadRequest || len(w.store.jobImages) != 2 || w.metricsWrites.Load() != written {
+		t.Fatalf("an image name too long to be one: got = %d %s, want 400 before anything is stored", rec.Code, rec.Body)
 	}
 }

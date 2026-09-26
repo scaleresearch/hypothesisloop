@@ -479,7 +479,7 @@ func TestSpeculativeCandidatesUsesInstalledNotFreeAccelerators(t *testing.T) {
 	already := &domain.Experiment{
 		ID: "already-running", ClusterName: "cluster-a", AcceleratorType: domain.AcceleratorType(h100),
 		AcceleratorCount: 8, Status: domain.StatusRunning,
-		Job: domain.JobSpec{AcceleratorType: h100, AcceleratorCount: 8},
+		Job: domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: h100, AcceleratorCount: 8},
 	}
 	store := &claimedExperimentsStore{claimed: []*domain.Experiment{already}}
 	l := speculationLoop(store)

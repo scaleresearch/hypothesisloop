@@ -325,7 +325,7 @@ var routes = []route{
 
 	// ---- runtimes and launchers ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},
-	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(metricsUnreachable)},
+	{method: "POST", path: "/internal/clusters/{name}/reconcile", request: "/internal/clusters/<cluster>/reconcile", body: capacity1, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/launchers/{name}/reconcile", request: "/internal/launchers/main/reconcile", body: `{"launch_digest":"0123456789abcdef0123456789abcdef","instances":[],"reconcile_interval_seconds":15,"create_pause_milliseconds":1000}`, rule: only([]string{"launcher"}, reached)},
 	{method: "GET", path: "/metrics", rule: staffOnly},

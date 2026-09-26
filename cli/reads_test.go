@@ -73,6 +73,26 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 
 // An agent token cannot read /me, so capacity asks for the org it is told and otherwise leaves
 // the org to the platform, which knows the one a token is bound to.
+func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"clusters": []any{
+			map[string]any{"cluster_name": "rented", "job_image": "registry.test/platform-job:7", "accelerators": []any{map[string]any{"accelerator_type": "RTX", "available": 2, "total": 2}}},
+			map[string]any{"cluster_name": "k8s", "accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 8, "total": 8}}},
+		}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"capacity"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"cluster":"rented","job_image":"registry.test/platform-job:7","accelerator_type":"RTX","available":2,"total":2}`,
+		`{"cluster":"k8s","accelerator_type":"L40","available":8,"total":8}`,
+	}
+	if !reflect.DeepEqual(lines(stdout.String()), want) {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+}
+
 func TestCapacityNamesTheOrgItIsToldAndAsksNothingElse(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"clusters": []any{}} })
 	t.Setenv("HL_ORG", "")

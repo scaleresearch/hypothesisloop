@@ -90,9 +90,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if !codeRefPattern.MatchString(exp.CodeRef) {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\" — a full 40-character commit SHA, not a branch name or tag"}
 	}
-	if exp.Job.Image == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.image is required"}
-	}
 	// Node labels under the platform's prefix are written by admission, the slot a job is
 	// admitted to among them. A submitter who could name one would place the job themselves.
 	for label := range exp.Job.NodeSelector {

@@ -35,7 +35,7 @@ func maxAcceleratorExperiment(acceleratorCount int) *domain.Experiment {
 		ID:               "exp-max",
 		AcceleratorType:  "example.com/product=test-accelerator",
 		AcceleratorCount: acceleratorCount,
-		Job: domain.JobSpec{
+		Job: domain.JobSpec{Image: "registry.test/job:1",
 			CPU:              domain.MaxResourceSentinel,
 			Memory:           "1Gi", // literal alongside a "max" field, per JobSpec.CPU's doc comment
 			Storage:          domain.MaxResourceSentinel,
@@ -89,7 +89,7 @@ func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *t
 		ID:               "exp-grouped",
 		AcceleratorType:  flavor,
 		AcceleratorCount: 3, // total: 2 (learner) + 1 (actor)
-		Job: domain.JobSpec{
+		Job: domain.JobSpec{Image: "registry.test/job:1",
 			AcceleratorType: flavor,
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: domain.MaxResourceSentinel, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
@@ -280,7 +280,7 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 		AcceleratorType:  flavor,
 		AcceleratorCount: 4,
 		CreatedAt:        pastTime(),
-		Job: domain.JobSpec{
+		Job: domain.JobSpec{Image: "registry.test/job:1",
 			AcceleratorType:  flavor,
 			AcceleratorCount: 4,
 			NumNodes:         2, // spans 2 nodes: Nodes() > 1
@@ -292,7 +292,7 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 		AcceleratorType:  flavor,
 		AcceleratorCount: 5,
 		CreatedAt:        pastTime(),
-		Job: domain.JobSpec{
+		Job: domain.JobSpec{Image: "registry.test/job:1",
 			AcceleratorType:  flavor,
 			AcceleratorCount: 5, // 5 accelerators, but on ONE node: Nodes() == 1
 			NumNodes:         1,
@@ -329,7 +329,7 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) 
 			AcceleratorType:  flavor,
 			AcceleratorCount: count,
 			CreatedAt:        pastTime(),
-			Job:              domain.JobSpec{AcceleratorType: flavor, AcceleratorCount: count, NumNodes: 1},
+			Job:              domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: count, NumNodes: 1},
 		}
 	}
 	claimed := []*domain.Experiment{

@@ -121,6 +121,7 @@ func queuedJob(id, peID string, tier domain.CapacityTier) *domain.Experiment {
 		CapacityTier:         tier,
 		AcceleratorType:      "nvidia.com/gpu.product=NVIDIA-L40",
 		AcceleratorCount:     1,
+		Job:                  domain.JobSpec{Image: "registry.test/job:1"},
 	}
 }
 

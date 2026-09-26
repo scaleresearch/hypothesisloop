@@ -157,7 +157,7 @@ func TestAClaimWaitingBehindAClusterBeingTurnedOffIsRefused(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		claimed, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, nil)
+		claimed, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{Image: "registry.test/job:1", AcceleratorCount: 1}, nil)
 		done <- outcome{claimed, err}
 	}()
 	select {
@@ -183,7 +183,7 @@ func TestTurningAClusterOffWaitsForAClaimInFlightAndLeavesItsJob(t *testing.T) {
 	deciding, release := make(chan struct{}), make(chan struct{})
 	claimed := make(chan error, 1)
 	go func() {
-		ok, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, func(context.Context, []*domain.Experiment) (bool, error) {
+		ok, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{Image: "registry.test/job:1", AcceleratorCount: 1}, func(context.Context, []*domain.Experiment) (bool, error) {
 			close(deciding)
 			<-release
 			return true, nil

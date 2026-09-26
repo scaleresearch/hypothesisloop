@@ -747,6 +747,10 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	if !orgHasCluster(registered, exp.OrgID, domain.Cluster.Hosts) {
 		return map[string]domain.Footprint{}, domain.NotAdmittedClustersDisabled
 	}
+	runsImage := func(c domain.Cluster, orgID string) bool { return c.HostsJob(orgID, exp.Job.Image) }
+	if !orgHasCluster(registered, exp.OrgID, runsImage) {
+		return map[string]domain.Footprint{}, noClusterForImageReason(registered, exp)
+	}
 	if exp.Job.Nodes() <= 1 {
 		return hosted, ""
 	}
@@ -773,10 +777,30 @@ func orgHasCluster(registered map[string]domain.Cluster, orgID string, is func(d
 	return false
 }
 
-// hostsJob reports whether cluster is registered and takes jobs of exp's org.
+// hostsJob reports whether cluster is registered, takes jobs of exp's org and runs the image exp
+// names (domain.Cluster.HostsJob).
 func hostsJob(registered map[string]domain.Cluster, cluster string, exp *domain.Experiment) bool {
 	c, ok := registered[cluster]
-	return ok && c.Hosts(exp.OrgID)
+	return ok && c.HostsJob(exp.OrgID, exp.Job.Image)
+}
+
+// noClusterForImageReason says why no cluster that takes the org's jobs runs this one, and what
+// would: the images the clusters with a fixed one run, by name.
+func noClusterForImageReason(registered map[string]domain.Cluster, exp *domain.Experiment) string {
+	var fixed []string
+	for _, c := range registered {
+		if c.Hosts(exp.OrgID) && c.JobImage != "" {
+			fixed = append(fixed, c.Name+" runs every job in "+c.JobImage)
+		}
+	}
+	sort.Strings(fixed)
+	if exp.Job.Image == "" {
+		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs a job in the image it names: set job.image"
+	}
+	if len(fixed) == 0 {
+		return domain.NotAdmittedNoClusterForImage + ": no cluster that takes this org's jobs runs image " + exp.Job.Image
+	}
+	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(fixed, "; ") + ": leave job.image out to run there"
 }
 
 func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {

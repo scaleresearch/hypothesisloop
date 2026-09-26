@@ -90,6 +90,12 @@ type Executor interface {
 	// execution time.
 	SupportsMultiNodeJobs() bool
 
+	// JobImage is the one image every job on this runtime runs in, or empty for a runtime that
+	// runs each job in the image the job names. Like SupportsMultiNodeJobs it is a fact reported
+	// with capacity: the control plane places a job that names no image only where one is fixed,
+	// and a job that names one only where that image runs.
+	JobImage() string
+
 	// GetClusterID returns a stable fingerprint for this cluster that the runtime derives live
 	// and never persists itself: the kube-system namespace UID on k8s, /etc/machine-id on bare
 	// metal. Unlike ClusterName (an operator-typed label that can be renamed or duplicated), this

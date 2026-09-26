@@ -921,6 +921,9 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 // runtime.
 func (c *JobWorkloadClient) SupportsMultiNodeJobs() bool { return true }
 
+// JobImage is empty: a pod runs in the image its job names.
+func (c *JobWorkloadClient) JobImage() string { return "" }
+
 // GetClusterID returns the kube-system namespace's UID: created with the cluster, immutable for
 // its life, globally unique, and readable with the credentials the agent already holds. The
 // community-standard cluster fingerprint (Karpenter, Prometheus "cluster" relabeling, kubecost

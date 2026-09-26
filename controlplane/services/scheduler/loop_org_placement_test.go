@@ -486,7 +486,7 @@ func TestAMultiNodeJobIsOfferedOnlyHostingClustersThatSpanNodes(t *testing.T) {
 // One org, every cluster its own: the filter returns what it was given, value for value.
 func TestADeploymentWithOneOrgSeesEveryConnectedCluster(t *testing.T) {
 	avail := map[string]domain.Footprint{"cluster-a": {cpuKey: 1}, "cluster-b": {cpuKey: 2}, "c1": {cpuKey: 3}}
-	exp := &domain.Experiment{Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
+	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
 
 	candidates, ineligible := eligibleClusters(avail, map[string]bool{}, singleOrg, exp)
 	if ineligible != "" || len(candidates) != len(avail) {
@@ -691,5 +691,57 @@ func TestTickPreemptsNothingOnAClusterTheJobsOrgTurnedOff(t *testing.T) {
 		if got := store.notAdmitted[id]; got != domain.NotAdmittedClustersDisabled {
 			t.Fatalf("%s not_admitted_reason = %q, want %q", id, got, domain.NotAdmittedClustersDisabled)
 		}
+	}
+}
+
+// A cluster that boots one image of its own runs the jobs that name none or exactly it, and
+// every other cluster runs a job in the image the job names. A job is offered only the clusters
+// that run it, and when none does the reason says which image runs where.
+func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
+	const platformImage = "registry.test/platform-job:7"
+	registered := map[string]domain.Cluster{
+		"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage},
+		"k8s":    {Name: "k8s", OrgID: "org-a"},
+	}
+	avail := func() map[string]domain.Footprint {
+		return map[string]domain.Footprint{"rented": {cpuKey: 100000}, "k8s": {cpuKey: 100000}}
+	}
+	job := func(image string) *domain.Experiment {
+		return &domain.Experiment{OrgID: "org-a", Job: domain.JobSpec{Image: image, CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
+	}
+	for name, c := range map[string]struct {
+		image string
+		want  []string
+	}{
+		"no image goes where one is fixed":            {"", []string{"rented"}},
+		"its own image goes where jobs bring theirs":  {"registry.test/mine:1", []string{"k8s"}},
+		"the fixed image named runs on both clusters": {platformImage, []string{"k8s", "rented"}},
+	} {
+		candidates, ineligible := eligibleClusters(avail(), map[string]bool{}, registered, job(c.image))
+		var got []string
+		for cluster := range candidates {
+			got = append(got, cluster)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, c.want) || ineligible != "" {
+			t.Errorf("%s: offered %v (%q), want %v", name, got, ineligible, c.want)
+		}
+	}
+
+	onlyRented := map[string]domain.Cluster{"rented": registered["rented"]}
+	candidates, ineligible := eligibleClusters(avail(), map[string]bool{}, onlyRented, job("registry.test/mine:1"))
+	want := "no_cluster_for_image: the job names image registry.test/mine:1, and rented runs every job in " + platformImage + ": leave job.image out to run there"
+	if len(candidates) != 0 || ineligible != want {
+		t.Errorf("an image no cluster runs: offered %v, reason %q\nwant %q", candidates, ineligible, want)
+	}
+	onlyK8s := map[string]domain.Cluster{"k8s": registered["k8s"]}
+	candidates, ineligible = eligibleClusters(avail(), map[string]bool{}, onlyK8s, job(""))
+	if len(candidates) != 0 || !strings.HasPrefix(ineligible, domain.NotAdmittedNoClusterForImage+": the job names no image") || !strings.HasSuffix(ineligible, "set job.image") {
+		t.Errorf("no image and no cluster with one: offered %v, reason %q", candidates, ineligible)
+	}
+	// A cluster the org turned off is no place the reason sends the job to.
+	off := map[string]domain.Cluster{"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage, DisabledOrgs: []string{"org-a"}}, "k8s": registered["k8s"]}
+	if _, ineligible = eligibleClusters(avail(), map[string]bool{}, off, job("")); strings.Contains(ineligible, "rented") {
+		t.Errorf("the reason names a cluster the org turned off: %q", ineligible)
 	}
 }

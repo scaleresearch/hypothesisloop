@@ -26,13 +26,16 @@ var (
 // cluster from jobs, so the two never interleave.
 const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('cluster-admission/' || $1, 0))`
 
-// clusterHostsJob is the placement rule (domain.Cluster.Hosts) as a condition on a job row e and
-// a cluster named $2: the cluster is registered, is shared or belongs to the job's org, and that
-// org has not turned it off.
+// clusterHostsJob is the placement rule (domain.Cluster.HostsJob) as a condition on a job row e
+// and a cluster named $2: the cluster is registered, is shared or belongs to the job's org, that
+// org has not turned it off, and it runs the image the job names: a cluster with a fixed image
+// the jobs that name none or exactly it, every other cluster the jobs that name one.
 const clusterHostsJob = `EXISTS (
 	SELECT 1 FROM clusters c, platform_experiments pe JOIN projects p ON p.id = pe.project_id
 	WHERE c.name = $2 AND pe.id = e.platform_experiment_id AND (c.shared OR c.org_id = p.org_id)
-	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = p.org_id))`
+	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = p.org_id)
+	  AND CASE WHEN c.job_image = '' THEN COALESCE(e.job_spec ->> 'image', '') <> ''
+	           ELSE COALESCE(e.job_spec ->> 'image', '') IN ('', c.job_image) END)`
 
 // requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
 // all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure
@@ -68,12 +71,12 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 	return &ClustersStore{pool: pool}
 }
 
-const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), created_at,
+const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), job_image, created_at,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.CreatedAt, &c.DisabledOrgs); err != nil {
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.JobImage, &c.CreatedAt, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -134,6 +137,15 @@ func (s *ClustersStore) ClusterOrg(ctx context.Context, name string) (orgID stri
 		return "", false, fmt.Errorf("clusters_store.ClusterOrg: %w", err)
 	}
 	return orgID, true, nil
+}
+
+// RecordJobImage keeps the one image the cluster's runtime says every job there runs in, empty
+// for a runtime that runs each job in its own. A report that changes nothing writes nothing.
+func (s *ClustersStore) RecordJobImage(ctx context.Context, name, image string) error {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET job_image = $2 WHERE name = $1 AND job_image <> $2`, name, image); err != nil {
+		return fmt.Errorf("clusters_store.RecordJobImage: %w", err)
+	}
+	return nil
 }
 
 // RegisteredClusters returns every registered cluster by name.

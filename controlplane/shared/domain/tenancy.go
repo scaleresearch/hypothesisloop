@@ -103,13 +103,19 @@ type APIKey struct {
 // states about itself, empty until its first report. DisabledOrgs are the orgs that turned the
 // cluster off for their own jobs.
 type Cluster struct {
-	Name         string    `json:"name"`
-	OrgID        string    `json:"org_id"`
-	Shared       bool      `json:"shared"`
-	ReportedID   string    `json:"cluster_id,omitempty"`
+	Name       string `json:"name"`
+	OrgID      string `json:"org_id"`
+	Shared     bool   `json:"shared"`
+	ReportedID string `json:"cluster_id,omitempty"`
+	// JobImage is the one image every job on the cluster runs in, as its runtime reports it.
+	// Empty for a cluster that runs each job in the image the job names.
+	JobImage     string    `json:"job_image,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	DisabledOrgs []string  `json:"-"`
 }
+
+// MaxJobImageLength bounds the image a runtime reports for its cluster.
+const MaxJobImageLength = 512
 
 // MaxClusterIDLength bounds the identity a runtime states: a kube-system namespace UID or a
 // machine id, with room to spare.
@@ -133,6 +139,22 @@ func ValidateClusterID(id string) error {
 // org has not turned off.
 func (c Cluster) Hosts(orgID string) bool {
 	return c.OpenTo(orgID) && c.EnabledFor(orgID)
+}
+
+// HostsJob is the placement rule: the cluster takes jobs of orgID and runs a job that names
+// image, which is empty for a job that names none.
+func (c Cluster) HostsJob(orgID, image string) bool {
+	return c.Hosts(orgID) && c.Runs(image)
+}
+
+// Runs reports whether a job naming image can run on the cluster. A cluster with one fixed image
+// runs the jobs that name none and the ones that name exactly it. Every other cluster runs each
+// job in its own image, so there a job must name one.
+func (c Cluster) Runs(image string) bool {
+	if c.JobImage == "" {
+		return image != ""
+	}
+	return image == "" || image == c.JobImage
 }
 
 // OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform
