@@ -3,18 +3,18 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { fetchAgentsPage } from '@/lib/api'
-import { useTenant } from '@/lib/tenant'
+import { useListScope } from '@/lib/example'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const LISTED = 50
 
 /** Picks an agent by id or name; typing searches all of them on the server. */
 export function AgentSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const { project } = useTenant()
+  const scope = useListScope()
   const [q, setQ] = useState('')
   const { data } = useSWR(
-    ['agent-search', project.id, q],
-    () => fetchAgentsPage({ project_id: project.id, q, limit: LISTED }),
+    ['agent-search', scope, q],
+    () => fetchAgentsPage({ ...scope, q, limit: LISTED }),
     { keepPreviousData: true },
   )
   const listed = data?.items ?? []

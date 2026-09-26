@@ -21,6 +21,7 @@ import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
 import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothesis-search'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
+import { useExample } from '@/lib/example'
 import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
 
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
@@ -37,7 +38,9 @@ function HypothesesPageContent() {
   const { project } = useTenant()
   const router = useProjectRouter()
   const searchParams = useSearchParams()
-  const peID = searchParams.get('pe') ?? ''
+  const example = useExample()
+  // An example's graph is that experiment's, whatever the URL names.
+  const peID = example ? example.id : searchParams.get('pe') ?? ''
   const [focus, setFocus] = useQueryParam('focus')
   const [view, setView] = useQueryParam('view', 'graph')
   const [statusFilter, setStatusFilter] = useQueryParam('status')
@@ -108,15 +111,17 @@ function HypothesesPageContent() {
       />
 
       <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
-        <FormField inline label="Platform Experiment">
-          <PlatformExperimentSelect
-            value={peID}
-            onChange={selectExperiment}
-            hideAllOption
-            placeholder="Select an experiment"
-            className="min-w-[260px]"
-          />
-        </FormField>
+        {!example && (
+          <FormField inline label="Platform Experiment">
+            <PlatformExperimentSelect
+              value={peID}
+              onChange={selectExperiment}
+              hideAllOption
+              placeholder="Select an experiment"
+              className="min-w-[260px]"
+            />
+          </FormField>
+        )}
         <div className="ml-auto flex gap-1.5" role="group" aria-label="View">
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
           <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
@@ -161,7 +166,7 @@ function HypothesesPageContent() {
             {graph.nodes.length === 0 ? (
               <EmptyState>
                 No hypotheses in this experiment yet. Agents place each idea under the objective or an
-                earlier hypothesis; you can add one under the objective above.
+                earlier hypothesis{example ? '.' : '; you can add one under the objective above.'}
               </EmptyState>
             ) : view === 'outline' ? (
               <HypothesisOutline
@@ -215,7 +220,7 @@ function HypothesesPageContent() {
         </div>
       )}
 
-      {graph && pe && addUnder !== null && (
+      {graph && pe && !example && addUnder !== null && (
         <Dialog open onClose={() => setAddUnder(null)} title="Add an idea">
           <AddIdeaForm
             platformExperimentID={peID}

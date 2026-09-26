@@ -14,6 +14,7 @@ import { linkGroups } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
+import { useReadOnly } from '@/lib/example'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph
@@ -29,6 +30,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   pe: PlatformExperiment
   onAddIdea: (parentID: string) => void
 }) {
+  const readOnly = useReadOnly()
   return (
     <Card>
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-2">
@@ -39,7 +41,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
           </span>
           <span className="ml-auto flex items-center gap-3">
-            <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>
+            {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(graph.root)}>+ Add idea under the objective</Button>}
             <Link href={`/platform-experiments/${graph.root}`} className="text-xs text-accent hover:underline">Experiment →</Link>
           </span>
         </div>
@@ -50,6 +52,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
 }
 
 export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect, onAddIdea }: HypothesisPanelProps) {
+  const readOnly = useReadOnly()
   const node = nodeByID.get(selected)
   if (!node) {
     return (
@@ -112,7 +115,7 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>
+          {!readOnly && <Button size="sm" variant="primary" onClick={() => onAddIdea(node.id)}>+ Add idea under this</Button>}
           <Link href={`/hypotheses/${node.id}`} className="text-xs text-accent hover:underline">Open detail →</Link>
         </div>
       </CardContent>

@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
+import { useReadOnly } from '@/lib/example'
 
 /** Marks a hypothesis or note that came from a person, wherever one is shown. */
 function HumanAuthor({ author }: { author: string }) {
@@ -68,6 +69,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
   const [error, setError] = useState('')
   const [existingID, setExistingID] = useState('')
   const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
+  const readOnly = useReadOnly()
 
   const picked = [...contradicts, ...related].map(t => t.id)
 
@@ -97,6 +99,7 @@ export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
     }
   }
 
+  if (readOnly) return null
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-2.5">
       <p className="text-xs text-muted">
@@ -176,7 +179,9 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   const [target, setTarget] = useState<HypothesisSearchHit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const readOnly = useReadOnly()
 
+  if (readOnly) return null
   if (hypothesis.source !== 'human') {
     return (
       <p className="mt-3 text-xs text-subtle">
@@ -229,6 +234,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const readOnly = useReadOnly()
 
   async function submit() {
     setBusy(true)
@@ -244,6 +250,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
     }
   }
 
+  if (readOnly) return null
   return (
     <div className="mt-3 grid max-w-[760px] gap-2">
       <Textarea

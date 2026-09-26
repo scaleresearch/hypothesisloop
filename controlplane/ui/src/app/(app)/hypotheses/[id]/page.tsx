@@ -2,7 +2,8 @@
 
 import useSWR from 'swr'
 import { Link } from '@/components/ui/link'
-import { useProjectRouter, useRecordProject } from '@/lib/query-state'
+import { useProjectRouter } from '@/lib/query-state'
+import { useRecordScope } from '@/lib/example'
 import { fetchHypothesis, fetchPlatformExperiment } from '@/lib/api'
 import type { PlatformExperiment, HypothesisLink } from '@/types'
 import { Card, CardHeader, CardContent, InsetCard, RowLink } from '@/components/ui/card'
@@ -50,7 +51,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
     data ? ['pe', data.platform_experiment_id] : null,
     () => fetchPlatformExperiment(data!.platform_experiment_id),
   )
-  useRecordProject(pe?.project_id)
+  useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
 
   if (error) return (
     <div>

@@ -23,6 +23,7 @@ import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
+import { useExample, useListScope } from '@/lib/example'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
@@ -39,10 +40,15 @@ export default function JobsPage() {
 }
 
 function JobsPageContent() {
-  const { org, project } = useTenant()
+  const { org } = useTenant()
   const router = useProjectRouter()
+  const example = useExample()
+  const scope = useListScope()
+  const scopeKey = 'project_id' in scope ? scope.project_id : 'example'
   const [agentFilter, setAgentFilter] = useState('')
-  const [peFilter, setPEFilter] = useQueryParam('platform_experiment_id')
+  const [peParam, setPEFilter] = useQueryParam('platform_experiment_id')
+  // An example's jobs are that experiment's, whatever the URL filters by.
+  const peFilter = example ? example.id : peParam
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -70,9 +76,9 @@ function JobsPageContent() {
   const sort = `${sortDir === 'desc' ? '-' : ''}${sortKey}`
 
   const { data, error, isLoading, mutate } = useSWR(
-    ['jobs', project.id, agentFilter, peFilter, statusFilter, page, sort],
+    ['jobs', scopeKey, agentFilter, peFilter, statusFilter, page, sort],
     () => fetchExperimentsPage({
-      project_id: project.id,
+      ...scope,
       agent: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
@@ -84,8 +90,8 @@ function JobsPageContent() {
   )
 
   const { data: unsummarized } = useSWR(
-    ['jobs-unsummarized', project.id, agentFilter, peFilter],
-    () => fetchUnsummarizedJobIDs({ project_id: project.id, agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
+    ['jobs-unsummarized', scopeKey, agentFilter, peFilter],
+    () => fetchUnsummarizedJobIDs({ ...scope, agent: agentFilter || undefined, platform_experiment_id: peFilter || undefined }),
     { refreshInterval: 8_000, keepPreviousData: true },
   )
 
@@ -111,9 +117,9 @@ function JobsPageContent() {
   // read uses, minus its paging. Tallying the visible rows instead would report the page's
   // shape under a label that reads as the platform's.
   const { data: stats } = useSWR(
-    ['job-stats', project.id, agentFilter, peFilter, statusFilter],
+    ['job-stats', scopeKey, agentFilter, peFilter, statusFilter],
     () => fetchExperimentStats({
-      project_id: project.id,
+      ...scope,
       agent: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
       status: statusFilter || undefined,
@@ -161,14 +167,16 @@ function JobsPageContent() {
           <AgentSelect value={agentFilter} onChange={v => { setAgentFilter(v); setPage(0) }} />
         </div>
 
-        <div className="flex items-center gap-2">
-          <Eyebrow>Platform Experiment</Eyebrow>
-          <PlatformExperimentSelect
-            value={peFilter}
-            onChange={v => { setPEFilter(v); setPage(0) }}
-            allLabel="All experiments"
-          />
-        </div>
+        {!example && (
+          <div className="flex items-center gap-2">
+            <Eyebrow>Platform Experiment</Eyebrow>
+            <PlatformExperimentSelect
+              value={peFilter}
+              onChange={v => { setPEFilter(v); setPage(0) }}
+              allLabel="All experiments"
+            />
+          </div>
+        )}
       </div>
 
       {isLoading && <Loading />}
@@ -296,7 +304,7 @@ function JobsPageContent() {
                       {relTime(j.created_at)}
                     </td>
                     <td onClick={e => e.stopPropagation()}>
-                      {CANCELABLE.has(status) && (
+                      {!example && CANCELABLE.has(status) && (
                         <Button
                           variant="danger"
                           size="sm"

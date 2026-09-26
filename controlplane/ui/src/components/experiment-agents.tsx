@@ -17,6 +17,7 @@ import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { InstanceHealth } from '@/components/instance-health'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
+import { useReadOnly } from '@/lib/example'
 
 // The specializations the agent harness ships: see agents/coordinator/setup.md. Another name is
 // accepted when the harness image carries a prompt for it.
@@ -112,6 +113,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
   const [removing, setRemoving] = useState<AgentSignup | null>(null)
+  const readOnly = useReadOnly()
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
   const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
 
@@ -150,7 +152,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
       <CardHeader>Agents{agents ? ` (${agents.length})` : ''}</CardHeader>
       <CardContent scrollX>
         <div className="grid gap-3.5">
-          {started
+          {readOnly ? null : started
             ? <span className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by being cut or by the experiment closing.</span>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
@@ -183,7 +185,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {rowError && <ErrorMessage>{rowError}</ErrorMessage>}
           {!agents && !error && <Loading />}
           {agents && agents.length === 0 && (
-            <EmptyState>No agents yet. Nothing runs in this experiment until at least one joins.</EmptyState>
+            <EmptyState>No agents yet.{!readOnly && ' Nothing runs in this experiment until at least one joins.'}</EmptyState>
           )}
           {agents && agents.length > 0 && (
             <Table>
@@ -208,10 +210,12 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                     <td className="whitespace-nowrap font-mono text-xs">{agent.model ?? 'default'}</td>
                     <td className="font-mono text-xs text-muted">{new Date(agent.signed_up_at).toLocaleString()}</td>
                     <td>
-                      <div className="flex justify-end gap-1.5">
-                        {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
-                        {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
-                      </div>
+                      {!readOnly && (
+                        <div className="flex justify-end gap-1.5">
+                          {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
+                          {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

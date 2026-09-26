@@ -1,7 +1,8 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import { useProjectRouter, useRecordProject } from '@/lib/query-state'
+import { useProjectRouter } from '@/lib/query-state'
+import { useReadOnly, useRecordScope } from '@/lib/example'
 import { Link } from '@/components/ui/link'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
@@ -503,7 +504,8 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     () => fetchPlatformExperiment(id),
     { refreshInterval: 15_000 },
   )
-  useRecordProject(pe?.project_id)
+  useRecordScope(pe && { project_id: pe.project_id, platform_experiment_id: pe.id })
+  const readOnly = useReadOnly()
 
   const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
     ['pe-quotas', id],
@@ -679,7 +681,9 @@ export default function PlatformExperimentDetailPage({ params }: { params: { id:
     <div>
       {/* Header */}
       <PageHeader
-        back={{ label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
+        back={readOnly
+          ? { label: 'Examples', onClick: () => router.push('/examples') }
+          : { label: 'Platform Experiments', onClick: () => router.push('/platform-experiments') }}
         title={pe.name}
         description={
           <div className="flex flex-wrap items-center gap-2.5">
