@@ -91,6 +91,7 @@ outranks this briefing. Roughly:
          shows with a `job_image` runs every job in that image (hl, hl-clone, git, uv, python)
          and takes no job naming another; one shown without runs the image a job names, so a
          job for it must name one. `no_cluster_for_image` says what runs where.
+         `hl capacity` lists images with a framework installed: name one, do not pip install it.
 {code_access}
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as

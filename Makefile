@@ -1,5 +1,5 @@
 .PHONY: $(addprefix locked-,images ui-image tt-hardware-image sparse-sdpa-workload-image)
-.PHONY: dev reset build test agent-test lint check images sparse-sdpa-workload-image \
+.PHONY: dev reset build test agent-test lint check images job-images sparse-sdpa-workload-image \
 	experimentator-base-image experimentator-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
@@ -346,6 +346,19 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 	$(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),echo "$(TAG)" > $(IMAGE_TAG_FILE))
 	$(MAKE) chart-push
 	$(MAKE) prune-images TAGS="$(TAG)"
+
+# The job images that carry a framework (job_images in the settings file): the upstream image
+# with the job image's own tools added. Apart from `images` because each pulls gigabytes.
+JOB_IMAGE_BASES := job-pytorch-cuda=docker.io/pytorch/pytorch@sha256:68c022c2f4627943a6f3e574cfd2c8ae4256210d5f66ae2b117942e0a8d4fa9d \
+	job-tenstorrent=ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0
+
+job-images: check-tag
+	@for entry in $(JOB_IMAGE_BASES); do \
+		name="$${entry%%=*}"; base="$${entry#*=}"; \
+		echo "==> building hypothesisloop-$$name:$(TAG) from $$base"; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
+	done
 
 # The runtime chart goes to the registry its images are in, as an OCI artifact under charts/, so
 # a cluster is attached with one helm command and no checkout (hl cluster add prints it). Its

@@ -59,7 +59,7 @@ Minimal shape:
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
-    image: ...                    # leave out to run in the image of a cluster that has its own
+    image: ...                    # one 'hl capacity' lists for the type; leave out for a cluster's own
     accelerator_type: ...         # a job on CPU states only its cores instead: cpu: 4
     accelerator_count: 1
     ...

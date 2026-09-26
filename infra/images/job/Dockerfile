@@ -1,3 +1,7 @@
+# BASE is the image the job's own tools are added to: Python alone for the bare job image, or an
+# upstream framework image (Debian or Ubuntu) for one of the others `make job-images` builds.
+ARG BASE=python:3.13-slim
+
 # The image a job's command runs in on rented compute. It carries the platform's client and git
 # and nothing of any experiment: the job's code comes from its repository through hl-clone and
 # its dependencies install when the job starts. Build context is the repo root.
@@ -10,7 +14,9 @@ COPY cli/ cli/
 COPY runtime/shared/exitline/ runtime/shared/exitline/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
-FROM python:3.13-slim
+FROM ${BASE}
+# An upstream image may leave another user set; the tools are installed as root.
+USER root
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
