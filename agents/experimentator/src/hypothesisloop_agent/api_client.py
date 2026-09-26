@@ -59,7 +59,7 @@ class PlatformClient:
                 raise
             raise SystemExit(
                 f"agent: {agent_id} is not in platform experiment {pe_id}, or HL_TOKEN is not its token "
-                f"(HTTP {e.status}). Add the agent with `hl platform-experiments agents add {pe_id}` and "
+                f"(HTTP {e.status}). Add the agent with `hl platform-experiments agents add --platform-experiment {pe_id}` and "
                 "start it with the HL_TOKEN that prints.") from None
 
     def require_coordinated(self, pe_id: str) -> dict:

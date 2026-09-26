@@ -312,7 +312,7 @@ class API:
         return r.status_code, r.json().get("role")
 
     def start_platform_experiment(self, pe_id: str) -> None:
-        self.hl("platform-experiments", "start", "--id", pe_id)
+        self.hl("platform-experiments", "start", "--platform-experiment", pe_id)
 
     def signup_and_start(self, pe_id: str, agents: list[str] | list[tuple]) -> None:
         for a in agents:

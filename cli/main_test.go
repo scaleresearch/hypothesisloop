@@ -39,7 +39,7 @@ func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	if gotAuthorization != "Bearer test-token" {
@@ -48,7 +48,7 @@ func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 
 	t.Setenv("HL_TOKEN", "")
 	stderr.Reset()
-	if code := run([]string{"platform-experiments", "get", "pe-1"}, &stdout, &stderr); code == 0 {
+	if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &stdout, &stderr); code == 0 {
 		t.Fatal("exit code with no HL_TOKEN: got = 0, want a failure")
 	}
 	if !strings.Contains(stderr.String(), "HL_TOKEN") || calls != 1 {
@@ -322,10 +322,10 @@ func TestIDIsPositionalOrFlag(t *testing.T) {
 		{[]string{"hypothesis", "status", "--id", "h-1", "--agent", "a", "--status", "refuted"}, "/hypotheses/h-1/status"},
 		{[]string{"hypothesis", "comment", "--agent", "a", "--id", "h-1", "--text", "t"}, "/hypotheses/h-1/comments"},
 		{[]string{"hypothesis", "link", "h-1", "--agent", "a", "--type", "related", "--to", "h-2"}, "/hypotheses/h-1/links"},
-		{[]string{"platform-experiments", "get", "pe-1"}, "/platform-experiments/pe-1"},
-		{[]string{"platform-experiments", "get", "--id", "pe-1"}, "/platform-experiments/pe-1"},
+		{[]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1"},
 		{[]string{"platform-experiments", "get"}, "/platform-experiments/pe-env"},
-		{[]string{"platform-experiments", "start", "pe-1"}, "/platform-experiments/pe-1/start"},
+		{[]string{"platform-experiments", "start", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/start"},
+		{[]string{"results", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/results"},
 	} {
 		*got = nil
 		var stdout, stderr bytes.Buffer
@@ -346,6 +346,9 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	}{
 		{[]string{"job", "metrics", "--agent", "a", "job-1"}, "usage: hl job metrics ID"},
 		{[]string{"job", "status"}, "usage: hl job status ID"},
+		{[]string{"platform-experiments", "get", "--pe", "pe-1"}, "usage: hl platform-experiments get [--platform-experiment PE]"},
+		{[]string{"platform-experiments", "get", "pe-1"}, "usage: hl platform-experiments get [--platform-experiment PE]"},
+		{[]string{"platform-experiments", "propose", "--pe", "pe-1"}, "usage: hl platform-experiments propose [--platform-experiment PE]"},
 		{[]string{"hypothesis", "get", "--bogus", "h-1"}, "usage: hl hypothesis get ID"},
 		{[]string{"hypothesis", "status", "h-1", "h-2", "--status", "open"}, "usage: hl hypothesis status ID"},
 		{[]string{"job", "summary", "job-1"}, "usage: hl job summary ID --text T"},
@@ -531,7 +534,7 @@ func TestHTTPErrorSurfacesPlatformMessage(t *testing.T) {
 	setAPIURL(t, url)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "close", "pe-1"}, &stdout, &stderr)
+	code := run([]string{"platform-experiments", "close", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
@@ -699,7 +702,7 @@ func TestOpenPlatformExperimentSaysWhenItStartsAheadOfItsRecord(t *testing.T) {
 	}{{"open", true}, {"running", false}, {"closed", false}} {
 		status = tc.status
 		var out bytes.Buffer
-		if code := run([]string{"platform-experiments", "get", "pe-1"}, &out, &out); code != 0 {
+		if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &out, &out); code != 0 {
 			t.Fatalf("exit %d, output %s", code, out.String())
 		}
 		first, _, _ := strings.Cut(out.String(), "\n")

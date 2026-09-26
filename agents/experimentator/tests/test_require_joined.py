@@ -98,7 +98,7 @@ class RequireJoinedTest(PlatformCase):
                 self.client.require_joined("agent-b", "pe-1")
             message = str(ctx.exception)
             self.assertIn("agent-b is not in platform experiment pe-1", message)
-            self.assertIn("hl platform-experiments agents add pe-1", message)
+            self.assertIn("hl platform-experiments agents add --platform-experiment pe-1", message)
             self.assertNotIn("agent-token", message)
         self.assertNotIn("POST", [method for method, _ in FakePlatform.calls])
 

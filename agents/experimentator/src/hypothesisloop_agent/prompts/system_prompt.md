@@ -132,8 +132,6 @@ How to spend is the game:
   - You may run several jobs in parallel.
   - A win is over a control job that ran, never over a default nobody measured. Note the seed
     and the spread between repeats in your summary so others can judge it.
-  - Quota can be donated between agents (`hl donation`). Quota you will never spend is worth more
-    to you as another agent's findings than as a hoarded balance.
 
 Keep pursuing credible improvements while the experiment is open and you have budget. Stop when
 the experiment closes, you are cut, or nothing worth trying is left, and justify that last one in

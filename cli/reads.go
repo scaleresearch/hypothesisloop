@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -61,11 +60,15 @@ running jobs. In an experiment on CPU cores these are CPU core-hours: a core for
 }
 
 func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("results", `usage: hl results [PE]
+	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
 value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, stderr)
-	pe, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id", "platform-experiment")
+	named := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	pe, err := namedExperiment(fs, c, *named)
 	if err != nil {
 		return parseExit(err)
 	}
@@ -210,99 +213,4 @@ func printPrefixed(stdout io.Writer, raw json.RawMessage, kv ...string) error {
 	}
 	_, err = fmt.Fprintf(stdout, "%s\n", b.Bytes())
 	return err
-}
-
-const donationUsage = `usage: hl donation <command> ...
-
-  list     [--status open|fulfilled|cancelled]   donation requests, most recent first
-  request  --credits N --reason T                ask the other agents for accelerator-hours
-  fulfill  ID                                    give a request's credits from your own quota
-  cancel   ID                                    withdraw your open request
-
-Run hl donation <command> --help for its flags.`
-
-func cmdDonation(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, donationUsage)
-		return 2
-	}
-	sub, rest := args[0], args[1:]
-	var method, path string
-	var body any
-	switch sub {
-	case "-h", "--help", "help":
-		fmt.Fprintln(stdout, donationUsage)
-		return 0
-	case "list":
-		fs := newFlags("donation list", "usage: hl donation list [--status open|fulfilled|cancelled] [--limit N] [--platform-experiment PE]", stderr)
-		status := fs.String("status", "", "open, fulfilled or cancelled")
-		pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
-		limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
-		if err := fs.Parse(rest); err != nil {
-			return parseExit(err)
-		}
-		q := url.Values{}
-		if p := experimentOf(c, *pe); p != "" {
-			q.Set("platform_experiment_id", p)
-		}
-		if *status != "" {
-			q.Set("status", *status)
-		}
-		if *limit != 0 {
-			q.Set("limit", strconv.Itoa(*limit))
-		}
-		method, path = "GET", "/donations?"+q.Encode()
-	case "request":
-		fs := newFlags("donation request", "usage: hl donation request --credits N --reason T [--agent A] [--platform-experiment PE]", stderr)
-		credits := fs.Float64("credits", 0, "accelerator-hours wanted (required)")
-		reason := fs.String("reason", "", "what you would spend them on (required)")
-		agent := fs.String("agent", "", "requesting agent (default the token's agent, else $AGENT_ID)")
-		pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
-		if err := fs.Parse(rest); err != nil {
-			return parseExit(err)
-		}
-		var err error
-		if *agent, err = writingAgent(c, *agent); err != nil {
-			return fail(stderr, err)
-		}
-		*pe = experimentOf(c, *pe)
-		if *credits <= 0 || *reason == "" || *agent == "" || *pe == "" {
-			return parseExit(misuse(fs, "--credits above 0, --reason, --agent and --platform-experiment are required"))
-		}
-		method, path = "POST", "/donations"
-		body = map[string]any{"agent_id": *agent, "platform_experiment_id": *pe, "credits_want": *credits, "reason": *reason}
-	case "fulfill":
-		fs := newFlags("donation fulfill", "usage: hl donation fulfill ID [--agent A]\n\nTransfers the request's credits from your quota to the requester's.", stderr)
-		agent := fs.String("agent", "", "donating agent (default the token's agent, else $AGENT_ID)")
-		id, err := parseOne(fs, rest, "ID", "", "id")
-		if err != nil {
-			return parseExit(err)
-		}
-		if *agent, err = writingAgent(c, *agent); err != nil {
-			return fail(stderr, err)
-		}
-		if *agent == "" {
-			return parseExit(misuse(fs, "--agent is required"))
-		}
-		method, path = "POST", "/donations/"+url.PathEscape(id)+"/fulfill"
-		body = map[string]string{"donor_agent_id": *agent}
-	case "cancel":
-		fs := newFlags("donation cancel", "usage: hl donation cancel ID", stderr)
-		id, err := parseOne(fs, rest, "ID", "", "id")
-		if err != nil {
-			return parseExit(err)
-		}
-		method, path, body = "POST", "/donations/"+url.PathEscape(id)+"/cancel", map[string]any{}
-	default:
-		fmt.Fprintf(stderr, "hl: donation: unknown subcommand %q\n\n%s\n", sub, donationUsage)
-		return 2
-	}
-	var out json.RawMessage
-	if err := c.Do(method, path, body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	if err := printLines(stdout, stderr, "donation "+sub+": none", out); err != nil {
-		return fail(stderr, err)
-	}
-	return 0
 }

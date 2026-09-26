@@ -177,35 +177,6 @@ func TestJobLogsPrintsPlainLines(t *testing.T) {
 	}
 }
 
-func TestDonation(t *testing.T) {
-	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "ok"} })
-	t.Setenv("AGENT_ID", "a")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-	for _, tc := range []struct {
-		args []string
-		path string
-		body map[string]any
-	}{
-		{[]string{"donation", "request", "--credits", "0.5", "--reason", "one more seed"}, "/donations",
-			map[string]any{"agent_id": "a", "platform_experiment_id": "pe-1", "credits_want": 0.5, "reason": "one more seed"}},
-		{[]string{"donation", "fulfill", "d-1"}, "/donations/d-1/fulfill", map[string]any{"donor_agent_id": "a"}},
-		{[]string{"donation", "cancel", "d-1"}, "/donations/d-1/cancel", nil},
-		{[]string{"donation", "list", "--status", "open"}, "/donations", nil},
-	} {
-		*got = nil
-		var stdout, stderr bytes.Buffer
-		if code := run(tc.args, &stdout, &stderr); code != 0 {
-			t.Fatalf("%v: exit %d, stderr %s", tc.args, code, stderr.String())
-		}
-		if (*got)[0].Path != tc.path || (tc.body != nil && !reflect.DeepEqual((*got)[0].Body, tc.body)) {
-			t.Fatalf("%v: request %+v", tc.args, (*got)[0])
-		}
-	}
-	if (*got)[0].Query != "platform_experiment_id=pe-1&status=open" {
-		t.Fatalf("donation list query = %q", (*got)[0].Query)
-	}
-}
-
 func TestHypothesisQueryTakesCypherFlag(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"columns": []string{"n"}, "rows": [][]any{{1}}} })
 	var stdout, stderr bytes.Buffer

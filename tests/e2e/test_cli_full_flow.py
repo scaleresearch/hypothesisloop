@@ -87,11 +87,11 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     assert pe_id, f"hl platform-experiments create: no id in response: {pe_create_out}"
 
     # -- hl platform-experiments agents add --
-    signup_out = api.hl("platform-experiments", "agents", "add", pe_id, "--name", "CLI Flow Agent")
+    signup_out = api.hl("platform-experiments", "agents", "add", "--platform-experiment", pe_id, "--name", "CLI Flow Agent")
     agent = json.loads(signup_out)["agent_id"]  # one joined agent per line, as valid JSON
     assert agent.startswith("ag-"), f"hl platform-experiments agents add: the platform issues the id, got {signup_out}"
 
-    api.hl("platform-experiments", "start", "--id", pe_id)  # hl platform-experiments start: succeeded
+    api.hl("platform-experiments", "start", "--platform-experiment", pe_id)  # hl platform-experiments start: succeeded
 
     # -- hl hypothesis submit --file / list --
     hyp_text = f"Higher batch size improves throughput without hurting val_accuracy (cli-{run_id})"

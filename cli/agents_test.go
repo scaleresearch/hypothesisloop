@@ -12,7 +12,7 @@ func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
 		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "hosted": true, "launcher": "main"}}}
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "agents", "add", "pe-1", "--hosted", "--flavor", "data-search",
+	code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--hosted", "--flavor", "data-search",
 		"--hyperparameters", `{"batch_size":64}`, "--model", "claude-sonnet-5", "--name", "sweep", "--role", "baseline", "--quota-tier", "burst_only"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -55,7 +55,7 @@ func TestAgentsAddJoinsARegisteredAgent(t *testing.T) {
 		return map[string]any{"agents": []map[string]any{{"agent_id": "jane"}}}
 	})
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "agents", "add", "pe-1", "--agent", "jane"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--agent", "jane"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	request := (*got)[0]
@@ -64,7 +64,7 @@ func TestAgentsAddJoinsARegisteredAgent(t *testing.T) {
 	}
 
 	*got = nil
-	if code := run([]string{"platform-experiments", "agents", "add", "pe-1", "--agent", "bot-1", "--quota-tier", "guaranteed"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--agent", "bot-1", "--quota-tier", "guaranteed"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	if body := (*got)[0].Body; body["quota_tier"] != "guaranteed" || body["agent_id"] != "bot-1" {
@@ -103,13 +103,13 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	})
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "agents", "remove", "pe-1", "ag-1"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "agents", "remove", "--platform-experiment", "pe-1", "ag-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("remove: exit %d, stderr %s", code, stderr.String())
 	}
 	if r := (*got)[0]; r.Method != "DELETE" || r.Path != "/platform-experiments/pe-1/agents/ag-1" || !strings.Contains(stdout.String(), "removed") {
 		t.Fatalf("remove request = %+v, stdout %q", r, stdout.String())
 	}
-	for _, args := range [][]string{{"remove"}, {"remove", "pe-1"}, {"remove", "pe-1", "ag-1", "ag-2"}} {
+	for _, args := range [][]string{{"remove"}, {"remove", "pe-1", "ag-1"}, {"list", "pe-1"}, {"add", "pe-1"}} {
 		if code := run(append([]string{"platform-experiments", "agents"}, args...), &stdout, &stderr); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
@@ -132,7 +132,7 @@ func TestAgentsRemoveAndList(t *testing.T) {
 // read the token before parsing its flags, so every coordinator exited as it started.
 func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	code, stdout, stderr := hl(t, "platform-experiments", "agents", "--help")
-	if code != 0 || !strings.Contains(stdout, "\n  add [PE]") || !strings.Contains(stdout, "\n  list [PE]") {
+	if code != 0 || !strings.Contains(stdout, "\n  add [--platform-experiment PE]") || !strings.Contains(stdout, "\n  list [--platform-experiment PE]") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 }

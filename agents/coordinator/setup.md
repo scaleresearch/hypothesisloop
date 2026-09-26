@@ -200,7 +200,7 @@ schedule and the stages answer 403 to its token); it writes those down for you.
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
   mirrored: update `agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`'s `description` to
   the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then send that block alone with `hl platform-experiments update
-  $PLATFORM_EXPERIMENT_ID --description-file FILE`, immediately,
+  --platform-experiment $PLATFORM_EXPERIMENT_ID --description-file FILE`, immediately,
   same turn as the file edit — never batched for later. (The update takes only the fields that
   change, and once the platform experiment is `running` only `name`/`description` do, so the
   whole experiment.yaml is refused there.) Then `hl
@@ -286,9 +286,9 @@ and records its flavor (`--flavor`, one of `generalist`, `hyperparameter-search`
 (`--model`; omit it and the platform's default applies). What the command prints is what the
 agent runs: flavor and model are resolved at that moment and never again. One call per agent:
 
-    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor generalist
-    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor generalist
-    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
+    hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --flavor generalist
+    hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --flavor generalist
+    hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}'
 
 Add `--hosted` and the platform runs them: its launcher starts one machine per agent from the
@@ -329,7 +329,7 @@ alone, instead of putting a token on a command line, where it would sit in the p
 in the shell's history:
 
     umask 077
-    hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
+    hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --flavor hyperparameter-search \
       --hyperparameters '{"batch_size":64}' |
       jq -r --arg api "$API_URL" '"API_URL=\($api)\nHL_TOKEN=\(.token)"' \
       > /tmp/hlrun/<run>/agent-1.env
@@ -341,7 +341,7 @@ in the shell's history:
 A secret is named with a bare `-e NAME`, which hands the container the value from this shell's
 environment. `hl` in the container reads its agent and its platform experiment from the token,
 so no command of an agent names either. A lost token is printed again by
-`hl platform-experiments agents add $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
+`hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
 nothing for an agent that already joined. `hl platform-experiments agents remove` takes an agent
 out again while the experiment is still open.
 
@@ -374,7 +374,7 @@ can push, a job's and a coordinator's can only read, and none is handed out once
 experiment is closed or the agent cut.
 
 Confirm the roster before handing off: `hl platform-experiments agents list
-$PLATFORM_EXPERIMENT_ID` shows every agent with what it was launched with, and a self-run agent
+--platform-experiment $PLATFORM_EXPERIMENT_ID` shows every agent with what it was launched with, and a self-run agent
 whose container is gone from `podman ps` has exited: read its `.err`.
 
 Hand off to `supervise.md` once agents are running.

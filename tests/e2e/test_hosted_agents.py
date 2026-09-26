@@ -376,7 +376,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["description"] == "the coordinator's brief"
 
         # Its findings are the platform experiment's summary, written through hl with no agent id.
-        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "what the run found so far")
+        as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "what the run found so far")
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["summary"] == "what the run found so far"
         refused = as_coordinator.hl_expect("hypothesis", "comment", "hyp-any", "--text", "t")
         assert refused.returncode == 1 and "no agent" in refused.stderr, f"a coordinator commenting as nobody: {refused.stderr}"
@@ -398,7 +398,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         assert gone is None and again["name"] in ending, f"after the close: instance {gone}, ending {ending}"
 
         # After the close its token still reads and still writes the summary, and nothing else.
-        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "the final summary")
+        as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "the final summary")
         assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
         late = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
         assert late.status_code in (403, 409, 400), f"a description update after the close: {late.status_code} {late.text}"
@@ -435,8 +435,8 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         # A platform experiment starts with at least one agent in it.
         with_repo.add_agents(pe_id)
         with_repo.start_platform_experiment(pe_id)
-        as_coordinator.hl("platform-experiments", "summary", pe_id, "--text", "why it is closed")
-        as_coordinator.hl("platform-experiments", "close", pe_id)
+        as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "why it is closed")
+        as_coordinator.hl("platform-experiments", "close", "--platform-experiment", pe_id)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
         assert pe["status"] == "closed" and pe["summary"] == "why it is closed", pe
     finally:

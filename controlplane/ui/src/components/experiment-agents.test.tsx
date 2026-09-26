@@ -93,7 +93,7 @@ describe('adding agents', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     await screen.findByTestId('secret')
     expect(screen.getByText(/shows the same one again/)).toBeTruthy()
-    expect(screen.getByText('hl platform-experiments agents add pe-1 --agent ag-new1')).toBeTruthy()
+    expect(screen.getByText('hl platform-experiments agents add --platform-experiment pe-1 --agent ag-new1')).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/never again|only time|shown once/)
   })
 

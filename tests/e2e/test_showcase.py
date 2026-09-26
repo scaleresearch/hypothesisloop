@@ -133,7 +133,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         assert pe_id in b.api.hl("platform-experiments", "list", "--shared")
         assert pe_id not in b.api.hl("platform-experiments", "list", "--shared=false")
         assert pe_id not in b.api.get("/hypotheses?limit=200").text and hyp_id not in b.api.get("/hypotheses?limit=200").text
-        assert json.loads(b.api.hl("platform-experiments", "get", pe_id))["shared"] is True
+        assert json.loads(b.api.hl("platform-experiments", "get", "--platform-experiment", pe_id))["shared"] is True
 
         # Its own org and its own agent work in it as before.
         own = a.api.post_hypothesis(pe_id, text=f"a second claim {uuid.uuid4().hex[:8]}", agent_id=agent)

@@ -61,10 +61,8 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
 	}
 	spending := map[string][]string{
-		"job submit":       {"job", "submit", job},
-		"donation request": {"donation", "request", "--credits", "1", "--reason", "r"},
-		"donation fulfill": {"donation", "fulfill", "don-1"},
-		"data-key":         {"data-key"},
+		"job submit": {"job", "submit", job},
+		"data-key":   {"data-key"},
 	}
 	for name, args := range graphWrites {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
@@ -191,7 +189,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		t.Fatalf("summary: exit %d, stderr %s", code, stderr.String())
 	}
 	file := writeFile(t, "from a file\n")
-	if code := run([]string{"platform-experiments", "summary", "pe-2", "--file", file}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "summary", "--platform-experiment", "pe-2", "--file", file}, &stdout, &stderr); code != 0 {
 		t.Fatalf("summary from a file: exit %d, stderr %s", code, stderr.String())
 	}
 	if code := run([]string{"platform-experiments", "close"}, &stdout, &stderr); code != 0 {
@@ -202,7 +200,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		t.Fatalf("update the description: exit %d, stderr %s", code, stderr.String())
 	}
 	fields := writeFile(t, "max_agents: 4\n")
-	if code := run([]string{"platform-experiments", "update", "pe-2", "--name", "renamed", fields}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "update", "--platform-experiment", "pe-2", "--name", "renamed", fields}, &stdout, &stderr); code != 0 {
 		t.Fatalf("update fields of a named experiment: exit %d, stderr %s", code, stderr.String())
 	}
 	if code := run([]string{"platform-experiments", "update"}, &stdout, &stderr); code != 2 {

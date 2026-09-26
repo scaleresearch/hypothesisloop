@@ -25,8 +25,8 @@
 // --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, which the
 // experimentator harness sets in an agent's container.
 //
-//	hl platform-experiments agents add pe-123 --hosted --flavor generalist
-//	hl platform-experiments agents add pe-123 --agent jane --quota-tier guaranteed
+//	hl platform-experiments agents add --platform-experiment pe-123 --hosted --flavor generalist
+//	hl platform-experiments agents add --platform-experiment pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
 //	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123
 //	hl job submit --agent jane job.yaml
@@ -96,8 +96,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdDataKey(client, rest, stdout, stderr)
 	case "git-credential":
 		return cmdGitCredential(client, rest, os.Stdin, stdout, stderr)
-	case "donation":
-		return cmdDonation(client, rest, stdout, stderr)
 	case "hypothesis":
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
@@ -122,13 +120,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage: hl <command> ...
 
-  platform-experiments  [list] | get [PE] | create [FILE] | start PE | update [PE] --description-file F | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list
+  platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list
   quota                 your accelerator-hours, used and granted; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
   data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
   git-credential        git's credential helper for your experiment's repository; git runs it
-  donation              list | request | fulfill ID | cancel ID
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
   code                  push | fetch CODE_REF FILE: your code, kept by the platform when the experiment has no repository
@@ -139,9 +136,10 @@ const usage = `usage: hl <command> ...
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
-An ID is positional; --id ID works too. --agent and --platform-experiment default to the agent
-and the platform experiment an agent's token names, and for another token to $AGENT_ID and
-$PLATFORM_EXPERIMENT_ID, which an agent's shell does not set. Where --agent filters a list it
+An ID is positional; --id ID works too. The platform experiment is never an operand: every
+command that works in one takes --platform-experiment PE. --agent and --platform-experiment
+default to the agent and the platform experiment an agent's token names, so an agent writes
+neither, and for another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
 has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
@@ -362,6 +360,21 @@ func parseOne(fs *flagSet, argv []string, what, def string, aliases ...string) (
 	return got[0], nil
 }
 
+// experimentFlag registers --platform-experiment, the one way a command names its platform
+// experiment. It is never an operand and has no shorter spelling.
+func experimentFlag(fs *flagSet) *string {
+	return fs.String("platform-experiment", "", "the platform experiment (default the token's, else $"+platformExperimentEnv+")")
+}
+
+// namedExperiment is the platform experiment a command works in (see experimentOf), or a misuse
+// when nothing names one.
+func namedExperiment(fs *flagSet, c *apiclient.Client, flagValue string) (string, error) {
+	if id := experimentOf(c, flagValue); id != "" {
+		return id, nil
+	}
+	return "", misuse(fs, "want --platform-experiment: HL_TOKEN names none and $"+platformExperimentEnv+" is not set")
+}
+
 // parseExit is the exit code for a parse error: 0 for an explicit -h or --help, else 2.
 func parseExit(err error) int {
 	if errors.Is(err, flag.ErrHelp) {
@@ -550,7 +563,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get [PE] | create [FILE] | start PE | update [PE] --description-file F | propose [FILE] | decline --reason TEXT | close [PE] | summary [PE] | agents add|remove|list", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -649,12 +662,12 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 	return 0
 }
 
-// cmdPlatformExperimentsUpdate handles `hl platform-experiments update PE [FILE|-]`. FILE is a
+// cmdPlatformExperimentsUpdate handles `hl platform-experiments update [FIELDS.yaml]`. FILE is a
 // YAML file shaped exactly like the create body (see controlplane/settings/examples/
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
 // is editable; once running, only name and description are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [PE] [--description-file FILE] [--description TEXT] [--name NAME] [FIELDS.yaml]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and leaves every other as it is. The brief is one command:
 
@@ -664,7 +677,7 @@ FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
 budget_accelerator_hours, max_agents, ends_at, metrics, report_interval_seconds. While the
 platform experiment is open any of them can change; once it runs only name and description do.
 A coordinator's token changes the description only.`, stderr)
-	id := fs.String("id", "", "")
+	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	description := fs.String("description", "", "the new description")
 	descriptionFile := fs.String("description-file", "", "read the new description from this file, - for stdin")
@@ -672,15 +685,12 @@ A coordinator's token changes the description only.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	// One operand that is a file on disk is FIELDS.yaml with the experiment from the environment.
-	if *id == "" && len(operands) > 0 {
-		if _, statErr := os.Stat(operands[0]); len(operands) == 2 || statErr != nil {
-			*id, operands = operands[0], operands[1:]
-		}
+	if len(operands) > 1 {
+		return parseExit(misuse(fs, "want at most one FIELDS.yaml, got %d operands: the platform experiment is --platform-experiment", len(operands)))
 	}
-	*id = experimentOf(c, *id)
-	if *id == "" || len(operands) > 1 {
-		return parseExit(misuse(fs, "want PE or $"+platformExperimentEnv+", and at most one FIELDS.yaml"))
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
 	}
 	if *description != "" && *descriptionFile != "" {
 		return parseExit(misuse(fs, "--description and --description-file are two ways to say one thing"))
@@ -715,7 +725,7 @@ A coordinator's token changes the description only.`, stderr)
 		return parseExit(misuse(fs, "nothing to change: name a field"))
 	}
 	var out any
-	if err := c.Do("PATCH", "/platform-experiments/"+url.PathEscape(*id), body, &out); err != nil {
+	if err := c.Do("PATCH", "/platform-experiments/"+url.PathEscape(id), body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
@@ -723,7 +733,7 @@ A coordinator's token changes the description only.`, stderr)
 }
 
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--pe PE] [FILE|-]
+	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [FILE|-]
 
 For the planner of a draft. FILE is YAML of this shape, with every field shown required unless
 it says optional:
@@ -758,14 +768,17 @@ it says optional:
 The proposal is checked before it is stored, and a refusal names what to fix. One that passes is
 stored at once, replaces the one before, releases your machine and is what the person is asked
 to accept: send only the finished proposal, never one written to try the checks.`, stderr)
-	pe := fs.String("pe", "", "the draft (default $"+platformExperimentEnv+")")
+	pe := experimentFlag(fs)
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
 	}
-	id := experimentOf(c, *pe)
-	if id == "" || len(operands) > 1 {
-		return parseExit(misuse(fs, "want --pe or $"+platformExperimentEnv+", and at most one FILE"))
+	if len(operands) > 1 {
+		return parseExit(misuse(fs, "want at most one FILE, got %d operands", len(operands)))
+	}
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
 	}
 	path := "-"
 	if len(operands) == 1 {
@@ -785,21 +798,23 @@ to accept: send only the finished proposal, never one written to try the checks.
 }
 
 func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--pe PE] --reason TEXT
+	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --reason TEXT
 
 For the planner of a draft, when the goal cannot be made into an experiment: nothing measurable,
 or nothing this platform can run. The reason is shown to the person who wrote the goal in place
 of a proposal, so say in plain words why, and what would make it plannable. A proposal you made
 before no longer stands. The person may answer with a revision, which starts you again.`, stderr)
-	pe := fs.String("pe", "", "the draft (default $"+platformExperimentEnv+")")
+	pe := experimentFlag(fs)
 	reason := fs.String("reason", "", "why no experiment is proposed")
-	operands, err := parseArgs(fs, args)
-	if err != nil {
+	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
-	id := experimentOf(c, *pe)
-	if id == "" || len(operands) > 0 || strings.TrimSpace(*reason) == "" {
-		return parseExit(misuse(fs, "want --reason, and --pe or $"+platformExperimentEnv))
+	if strings.TrimSpace(*reason) == "" {
+		return parseExit(misuse(fs, "want --reason"))
+	}
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
 	}
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]string{"reason": *reason}, &out); err != nil {
@@ -810,11 +825,14 @@ before no longer stands. The person may answer with a revision, which starts you
 }
 
 func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [PE]
+	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
 
-The platform experiment (default $PLATFORM_EXPERIMENT_ID): its status, description, metrics,
-stages and current_stage.`, stderr)
-	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
+The platform experiment: its status, description, metrics, stages and current_stage.`, stderr)
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := namedExperiment(fs, c, *pe)
 	if err != nil {
 		return parseExit(err)
 	}
@@ -833,8 +851,12 @@ stages and current_stage.`, stderr)
 }
 
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments start", "usage: hl platform-experiments start PE", stderr)
-	id, err := parseOne(fs, args, "PE", "", "id")
+	fs := newFlags("platform-experiments start", "usage: hl platform-experiments start [--platform-experiment PE]", stderr)
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := namedExperiment(fs, c, *pe)
 	if err != nil {
 		return parseExit(err)
 	}
@@ -847,12 +869,16 @@ func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, std
 }
 
 func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [PE]
+	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--platform-experiment PE]
 
-Ends the platform experiment (default $PLATFORM_EXPERIMENT_ID) for good: every job still running
+Ends the platform experiment for good: every job still running
 is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
 summary can still be written afterwards.`, stderr)
-	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := namedExperiment(fs, c, *pe)
 	if err != nil {
 		return parseExit(err)
 	}
@@ -865,15 +891,19 @@ summary can still be written afterwards.`, stderr)
 }
 
 func cmdPlatformExperimentsSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [PE] --text T | --file FILE|-
+	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [--platform-experiment PE] --text T | --file FILE|-
 
-Writes the summary of the platform experiment (default $PLATFORM_EXPERIMENT_ID): what the run
+Writes the summary of the platform experiment: what the run
 found and what the next one should do differently. Each write replaces the one before, so write
 the whole text; hl platform-experiments get shows it as summary. It can be written while the
 experiment runs and after it closed.`, stderr)
 	text := fs.String("text", "", "the summary")
 	file := fs.String("file", "", "read the summary from this file, - for stdin")
-	id, err := parseOne(fs, args, "PE", experimentOf(c, ""), "id")
+	pe := experimentFlag(fs)
+	if err := parseNone(fs, args); err != nil {
+		return parseExit(err)
+	}
+	id, err := namedExperiment(fs, c, *pe)
 	if err != nil {
 		return parseExit(err)
 	}
