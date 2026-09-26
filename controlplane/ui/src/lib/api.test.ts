@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessToken, endSession } from '@/lib/auth'
 import {
   ApiError, addHumanHypothesisComment, registerCluster, connectGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
-  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
+  fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings, setClusterEnabled,
   registerHumanHypothesis, revokeAPIKey,
   acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
 } from '@/lib/api'
@@ -111,6 +111,19 @@ describe('live capacity', () => {
     fetchMock().mockResolvedValue(answer(200, { clusters: [] }))
     await fetchResourceCapacity('org_b')
     expect(sent().url.href).toBe('http://api.test/resource-catalog/capacity?org_id=org_b')
+  })
+})
+
+describe('a cluster turned off or on for an org\'s jobs', () => {
+  it('is one POST to the verb, with the name as a path segment', async () => {
+    fetchMock().mockResolvedValue(answer(200, { name: 'lab', enabled: false }))
+    await setClusterEnabled('org_b', 'lab', false)
+    expect(sent().init.method).toBe('POST')
+    expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/lab/disable')
+    fetchMock().mockClear()
+    fetchMock().mockResolvedValue(answer(200, { name: 'lab', enabled: true }))
+    await setClusterEnabled('org_b', 'lab', true)
+    expect(sent().url.href).toBe('http://api.test/orgs/org_b/clusters/lab/enable')
   })
 })
 

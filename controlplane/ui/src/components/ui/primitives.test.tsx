@@ -7,6 +7,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { MetricBar } from '@/components/ui/metric-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { EmptyState, ErrorMessage, Loading } from '@/components/ui/status-message'
+import { Switch } from '@/components/ui/switch'
 import { Segmented, Tabs } from '@/components/ui/tabs'
 import { statusColor, statusTone, tint } from '@/lib/colors'
 
@@ -115,5 +116,30 @@ describe('a copy button', () => {
     render(<CopyButton value="hls_token" />)
     await userEvent.click(screen.getByRole('button', { name: 'Copy' }))
     expect((await screen.findByRole('alert')).textContent).toBe('Copy failed, select the text instead: denied')
+  })
+})
+
+describe('a switch', () => {
+  function Held({ disabled }: { disabled?: boolean }) {
+    const [on, setOn] = useState(true)
+    return <Switch label="Use lab" checked={on} onChange={setOn} disabled={disabled} />
+  }
+
+  it('says what it switches and whether it is on, and turns with a click or the keyboard', async () => {
+    render(<Held />)
+    const control = screen.getByRole('switch', { name: 'Use lab' })
+    expect(control.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(control)
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    control.focus()
+    await userEvent.keyboard(' ')
+    expect(control.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('does not turn while disabled', async () => {
+    render(<Held disabled />)
+    const control = screen.getByRole('switch', { name: 'Use lab' })
+    await userEvent.click(control)
+    expect(control.getAttribute('aria-checked')).toBe('true')
   })
 })

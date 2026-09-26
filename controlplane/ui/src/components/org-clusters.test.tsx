@@ -2,13 +2,14 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchClusterSettings, fetchOrgClusters, putClusterSettings, registerCluster } from '@/lib/api'
+import { fetchClusterSettings, fetchOrgClusters, putClusterSettings, registerCluster, setClusterEnabled } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgClusters } from '@/components/org-clusters'
 import type { ClusterSettings, Me, OrgCluster } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   fetchClusterSettings: vi.fn(), fetchOrgClusters: vi.fn(), putClusterSettings: vi.fn(), registerCluster: vi.fn(),
+  setClusterEnabled: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -35,16 +36,20 @@ function show({ manage = true, as = me }: { manage?: boolean; as?: Me } = {}) {
 
 beforeEach(() => {
   clusters = [
-    { name: 'lab', org_id: 'org_a', shared: false, cluster_id: 'cid-1', created_at: at, owned: true, connected: true },
-    { name: 'new', org_id: 'org_a', shared: false, created_at: at, owned: true, connected: false },
+    { name: 'lab', org_id: 'org_a', shared: false, enabled: true, cluster_id: 'cid-1', created_at: at, owned: true, connected: true },
+    { name: 'new', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false },
   ]
   settings = { cluster_id: 'cid-1', scale_up_timeout_seconds: 600, max_speculative_accelerators: null, stuck_pending_timeout_seconds: null }
   vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters])
   vi.mocked(fetchClusterSettings).mockImplementation(async () => ({ ...settings }))
   vi.mocked(putClusterSettings).mockImplementation(async (id, next) => (settings = { cluster_id: id, ...next }))
+  vi.mocked(setClusterEnabled).mockReset()
+  vi.mocked(setClusterEnabled).mockImplementation(async (_orgID, name, enabled) => {
+    clusters = clusters.map(c => (c.name === name ? { ...c, enabled } : c))
+  })
   vi.mocked(registerCluster).mockImplementation(async (orgID, name) => {
     if (!clusters.some(c => c.name === name)) {
-      clusters = [...clusters, { name, org_id: orgID, shared: false, created_at: at, owned: true, connected: false }]
+      clusters = [...clusters, { name, org_id: orgID, shared: false, enabled: true, created_at: at, owned: true, connected: false }]
     }
     return { name, api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
   })
@@ -139,10 +144,10 @@ describe('a cluster name the API refuses', () => {
 
 describe('a cluster the platform shares with the org', () => {
   beforeEach(() => {
-    clusters = [...clusters, { name: 'platform-gpu', shared: true, created_at: at, owned: false, connected: true }]
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true }]
   })
 
-  it('is listed with its status, as the platform\'s, with nothing to change', async () => {
+  it('is listed with its status, as the platform\'s, with settings that are not the org\'s to change', async () => {
     show()
     const row = (await screen.findByRole('cell', { name: /^platform-gpu/ })).closest('tr')!
     expect(within(row).getByText('Connected')).toBeTruthy()
@@ -151,6 +156,63 @@ describe('a cluster the platform shares with the org', () => {
     expect(within(row).getByText('set by the platform')).toBeTruthy()
     expect(within(row).queryByRole('button')).toBeNull()
     expect(fetchClusterSettings).toHaveBeenCalledExactlyOnceWith('cid-1')
+  })
+})
+
+describe('turning a cluster off for the org\'s jobs', () => {
+  beforeEach(() => {
+    clusters = [...clusters, { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true }]
+  })
+
+  const rowOf = async (name: RegExp) => (await screen.findByRole('cell', { name })).closest('tr')!
+  const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] }
+
+  it('is an owner\'s on every row, the platform\'s shared cluster included, and says what it means', async () => {
+    show()
+    const row = await rowOf(/^platform-gpu/)
+    const use = within(row).getByRole('switch', { name: 'Use platform-gpu for the jobs of Ada' })
+    expect(use.getAttribute('aria-checked')).toBe('true')
+    expect(within(row).getByText('Used')).toBeTruthy()
+    expect(within(await rowOf(/^lab/)).getByRole('switch', { name: 'Use lab for the jobs of Ada' })).toBeTruthy()
+
+    await userEvent.click(use)
+    expect(setClusterEnabled).toHaveBeenCalledExactlyOnceWith('org_a', 'platform-gpu', false)
+    expect(await within(row).findByText('Not used')).toBeTruthy()
+    expect(within(row).getByText('Turned off: no job of Ada is placed here. Jobs already running finish.')).toBeTruthy()
+    expect(within(row).getByRole('switch').getAttribute('aria-checked')).toBe('false')
+    expect(within(await rowOf(/^lab/)).getByText('Used')).toBeTruthy()
+
+    await userEvent.click(within(row).getByRole('switch'))
+    expect(setClusterEnabled).toHaveBeenLastCalledWith('org_a', 'platform-gpu', true)
+    expect(await within(row).findByText('Used')).toBeTruthy()
+    expect(within(row).queryByText(/Jobs already running finish/)).toBeNull()
+  })
+
+  it('shows the API\'s refusal and leaves the cluster as it was', async () => {
+    vi.mocked(setClusterEnabled).mockRejectedValue(new Error('forbidden: only an owner of the org may change it'))
+    show()
+    const row = await rowOf(/^platform-gpu/)
+    await userEvent.click(within(row).getByRole('switch'))
+    expect(await screen.findByText('forbidden: only an owner of the org may change it')).toBeTruthy()
+    expect(within(row).getByRole('switch').getAttribute('aria-checked')).toBe('true')
+    expect(within(row).getByText('Used')).toBeTruthy()
+  })
+
+  it('is shown to a member as it stands, with nothing to switch', async () => {
+    clusters = clusters.map(c => (c.name === 'platform-gpu' ? { ...c, enabled: false } : c))
+    show({ as: member })
+    const row = await rowOf(/^platform-gpu/)
+    expect(within(row).getByText('Not used')).toBeTruthy()
+    expect(within(row).getByText(/no job of Ada is placed here/)).toBeTruthy()
+    expect(within(await rowOf(/^lab/)).getByText('Used')).toBeTruthy()
+    expect(screen.queryByRole('switch')).toBeNull()
+  })
+
+  it('is shown and not offered where clusters are only shown', async () => {
+    clusters = clusters.map(c => (c.name === 'lab' ? { ...c, enabled: false } : c))
+    show({ manage: false })
+    expect(within(await rowOf(/^lab/)).getByText('Not used')).toBeTruthy()
+    expect(screen.queryByRole('switch')).toBeNull()
   })
 })
 

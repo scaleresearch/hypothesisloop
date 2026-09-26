@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { fetchOrgClusters, registerCluster } from '@/lib/api'
-import type { RegisteredCluster } from '@/types'
+import { fetchOrgClusters, registerCluster, setClusterEnabled } from '@/lib/api'
+import type { OrgCluster, RegisteredCluster } from '@/types'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { Badge, StatusLabel } from '@/components/ui/badge'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
+import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/ui/tabs'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 
@@ -44,7 +45,8 @@ function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): st
 
 /**
  * The clusters the org's jobs can run on: its own, with the scheduler settings an owner reads and
- * changes, and any the platform provides. With `manage` an owner also adds a Kubernetes cluster
+ * changes, and any the platform provides, each with whether the org uses it for its jobs. With
+ * `manage` an owner also turns a cluster off or on for the org's jobs, adds a Kubernetes cluster
  * or a bare-metal node and reads the command that starts its agent.
  */
 export function OrgClusters({ manage }: { manage: boolean }) {
@@ -55,7 +57,21 @@ export function OrgClusters({ manage }: { manage: boolean }) {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
+  const [switching, setSwitching] = useState('')
   const manages = manage && administers
+
+  async function setEnabled(cluster: OrgCluster, enabled: boolean) {
+    setSwitching(cluster.name)
+    setActionError('')
+    try {
+      await setClusterEnabled(org.id, cluster.name, enabled)
+      await mutate()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSwitching('')
+    }
+  }
 
   // Registering a name the org already owns changes nothing and answers the same addresses, so
   // adding a cluster and reading an existing one's command again are the same call.
@@ -143,6 +159,7 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               <th>Cluster</th>
               <th>Status</th>
               <th>Provided by</th>
+              <th>Jobs of {org.name}</th>
               <th>Scheduler settings</th>
               {manages && <th />}
             </tr>
@@ -158,6 +175,24 @@ export function OrgClusters({ manage }: { manage: boolean }) {
                 <td className="text-xs">
                   {c.owned ? org.name : <Badge tone="accent">Platform</Badge>}
                   {c.shared && <div className="mt-0.5 text-2xs text-muted">shared with every org</div>}
+                </td>
+                <td>
+                  <div className="flex items-center gap-2">
+                    {manages && (
+                      <Switch
+                        label={`Use ${c.name} for the jobs of ${org.name}`}
+                        checked={c.enabled}
+                        disabled={switching !== ''}
+                        onChange={enabled => setEnabled(c, enabled)}
+                      />
+                    )}
+                    <StatusLabel tone={c.enabled ? 'success' : 'neutral'}>{c.enabled ? 'Used' : 'Not used'}</StatusLabel>
+                  </div>
+                  {!c.enabled && (
+                    <div className="mt-0.5 max-w-[220px] text-2xs text-muted">
+                      Turned off: no job of {org.name} is placed here. Jobs already running finish.
+                    </div>
+                  )}
                 </td>
                 <td>
                   {!c.owned

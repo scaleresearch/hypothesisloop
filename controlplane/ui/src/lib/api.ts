@@ -144,6 +144,12 @@ export function fetchOrgClusters(orgID: string): Promise<OrgCluster[]> {
   return apiFetch<{ clusters: OrgCluster[] }>(`/orgs/${orgID}/clusters`).then(r => r.clusters)
 }
 
+// Whether the org's jobs are placed on a cluster it can use, its own or a shared one. Turning it
+// off leaves the jobs already there to finish.
+export async function setClusterEnabled(orgID: string, name: string, enabled: boolean): Promise<void> {
+  await apiSend('POST', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}/${enabled ? 'enable' : 'disable'}`)
+}
+
 // Registering a name the org already owns changes nothing and answers the same. The answer's
 // runtime token is left behind here, so no page holds it.
 export async function registerCluster(orgID: string, name: string): Promise<RegisteredCluster> {

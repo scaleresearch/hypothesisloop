@@ -535,6 +535,9 @@ export interface OrgCluster {
   org_id?: string
   // The platform places every org's jobs on a shared cluster. Staff decide it.
   shared: boolean
+  // Whether the org's jobs are placed on the cluster. An owner of the org turns it off and on,
+  // for this org alone; jobs already running there finish.
+  enabled: boolean
   cluster_id?: string
   created_at: string
   // The org registered the cluster and may change its settings.
