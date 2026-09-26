@@ -149,6 +149,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "coordinator", "you closed it"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
+            ({**ended, "close_reason": "planning_limit_reached"}, {}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
             ({"status": "running"}, {}, "coordinator", "still running: this machine is being replaced"),
             ({"status": "running"}, {"finished_at": "2026-01-01T00:20:00Z"}, "generalist", "you said you have nothing left to do"),
         ):

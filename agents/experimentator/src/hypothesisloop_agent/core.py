@@ -159,6 +159,10 @@ def stop_cause(setup: RunSetup) -> str:
             closed_at = pe.get("closed_at", "an unrecorded time")
             if pe.get("close_reason") == "end_time_reached":
                 return f"You are being stopped because the platform experiment reached its end time, {pe['ends_at']}, and the platform closed it."
+            if pe.get("close_reason") == "planning_limit_reached":
+                return f"You are being stopped because the planning limit, {pe['ends_at']}, passed with nothing proposed, and the platform closed the draft."
+            if pe.get("close_reason") == "proposal_expired":
+                return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
             if pe.get("close_reason") == "closed_by_request":
                 return (f"You are being stopped because the platform experiment was closed before its end time: "
                         f"{_closer(pe.get('closed_by'), config.coordinates(cfg))} at {closed_at}.")
