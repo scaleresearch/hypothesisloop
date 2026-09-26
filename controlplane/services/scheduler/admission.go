@@ -282,8 +282,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		}
 	}
 
-	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d exceeds per-job max %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
+	// The count of a job on cores is its cores, which max_cpu_cores_per_job bounds below.
+	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorType.Kind() != domain.TypeKindCPU && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := exp.Job.Nodes()
 	if caps.MaxCPUCoresPerJob > 0 {
@@ -292,7 +293,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 		}
 		if total > caps.MaxCPUCoresPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %.2f cores (x%d nodes) exceeds per-job max %.2f", total/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
+			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", total/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 		}
 	}
 	if caps.MaxRAMGBPerJob > 0 {

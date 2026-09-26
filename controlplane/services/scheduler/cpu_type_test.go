@@ -79,6 +79,17 @@ func TestAJobOnCPUHoldsItsCoresAsUnitsOfTheCPUType(t *testing.T) {
 		}
 	}
 
+	// The cores of a job are bounded by the cores limit and by no limit on devices, and the
+	// refusal names the field the caller wrote.
+	caps := domain.QuotaConfig{MaxAcceleratorCountPerJob: 16, MaxCPUCoresPerJob: 64}
+	for cores, refused := range map[string]string{"24": "", "80": "job.cpu 80 cores (x1 nodes) is over the most cores one job may ask for, 64"} {
+		exp := cpuSubmission(1)
+		exp.Job.AcceleratorType, exp.Job.AcceleratorCount, exp.AcceleratorCount, exp.Job.CPU = "", 0, 0, cores
+		if err := ValidateExperiment(exp, caps); (err == nil) != (refused == "") || (err != nil && !strings.Contains(err.Error(), refused)) {
+			t.Errorf("cpu: %s under a limit of 64 cores and 16 devices: err = %v, want %q", cores, err, refused)
+		}
+	}
+
 	// A job runs on cores or on devices: one count cannot be both.
 	exp := cpuSubmission(4)
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{h100}
