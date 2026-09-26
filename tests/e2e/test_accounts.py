@@ -251,18 +251,23 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     a, b = orgs
     name, name_b = f"own-{a.marker}"[:40], f"own-{b.marker}"[:40]
 
-    command = a.api.hl("cluster", "add", name)
+    printed = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
-        rf"hl cluster token '{name}' --org '{a.org_id}' \| helm upgrade --install hypothesisloop-cluster-agent "
-        r"'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' --version '0\.1\.0\+([^' ]+)' --namespace hypothesisloop --create-namespace "
+        r"""sh -c '[^']*helm upgrade --install hypothesisloop-cluster-agent "\$chart" --version "\$version" """
+        r"""--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "\$@"' sh """
+        r"'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' '0\.1\.0\+([^' ]+)' "
         rf"--set-string 'clusterName={name}' --set-string 'apiURL=(http://\S+:8081)' --set-string 'metricsURL=(http://\S+:8084)' "
-        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)' --set-file runtimeToken=/dev/stdin\n", command)
-    assert match, f"hl cluster add printed {command!r}"
-    assert "hls_" not in command, "hl cluster add prints the runtime token, which then sits in scrollback and shell history"
-    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag = match.groups()
+        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)' --set-string 'jobImage=([^' ]+)'\n"
+        rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)
+    assert match, f"hl cluster add printed {printed!r}"
+    command = printed.split("\n", 1)[0]
+    assert "hls_" not in command and "hl cluster token" not in command, "the command holds the runtime token or needs hl on the machine"
+    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, job_image, shown_token = match.groups()
     assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"
+    assert job_image == f"{registry}/hypothesisloop-job:{image_tag}", "the job image named is the platform's, pushed beside the agents' images"
     token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
+    assert shown_token == token, "the token shown below the command is the cluster's"
     unregistered = a.api.hl_expect("cluster", "token", f"never-{a.marker}"[:40])
     assert unregistered.returncode != 0 and "hls_" not in unregistered.stdout, "hl cluster token registered a name to print its token"
     assert b.api.hl_expect("cluster", "token", name).returncode != 0, "org B read the runtime token of org A's cluster"
@@ -270,7 +275,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         assert "localhost" not in address and "127.0.0.1" not in address and "REPLACE" not in address, (
             f"hl cluster add printed {address}, which no runtime inside a cluster reaches"
         )
-    assert a.api.hl("cluster", "add", name) == command, "adding again prints the same command"
+    assert a.api.hl("cluster", "add", name) == printed, "adding again prints the same"
     registered = a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})
     assert (registered["runtime_token"], registered["api_url"], registered["metrics_url"]) == (token, api_url, metrics_url)
     assert (registered["registry"], registered["image_tag"]) == (registry, image_tag), "the command names the images the platform answered"

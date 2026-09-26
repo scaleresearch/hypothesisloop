@@ -397,29 +397,31 @@ type registeredCluster struct {
 	MetricsURL   string `json:"metrics_url"`
 	Registry     string `json:"registry"`
 	ImageTag     string `json:"image_tag"`
+	JobImage     string `json:"job_image"`
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
 
-Registers the cluster name for the org and prints the one command that attaches it, with the
-addresses its agent reaches the platform at and the registry and tag of its images filled in.
-The command holds no token, so none is in a shell history. Adding a name the org already has
-prints the same command again. A cluster takes its own org's jobs only.
+Registers the cluster name for the org and prints the one command that attaches it, complete:
+the addresses its agent reaches the platform at, the registry and tag of its images and the
+platform's job image, where a job that names no image runs. Below the command it prints the
+cluster's runtime token, which the command asks for when it runs, so the token is in no shell
+history and the machine needs neither hl nor an API key. Adding a name the org already has
+prints the same again. A cluster takes its own org's jobs only.
 
-Without --bare-metal the command is for a Kubernetes cluster: run it with helm installed and
-kubectl pointed at the cluster (add --kube-context to name another). It installs the runtime's
-chart from the registry, or upgrades it, and reads the cluster's runtime token with hl cluster
-token when it runs. helm uninstall hypothesisloop-cluster-agent -n
-hypothesisloop detaches the cluster again: it removes the cluster here, where its jobs go back
-to the queue, and stops what it runs there.
+Without --bare-metal the command is for a Kubernetes cluster: run it with helm 3.17 or newer
+and kubectl pointed at the cluster (add --kube-context to name another). It installs the
+runtime's chart from the registry, or upgrades it, and takes over a hypothesisloop-jobs
+namespace an older install left. helm uninstall hypothesisloop-cluster-agent -n hypothesisloop
+detaches the cluster again: it removes the cluster here, where its jobs go back to the queue,
+and stops what it runs there.
 
 With --bare-metal it is for one node with docker or podman, which is a cluster of its own. Run
-the command on the node. It copies the agent out of its image, installs it as a systemd unit
-that starts at boot, and asks for the cluster's runtime token, which is printed below the
-command; the node needs neither hl nor an API key. It needs root, outbound access to the
-platform and the image registries, and nothing inbound. Running the command of a newer image
-tag upgrades the agent. To detach the node again, on the node:
+the command on the node. It copies the agent out of its image and installs it as a systemd
+unit that starts at boot. It needs root, outbound access to the platform and the image
+registries, and nothing inbound. Running the command of a newer image tag upgrades the agent.
+To detach the node again, on the node:
 
   sudo bare-agent detach        removes the cluster here, stops its jobs and the agent
   sudo bare-agent uninstall     removes the agent from the node
@@ -439,26 +441,33 @@ hl cluster remove NAME detaches from this side: the agent stops its jobs and sta
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
 		return fail(stderr, err)
 	}
+	command := kubernetesCommand(registered)
 	if *bareMetal {
-		fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", bareMetalCommand(registered), registered.Name, registered.RuntimeToken)
-		return 0
+		command = bareMetalCommand(registered)
 	}
-	fmt.Fprintln(stdout, kubernetesCommand(id, registered))
+	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", command, registered.Name, registered.RuntimeToken)
 	return 0
 }
 
-// kubernetesCommand installs the runtime chart that make images pushed beside the images, at
-// the version that carries their tag. helm reads the runtime token on stdin.
-func kubernetesCommand(orgID string, registered registeredCluster) string {
+// kubernetesScript reads the runtime token, without echo when a person types it, and hands it
+// to helm on standard input, so it is in no shell history and no process's arguments. helm
+// installs the runtime chart that make images pushed beside the images, and with
+// --take-ownership takes over the jobs namespace an install from before the chart created.
+// $1 is the chart, $2 its version, the rest the chart's values.
+const kubernetesScript = `[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
+	`chart="$1" version="$2"; shift 2; ` +
+	`printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
+	`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"`
+
+// kubernetesCommand attaches a Kubernetes cluster and holds no token.
+func kubernetesCommand(registered registeredCluster) string {
 	set := func(key, value string) string {
 		return " --set-string " + shellQuote(key+"="+helmValue(value))
 	}
-	return fmt.Sprintf("hl cluster token %s --org %s | helm upgrade --install hypothesisloop-cluster-agent %s --version %s --namespace hypothesisloop --create-namespace",
-		shellQuote(registered.Name), shellQuote(orgID),
+	return fmt.Sprintf("sh -c %s sh %s %s", shellQuote(kubernetesScript),
 		shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"), shellQuote("0.1.0+"+registered.ImageTag)) +
 		set("clusterName", registered.Name) + set("apiURL", registered.APIURL) + set("metricsURL", registered.MetricsURL) +
-		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) +
-		" --set-file runtimeToken=/dev/stdin"
+		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) + set("jobImage", registered.JobImage)
 }
 
 // helmValue writes text as one value of helm's --set-string, which splits on commas and reads a
@@ -471,15 +480,15 @@ func helmValue(text string) string {
 // that carries it, with no container started, and the agent installs itself: it knows its own
 // unit and settings file, and asks for the runtime token on standard input. It is staged
 // beside its place because a running agent's binary cannot be written over. $1 is the cluster
-// name, $2 the API address and $3 the image.
+// name, $2 the API address, $3 the image that carries the agent and $4 the job image.
 const bareMetalScript = `engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
 	`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
-	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"`
+	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"`
 
 // bareMetalCommand installs the agent of a bare-metal node and holds no token.
 func bareMetalCommand(registered registeredCluster) string {
-	return fmt.Sprintf("sudo sh -c %s sh %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
-		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag))
+	return fmt.Sprintf("sudo sh -c %s sh %s %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
+		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag), shellQuote(registered.JobImage))
 }
 
 // shellQuote writes text as one word of a POSIX shell command, whatever it holds.

@@ -228,7 +228,7 @@ describe('what a person writes is filed under their session, with no author in t
 
 describe('registering a cluster', () => {
   it('answers with the cluster, its addresses and its runtime token, and nothing else of the answer', async () => {
-    const installedWith = { api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
+    const installedWith = { api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234', job_image: 'registry.cluster.test/images/hypothesisloop-job:abc1234' }
     fetchMock().mockResolvedValue(answer(200, { name: 'edge', org_id: 'org_a', shared: false, runtime_token: 'hls_runtime', ...installedWith }))
     await expect(registerCluster('org_a', 'edge')).resolves.toEqual({ name: 'edge', runtime_token: 'hls_runtime', ...installedWith })
     expect(sent().body).toEqual({ name: 'edge' })

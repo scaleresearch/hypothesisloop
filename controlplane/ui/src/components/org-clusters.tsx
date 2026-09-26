@@ -37,26 +37,33 @@ const KIND_HINT: Record<Kind, string> = {
 // What `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalScript). It runs on the node
 // as root: the node's engine copies the agent out of the image that carries it, and the agent
 // installs itself as a systemd unit and asks for the runtime token. $1 is the cluster name, $2 the
-// API address and $3 the image.
+// API address, $3 the image that carries the agent and $4 the job image.
 const BARE_METAL_SCRIPT =
   'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ' +
   'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
-  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"'
+  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"'
 
-// Neither command holds the runtime token, so it is in no shell history: a Kubernetes cluster's
-// reads it with `hl cluster token` when it runs, a bare-metal node's asks for it.
-function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): string {
+// What `hl cluster add` prints (cli/accounts.go kubernetesScript). It reads the runtime token,
+// without echo when a person types it, and hands it to helm on standard input. $1 is the chart,
+// $2 its version, the rest the chart's values.
+const KUBERNETES_SCRIPT =
+  '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ' +
+  'chart="$1" version="$2"; shift 2; ' +
+  'printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ' +
+  '--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"'
+
+// Neither command holds the runtime token, so it is in no shell history. Each asks for it when it
+// runs, and it is shown beside the command, so the machine needs neither hl nor an API key.
+function startCommand(kind: Kind, cluster: RegisteredCluster): string {
   const name = shellQuote(cluster.name)
   if (kind === 'bare-metal') {
     const image = shellQuote(`${cluster.registry}/hypothesisloop-bare-agent:${cluster.image_tag}`)
-    return `sudo sh -c ${shellQuote(BARE_METAL_SCRIPT)} sh ${name} ${shellQuote(cluster.api_url)} ${image}`
+    return `sudo sh -c ${shellQuote(BARE_METAL_SCRIPT)} sh ${name} ${shellQuote(cluster.api_url)} ${image} ${shellQuote(cluster.job_image)}`
   }
   const set = (key: string, value: string) => ` --set-string ${shellQuote(`${key}=${helmValue(value)}`)}`
-  return `hl cluster token ${name} --org ${shellQuote(orgID)} | helm upgrade --install hypothesisloop-cluster-agent ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ` +
-    `--version ${shellQuote(`0.1.0+${cluster.image_tag}`)} --namespace hypothesisloop --create-namespace` +
+  return `sh -c ${shellQuote(KUBERNETES_SCRIPT)} sh ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ${shellQuote(`0.1.0+${cluster.image_tag}`)}` +
     set('clusterName', cluster.name) + set('apiURL', cluster.api_url) + set('metricsURL', cluster.metrics_url) +
-    set('images.registry', cluster.registry) + set('images.tag', cluster.image_tag) +
-    ' --set-file runtimeToken=/dev/stdin'
+    set('images.registry', cluster.registry) + set('images.tag', cluster.image_tag) + set('jobImage', cluster.job_image)
 }
 
 // helm splits a --set-string value on commas and reads a backslash as an escape.
@@ -193,14 +200,14 @@ function ClusterPriority({ cluster, onSet, disabled }: { cluster: OrgCluster; on
       {registered && (
         <Secret
           label={`Start the agent of ${registered.name} · ${kind === 'kubernetes' ? 'Kubernetes cluster' : 'bare-metal node'}`}
-          value={startCommand(kind, org.id, registered)}
+          value={startCommand(kind, registered)}
           note={<>
             {kind === 'kubernetes' ? (
               <>
-                Run it with <span className="font-mono">helm</span> installed,{' '}
-                <span className="font-mono">kubectl</span> pointed at the cluster and{' '}
-                <span className="font-mono">hl</span> signed in as an owner of {org.name}, which is how it reads
-                the cluster&apos;s runtime token when it runs. To detach the
+                Run it with <span className="font-mono">helm</span> 3.17 or newer and{' '}
+                <span className="font-mono">kubectl</span> pointed at the cluster. It installs the runtime&apos;s
+                chart, or upgrades it, and asks for the runtime token below; the machine needs neither{' '}
+                <span className="font-mono">hl</span> nor an API key. To detach the
                 cluster: <span className="font-mono">helm uninstall hypothesisloop-cluster-agent -n hypothesisloop</span>
               </>
             ) : (
@@ -214,15 +221,13 @@ function ClusterPriority({ cluster, onSet, disabled }: { cluster: OrgCluster; on
             )}{' '}
             The command holds no token. The kind chosen above selects the command, and{' '}
             <span className="font-mono">Show start command</span> in the cluster&apos;s row brings it back.
-            {kind === 'bare-metal' && (
-              <span className="mt-2 grid gap-1">
-                <span>Runtime token of {registered.name}, which the command asks for:</span>
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="select-all break-all font-mono text-foreground" data-testid="runtime-token">{registered.runtime_token}</span>
-                  <CopyButton value={registered.runtime_token} />
-                </span>
+            <span className="mt-2 grid gap-1">
+              <span>Runtime token of {registered.name}, which the command asks for:</span>
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="select-all break-all font-mono text-foreground" data-testid="runtime-token">{registered.runtime_token}</span>
+                <CopyButton value={registered.runtime_token} />
               </span>
-            )}
+            </span>
           </>}
           dismiss="Hide"
           onDismiss={() => setRegistered(null)}

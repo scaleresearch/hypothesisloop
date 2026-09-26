@@ -168,6 +168,7 @@ export async function registerCluster(orgID: string, name: string): Promise<Regi
     metrics_url: registered.metrics_url,
     registry: registered.registry,
     image_tag: registered.image_tag,
+    job_image: registered.job_image,
   }
 }
 

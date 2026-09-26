@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -182,23 +183,32 @@ func TestAPIKeyCreateNeverNarrowsTheKeyFromTheEnvironment(t *testing.T) {
 	}
 }
 
+const registeredAnswer = `{"name":"%s","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's","registry":"registry.example/images","image_tag":"abc1234","job_image":"registry.example/images/hypothesisloop-job:abc1234"}`
+
 // The printed command lands in scrollback and, once run, in shell history, so it carries no
-// token: it reads the token when it runs. What the platform answered is quoted as one word each.
-func TestClusterAddPrintsACommandThatHoldsNoToken(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-east","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example/it's","registry":"registry.example/images","image_tag":"abc1234"}`)
+// token: it asks for the token, which is printed below it, when it runs. It is complete, with
+// what the platform answered quoted as one word each, and needs no hl on the machine.
+func TestClusterAddPrintsTheCompleteCommandForAKubernetesClusterAndItsToken(t *testing.T) {
+	accountsServer(t, nil, fmt.Sprintf(registeredAnswer, "gpu-east"))
 	code, stdout, stderr := hl(t, "cluster", "add", "gpu-east", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
-	if strings.Contains(stdout+stderr, "hls_cnVudGltZQ") {
-		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
+	command, rest, _ := strings.Cut(stdout, "\n")
+	if strings.Contains(command, "hls_") || strings.Contains(command, "hl cluster token") {
+		t.Fatalf("the command holds the token or reads it with hl: %q", command)
 	}
-	want := `hl cluster token 'gpu-east' --org 'org-1' | helm upgrade --install hypothesisloop-cluster-agent ` +
-		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' --version '0.1.0+abc1234' --namespace hypothesisloop --create-namespace ` +
+	want := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
+		`chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ` +
+		`--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' sh ` +
+		`'oci://registry.example/images/charts/hypothesisloop-cluster-agent' '0.1.0+abc1234' ` +
 		`--set-string 'clusterName=gpu-east' --set-string 'apiURL=https://api.example/a?b=1&c=$(id)' --set-string 'metricsURL=https://metrics.example/it'\''s' ` +
-		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234' --set-file runtimeToken=/dev/stdin` + "\n"
-	if stdout != want {
-		t.Fatalf("stdout: got = %q, want = %q, with the addresses the platform answered, each quoted", stdout, want)
+		`--set-string 'images.registry=registry.example/images' --set-string 'images.tag=abc1234' --set-string 'jobImage=registry.example/images/hypothesisloop-job:abc1234'`
+	if command != want {
+		t.Fatalf("command: got = %q, want = %q", command, want)
+	}
+	if rest != "\nIt asks for the runtime token of gpu-east:\nhls_cnVudGltZQ.c2ln\n" {
+		t.Fatalf("after the command: %q, want the token shown once below it", rest)
 	}
 }
 
@@ -218,7 +228,7 @@ func TestClusterAddEscapesWhatHelmWouldSplitAValueOn(t *testing.T) {
 // A bare-metal node has neither hl nor an API key, so its command reads nothing from the
 // platform: the token is shown once beside it and the command asks for it on the node.
 func TestClusterAddPrintsTheCommandThatInstallsABareMetalNodesAgentAndItsToken(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-box","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
+	accountsServer(t, nil, fmt.Sprintf(registeredAnswer, "gpu-box"))
 	code, stdout, stderr := hl(t, "cluster", "add", "gpu-box", "--bare-metal", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
@@ -228,8 +238,8 @@ func TestClusterAddPrintsTheCommandThatInstallsABareMetalNodesAgentAndItsToken(t
 		t.Fatalf("the node's command holds the token or reads it with hl: %q", command)
 	}
 	if !strings.HasPrefix(command, `sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) ||
-		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' sh `) ||
-		!strings.HasSuffix(command, ` sh 'gpu-box' 'https://api.example/a?b=1&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234'`) {
+		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh `) ||
+		!strings.HasSuffix(command, ` sh 'gpu-box' 'https://api.example/a?b=1&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234' 'registry.example/images/hypothesisloop-job:abc1234'`) {
 		t.Fatalf("command = %q", command)
 	}
 	if rest != "\nIt asks for the runtime token of gpu-box:\nhls_cnVudGltZQ.c2ln\n" {

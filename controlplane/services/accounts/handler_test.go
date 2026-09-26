@@ -675,6 +675,10 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 		if got := (RuntimeAddresses{APIURL: registered.APIURL, MetricsURL: registered.MetricsURL, Registry: registered.Registry, ImageTag: registered.ImageTag}); got != testRuntimeAddresses {
 			t.Fatalf("registered by %s: got = %+v, want what runtimes are configured to install with, %+v", caller, got, testRuntimeAddresses)
 		}
+		// The platform's job image is published beside the agents' images, under the same tag.
+		if registered.JobImage != "registry.test.invalid/images/hypothesisloop-job:abc1234" {
+			t.Fatalf("registered by %s: job image = %q", caller, registered.JobImage)
+		}
 	}
 
 	rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": "gpu-east"})

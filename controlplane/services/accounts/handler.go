@@ -162,6 +162,7 @@ type RegisteredCluster struct {
 	MetricsURL   string `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
 	Registry     string `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
 	ImageTag     string `json:"image_tag" doc:"The tag of the agents' images."`
+	JobImage     string `json:"job_image" doc:"The platform's job image, published beside the agents' images: where a job that names no image runs on this cluster once its agent is started with it."`
 }
 
 // ListedCluster is a cluster an org can use, whether the org has it on for its jobs, and whether
@@ -501,6 +502,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body RegisteredCluster }{Body: RegisteredCluster{
 			ClusterView: viewOf(cluster, in.ID), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
 			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
+			JobImage: h.runtimes.Registry + "/hypothesisloop-job:" + h.runtimes.ImageTag,
 		}}, nil
 	})
 

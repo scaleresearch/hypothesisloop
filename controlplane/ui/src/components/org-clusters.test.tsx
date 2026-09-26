@@ -55,7 +55,7 @@ beforeEach(() => {
     if (!clusters.some(c => c.name === name)) {
       clusters = [...clusters, { name, org_id: orgID, shared: false, enabled: true, priority: 100, created_at: at, owned: true, connected: false }]
     }
-    return { name, runtime_token: 'hls_cnVudGltZQ.c2ln', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
+    return { name, runtime_token: 'hls_cnVudGltZQ.c2ln', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234', job_image: 'registry.cluster.test/images/hypothesisloop-job:abc1234' }
   })
 })
 
@@ -304,7 +304,7 @@ describe('a cluster\'s start command', () => {
     const lab = (await screen.findByRole('cell', { name: /^lab/ })).closest('tr')!
     await userEvent.click(within(lab).getByRole('button', { name: 'Show start command' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab')
-    expect((await screen.findByTestId('secret')).textContent).toContain(`hl cluster token 'lab' --org 'org_a' | helm upgrade --install hypothesisloop-cluster-agent `)
+    expect((await screen.findByTestId('secret')).textContent).toContain(`--set-string 'clusterName=lab' `)
     expect(screen.getByText(/brings it back/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/never again|only time/)
   })
@@ -330,11 +330,15 @@ describe('adding a cluster', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add cluster' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'edge')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      `hl cluster token 'edge' --org 'org_a' | helm upgrade --install hypothesisloop-cluster-agent 'oci://registry.cluster.test/images/charts/hypothesisloop-cluster-agent' --version '0.1.0+abc1234' --namespace hypothesisloop --create-namespace ` +
+      `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; ` +
+      'chart="$1" version="$2"; shift 2; printf %s "$token" | helm upgrade --install hypothesisloop-cluster-agent "$chart" --version "$version" ' +
+      `--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "$@"' sh ` +
+      `'oci://registry.cluster.test/images/charts/hypothesisloop-cluster-agent' '0.1.0+abc1234' ` +
       `--set-string 'clusterName=edge' --set-string 'apiURL=http://api.cluster.test' --set-string 'metricsURL=http://metrics.cluster.test' ` +
-      `--set-string 'images.registry=registry.cluster.test/images' --set-string 'images.tag=abc1234' --set-file runtimeToken=/dev/stdin`,
+      `--set-string 'images.registry=registry.cluster.test/images' --set-string 'images.tag=abc1234' --set-string 'jobImage=registry.cluster.test/images/hypothesisloop-job:abc1234'`,
     )
-    expect(document.body.textContent).not.toContain('hls_')
+    // The machine has no hl to read the token with, so it is shown beside the command that asks for it.
+    expect(screen.getByTestId('runtime-token').textContent).toBe('hls_cnVudGltZQ.c2ln')
     expect(await screen.findByRole('cell', { name: 'edge' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Hide' }))
     expect(screen.queryByTestId('secret')).toBeNull()
@@ -352,15 +356,13 @@ describe('adding a cluster', () => {
     expect((await screen.findByTestId('secret')).textContent).toBe(
       `sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
       'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
-      `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' sh 'gpu-box-1' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234'`,
+      `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' sh 'gpu-box-1' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234' 'registry.cluster.test/images/hypothesisloop-job:abc1234'`,
     )
     expect(screen.getByText(/Run it on the node/)).toBeTruthy()
     expect(screen.getByText(/sudo bare-agent detach/)).toBeTruthy()
     // The node has no hl to read the token with, so it is shown beside the command that asks for it.
     expect(screen.getByTestId('runtime-token').textContent).toBe('hls_cnVudGltZQ.c2ln')
-    await userEvent.click(screen.getByRole('button', { name: 'Kubernetes cluster' }))
-    expect(screen.queryByTestId('runtime-token')).toBeNull()
-    expect(document.body.textContent).not.toContain('hls_')
+    expect(screen.getByTestId('secret').textContent).not.toContain('hls_')
   })
 
   it('switches the command on show when the other kind is chosen, without asking the API again', async () => {

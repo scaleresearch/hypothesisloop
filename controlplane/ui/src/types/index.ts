@@ -550,9 +550,8 @@ export interface OrgCluster {
   connected: boolean
 }
 
-// A registered cluster, the addresses its agent is started with and its runtime token. The token
-// is shown only for a bare-metal node, whose install command asks for it on the node; a
-// Kubernetes cluster's command reads it with `hl cluster token`.
+// A registered cluster, what its agent is started with and its runtime token, which is shown
+// beside the command that asks for it on the machine.
 export interface RegisteredCluster {
   name: string
   runtime_token: string
@@ -562,6 +561,8 @@ export interface RegisteredCluster {
   // The registry and tag the agent's images are pulled under.
   registry: string
   image_tag: string
+  // The platform's job image: where a job that names no image runs on this cluster.
+  job_image: string
 }
 
 // What became of the machine the platform runs for a hosted agent or a coordinator, as its
