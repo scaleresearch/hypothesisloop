@@ -19,7 +19,7 @@ import (
 // joins a platform experiment.
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Defaults to the generated id."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Omitted, an agent is named by its place in the platform experiment, \"Researcher 2\", and a human by the generated id."`
 	Kind            string         `json:"kind,omitempty" doc:"Kind of a created agent: \"agent\" (default) or \"human\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
@@ -182,6 +182,21 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	return []domain.AgentSignup{*joined}, nil
 }
 
+// nextAgentName is what a created agent is called when the caller named none: "Researcher 3"
+// for the third agent of the experiment, which is what a person reads in every list in place of
+// a generated id. A person joining as themselves keeps the id. Two agents added at the same
+// moment, or one added after another left, may share a name; the id is what tells them apart.
+func (s *PlatformExperimentsService) nextAgentName(ctx context.Context, platformExpID string, kind domain.AgentKind, id string) (string, error) {
+	if kind != domain.AgentKindAgent {
+		return id, nil
+	}
+	joined, err := s.store.ListSignups(ctx, platformExpID)
+	if err != nil {
+		return "", fmt.Errorf("platform_experiments.AddAgent: %w", err)
+	}
+	return fmt.Sprintf("Researcher %d", len(joined)+1), nil
+}
+
 func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
 	kind := domain.AgentKind(req.Kind)
 	if kind == "" {
@@ -206,7 +221,9 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	}
 	name := req.Name
 	if name == "" {
-		name = id
+		if name, err = s.nextAgentName(ctx, platformExpID, kind, id); err != nil {
+			return nil, err
+		}
 	}
 	signup.AgentID = id
 	agent := &domain.Agent{ID: id, Name: name, Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}

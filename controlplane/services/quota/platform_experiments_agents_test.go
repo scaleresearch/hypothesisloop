@@ -41,6 +41,14 @@ func (f *rosterStore) ExperimentBase(context.Context, string, string) ([]byte, e
 
 const rosterMaxHosted = 6
 
+func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
+	ids := make([]string, 0, len(f.signups))
+	for _, s := range f.signups {
+		ids = append(ids, s.AgentID)
+	}
+	return ids, nil
+}
+
 func (f *rosterStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !f.unregistered, nil
 }
@@ -284,7 +292,8 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 	if agents[0]["token"] != want {
 		t.Errorf("token = %v, want the agent:pe-1/%s token", agents[0]["token"], id)
 	}
-	if agents[0]["hosted"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != id {
+	// Named by its place, which is what a person reads in every list in place of the id.
+	if agents[0]["hosted"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != "Researcher 1" {
 		t.Errorf("agent = %v", agents[0])
 	}
 
@@ -636,5 +645,24 @@ func TestACountIsNoPartOfTheRequest(t *testing.T) {
 	}
 	if len(store.signups) != 0 || len(store.agents) != 0 {
 		t.Fatalf("a refused request added %d agents", len(store.signups))
+	}
+}
+
+// Every list showed a created agent by its generated id, which nobody can tell apart.
+func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	r := agentsRouter(t, store, staff)
+	call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
+	_, second := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
+	_, named := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`)
+	_, person := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"kind":"human"}`)
+	if got := joined(t, second)[0]["name"]; got != "Researcher 2" {
+		t.Errorf("the second agent is named %v, want Researcher 2", got)
+	}
+	if got := joined(t, named)[0]["name"]; got != "ablation" {
+		t.Errorf("a stated name became %v", got)
+	}
+	if p := joined(t, person)[0]; p["name"] != p["agent_id"] {
+		t.Errorf("a person joined as %v, want their id as the name", p)
 	}
 }
