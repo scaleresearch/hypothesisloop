@@ -156,6 +156,7 @@ export async function registerCluster(orgID: string, name: string): Promise<Regi
   const registered = await apiSend<RegisteredCluster>('POST', `/orgs/${orgID}/clusters`, { name })
   return {
     name: registered.name,
+    runtime_token: registered.runtime_token,
     api_url: registered.api_url,
     metrics_url: registered.metrics_url,
     registry: registered.registry,

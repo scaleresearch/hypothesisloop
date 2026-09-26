@@ -547,11 +547,12 @@ export interface OrgCluster {
   connected: boolean
 }
 
-// A registered cluster and the addresses its agent is started with. The API also answers with
-// the cluster's runtime token, which the UI drops on arrival: `hl cluster token` reads it where
-// the agent is installed.
+// A registered cluster, the addresses its agent is started with and its runtime token. The token
+// is shown only for a bare-metal node, whose install command asks for it on the node; a
+// Kubernetes cluster's command reads it with `hl cluster token`.
 export interface RegisteredCluster {
   name: string
+  runtime_token: string
   // Where the cluster's agent reaches the API and sends metrics.
   api_url: string
   metrics_url: string

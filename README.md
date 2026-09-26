@@ -445,44 +445,62 @@ uninstalls regardless. `hl cluster remove my-cluster` detaches from the other si
 reads that its cluster is gone, stops its jobs and exits, and the release is then uninstalled
 the same way.
 
-**A bare-metal node.** Needs docker on the node and nothing else. `hl cluster add my-node
---bare-metal` prints the command, which runs on the node:
+**A bare-metal node.** Needs docker or podman, systemd and root on the node, and glibc 2.17 or
+newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-metal choice,
+shows two things: the command to run on the node and the cluster's runtime token.
 
 ```bash
-RUNTIME_TOKEN="$(hl cluster token 'my-node' --org 'org-1')" docker run -d --name hypothesisloop-agent \
-  --restart unless-stopped --hostname "$(hostname)" \
-  -v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro \
-  -v /var/lib/hypothesisloop:/var/lib/hypothesisloop \
-  -e CLUSTER_NAME='my-node' -e API_URL='https://your-control-plane:8081' -e RUNTIME_TOKEN \
-  'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' \
+  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
 ```
 
-The node is its own cluster. The agent is one container that starts jobs as containers beside
-it through the engine's socket, comes back after a reboot, and needs outbound access to the
-platform and the image registries and nothing inbound. On a node without `hl`, set
-`RUNTIME_TOKEN` to what `hl cluster token my-node` prints. `docker logs hypothesisloop-agent`
-starts with what the node offers: the engine, its accelerators under the names jobs ask for
-them by, the hugepages reserved on a Tenstorrent node, and whether job storage is enforced
-(only on XFS). It stops there if the platform does not answer from the node. An NVIDIA node
-adds `--gpus all`, so the agent reads the GPUs through the driver's library.
+The node's engine copies the agent's binary out of the image that carries it; no container is
+started for the agent. The binary then installs itself. It asks for the runtime token on
+standard input, without echo, so the token is in no shell history and no process's arguments
+(a script pipes it in). The node needs neither `hl` nor an API key. Before it changes anything
+it runs the agent's preflight and prints what the node offers: the engine, the accelerators
+under the names jobs ask for them by, the hugepages reserved on a Tenstorrent node, and whether
+the engine holds a job to its storage request (only the overlay driver on XFS mounted with
+project quotas does). It stops, with the node unchanged, when the platform does not answer
+from the node, when the platform refuses the token, or when the host has NVIDIA cards the agent
+cannot read. Then it writes three files and starts the unit:
 
-To detach the node, on the node:
+- `/usr/local/bin/bare-agent`, the agent.
+- `/etc/hypothesisloop/bare-agent.env`, its cluster name, API address and token, readable by
+  root only.
+- `/etc/systemd/system/hypothesisloop-agent.service`, ordered after the network and the engine,
+  enabled at boot, restarted when it fails. `journalctl -u hypothesisloop-agent -f` follows it.
+
+On a node with podman and no docker it also enables podman's API socket (`podman.socket`),
+which is how the agent reaches that engine. Running the command of a newer image tag upgrades
+the agent in place; given no token it keeps the one installed. A machine image can carry the
+three files, with the unit enabled, instead of running the command at first boot.
+
+The agent runs as root. It starts containers through the engine's socket, and whoever can do
+that is root on the node whatever user it runs as, so a dedicated user would only look
+narrower. Root is also what writes the three files above. The agent opens no port and makes
+outbound calls only, to the platform. Job containers get the devices and host directories their
+job names and no others, and are never privileged.
+
+The node is its own cluster. To detach it, on the node:
 
 ```bash
-docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent
+sudo bare-agent detach      # removes the cluster from the platform, stops its job containers and the unit
+sudo bare-agent uninstall   # removes the three files
 ```
 
-That removes the cluster from the platform, its jobs go back to the queue, and the agent stops
-the containers it started. `hl cluster remove my-node` does the same from the other side: the
-agent reads that its cluster is gone, stops its jobs and exits. Left on the node are the pulled
-images and `/var/lib/hypothesisloop`.
+`detach` sends the cluster's jobs back to the queue and leaves the unit disabled. `uninstall`
+refuses a node that is still attached. It leaves `/var/lib/hypothesisloop` and the images jobs
+pulled. `hl cluster remove my-node` detaches from the other side: the agent reads that its
+cluster is gone, stops its jobs, exits and stays stopped, also across a reboot.
 
-Without a container, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent`
-on the node (it needs Go and gcc there) and runs with the same three variables.
+From a checkout, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/bare-agent` (it
+needs Go and gcc) and runs in the foreground with `CLUSTER_NAME`, `API_URL` and `RUNTIME_TOKEN`
+in its environment.
 
-The runtime token reaches helm on stdin and the bare-metal agent through the environment: a
-token given as a make argument or a flag is readable in the process list. Every command reads
-it with `hl cluster token` when it runs, so the token is in no scrollback and no shell history.
+A Kubernetes cluster's runtime token reaches helm on stdin: a token given as a make argument or
+a flag is readable in the process list. Its command reads the token with `hl cluster token` when
+it runs, so the token is in no scrollback and no shell history.
 
 `hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
 accelerators under the names its drivers publish. Repeat for every additional cluster.

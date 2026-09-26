@@ -51,7 +51,7 @@ beforeEach(() => {
     if (!clusters.some(c => c.name === name)) {
       clusters = [...clusters, { name, org_id: orgID, shared: false, enabled: true, created_at: at, owned: true, connected: false }]
     }
-    return { name, api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
+    return { name, runtime_token: 'hls_cnVudGltZQ.c2ln', api_url: 'http://api.cluster.test', metrics_url: 'http://metrics.cluster.test', registry: 'registry.cluster.test/images', image_tag: 'abc1234' }
   })
 })
 
@@ -263,17 +263,21 @@ describe('adding a cluster', () => {
     const kinds = within(await screen.findByRole('group', { name: 'Kind of cluster' }))
     expect(kinds.getByRole('button', { name: 'Kubernetes cluster' }).getAttribute('aria-pressed')).toBe('true')
     await userEvent.click(kinds.getByRole('button', { name: 'Bare-metal node' }))
-    expect(screen.getByText(/starts jobs as containers beside it with docker/)).toBeTruthy()
+    expect(screen.getByText(/starts jobs as containers with docker or podman/)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('Cluster name'), 'gpu-box-1')
     await userEvent.click(screen.getByRole('button', { name: 'Add node' }))
     expect(registerCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'gpu-box-1')
     expect((await screen.findByTestId('secret')).textContent).toBe(
-      `RUNTIME_TOKEN="$(hl cluster token 'gpu-box-1' --org 'org_a')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
-      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
-      `-e CLUSTER_NAME='gpu-box-1' -e API_URL='http://api.cluster.test' -e RUNTIME_TOKEN 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234'`,
+      `sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
+      'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
+      `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' sh 'gpu-box-1' 'http://api.cluster.test' 'registry.cluster.test/images/hypothesisloop-bare-agent:abc1234'`,
     )
     expect(screen.getByText(/Run it on the node/)).toBeTruthy()
-    expect(screen.getByText(/bare-agent detach && docker wait/)).toBeTruthy()
+    expect(screen.getByText(/sudo bare-agent detach/)).toBeTruthy()
+    // The node has no hl to read the token with, so it is shown beside the command that asks for it.
+    expect(screen.getByTestId('runtime-token').textContent).toBe('hls_cnVudGltZQ.c2ln')
+    await userEvent.click(screen.getByRole('button', { name: 'Kubernetes cluster' }))
+    expect(screen.queryByTestId('runtime-token')).toBeNull()
     expect(document.body.textContent).not.toContain('hls_')
   })
 

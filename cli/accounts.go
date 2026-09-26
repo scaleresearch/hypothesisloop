@@ -402,27 +402,28 @@ func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 Registers the cluster name for the org and prints the one command that attaches it, with the
 addresses its agent reaches the platform at and the registry and tag of its images filled in.
-The command reads the cluster's runtime token with hl cluster token when it runs, so the token is
-in no terminal scrollback and no shell history; where hl is not installed, hand the command
-what hl cluster token NAME prints in its place. Adding a name the org already has prints the
-same command again. A cluster takes its own org's jobs only.
+The command holds no token, so none is in a shell history. Adding a name the org already has
+prints the same command again. A cluster takes its own org's jobs only.
 
 Without --bare-metal the command is for a Kubernetes cluster: run it with helm installed and
 kubectl pointed at the cluster (add --kube-context to name another). It installs the runtime's
-chart from the registry, or upgrades it. helm uninstall hypothesisloop-cluster-agent -n
+chart from the registry, or upgrades it, and reads the cluster's runtime token with hl cluster
+token when it runs. helm uninstall hypothesisloop-cluster-agent -n
 hypothesisloop detaches the cluster again: it removes the cluster here, where its jobs go back
 to the queue, and stops what it runs there.
 
-With --bare-metal it is for one node with docker, which is a cluster of its own: run it on the
-node. It starts the agent as a container that comes back after a reboot and starts jobs as
-containers beside it. The node needs outbound access to the platform and to the image
-registries and nothing inbound. To detach the node again, on the node:
+With --bare-metal it is for one node with docker or podman, which is a cluster of its own. Run
+the command on the node. It copies the agent out of its image, installs it as a systemd unit
+that starts at boot, and asks for the cluster's runtime token, which is printed below the
+command; the node needs neither hl nor an API key. It needs root, outbound access to the
+platform and the image registries, and nothing inbound. Running the command of a newer image
+tag upgrades the agent. To detach the node again, on the node:
 
-  docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent
+  sudo bare-agent detach        removes the cluster here, stops its jobs and the agent
+  sudo bare-agent uninstall     removes the agent from the node
 
-That removes the cluster here too: its jobs go back to the queue and the agent stops what it
-runs. hl cluster remove NAME does the same from this side, and the agent then stops by itself.`, stderr)
-	bareMetal := fs.Bool("bare-metal", false, "print the command for a bare-metal node with docker")
+hl cluster remove NAME detaches from this side: the agent stops its jobs and stays stopped.`, stderr)
+	bareMetal := fs.Bool("bare-metal", false, "print the command for a bare-metal node")
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {
@@ -437,7 +438,7 @@ runs. hl cluster remove NAME does the same from this side, and the agent then st
 		return fail(stderr, err)
 	}
 	if *bareMetal {
-		fmt.Fprintln(stdout, bareMetalCommand(id, registered))
+		fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", bareMetalCommand(registered), registered.Name, registered.RuntimeToken)
 		return 0
 	}
 	fmt.Fprintln(stdout, kubernetesCommand(id, registered))
@@ -464,15 +465,18 @@ func helmValue(text string) string {
 	return strings.NewReplacer(`\`, `\\`, ",", `\,`).Replace(text)
 }
 
-// bareMetalCommand starts the agent of a bare-metal node as a container. It is handed the
-// engine's socket to start jobs with, the machine id it reports as the cluster's identity, and
-// the directory job storage lives in, under the same path as on the host since the engine
-// resolves it there. --hostname keeps the node's own name on what it reports.
-func bareMetalCommand(orgID string, registered registeredCluster) string {
-	return fmt.Sprintf(`RUNTIME_TOKEN="$(hl cluster token %s --org %s)" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" `+
-		`-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop `+
-		`-e CLUSTER_NAME=%s -e API_URL=%s -e RUNTIME_TOKEN %s`,
-		shellQuote(registered.Name), shellQuote(orgID), shellQuote(registered.Name), shellQuote(registered.APIURL),
+// bareMetalScript runs on the node as root. The node's engine copies the agent out of the image
+// that carries it, with no container started, and the agent installs itself: it knows its own
+// unit and settings file, and asks for the runtime token on standard input. It is staged
+// beside its place because a running agent's binary cannot be written over. $1 is the cluster
+// name, $2 the API address and $3 the image.
+const bareMetalScript = `engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
+	`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
+	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"`
+
+// bareMetalCommand installs the agent of a bare-metal node and holds no token.
+func bareMetalCommand(registered registeredCluster) string {
+	return fmt.Sprintf("sudo sh -c %s sh %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
 		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag))
 }
 

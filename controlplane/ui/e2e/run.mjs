@@ -773,13 +773,14 @@ async function scenarios(browser) {
   assert.ok(!(await page.content()).includes(runtimeToken), 'the runtime token is nowhere on the page')
   assert.ok(command.includes(`--set-string 'apiURL=${registered.api_url}' --set-string 'metricsURL=${registered.metrics_url}' --set-string 'images.registry=${registered.registry}' --set-string 'images.tag=${registered.image_tag}'`))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Bare-metal node' }).click()
-  assert.equal(
-    await page.getByTestId('secret').innerText(),
-    `RUNTIME_TOKEN="$(hl cluster token '${clusterName}' --org '${adaMe.orgs[0].id}')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
-      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
-      `-e CLUSTER_NAME='${clusterName}' -e API_URL='${registered.api_url}' -e RUNTIME_TOKEN '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}'`,
-    'a bare-metal node is shown the container that runs its agent, with the same token read',
+  const nodeCommand = await page.getByTestId('secret').innerText()
+  assert.ok(
+    nodeCommand.startsWith(`sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) &&
+      nodeCommand.endsWith(` install --cluster "$1" --api-url "$2"' sh '${clusterName}' '${registered.api_url}' '${registered.registry}/hypothesisloop-bare-agent:${registered.image_tag}'`),
+    `a bare-metal node is shown the command that installs its agent: ${nodeCommand}`,
   )
+  assert.ok(!nodeCommand.includes(runtimeToken) && !nodeCommand.includes('hl cluster token'), 'the node command holds no token and needs no hl')
+  assert.equal(await page.getByTestId('runtime-token').innerText(), runtimeToken, 'the token the node command asks for is shown beside it')
   await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
   await page.getByRole('cell', { name: clusterName }).first().waitFor()

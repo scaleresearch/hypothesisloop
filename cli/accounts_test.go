@@ -214,22 +214,25 @@ func TestClusterAddEscapesWhatHelmWouldSplitAValueOn(t *testing.T) {
 	}
 }
 
-// A bare-metal node gets one command that needs docker and nothing else on the node, and holds
-// no token either.
-func TestClusterAddPrintsTheContainerThatAttachesABareMetalNode(t *testing.T) {
-	accountsServer(t, nil, `{"name":"gpu-box","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
+// A bare-metal node has neither hl nor an API key, so its command reads nothing from the
+// platform: the token is shown once beside it and the command asks for it on the node.
+func TestClusterAddPrintsTheCommandThatInstallsABareMetalNodesAgentAndItsToken(t *testing.T) {
+	accountsServer(t, nil, `{"name":"gpu-box","org_id":"org-1","shared":false,"runtime_token":"hls_cnVudGltZQ.c2ln","api_url":"https://api.example/a?b=1&c=$(id)","metrics_url":"https://metrics.example","registry":"registry.example/images","image_tag":"abc1234"}`)
 	code, stdout, stderr := hl(t, "cluster", "add", "gpu-box", "--bare-metal", "--org", "org-1")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
-	if strings.Contains(stdout+stderr, "hls_cnVudGltZQ") {
-		t.Fatalf("the runtime token is printed: stdout = %q, stderr = %q", stdout, stderr)
+	command, rest, _ := strings.Cut(stdout, "\n")
+	if strings.Contains(command, "hls_") || strings.Contains(command, "hl cluster token") {
+		t.Fatalf("the node's command holds the token or reads it with hl: %q", command)
 	}
-	want := `RUNTIME_TOKEN="$(hl cluster token 'gpu-box' --org 'org-1')" docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
-		`-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ` +
-		`-e CLUSTER_NAME='gpu-box' -e API_URL='https://api.example' -e RUNTIME_TOKEN 'registry.example/images/hypothesisloop-bare-agent:abc1234'` + "\n"
-	if stdout != want {
-		t.Fatalf("stdout: got = %q, want = %q", stdout, want)
+	if !strings.HasPrefix(command, `sudo sh -c 'engine="$(command -v docker || command -v podman)" || `) ||
+		!strings.Contains(command, `exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' sh `) ||
+		!strings.HasSuffix(command, ` sh 'gpu-box' 'https://api.example/a?b=1&c=$(id)' 'registry.example/images/hypothesisloop-bare-agent:abc1234'`) {
+		t.Fatalf("command = %q", command)
+	}
+	if rest != "\nIt asks for the runtime token of gpu-box:\nhls_cnVudGltZQ.c2ln\n" {
+		t.Fatalf("after the command: %q, want the token shown once beside it", rest)
 	}
 }
 

@@ -8,6 +8,7 @@ import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/cluster-settings-editor'
 import { Badge, StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Secret } from '@/components/ui/secret'
@@ -30,27 +31,28 @@ const KINDS: { value: Kind; label: string }[] = [
 
 const KIND_HINT: Record<Kind, string> = {
   kubernetes: 'One agent is installed on the cluster with helm and schedules jobs as pods on its nodes.',
-  'bare-metal': 'One agent container runs on the node and starts jobs as containers beside it with docker. Each node is added as a cluster of its own.',
+  'bare-metal': 'One agent runs on the node as a systemd unit and starts jobs as containers with docker or podman. Each node is added as a cluster of its own.',
 }
 
-const DETACH_NODE = 'docker exec hypothesisloop-agent bare-agent detach && docker wait hypothesisloop-agent && docker rm -f hypothesisloop-agent'
+// What `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalScript). It runs on the node
+// as root: the node's engine copies the agent out of the image that carries it, and the agent
+// installs itself as a systemd unit and asks for the runtime token. $1 is the cluster name, $2 the
+// API address and $3 the image.
+const BARE_METAL_SCRIPT =
+  'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ' +
+  'staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ' +
+  'exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"'
 
-// Both commands read the runtime token with `hl cluster token` when they run, as the commands
-// `hl cluster add` prints do (cli/accounts.go), so the token is on no page and in no shell history.
+// Neither command holds the runtime token, so it is in no shell history: a Kubernetes cluster's
+// reads it with `hl cluster token` when it runs, a bare-metal node's asks for it.
 function startCommand(kind: Kind, orgID: string, cluster: RegisteredCluster): string {
   const name = shellQuote(cluster.name)
-  const read = `hl cluster token ${name} --org ${shellQuote(orgID)}`
-  const token = `RUNTIME_TOKEN="$(${read})"`
-  const api = `API_URL=${shellQuote(cluster.api_url)}`
   if (kind === 'bare-metal') {
-    // The same command `hl cluster add --bare-metal` prints (cli/accounts.go bareMetalCommand).
     const image = shellQuote(`${cluster.registry}/hypothesisloop-bare-agent:${cluster.image_tag}`)
-    return `${token} docker run -d --name hypothesisloop-agent --restart unless-stopped --hostname "$(hostname)" ` +
-      '-v /var/run/docker.sock:/var/run/docker.sock -v /etc/machine-id:/etc/machine-id:ro -v /var/lib/hypothesisloop:/var/lib/hypothesisloop ' +
-      `-e CLUSTER_NAME=${name} -e ${api} -e RUNTIME_TOKEN ${image}`
+    return `sudo sh -c ${shellQuote(BARE_METAL_SCRIPT)} sh ${name} ${shellQuote(cluster.api_url)} ${image}`
   }
   const set = (key: string, value: string) => ` --set-string ${shellQuote(`${key}=${helmValue(value)}`)}`
-  return `${read} | helm upgrade --install hypothesisloop-cluster-agent ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ` +
+  return `hl cluster token ${name} --org ${shellQuote(orgID)} | helm upgrade --install hypothesisloop-cluster-agent ${shellQuote(`oci://${cluster.registry}/charts/hypothesisloop-cluster-agent`)} ` +
     `--version ${shellQuote(`0.1.0+${cluster.image_tag}`)} --namespace hypothesisloop --create-namespace` +
     set('clusterName', cluster.name) + set('apiURL', cluster.api_url) + set('metricsURL', cluster.metrics_url) +
     set('images.registry', cluster.registry) + set('images.tag', cluster.image_tag) +
@@ -146,22 +148,30 @@ export function OrgClusters({ manage }: { manage: boolean }) {
               <>
                 Run it with <span className="font-mono">helm</span> installed,{' '}
                 <span className="font-mono">kubectl</span> pointed at the cluster and{' '}
-                <span className="font-mono">hl</span> signed in as an owner of {org.name}. To detach the
+                <span className="font-mono">hl</span> signed in as an owner of {org.name}, which is how it reads
+                the cluster&apos;s runtime token when it runs. To detach the
                 cluster: <span className="font-mono">helm uninstall hypothesisloop-cluster-agent -n hypothesisloop</span>
               </>
             ) : (
               <>
-                Run it on the node. It needs docker there and nothing else, and{' '}
-                <span className="font-mono">hl</span> signed in as an owner of {org.name}; without{' '}
-                <span className="font-mono">hl</span> on the node, set <span className="font-mono">RUNTIME_TOKEN</span>{' '}
-                to what <span className="font-mono">hl cluster token</span> prints. The agent comes back after a
-                reboot. To detach the node, run on it:{' '}
-                <span className="font-mono">{DETACH_NODE}</span>
+                Run it on the node, which needs docker or podman, systemd and root. It installs the agent
+                as a unit that starts at boot and asks for the runtime token below; the node needs neither{' '}
+                <span className="font-mono">hl</span> nor an API key. The command of a newer image tag upgrades
+                the agent. To detach the node, run on it <span className="font-mono">sudo bare-agent detach</span>,
+                then <span className="font-mono">sudo bare-agent uninstall</span> to remove the agent.
               </>
             )}{' '}
-            It reads the cluster&apos;s runtime token with <span className="font-mono">hl cluster token</span>{' '}
-            when it runs, so the token is not on this page. The kind chosen above selects the command, and{' '}
+            The command holds no token. The kind chosen above selects the command, and{' '}
             <span className="font-mono">Show start command</span> in the cluster&apos;s row brings it back.
+            {kind === 'bare-metal' && (
+              <span className="mt-2 grid gap-1">
+                <span>Runtime token of {registered.name}, which the command asks for:</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="select-all break-all font-mono text-foreground" data-testid="runtime-token">{registered.runtime_token}</span>
+                  <CopyButton value={registered.runtime_token} />
+                </span>
+              </span>
+            )}
           </>}
           dismiss="Hide"
           onDismiss={() => setRegistered(null)}
