@@ -119,19 +119,13 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
 	}
-	// This statement is the one write that places a job, so the placement rule is part of it:
-	// the cluster is registered, and is shared or belongs to the job's org. What admission
-	// filtered in memory only chose the candidate. Un-sharing or removing a cluster takes the
-	// admission lock held above, so it either finds this job among the ones it requeues or is
-	// already committed when this statement reads the cluster.
+	// This statement is the one write that places a job, so the placement rule is part of it
+	// (clusterHostsJob). What admission filtered in memory only chose the candidate. Un-sharing,
+	// removing or turning off a cluster takes the admission lock held above, so it either finds
+	// this job already placed or is committed when this statement reads the cluster.
 	const q = `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, not_admitted_reason = NULL, resolved_job_spec = $3, updated_at = NOW()
-WHERE e.id = $1 AND e.status = 'QUEUED'
-  AND EXISTS (
-	SELECT 1 FROM clusters c
-	WHERE c.name = $2 AND (c.shared OR c.org_id = (
-		SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-		WHERE pe.id = e.platform_experiment_id)))`
+WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob
 	tag, err := tx.Exec(ctx, q, id, clusterName, resolvedJobSpec)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)

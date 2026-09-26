@@ -26,6 +26,14 @@ var (
 // cluster from jobs, so the two never interleave.
 const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('cluster-admission/' || $1, 0))`
 
+// clusterHostsJob is the placement rule (domain.Cluster.Hosts) as a condition on a job row e and
+// a cluster named $2: the cluster is registered, is shared or belongs to the job's org, and that
+// org has not turned it off.
+const clusterHostsJob = `EXISTS (
+	SELECT 1 FROM clusters c, platform_experiments pe JOIN projects p ON p.id = pe.project_id
+	WHERE c.name = $2 AND pe.id = e.platform_experiment_id AND (c.shared OR c.org_id = p.org_id)
+	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = p.org_id))`
+
 // requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
 // all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure
 // fault gets (RequeueInfrastructureFault): the attempt advances so the next placement is a new
@@ -51,7 +59,7 @@ WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')
 RETURNING e.id`
 
 // ClustersStore holds which cluster names exist, the org each belongs to, whether the platform
-// shares it, and the identity its runtime reported.
+// shares it, the identity its runtime reported, and which orgs turned it off for their jobs.
 type ClustersStore struct {
 	pool *Pool
 }
@@ -60,11 +68,12 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 	return &ClustersStore{pool: pool}
 }
 
-const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), created_at`
+const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), created_at,
+	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.CreatedAt, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -145,8 +154,8 @@ func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]doma
 	return out, rows.Err()
 }
 
-// ClustersHosting returns the clusters that take jobs of orgID, its own and the shared ones,
-// by name.
+// ClustersHosting returns the clusters orgID can use, its own and the shared ones, by name. The
+// ones it turned off are among them and say so.
 func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY name`, orgID)
 	if err != nil {
@@ -193,6 +202,45 @@ func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, share
 		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: commit: %w", err)
 	}
 	return cluster, requeued, nil
+}
+
+// SetClusterEnabled records whether orgID uses a cluster for its jobs, and by whom it was turned
+// off. It decides placements from here on only: the org's jobs already on the cluster stay and
+// finish. It takes the admission lock, so a claim either committed before the cluster was turned
+// off or reads it as off. Repeating a decision changes nothing. A cluster that is not open to the
+// org is ErrClusterNotFound.
+func (s *ClustersStore) SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: lock: %w", err)
+	}
+	const open = `FROM clusters WHERE name = $1 AND (shared OR org_id = $2)`
+	if enabled {
+		_, err = tx.Exec(ctx, `DELETE FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2`, name, orgID)
+	} else {
+		_, err = tx.Exec(ctx, `
+INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by)
+SELECT name, $2, $3 `+open+`
+ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, by)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
+	}
+	cluster, err := scanCluster(tx.QueryRow(ctx, `SELECT `+clusterColumns+` `+open, name, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClusterNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: commit: %w", err)
+	}
+	return cluster, nil
 }
 
 func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, error) {

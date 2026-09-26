@@ -953,6 +953,17 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT fa
 -- its first report. cluster_settings are keyed by it, so the binding is what says whose they are.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
 
+-- An org turns a cluster on or off for its own jobs, whether the cluster is its own or one the
+-- platform shares. A row is the org's decision that none of its jobs is placed on the cluster
+-- from then on; the jobs already placed there finish. No row is enabled.
+CREATE TABLE IF NOT EXISTS org_disabled_clusters (
+    org_id       TEXT        NOT NULL REFERENCES orgs(id),
+    cluster_name TEXT        NOT NULL REFERENCES clusters(name) ON DELETE CASCADE,
+    disabled_by  TEXT        NOT NULL,
+    disabled_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (cluster_name, org_id)
+);
+
 -- minted_by is the key an API key was created with, NULL when a person created it. A key is
 -- read as revoked while any key it descends from is.
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS minted_by TEXT REFERENCES api_keys(id);

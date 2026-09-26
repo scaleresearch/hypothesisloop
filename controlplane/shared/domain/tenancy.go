@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -99,13 +100,15 @@ type APIKey struct {
 
 // Cluster is a runtime's registered name and the org that added it. Shared is the platform's
 // decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
-// states about itself, empty until its first report.
+// states about itself, empty until its first report. DisabledOrgs are the orgs that turned the
+// cluster off for their own jobs.
 type Cluster struct {
-	Name       string    `json:"name"`
-	OrgID      string    `json:"org_id"`
-	Shared     bool      `json:"shared"`
-	ReportedID string    `json:"cluster_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	Name         string    `json:"name"`
+	OrgID        string    `json:"org_id"`
+	Shared       bool      `json:"shared"`
+	ReportedID   string    `json:"cluster_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	DisabledOrgs []string  `json:"-"`
 }
 
 // MaxClusterIDLength bounds the identity a runtime states: a kube-system namespace UID or a
@@ -126,10 +129,21 @@ func ValidateClusterID(id string) error {
 	return nil
 }
 
-// Hosts reports whether a job of orgID may be placed on the cluster: one of its own org, or one
-// the platform shares.
+// Hosts reports whether a job of orgID may be placed on the cluster: one open to the org that the
+// org has not turned off.
 func (c Cluster) Hosts(orgID string) bool {
+	return c.OpenTo(orgID) && c.EnabledFor(orgID)
+}
+
+// OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform
+// shares.
+func (c Cluster) OpenTo(orgID string) bool {
 	return c.Shared || c.OrgID == orgID
+}
+
+// EnabledFor reports whether orgID left the cluster on for its jobs, which is the default.
+func (c Cluster) EnabledFor(orgID string) bool {
+	return !slices.Contains(c.DisabledOrgs, orgID)
 }
 
 // AgentWindDown is how long an agent outlives its platform experiment closing, or its own cut:
