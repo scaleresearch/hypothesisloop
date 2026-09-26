@@ -13,6 +13,7 @@ import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
+import { Actor } from '@/components/actor'
 import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
@@ -198,6 +199,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           <Table>
             <tbody>
               <Row label="Agent" value={j.agent_id} />
+              <Row label="Submitted by" value={<Actor actor={j.actor} />} />
               <Row label="Platform Experiment" value={
                 <Link href={`/platform-experiments/${j.platform_experiment_id}`} className="text-accent hover:underline"><PlatformExperimentName id={j.platform_experiment_id} /></Link>
               } />

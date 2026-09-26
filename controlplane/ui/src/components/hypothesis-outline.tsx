@@ -9,7 +9,7 @@ import { RowButton } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
 import { NodeMeta } from '@/components/hypothesis-graph'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
-import { verdictSetBy } from '@/lib/hypothesis-progress'
+import { verdictBy } from '@/components/actor'
 import type { GraphFilters } from '@/lib/hypothesis-graph'
 
 interface HypothesisOutlineProps {
@@ -56,7 +56,7 @@ export function HypothesisOutline({ graph, rootLabel, evidence, selected, hits, 
             aria-current={selected === node.id}
             onClick={() => onSelect(node.id)}
           >
-            <span title={verdictSetBy(node) && `${node.status} ${verdictSetBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
+            <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
             <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
             {alsoBuildsOn.length > 0 && (
               <span className="whitespace-nowrap text-2xs text-subtle">

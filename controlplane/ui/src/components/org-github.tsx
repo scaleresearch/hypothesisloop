@@ -8,7 +8,7 @@ import {
 import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
-import { Badge } from '@/components/ui/badge'
+import { Person } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Table } from '@/components/ui/table'
@@ -124,10 +124,7 @@ export function OrgGitHub() {
               <tr key={installation.installation_id}>
                 <td className="font-mono text-xs font-semibold">{installation.account_login}</td>
                 <td>
-                  <span className="inline-flex items-center gap-2">
-                    <span className="font-mono text-xs">{installation.connected_by}</span>
-                    {installation.connected_by === me.user_id && <Badge tone="accent">you</Badge>}
-                  </span>
+                  <Person id={installation.connected_by} name={installation.connected_by_name} self={installation.connected_by === me.user_id} />
                 </td>
                 <td className="font-mono text-xs text-muted">{new Date(installation.connected_at).toLocaleString()}</td>
                 {administers && (

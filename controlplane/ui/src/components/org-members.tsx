@@ -8,7 +8,7 @@ import { inviteLink } from '@/lib/invite'
 import { HOME_PATH } from '@/lib/auth'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import type { CreatedOrgInvite, OrgInvite, OrgMember, OrgRole } from '@/types'
-import { Badge } from '@/components/ui/badge'
+import { Person } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
@@ -31,15 +31,6 @@ type Change =
 
 function when(at: string): string {
   return new Date(at).toLocaleString()
-}
-
-function Person({ id, self }: { id: string; self: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className="font-mono text-xs">{id}</span>
-      {self && <Badge tone="accent">you</Badge>}
-    </span>
-  )
 }
 
 /** The pending invites of the org: create one and read its link once, list them, revoke one. */
@@ -114,7 +105,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
               <tr key={invite.id}>
                 <td className="font-mono text-xs text-muted">{invite.id}</td>
                 <td className="text-xs">{invite.role}</td>
-                <td><Person id={invite.created_by} self={invite.created_by === me.user_id} /></td>
+                <td><Person id={invite.created_by} name={invite.created_by_name} self={invite.created_by === me.user_id} /></td>
                 <td className="font-mono text-xs text-muted">{when(invite.created_at)}</td>
                 <td className="font-mono text-xs text-muted">{when(invite.expires_at)}</td>
                 <td><Button size="sm" variant="danger" onClick={() => setRevoking(invite)}>Revoke</Button></td>
@@ -192,20 +183,20 @@ export function OrgMembers() {
       {members && members.length > 0 && (
         <Table aria-label="Members">
           <thead>
-            <tr><th>User id</th><th>Role</th><th>Joined</th><th /></tr>
+            <tr><th>Member</th><th>Role</th><th>Joined</th><th /></tr>
           </thead>
           <tbody>
             {members.map(member => {
               const self = member.user_id === me.user_id
               return (
                 <tr key={member.user_id}>
-                  <td><Person id={member.user_id} self={self} /></td>
+                  <td><Person id={member.user_id} name={member.name} self={self} /></td>
                   <td className="text-xs">
                     {administers
                       ? (
                         <Select
                           fieldSize="sm"
-                          aria-label={`Role of ${member.user_id}`}
+                          aria-label={`Role of ${member.name || member.user_id}`}
                           value={member.role}
                           onChange={role => setChange({ kind: 'role', member, role })}
                           options={ROLES.map(role => ({ value: role, label: role }))}
@@ -236,8 +227,8 @@ export function OrgMembers() {
 
 function Question({ change, onConfirm, onCancel }: { change: Change; onConfirm: () => void; onCancel: () => void }) {
   const { me, org } = useTenant()
-  const id = change.member.user_id
-  const self = id === me.user_id
+  const self = change.member.user_id === me.user_id
+  const id = change.member.name || change.member.user_id
   if (change.kind === 'role') {
     const demotes = change.role === 'member'
     return (

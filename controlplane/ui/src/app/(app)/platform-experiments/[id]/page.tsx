@@ -33,6 +33,7 @@ import type { PlatformExperiment, AgentQuota, Experiment, MetricDataPoint, Agent
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
 import { AgentLabel, AgentNames, useAgentName } from '@/components/agent-label'
+import { verdictBy } from '@/components/actor'
 import { Card, CardHeader, CardContent, InsetCard } from '@/components/ui/card'
 import { Badge, Dot, NoSummary } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,7 @@ import { Eyebrow, Pill } from '@/components/ui/text'
 import { semantic, agentPalette, chart } from '@/lib/colors'
 import { acceleratorLabel, formatAccH, formatDate, isZeroDate } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
-import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys, verdictSetBy } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { inFlight } from '@/lib/units'
 
@@ -774,7 +775,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                   <tr key={h.id} className="[&>td]:align-top">
                     <td>
                       <Badge status={h.status}>{h.status}</Badge>
-                      <div className="mt-0.5 text-2xs text-muted">{verdictSetBy(h)}</div>
+                      <div className="mt-0.5 text-2xs text-muted">{verdictBy(h)}</div>
                       {h.finding && filedAfterVerdict(h, h.finding.created_at) && (
                         <div className="mt-0.5 text-2xs text-warning" title="The newest finding was filed after this verdict was set">
                           newer finding

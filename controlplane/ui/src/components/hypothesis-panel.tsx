@@ -9,10 +9,10 @@ import { Button, RowButton } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
 import { EmptyState } from '@/components/ui/status-message'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
-import { PoolAuthor } from '@/components/human-idea'
+import { Actor, Verdict } from '@/components/actor'
 import { linkGroups } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
-import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 import { useReadOnly } from '@/lib/read-only'
 
@@ -83,8 +83,8 @@ export function HypothesisPanel({ graph, nodeByID, evidence, selected, onSelect,
           {node.text}
         </p>
         <div className="text-2xs text-muted">
-          <PoolAuthor source={node.source} agentID={node.agent_id} author={node.author} /> · {relTime(node.created_at)}
-          {node.status_changed_at && <> · {node.status} {verdictSetBy(node)}</>}
+          <Actor actor={node.actor} agentID={node.agent_id} /> · {relTime(node.created_at)}
+          {node.status_changed_at && <> · <Verdict hypothesis={node} /></>}
         </div>
         <div className="font-mono text-2xs text-muted">
           {node.finding_count} findings · {node.comment_count} comments · built on by {node.child_count}

@@ -613,7 +613,7 @@ async function scenarios(browser) {
   await page.route(runInstallations, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { ...runCors, 'X-Total-Count': '1' },
-      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_at: new Date().toISOString() }],
+      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() }],
     })
     : route.fallback())
   await page.route(runRepositories, route => route.fulfill({
@@ -703,6 +703,30 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: '+ Add idea under the objective' }).click()
   await page.getByText('registered under the name you signed in with').waitFor()
   assert.equal(await page.getByPlaceholder(/your name/i).count(), 0)
+  const ideaText = `a warmup of 500 steps steadies the loss ${run}`
+  const ideaWrite = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === `${API}/hypotheses`)
+  await page.getByPlaceholder(/the retry loop is masking/).fill(ideaText)
+  await page.getByRole('button', { name: 'Add idea', exact: true }).click()
+  const idea = await (await ideaWrite).json()
+  assert.deepEqual(idea.actor, { kind: 'user', id: adaMe.user_id, name: ada.name }, 'the idea is the signed-in person\'s, by the session alone')
+  assert.ok(!('author' in (await ideaWrite).request().postDataJSON()), 'and the request names nobody')
+  // The new idea is selected: its panel names who registered it and marks them a person.
+  const ideaPanel = page.locator('main').filter({ hasText: ideaText })
+  await ideaPanel.getByText(ada.name).first().waitFor()
+  await ideaPanel.getByText('human', { exact: true }).first().waitFor()
+  await shot(page, 'idea-by-signed-in-name')
+
+  section('a comment is shown under the signed-in name')
+  const ideaPage = `${UI}/hypotheses/${idea.id}?project=${adaMe.projects[0].id}`
+  await page.goto(ideaPage)
+  await page.getByText('Registered by').getByText(ada.name).waitFor()
+  const noteText = `try it at batch size 512 first ${run}`
+  await page.getByPlaceholder(/A note on this claim/).fill(noteText)
+  await page.getByRole('button', { name: 'Add comment' }).click()
+  const note = page.locator('div', { hasText: noteText }).filter({ hasText: ada.name }).last()
+  await note.getByText('human', { exact: true }).waitFor()
+  await note.getByText(ada.name).waitFor()
+  await shot(page, 'comment-by-signed-in-name')
 
   section('settings: a second project, then switching projects shows only what each holds')
   await page.goto(`${UI}/settings`)
@@ -943,7 +967,7 @@ async function scenarios(browser) {
   // install goes on to authorise, and the connect names that installation.
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() },
   }
   const authorizesBeforeInstall = authorizes.length
   await githubCard.getByRole('button', { name: 'Install the App on an account' }).click()
@@ -952,7 +976,7 @@ async function scenarios(browser) {
   assert.equal(connects.at(-1).postDataJSON().installation_id, 4242, 'for the installation GitHub returned')
   await githubCard.getByText('Connected acme.').waitFor()
   const accountRow = githubCard.getByRole('row', { name: /acme/ })
-  await accountRow.getByText(adaMe.user_id).waitFor()
+  await accountRow.getByText(ada.name).waitFor()
   await shot(page, 'github-connected', githubCard)
 
   await accountRow.getByRole('button', { name: 'Disconnect' }).click()
@@ -977,7 +1001,7 @@ async function scenarios(browser) {
   await shot(page, 'github-choose-account', githubCard)
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_by: adaMe.user_id, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() },
   }
   await choice.getByRole('button', { name: 'ada-personal' }).click()
   await page.waitForURL(landed)
@@ -1249,8 +1273,12 @@ async function scenarios(browser) {
   const labProject = adaMe.projects[0].id
   const pendingInvites = async () => (await api(await tokenOf(ada), `/orgs/${labOrg}/invites`)).json()
   await page.goto(`${UI}/settings?project=${labProject}`)
-  const adaRow = page.getByRole('row', { name: new RegExp(adaMe.user_id) })
+  // A member is listed by the name their identity provider states, their id on hover.
+  const membersTable = page.getByRole('table', { name: 'Members' })
+  const adaRow = membersTable.getByRole('row', { name: new RegExp(ada.name) })
   await adaRow.getByText('you', { exact: true }).waitFor()
+  assert.equal(await adaRow.getByText(ada.name).getAttribute('title'), adaMe.user_id)
+  assert.equal(await adaRow.getByText(adaMe.user_id).count(), 0, 'the id is not what the row reads')
   await page.getByText('No pending invites.').waitFor()
   await adaRow.getByRole('button', { name: 'Leave' }).click()
   await confirmWith(page, 'Leave')
@@ -1269,6 +1297,7 @@ async function scenarios(browser) {
   const [revokedInvite] = await pendingInvites()
   const inviteRow = page.getByRole('row', { name: new RegExp(revokedInvite.id) })
   await inviteRow.waitFor()
+  await inviteRow.getByText(ada.name).waitFor()
   assert.ok(!(await page.content()).includes(revokedLink.split('#')[1]), 'the token is not on the page after a reload')
 
   section('members: a revoked invite is refused')
@@ -1307,8 +1336,17 @@ async function scenarios(browser) {
 
   section('members: a member reads the list, and the owner changes a role and removes them')
   await danPage.goto(`${UI}/settings?project=${labProject}`)
-  const danOwnRow = danPage.getByRole('row', { name: new RegExp(danID) })
+  const danMembers = danPage.getByRole('table', { name: 'Members' })
+  const danOwnRow = danMembers.getByRole('row', { name: new RegExp(dan.name) })
   await danOwnRow.getByRole('cell', { name: 'member', exact: true }).waitFor()
+  // The one who was invited sees who was there before them, by name.
+  await danMembers.getByRole('row', { name: new RegExp(ada.name) }).getByRole('cell', { name: 'owner', exact: true }).waitFor()
+  await danPage.goto(ideaPage)
+  await danPage.getByText('Registered by').getByText(ada.name).waitFor()
+  await danPage.locator('div', { hasText: noteText }).filter({ hasText: ada.name }).last().waitFor()
+  await shot(danPage, 'idea-read-by-another-member')
+  await danPage.goto(`${UI}/settings?project=${labProject}`)
+  await danOwnRow.waitFor()
   await danOwnRow.getByRole('button', { name: 'Leave' }).waitFor()
   assert.equal(await danPage.getByRole('button', { name: 'Create invite link' }).count(), 0)
   assert.equal(await danPage.getByRole('button', { name: 'Remove' }).count(), 0)
@@ -1318,18 +1356,18 @@ async function scenarios(browser) {
   await page.reload()
   const roleChange = () => page.waitForResponse(r => r.request().method() === 'PATCH' && r.url() === `${API}/orgs/${labOrg}/members/${danID}`)
   let changed = roleChange()
-  await choose(page, page.getByLabel(`Role of ${danID}`), 'owner')
+  await choose(page, page.getByLabel(`Role of ${dan.name}`), 'owner')
   await confirmWith(page, 'Make owner')
   assert.equal((await changed).status(), 200)
-  await shot(page, 'members-as-owner', page.getByLabel(`Role of ${danID}`))
+  await shot(page, 'members-as-owner', page.getByLabel(`Role of ${dan.name}`))
   await danPage.reload()
   await danPage.getByRole('button', { name: 'Create invite link' }).waitFor()
   changed = roleChange()
-  await choose(page, page.getByLabel(`Role of ${danID}`), 'member')
+  await choose(page, page.getByLabel(`Role of ${dan.name}`), 'member')
   await confirmWith(page, 'Make member')
   assert.equal((await changed).status(), 200)
 
-  const danRow = page.getByRole('row', { name: new RegExp(danID) })
+  const danRow = membersTable.getByRole('row', { name: new RegExp(dan.name) })
   await danRow.getByRole('button', { name: 'Remove' }).click()
   await confirmWith(page, 'Remove')
   await danRow.waitFor({ state: 'detached' })
@@ -1371,7 +1409,7 @@ async function scenarios(browser) {
     await otherPage.route(url => url.href.startsWith(memberInstallationsAPI), route => route.request().method() === 'GET'
       ? route.fulfill({
         headers: { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count', 'X-Total-Count': '1' },
-        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_at: new Date().toISOString() }],
+        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', connected_by: adaMe.user_id, connected_by_name: ada.name, connected_at: new Date().toISOString() }],
       })
       : route.fallback())
     await otherPage.goto(`${UI}/settings?project=${adaMe.projects[0].id}`)

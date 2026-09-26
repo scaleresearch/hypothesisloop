@@ -13,9 +13,10 @@ import { Eyebrow } from '@/components/ui/text'
 import { Badge, NoSummary } from '@/components/ui/badge'
 import { Loading, EmptyState, InlineError } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
-import { PoolAuthor, AddCommentForm, AddLinkForm } from '@/components/human-idea'
+import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
+import { Actor, Verdict } from '@/components/actor'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
-import { envSettings, filedAfterVerdict, variedEnvKeys, verdictSetBy } from '@/lib/hypothesis-progress'
+import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
 
 function LinkRow({ link, platformExperimentID, pe }: {
   link: HypothesisLink
@@ -35,7 +36,7 @@ function LinkRow({ link, platformExperimentID, pe }: {
       <Badge status={link.status}>{link.status}</Badge>
       <span className="min-w-0 flex-1 truncate">{link.text}</span>
       <span className="whitespace-nowrap text-2xs text-subtle">
-        linked by <PoolAuthor source={link.author ? 'human' : 'agent'} agentID={link.agent_id} author={link.author} />
+        linked by <Actor actor={link.actor} agentID={link.agent_id} />
       </span>
     </RowLink>
   )
@@ -88,8 +89,8 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
         }
         description={
           <span className="font-mono text-2xs">
-            Registered by <PoolAuthor source={data.source} agentID={data.agent_id} author={data.author} /> · {relTime(data.created_at)}
-            {data.status_changed_at && <> · {data.status} {verdictSetBy(data)}</>}
+            Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
+            {data.status_changed_at && <> · <Verdict hypothesis={data} /></>}
             {sinceVerdict > 0 && (
               <span className="text-warning"> · {sinceVerdict} {sinceVerdict === 1 ? 'finding' : 'findings'} filed since</span>
             )}
@@ -156,7 +157,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                   <InsetCard key={f.id}>
                     <div className="mb-1.5 flex items-center justify-between text-2xs">
                       <span className="flex items-center gap-2 font-mono">
-                        <span className="font-semibold">{f.agent_id}</span>
+                        <span className="font-semibold"><Actor actor={f.actor} agentID={f.agent_id} /></span>
                         <Link href={`/jobs/${f.experiment_id}`} className="text-accent hover:underline">{f.experiment_id.slice(0, 8)}…</Link>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
                         {job?.metric && <span className="text-accent" title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
@@ -192,7 +193,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
               {comments.map(c => (
                 <InsetCard key={c.id}>
                   <div className="mb-1.5 flex items-center justify-between text-2xs">
-                    <PoolAuthor source={c.source} agentID={c.agent_id} author={c.author} />
+                    <Actor actor={c.actor} agentID={c.agent_id} />
                     <span className="font-mono text-subtle">{relTime(c.created_at)}</span>
                   </div>
                   <p className="whitespace-pre-wrap text-sm">{c.text}</p>

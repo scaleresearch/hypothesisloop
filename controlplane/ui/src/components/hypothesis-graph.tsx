@@ -14,20 +14,19 @@ import type { HypothesisEvidence } from '@/lib/api'
 import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
 import { Dot } from '@/components/ui/badge'
 import { Eyebrow } from '@/components/ui/text'
-import { filedAfterVerdict, verdictSetBy } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { Actor, verdictBy } from '@/components/actor'
 import { NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 const COUNT = 'inline-flex items-center gap-0.5'
 
-/** Owner, evidence counts and best result, shared by graph nodes and outline rows. */
+/** Who registered it, evidence counts and best result, shared by graph nodes and outline rows. */
 export function NodeMeta({ item, evidence }: { item: HypothesisListItem; evidence?: HypothesisEvidence }) {
   const newer = evidence?.finding !== undefined && filedAfterVerdict(item, evidence.finding.created_at)
   return (
     <span className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
-      {item.source === 'human'
-        ? <span className="max-w-[110px] truncate text-warning" title={`human: ${item.author}`}>{item.author}</span>
-        : <span className="max-w-[110px] truncate" title={item.agent_id}>{item.agent_id}</span>}
+      <Actor actor={item.actor} agentID={item.agent_id} compact />
       <span
         className={clsx(COUNT, newer && 'text-warning')}
         title={`${item.finding_count} findings${newer ? ', the newest filed after the verdict' : ''}`}
@@ -87,7 +86,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <HiddenHandles />
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="font-mono text-2xs font-bold uppercase tracking-wide" style={{ color }} title={verdictSetBy(item) && `${item.status} ${verdictSetBy(item)}`}>{item.status}</span>
+        <span className="font-mono text-2xs font-bold uppercase tracking-wide" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
         <NodeMeta item={item} evidence={evidence} />
       </div>
     </div>

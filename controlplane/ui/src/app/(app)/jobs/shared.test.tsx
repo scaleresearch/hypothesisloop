@@ -31,7 +31,7 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const running = {
-  id: 'job-00001', agent_id: 'ag-1', platform_experiment_id: 'pe-x', project_id: 'prj_platform', hypothesis_id: 'h1',
+  id: 'job-00001', agent_id: 'ag-1', actor: { kind: 'key', id: 'key_1', name: 'ci' }, platform_experiment_id: 'pe-x', project_id: 'prj_platform', hypothesis_id: 'h1',
   status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: 'platform-gpu', created_at: at, updated_at: at,
   accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
 } as Experiment

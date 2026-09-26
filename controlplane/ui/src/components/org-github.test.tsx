@@ -25,8 +25,8 @@ const owner: Me = {
 }
 const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member' }] }
 const app = { slug: 'hl', client_id: 'app', install_url: 'https://github.test/apps/hl/installations/new', authorize_url: 'https://github.test/login/oauth/authorize?client_id=app' }
-const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u1', connected_at: at }
-const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_by: 'u3', connected_at: at }
+const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u1', connected_by_name: 'Ada Lovelace', connected_at: at }
+const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_by: 'key_3', connected_by_name: 'ci', connected_at: at }
 
 let installations: GitHubInstallation[]
 
@@ -67,11 +67,11 @@ describe('the connected GitHub accounts', () => {
     installations = [acme, lab]
     show()
     const row = (await screen.findByRole('cell', { name: 'acme' })).closest('tr')!
-    expect(within(row).getByText('u1')).toBeTruthy()
+    expect(within(row).getByText('Ada Lovelace').getAttribute('title')).toBe('u1')
     expect(within(row).getByText('you')).toBeTruthy()
     expect(within(row).getByText(new Date(at).toLocaleString())).toBeTruthy()
     const other = screen.getByRole('cell', { name: 'lab' }).closest('tr')!
-    expect(within(other).getByText('u3')).toBeTruthy()
+    expect(within(other).getByText('ci').getAttribute('title')).toBe('key_3')
     expect(within(other).queryByText('you')).toBeNull()
   })
 

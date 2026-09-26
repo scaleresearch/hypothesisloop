@@ -31,6 +31,7 @@ const graph = {
   root: 'pe-x',
   nodes: [{
     id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', source: 'agent', agent_id: 'ag-1',
+    actor: { kind: 'user', id: 'u7', name: 'Grace Hopper' }, status_actor: null,
     created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
   }],
   edges: [],
@@ -68,6 +69,13 @@ describe('the hypothesis graph', () => {
     show('pe=pe-x&focus=hyp-1', { project_id: 'prj_1', shared: true })
     expect(await screen.findByRole('button', { name: '+ Add idea under the objective' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '+ Add idea under this' })).toBeTruthy()
+  })
+
+  it('names who registered the selected hypothesis beside the agent it was registered for', async () => {
+    show('pe=pe-x&focus=hyp-1', { project_id: 'prj_1', shared: false })
+    expect((await screen.findByText('Grace Hopper')).getAttribute('title')).toBe('u7')
+    expect(screen.getByText('human')).toBeTruthy()
+    expect(screen.getByText('ag-1')).toBeTruthy()
   })
 
   it('opens on the newest experiment listed for the project, which a shared one may be', async () => {

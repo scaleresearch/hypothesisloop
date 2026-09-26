@@ -58,15 +58,15 @@ function confirm(label: string) {
 beforeEach(() => {
   router.replace.mockReset()
   members = [
-    { org_id: 'org_a', user_id: 'u1', role: 'owner', joined_at: at },
-    { org_id: 'org_a', user_id: 'u2', role: 'member', joined_at: at },
+    { org_id: 'org_a', user_id: 'u1', name: 'Ada Lovelace', role: 'owner', joined_at: at },
+    { org_id: 'org_a', user_id: 'u2', name: 'Bob Stone', role: 'member', joined_at: at },
   ]
-  invites = [{ id: 'inv_1', org_id: 'org_a', role: 'member', created_by: 'u1', created_at: at, expires_at: expires }]
+  invites = [{ id: 'inv_1', org_id: 'org_a', role: 'member', created_by: 'u1', created_by_name: 'Ada Lovelace', created_at: at, expires_at: expires }]
   vi.mocked(fetchMe).mockResolvedValue(owner)
   vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: [...members], total: members.length }))
   vi.mocked(fetchOrgInvites).mockImplementation(async () => ({ items: [...invites], total: invites.length }))
   vi.mocked(createOrgInvite).mockImplementation(async (orgID, role) => {
-    const invite: OrgInvite = { id: 'inv_2', org_id: orgID, role, created_by: 'u1', created_at: at, expires_at: expires }
+    const invite: OrgInvite = { id: 'inv_2', org_id: orgID, role, created_by: 'u1', created_by_name: 'Ada Lovelace', created_at: at, expires_at: expires }
     invites = [invite, ...invites]
     return { ...invite, token: TOKEN }
   })
@@ -79,53 +79,58 @@ beforeEach(() => {
 })
 
 describe('an owner', () => {
-  it('sees each member by user id with their role, and which one they are', async () => {
+  it('sees each member by name with their role, and which one they are', async () => {
+    members = [...members, { org_id: 'org_a', user_id: 'u3', name: '', role: 'member', joined_at: at }]
     show()
-    const own = await row('u1')
+    const own = await row('Ada Lovelace')
+    expect(own.getByText('Ada Lovelace').getAttribute('title')).toBe('u1')
+    expect(own.queryByText('u1')).toBeNull()
+    // One whose identity provider states no name is shown by id.
+    expect((await row('u3')).getByLabelText('Role of u3')).toBeTruthy()
     expect(own.getByText('you')).toBeTruthy()
-    expect(own.getByLabelText('Role of u1')).toHaveProperty('textContent', 'owner')
+    expect(own.getByLabelText('Role of Ada Lovelace')).toHaveProperty('textContent', 'owner')
     expect(own.getByRole('button', { name: 'Leave' })).toBeTruthy()
-    const other = await row('u2')
+    const other = await row('Bob Stone')
     expect(other.queryByText('you')).toBeNull()
-    expect(other.getByLabelText('Role of u2')).toHaveProperty('textContent', 'member')
+    expect(other.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'member')
     expect(other.getByRole('button', { name: 'Remove' })).toBeTruthy()
   })
 
   it('changes a role after being asked, and reads the list again', async () => {
     show()
-    await choose((await row('u2')).getByLabelText('Role of u2'), 'owner')
+    await choose((await row('Bob Stone')).getByLabelText('Role of Bob Stone'), 'owner')
     expect(setOrgMemberRole).not.toHaveBeenCalled()
-    expect(within(screen.getByRole('dialog')).getByText('Make u2 an owner of Lab?')).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText('Make Bob Stone an owner of Lab?')).toBeTruthy()
     await confirm('Make owner')
     expect(setOrgMemberRole).toHaveBeenCalledExactlyOnceWith('org_a', 'u2', 'owner')
-    await waitFor(() => expect(screen.getByLabelText('Role of u2')).toHaveProperty('textContent', 'owner'))
+    await waitFor(() => expect(screen.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'owner'))
     expect(fetchMe).not.toHaveBeenCalled()
   })
 
   it('leaves a role as it was when the answer is no', async () => {
     show()
-    await choose((await row('u2')).getByLabelText('Role of u2'), 'owner')
+    await choose((await row('Bob Stone')).getByLabelText('Role of Bob Stone'), 'owner')
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(setOrgMemberRole).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Role of u2')).toHaveProperty('textContent', 'member')
+    expect(screen.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'member')
   })
 
   it('is told in the API\'s words that the last owner cannot be demoted', async () => {
     vi.mocked(setOrgMemberRole).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
-    await choose((await row('u1')).getByLabelText('Role of u1'), 'member')
+    await choose((await row('Ada Lovelace')).getByLabelText('Role of Ada Lovelace'), 'member')
     expect(within(screen.getByRole('dialog')).getByText('Make yourself a member of Lab?')).toBeTruthy()
     await confirm('Make member')
     expect(await screen.findByText(LAST_OWNER)).toBeTruthy()
-    expect(screen.getByLabelText('Role of u1')).toHaveProperty('textContent', 'owner')
+    expect(screen.getByLabelText('Role of Ada Lovelace')).toHaveProperty('textContent', 'owner')
     expect(fetchMe).not.toHaveBeenCalled()
   })
 
   it('reads the account again after demoting themselves, which is where the page takes their role from', async () => {
-    members = [...members, { org_id: 'org_a', user_id: 'u3', role: 'owner', joined_at: at }]
+    members = [...members, { org_id: 'org_a', user_id: 'u3', name: '', role: 'owner', joined_at: at }]
     show()
-    await choose((await row('u1')).getByLabelText('Role of u1'), 'member')
+    await choose((await row('Ada Lovelace')).getByLabelText('Role of Ada Lovelace'), 'member')
     await confirm('Make member')
     await waitFor(() => expect(fetchMe).toHaveBeenCalledTimes(1))
     expect(setOrgMemberRole).toHaveBeenCalledExactlyOnceWith('org_a', 'u1', 'member')
@@ -133,18 +138,18 @@ describe('an owner', () => {
 
   it('removes a member after being asked', async () => {
     show()
-    await userEvent.click((await row('u2')).getByRole('button', { name: 'Remove' }))
-    expect(within(screen.getByRole('dialog')).getByText('Remove u2 from Lab?')).toBeTruthy()
+    await userEvent.click((await row('Bob Stone')).getByRole('button', { name: 'Remove' }))
+    expect(within(screen.getByRole('dialog')).getByText('Remove Bob Stone from Lab?')).toBeTruthy()
     await confirm('Remove')
     expect(removeOrgMember).toHaveBeenCalledExactlyOnceWith('org_a', 'u2')
-    await waitFor(() => expect(screen.queryByLabelText('Role of u2')).toBeNull())
+    await waitFor(() => expect(screen.queryByLabelText('Role of Bob Stone')).toBeNull())
     expect(router.replace).not.toHaveBeenCalled()
   })
 
   it('is told in the API\'s words that the last owner cannot leave, and stays', async () => {
     vi.mocked(removeOrgMember).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
-    await userEvent.click((await row('u1')).getByRole('button', { name: 'Leave' }))
+    await userEvent.click((await row('Ada Lovelace')).getByRole('button', { name: 'Leave' }))
     await confirm('Leave')
     expect(await screen.findByText(LAST_OWNER)).toBeTruthy()
     expect(router.replace).not.toHaveBeenCalled()
@@ -215,7 +220,7 @@ describe('inviting', () => {
     show()
     const pending = await row('inv_1')
     expect(pending.getByText('member')).toBeTruthy()
-    expect(pending.getByText('u1')).toBeTruthy()
+    expect(pending.getByText('Ada Lovelace')).toBeTruthy()
     expect(pending.getByText('you')).toBeTruthy()
     expect(pending.getByText(new Date(expires).toLocaleString())).toBeTruthy()
   })
@@ -253,7 +258,7 @@ describe('inviting', () => {
 describe('a member', () => {
   it('reads the members and has nothing to change about anyone else', async () => {
     show(member)
-    const other = await row('u1')
+    const other = await row('Ada Lovelace')
     expect(other.getByText('owner')).toBeTruthy()
     expect(other.queryByRole('button')).toBeNull()
     expect(screen.queryByRole('combobox')).toBeNull()
@@ -263,7 +268,7 @@ describe('a member', () => {
 
   it('is offered no invite and asks the API for none', async () => {
     show(member)
-    await row('u2')
+    await row('Bob Stone')
     expect(screen.queryByRole('button', { name: 'Create invite link' })).toBeNull()
     expect(screen.queryByText('Invites')).toBeNull()
     expect(fetchOrgInvites).not.toHaveBeenCalled()
@@ -272,7 +277,7 @@ describe('a member', () => {
   it('leaves after being asked, and is taken out of the org\'s pages', async () => {
     vi.mocked(fetchMe).mockResolvedValue({ ...member, orgs: [], projects: [] })
     show(member)
-    await userEvent.click((await row('u2')).getByRole('button', { name: 'Leave' }))
+    await userEvent.click((await row('Bob Stone')).getByRole('button', { name: 'Leave' }))
     expect(within(screen.getByRole('dialog')).getByText('Leave Lab?')).toBeTruthy()
     expect(removeOrgMember).not.toHaveBeenCalled()
     await confirm('Leave')

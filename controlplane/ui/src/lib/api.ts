@@ -94,7 +94,7 @@ async function answer(method: string, path: string, body?: unknown): Promise<Res
   return res
 }
 
-async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
   return (await answer(method, path, body)).json() as Promise<T>
 }
 
@@ -415,8 +415,8 @@ export interface HeldBack {
 }
 
 // Registers a human's idea, placed in the graph by `links` (at least one builds_on; `to` is a
-// hypothesis id, or the platform_experiment_id for the objective root). The author is the signed-in
-// person, named by the API from their session. Text equivalent to an existing claim returns
+// hypothesis id, or the platform_experiment_id for the objective root). Who registered it is the
+// signed-in person, read by the API from their session. Text equivalent to an existing claim returns
 // that row with already_existed set, and the supplied links are not applied. Text close to other
 // hypotheses registers nothing and returns them until their ids are passed in distinctFrom.
 export async function registerHumanHypothesis(
@@ -428,7 +428,7 @@ export async function registerHumanHypothesis(
   return res.json()
 }
 
-// Links are append-only. Only a human-authored hypothesis accepts links from a human.
+// Links are append-only. Only a hypothesis no agent owns accepts links from a person as themselves.
 export async function addHumanHypothesisLink(
   hypothesisID: string, type: HypothesisLinkType, to: string,
 ): Promise<void> {

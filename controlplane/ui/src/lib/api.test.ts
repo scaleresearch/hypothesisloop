@@ -203,7 +203,7 @@ describe('a failure carries the API\'s own words', () => {
   })
 })
 
-describe('what a person writes is filed under their session, with no author in the body', () => {
+describe('what a person writes is theirs by their session: no body names who wrote it or an agent', () => {
   it('for an idea', async () => {
     fetchMock().mockResolvedValue(answer(201, { id: 'h1', already_existed: false }))
     await registerHumanHypothesis('pe-1', 'an idea', [{ type: 'builds_on', to: 'pe-1' }])

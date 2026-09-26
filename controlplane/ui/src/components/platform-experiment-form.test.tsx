@@ -48,7 +48,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 beforeEach(() => {
   onSaved.mockReset()
   vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
-  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u9', connected_at: at }], total: 1 })
+  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_by: 'u9', connected_by_name: 'Una', connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockResolvedValue(created)
   vi.mocked(addPlatformExperimentAgents).mockResolvedValue([])

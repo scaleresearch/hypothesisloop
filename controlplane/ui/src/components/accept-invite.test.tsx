@@ -51,7 +51,7 @@ beforeEach(() => {
   router.replace.mockReset()
   vi.mocked(accessToken).mockResolvedValue('session-token')
   vi.mocked(fetchMe).mockResolvedValue(me)
-  vi.mocked(acceptOrgInvite).mockResolvedValue({ org_id: 'org_a', user_id: 'u2', role: 'member', joined_at: at })
+  vi.mocked(acceptOrgInvite).mockResolvedValue({ org_id: 'org_a', user_id: 'u2', name: 'Bob', role: 'member', joined_at: at })
 })
 
 describe('opening an invite link', () => {
@@ -120,7 +120,7 @@ describe('accepting', () => {
   })
 
   it('names the role when the invite made an owner', async () => {
-    vi.mocked(acceptOrgInvite).mockResolvedValue({ org_id: 'org_a', user_id: 'u2', role: 'owner', joined_at: at })
+    vi.mocked(acceptOrgInvite).mockResolvedValue({ org_id: 'org_a', user_id: 'u2', name: 'Bob', role: 'owner', joined_at: at })
     open()
     await accept()
     expect(await screen.findByText(/You joined as an owner/)).toBeTruthy()

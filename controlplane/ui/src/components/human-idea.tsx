@@ -12,22 +12,6 @@ import { Eyebrow } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
 import { useReadOnly } from '@/lib/read-only'
 
-/** Marks a hypothesis or note that came from a person, wherever one is shown. */
-function HumanAuthor({ author }: { author: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <Badge status="human">human</Badge>
-      <span>{author}</span>
-    </span>
-  )
-}
-
-/** The author of a hypothesis or note: an agent id, or a person marked as such. */
-export function PoolAuthor({ source, agentID, author }: { source?: string; agentID: string; author?: string }) {
-  if (source === 'human') return <HumanAuthor author={author ?? ''} />
-  return <span className="font-mono text-xs">{agentID}</span>
-}
-
 interface IdeaParent {
   /** A hypothesis id, or the platform_experiment_id for the objective root. */
   id: string
@@ -173,7 +157,7 @@ const LINK_TYPE_LABELS: Record<HypothesisLinkType, string> = {
   related: 'Related',
 }
 
-// The registering agent alone may link from its hypothesis; a human-authored one is anyone's.
+// From an agent's hypothesis only that agent links; one no agent owns is anyone's.
 export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
   const [type, setType] = useState<HypothesisLinkType>('related')
   const [target, setTarget] = useState<HypothesisSearchHit | null>(null)

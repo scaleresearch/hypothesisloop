@@ -125,6 +125,8 @@ export interface Experiment {
   id: string
   parent_id?: string
   agent_id: string
+  /** Who submitted it; agent_id is whose job it is. */
+  actor: Actor
   platform_experiment_id: string
   project_id: string
   cluster_name?: string
@@ -349,28 +351,41 @@ export interface ClusterSettings {
 // Hypotheses
 // ---------------------------------------------------------------------------
 
-// The owning agent's own verdict on its claim — see POST /hypotheses/{id}/status. Only
-// the agent named in `agent_id` may ever change it.
+// The verdict on a claim: see POST /hypotheses/{id}/status. On an agent's hypothesis only that
+// agent, or a person or key acting for it, may change it.
 export type HypothesisStatus = 'open' | 'confirmed' | 'refuted' | 'inconclusive'
 
-// Who put a row in the pool. Human rows come from the UI form and carry `author` instead of
-// `agent_id`; exactly one of the two is ever set. Both sit in the same pool under the same dedup,
-// but a human row owns no job, holds no quota, and appears in no standings.
+// Whether an agent owns a row of the pool. A row with no owning agent is `human`: it sits in the
+// same pool under the same dedup, but owns no job, holds no quota, and appears in no standings.
 type HypothesisSource = 'agent' | 'human'
+
+// Whose credential made a record, as the platform authenticated it. Nothing a request says sets
+// it. `unverified` is a record from before actors were kept: its name is the one stated then.
+export type ActorKind = 'user' | 'key' | 'agent' | 'coordinator' | 'staff' | 'unverified'
+
+export interface Actor {
+  kind: ActorKind
+  /** The user, key, agent or platform experiment (for a coordinator); empty for staff and unverified. */
+  id: string
+  /** The name it carries now, its id when it has none. */
+  name: string
+}
 
 export interface Hypothesis {
   id: string
-  /** Empty on a human-submitted row — the owner column names nobody. */
+  /** The agent whose hypothesis it is, empty on one no agent owns. */
   agent_id: string
   source: HypothesisSource
-  /** The name a human typed. There is no auth: a claim, not an identity, exactly as agent_id is. */
-  author: string
+  /** Who registered it, which is another credential than the agent's when one registered it for the agent. */
+  actor: Actor
   platform_experiment_id: string
   text: string
   status: HypothesisStatus
   created_at: string
-  /** When the owner last set the verdict; null while it has never been set. */
+  /** When the verdict was last set; null while it has never been set. */
   status_changed_at: string | null
+  /** Who last set the verdict; null while it has never been set. */
+  status_actor: Actor | null
 }
 
 export type HypothesisLinkType = 'builds_on' | 'contradicts' | 'related'
@@ -384,13 +399,13 @@ export interface HypothesisListItem extends Hypothesis {
   comment_count: number
 }
 
-// agent_id or author (exactly one) and created_at say who made the link and when.
+// actor and created_at say who made the link and when; agent_id is the agent it was made for.
 interface HypothesisGraphEdge {
   from: string
   to: string
   type: HypothesisLinkType
   agent_id: string
-  author: string
+  actor: Actor
   created_at: string
 }
 
@@ -403,15 +418,15 @@ export interface HypothesisGraph {
 }
 
 // One neighbour on GET /hypotheses/{id}. When it is the objective root, hypothesis_id is the
-// platform_experiment_id and text and status are empty. agent_id or author (exactly one) and
-// created_at say who made the link and when.
+// platform_experiment_id and text and status are empty. actor and created_at say who made the
+// link and when; agent_id is the agent it was made for.
 export interface HypothesisLink {
   type: HypothesisLinkType
   hypothesis_id: string
   text: string
   status: HypothesisStatus | ''
   agent_id: string
-  author: string
+  actor: Actor
   created_at: string
 }
 
@@ -428,6 +443,8 @@ export interface HypothesisFinding {
   hypothesis_id: string
   experiment_id: string
   agent_id: string
+  /** Who filed it; agent_id is the job's agent, whose finding it is. */
+  actor: Actor
   summary: string
   created_at: string
 }
@@ -439,7 +456,7 @@ export interface HypothesisComment {
   hypothesis_id: string
   agent_id: string
   source: HypothesisSource
-  author: string
+  actor: Actor
   text: string
   created_at: string
 }
@@ -489,11 +506,12 @@ export interface Me {
   projects: Project[]
 }
 
-// One person of an org. The platform holds no name and no email for them, only the id the identity
-// provider gave them.
+// One person of an org: the id their identity provider gave them and the name it states, empty
+// when it states none. The platform holds no email for them.
 export interface OrgMember {
   org_id: string
   user_id: string
+  name: string
   role: OrgRole
   joined_at: string
 }
@@ -504,6 +522,7 @@ export interface OrgInvite {
   org_id: string
   role: OrgRole
   created_by: string
+  created_by_name: string
   created_at: string
   expires_at: string
 }
@@ -633,7 +652,9 @@ export interface GitHubInstallation {
   installation_id: number
   /** The GitHub user or organisation the App is installed on. */
   account_login: string
+  /** The user who connected it, or the API key it was connected with, and the name of that one. */
   connected_by: string
+  connected_by_name: string
   connected_at: string
 }
 
