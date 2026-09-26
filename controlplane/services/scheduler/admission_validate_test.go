@@ -128,29 +128,49 @@ func TestAnUnspecifiedResourceDimensionIsRejectedRatherThanDefaulted(t *testing.
 	}
 }
 
-// "max" is a proportional share of an accelerator. A job with no accelerator has nothing to take a
-// share of, so the sentinel could never be resolved — it would queue forever, waiting on a
-// resolution step that only ever runs for a positive accelerator count.
-func TestMaxWithoutAnAcceleratorIsRejectedRatherThanQueuedForever(t *testing.T) {
-	for _, spoil := range []func(*domain.JobSpec){
-		func(j *domain.JobSpec) { j.CPU = domain.MaxResourceSentinel },
-		func(j *domain.JobSpec) { j.Memory = domain.MaxResourceSentinel },
-		func(j *domain.JobSpec) { j.Storage = domain.MaxResourceSentinel },
+// Budget, quota, fairness and the concurrency cap count the units of a priced type a job holds. A
+// job that held none ran outside all four, so there is none: work that needs no accelerator asks
+// for cores of a CPU class.
+func TestAJobThatHoldsNoUnitOfAPricedTypeIsRejected(t *testing.T) {
+	const wants = "job.accelerator_count must be at least 1"
+	for name, spoil := range map[string]func(*domain.Experiment){
+		"cores and no type": func(e *domain.Experiment) {
+			e.AcceleratorType, e.Job.AcceleratorType = "", ""
+		},
+		"a type and no count": func(*domain.Experiment) {},
+		"no cores either":     func(e *domain.Experiment) { e.Job.CPU = "0" },
+		"its share of nothing": func(e *domain.Experiment) {
+			e.Job.CPU, e.Job.Memory, e.Job.Storage = domain.MaxResourceSentinel, domain.MaxResourceSentinel, domain.MaxResourceSentinel
+		},
+		"groups that all hold none": func(e *domain.Experiment) {
+			e.Job.CPU, e.Job.Memory, e.Job.Storage = "", "", ""
+			e.Job.Groups = []domain.JobGroup{
+				{Name: "a", Replicas: 2, CPU: "2", Memory: "1Gi", Storage: "1Gi"},
+				{Name: "b", Replicas: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+			}
+		},
 	} {
 		exp := validSubmission()
 		exp.AcceleratorCount, exp.Job.AcceleratorCount = 0, 0
-		spoil(&exp.Job)
-		mustReject(t, exp, "max")
+		spoil(exp)
+		t.Run(name, func(t *testing.T) { mustReject(t, exp, wants) })
 	}
 }
 
-// Zero accelerators and no CPU requests nothing at all — a job that would occupy a slot in every
-// queue while being incapable of doing work.
-func TestAJobRequestingNoResourcesAtAllIsRejected(t *testing.T) {
+// A group that holds no device rides beside one that does, as a job's cores ride beside its
+// accelerators: the job holds priced units and is counted by them.
+func TestAGroupWithNoAcceleratorIsAcceptedBesideOneThatHoldsSome(t *testing.T) {
 	exp := validSubmission()
-	exp.AcceleratorCount, exp.Job.AcceleratorCount = 0, 0
-	exp.Job.CPU = "0"
-	mustReject(t, exp, "job.cpu")
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.AcceleratorCount = "", "", "", 0
+	exp.Job.Groups = []domain.JobGroup{
+		{Name: "learner", Replicas: 1, AcceleratorCount: 1, CPU: "8", Memory: "8Gi", Storage: "1Gi"},
+		{Name: "actors", Replicas: 4, CPU: "2", Memory: "1Gi", Storage: "1Gi"},
+	}
+	if err := validate(t, exp); err != nil {
+		t.Fatalf("a learner with one accelerator and four actors with none: %v", err)
+	}
+	exp.Job.Groups[1].CPU = domain.MaxResourceSentinel
+	mustReject(t, exp, "max")
 }
 
 // The ID is used verbatim in cluster resource names, so anything a DNS subdomain rejects fails at

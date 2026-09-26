@@ -108,10 +108,10 @@ func humanIdeaSubmission() *domain.Experiment {
 	retries := 0
 	return &domain.Experiment{
 		ID: "human-idea-job", AgentID: "agent-1", PlatformExperimentID: "pe-1",
-		HypothesisID: "h-human", Theory: "t", Objective: "o", EstimatedDurationHours: 1,
+		HypothesisID: "h-human", Theory: "t", Objective: "o", EstimatedDurationHours: 1, AcceleratorCount: 1,
 		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
 		Job: domain.JobSpec{
-			Image: "img", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
+			Image: "img", AcceleratorType: h100, AcceleratorCount: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
 		},
 	}
 }

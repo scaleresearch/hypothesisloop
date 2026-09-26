@@ -180,27 +180,14 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("capacity_tier must be %q, %q, or omitted, got %q", domain.CapacityGuaranteed, domain.CapacityBurst, exp.CapacityTier)}
 	}
 
-	// AcceleratorCount == 0 is a legitimate CPU-only job as long as it requests positive CPU —
-	// zero accelerators and no CPU requests nothing at all. An accelerator job must name a type,
-	// or nothing downstream has a type to schedule against.
+	// Every job holds units of a priced type. Budget, quota, fairness and the concurrency cap all
+	// count those units, so a job that held none would run outside all of them. An accelerator job
+	// must name a type, or nothing downstream has a type to schedule against.
 	switch {
 	case exp.AcceleratorCount < 0:
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
 	case exp.AcceleratorCount == 0:
-		// "max" resolves to a proportional share of an accelerator this job isn't requesting, so
-		// it can never be resolved for a job with no accelerators — reject outright rather than
-		// let it queue forever unresolved (see loop_resolve.go's resolveClusterLocalResources,
-		// which only ever resolves a group with a positive accelerator count).
-		if exp.Job.CPU == domain.MaxResourceSentinel || exp.Job.Memory == domain.MaxResourceSentinel || exp.Job.Storage == domain.MaxResourceSentinel {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu/memory/storage cannot be \"max\" without a positive job.accelerator_count — there is no accelerator to compute a proportional share against"}
-		}
-		cores, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
-		if err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
-		}
-		if cores <= 0 {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count is zero and job.cpu requests no positive CPU"}
-		}
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must be at least 1: every job holds units of a type the catalog prices. A job that needs no accelerator asks for cores of a CPU class, a type of kind cpu in GET /resource-catalog, whose count is the job's cores"}
 	case exp.Job.AcceleratorType == "":
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_type is required when job.accelerator_count > 0"}
 	}
