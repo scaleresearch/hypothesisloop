@@ -15,6 +15,8 @@ var (
 	// ErrClusterNameTaken reports that another org already registered the cluster name.
 	ErrClusterNameTaken = errors.New("cluster name is registered to another org")
 	ErrClusterNotFound  = errors.New("cluster is not registered")
+	// ErrClusterShared reports a priority asked for a shared cluster, which holds the platform's.
+	ErrClusterShared = errors.New("a shared cluster holds the platform's priority, below every org's own clusters")
 	// ErrClusterIDBound reports a runtime stating an identity another registered cluster holds.
 	ErrClusterIDBound = errors.New("cluster id is bound to another registered cluster")
 	// ErrClusterIDChanged reports a runtime stating an identity other than the one its cluster
@@ -71,12 +73,12 @@ func NewClustersStore(pool *Pool) *ClustersStore {
 	return &ClustersStore{pool: pool}
 }
 
-const clusterColumns = `name, org_id, shared, COALESCE(reported_id, ''), job_image, created_at,
+const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.ReportedID, &c.JobImage, &c.CreatedAt, &c.DisabledOrgs); err != nil {
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.CreatedAt, &c.DisabledOrgs); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -167,9 +169,10 @@ func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]doma
 }
 
 // ClustersHosting returns the clusters orgID can use, its own and the shared ones, by name. The
-// ones it turned off are among them and say so.
+// ones it turned off are among them and say so. They come in the order placement tries them:
+// highest priority first, then by name.
 func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY name`, orgID)
+	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY priority DESC, name`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.ClustersHosting: %w", err)
 	}
@@ -198,7 +201,12 @@ func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, share
 	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
 		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: lock: %w", err)
 	}
-	cluster, err = scanCluster(tx.QueryRow(ctx, `UPDATE clusters SET shared = $2 WHERE name = $1 RETURNING `+clusterColumns, name, shared))
+	// A shared cluster holds the platform's priority, and one that is its org's alone again starts
+	// from the priority a cluster is registered with.
+	cluster, err = scanCluster(tx.QueryRow(ctx, `
+UPDATE clusters SET shared = $2,
+	priority = CASE WHEN $2 THEN $3 WHEN shared THEN $4 ELSE priority END
+WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrClusterNotFound
 	}
@@ -251,6 +259,26 @@ ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, by)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: commit: %w", err)
+	}
+	return cluster, nil
+}
+
+// SetClusterPriority records where its org ranks a cluster among the ones its jobs may be placed
+// on. It orders placements from here on and moves no job. A shared cluster is ErrClusterShared.
+func (s *ClustersStore) SetClusterPriority(ctx context.Context, name string, priority int) (*domain.Cluster, error) {
+	if err := domain.ValidateClusterPriority(priority); err != nil {
+		return nil, err
+	}
+	cluster, err := scanCluster(s.pool.pool.QueryRow(ctx, `
+UPDATE clusters SET priority = CASE WHEN shared THEN priority ELSE $2 END WHERE name = $1 RETURNING `+clusterColumns, name, priority))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClusterNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.SetClusterPriority: %w", err)
+	}
+	if cluster.Shared {
+		return nil, ErrClusterShared
 	}
 	return cluster, nil
 }

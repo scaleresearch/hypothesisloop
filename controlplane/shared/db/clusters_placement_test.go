@@ -42,7 +42,7 @@ func newTwoOrgs(t *testing.T) *twoOrgs {
 	}
 	// The database is shared by the package's tests, and a shared cluster is every org's.
 	t.Cleanup(func() {
-		_, _ = pool.pool.Exec(context.Background(), `UPDATE clusters SET shared = false WHERE name = ANY($1)`, []string{w.ofA, w.ofB})
+		_, _ = pool.pool.Exec(context.Background(), `UPDATE clusters SET shared = false, priority = 100 WHERE name = ANY($1)`, []string{w.ofA, w.ofB})
 	})
 	return w
 }
@@ -235,7 +235,7 @@ func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
 	if _, err := tx.Exec(ctx, clusterAdmissionLock, w.ofA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET shared = false WHERE name = $1`, w.ofA); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE clusters SET shared = false, priority = 100 WHERE name = $1`, w.ofA); err != nil {
 		t.Fatal(err)
 	}
 	type outcome struct {

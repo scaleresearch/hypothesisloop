@@ -957,6 +957,18 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
 -- job_image is the one image every job on the cluster runs in, as its runtime last reported it.
 -- Empty for a cluster that runs each job in the image the job names. Placement reads it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image TEXT NOT NULL DEFAULT '';
+-- priority orders the clusters a job may be placed on, higher first. The org that registered a
+-- cluster sets 1 to 1000 on it. A shared cluster is the platform's and holds 0, so every org's
+-- own compute is tried before it.
+ALTER TABLE clusters ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100;
+UPDATE clusters SET priority = 0 WHERE shared AND priority <> 0;
+DO $$ BEGIN
+    ALTER TABLE clusters ADD CONSTRAINT clusters_priority CHECK (
+        (shared AND priority = 0) OR (NOT shared AND priority BETWEEN 1 AND 1000)
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- An org turns a cluster on or off for its own jobs, whether the cluster is its own or one the
 -- platform shares. A row is the org's decision that none of its jobs is placed on the cluster
