@@ -132,11 +132,12 @@ auth:
   ui_origin: http://localhost:3000
 ```
 
-A deployment lists the one provider it signs people in with. Locally `make render-settings`
-(`localdev/lib/auth.sh`) always lists a stand-in whose key is made on this machine, which the e2e
-suite and the UI's browser run sign their users with, and with `LOCAL_IDENTITY_PROVIDER=supabase`
-in `.env` the Supabase project beside it, so signing in with GitHub and the tests work on the
-same running stack. A token is checked against the one provider its issuer names. The UI's
+`identity_providers` lists the sign-in services whose tokens the control plane accepts, and a
+person's token is checked against the one entry whose issuer it states. A deployment lists the
+service it signs people in with. Locally `make render-settings` (`localdev/lib/auth.sh`) always
+lists a stand-in whose key is made on this machine, which the e2e suite and the UI's browser run
+sign their users with, and with `LOCAL_IDENTITY_PROVIDER=supabase` in `.env` the Supabase project
+beside it, so signing in with GitHub and the tests work on the same running stack. The UI's
 browser run uses the stand-in:
 
 ```bash

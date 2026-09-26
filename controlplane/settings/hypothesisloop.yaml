@@ -11,15 +11,16 @@ services:
 # check off.
 #
 #   identity_providers
-#                     who signs people in. Each entry is one issuer of people's JWTs: its issuer,
-#                     the audience it issues them for this API under, and jwt_keys, its public
-#                     keys as its JWKS document gives them (kid, kty, alg and crv/x/y for ES256 or
-#                     n/e for RS256). A token is checked against the one entry its issuer names.
+#                     the sign-in services whose tokens the control plane accepts. Each entry is
+#                     one service: its issuer, as its tokens state it, the audience it issues
+#                     them for this API under, and jwt_keys, its public keys as its JWKS document
+#                     gives them (kid, kty, alg and crv/x/y for ES256 or n/e for RS256). A
+#                     person's token is checked against the one entry whose issuer it states.
 #                     The keys are never fetched: rotating one is an edit here and a restart.
-#                     With none listed no JWT is accepted. A deployment lists the provider it
-#                     signs people in with. Local development renders in a key made on the machine,
-#                     which its tests sign their users with, and the Supabase project beside it
-#                     when .env asks for one (make render-settings).
+#                     With none listed no person's token is accepted. A deployment lists the
+#                     service it signs people in with. Local development renders in a key made on
+#                     the machine, which its tests sign their users with, and the Supabase project
+#                     beside it when .env asks for one (make render-settings).
 #   signing_secret    derives the hls_ tokens handed to what the platform launches (jobs, agents,
 #                     coordinators, runtimes) and the staff token. A secret of the deployment, so
 #                     this file names the environment variable and never holds the value: the
