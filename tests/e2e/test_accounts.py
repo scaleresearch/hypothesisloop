@@ -521,11 +521,6 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
             org.api.close_platform_experiment(pe_id)
 
 
-@pytest.mark.parallel
-def test_only_staff_see_every_org(orgs, api: API):
-    a, b = orgs
-    me = api.get_json("/me")
-    assert me["kind"] == "staff" and {a.org_id, b.org_id, "default"} <= {o["id"] for o in me["orgs"]}
 @pytest.mark.timeout(240)
 @pytest.mark.exclusive
 def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API, run_id: str, deadline: Deadline):
@@ -612,6 +607,11 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
         a.api.close_platform_experiment(pe_id)
 
 
+@pytest.mark.parallel
+def test_only_staff_see_every_org(orgs, api: API):
+    a, b = orgs
+    me = api.get_json("/me")
+    assert me["kind"] == "staff" and {a.org_id, b.org_id, "default"} <= {o["id"] for o in me["orgs"]}
     assert api.get(f"/orgs/{a.org_id}/api-keys").status_code == 200
     r = api.post(f"/orgs/{a.org_id}/api-keys", {"name": "by a staff token"})
     assert r.status_code == 403, f"a staff token that is no person created a key: {r.status_code} {r.text}"
