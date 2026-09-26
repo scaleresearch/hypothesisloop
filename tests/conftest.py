@@ -87,12 +87,15 @@ def preflight() -> None:
 
 @pytest.fixture(scope="session")
 def api(preflight: None):
-    """Closes at session end every platform experiment created through it, which catches the ones
-    a test created directly and failed before closing."""
+    """The staff caller. At session end it closes every platform experiment created through it
+    or through a caller made from it, and removes every cluster the tests registered: what a
+    test left behind when it failed, on a database that is never emptied between runs."""
     client = API(API_URL, _build_hl_binary(), HL_TOKEN, DEFAULT_ORG, DEFAULT_PROJECT)
     yield client
     for pe_id in client.created_platform_experiments:
         client.close_platform_experiment(pe_id)
+    for name, org_id in admin.added_clusters:
+        client.session.delete(client._url(f"/orgs/{org_id}/clusters/{name}"), timeout=30)
 
 
 @pytest.fixture

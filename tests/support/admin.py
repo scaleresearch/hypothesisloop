@@ -51,9 +51,16 @@ def add_api_key(subject: str, org_id: str, project_id: str = "") -> str:
     return json.loads(_run(*args))["token"]
 
 
+# Every (cluster, org) registered here, removed by conftest at session end.
+added_clusters: list[tuple[str, str]] = []
+
+
 def add_cluster(name: str, org_id: str) -> str:
     """Registers the cluster for the org and returns its runtime token."""
-    return _run("cluster", "add", name, org_id)
+    token = _run("cluster", "add", name, org_id)
+    if (name, org_id) not in added_clusters:
+        added_clusters.append((name, org_id))
+    return token
 
 
 def set_staff(subject: str, staff: bool) -> None:

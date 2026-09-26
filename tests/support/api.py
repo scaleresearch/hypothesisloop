@@ -110,7 +110,8 @@ class API:
         self.repository: str | None = None
         self.session = requests.Session()
         self.session.headers["Authorization"] = f"Bearer {token}"
-        # Every platform experiment created through hl, closed by conftest at session end.
+        # Every platform experiment created through hl by this caller and the callers made from
+        # it, closed by conftest at session end.
         self.created_platform_experiments: list[str] = []
 
     # ---- hl CLI -----------------------------------------------------------------------------
@@ -141,8 +142,11 @@ class API:
         }
 
     def as_caller(self, token: str, org_id: str = "", project_id: str = "") -> "API":
-        """The same API seen by another caller."""
-        return API(self.base_url, self.hl_bin, token, org_id, project_id)
+        """The same API seen by another caller. What it creates is listed with what this one
+        creates, so the session closes it too."""
+        caller = API(self.base_url, self.hl_bin, token, org_id, project_id)
+        caller.created_platform_experiments = self.created_platform_experiments
+        return caller
 
     def hl_expect(self, *args: str, input: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
         """Raw `hl` invocation returning the CompletedProcess as-is, unlike hl() which raises on a
