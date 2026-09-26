@@ -1,6 +1,10 @@
 package domain
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // Regression test for findings.md's P0 "extended resources bypass admission accounting":
 // JobSpec.Footprint (used by Job/JobSpec-facing code) includes every ExtraResources entry as
@@ -305,5 +309,31 @@ func TestExperimentFootprintCountsWhatAdmissionResolved(t *testing.T) {
 	}
 	if exp.Job.CPU != MaxResourceSentinel {
 		t.Error("the submitted job was rewritten")
+	}
+}
+
+// A job states cpu as a number or as a string, and it is kept and answered as the string.
+func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"cpu":4,"groups":[{"cpu":2}]}`:        "4 2",
+		`{"cpu":"500m","groups":[{"cpu":"1"}]}`: "500m 1",
+		`{"cpu":0.5,"groups":[{"cpu":"max"}]}`:  "0.5 max",
+		`{"image":"i","groups":[{}]}`:           " ",
+	} {
+		var job JobSpec
+		if err := json.Unmarshal([]byte(body), &job); err != nil || job.CPU+" "+job.Groups[0].CPU != want {
+			t.Errorf("%s: got = %q and %q, %v, want %q", body, job.CPU, job.Groups[0].CPU, err, want)
+		}
+	}
+	var job JobSpec
+	if err := json.Unmarshal([]byte(`{"image":"i","cpu":true}`), &job); err == nil {
+		t.Error("cpu: true was accepted")
+	}
+	if err := json.Unmarshal([]byte(`{"image":"i","cpu":4,"memory":"1Gi"}`), &job); err != nil || job.Image != "i" || job.Memory != "1Gi" {
+		t.Fatalf("the fields beside cpu: got = %+v, %v", job, err)
+	}
+	out, err := json.Marshal(job)
+	if err != nil || !strings.Contains(string(out), `"cpu":"4"`) {
+		t.Errorf("answered as %s, %v, want cpu as the string", out, err)
 	}
 }

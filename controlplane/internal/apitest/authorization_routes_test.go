@@ -226,7 +226,7 @@ var staffOnly = only(nil, 0)
 const metricsUnreachable = http.StatusInternalServerError
 
 const (
-	job1      = `{"id":"job-new","metadata":{"platform_experiment_id":"<pe>","agent_id":"<agent>","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`
+	job1      = `{"id":"job-new","metadata":{"platform_experiment_id":"<pe>","agent_id":"<agent>","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":1,"memory":"1Gi","storage":"1Gi","max_retries":0}}`
 	pe1       = `{"project_id":"<prj>","name":"n","description":"d","budget_accelerator_hours":1,"max_agents":2,"metrics":[{"key":"loss","direction":"minimize","role":"ranking"}],"report_interval_seconds":60,"starts_at":"2030-01-01T00:00:00Z","ends_at":"2030-01-02T00:00:00Z"}`
 	capacity1 = `{"cpu_available_cores":1,"cpu_total_cores":1,"accelerator_available_by_type":{},"accelerator_total_by_type":{},"accelerator_available_by_node":{},"node_resources_by_node":{},"node_resources_total_by_node":{},"node_labels_by_node":{},"multi_node_capable":false,"autoscaler_enabled":false,"cluster_id":"","ram_available_bytes":1,"ram_total_bytes":1,"storage_available_bytes":1,"storage_total_bytes":1}`
 )

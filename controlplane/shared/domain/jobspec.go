@@ -44,6 +44,8 @@ type JobSpec struct {
 	//
 	// A job that names no accelerator runs on cores: cpu is then a whole number and the job holds
 	// that many units of CPUType. Submission writes the count and every "max" into the job.
+	// cpu is written as a number (cpu: 4) or a string ("4", "500m", "max") and is kept and
+	// answered as the string.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
