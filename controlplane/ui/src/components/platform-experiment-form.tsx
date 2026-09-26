@@ -551,6 +551,19 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
               </>
             ) : (
               <>
+                {!isEdit && (
+                  <FieldGroup label="Who runs the agents?" hint={RUN_BY_HINTS[form.run_by]}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Segmented label="Who runs the agents?" options={RUN_BY_OPTIONS} value={form.run_by} onChange={v => set('run_by', v)} />
+                      {hosted && (
+                        <FormField inline label="Researchers">
+                          <Input type="number" fieldSize="sm" className="w-20" min={1} step={1} value={form.researchers} onChange={e => set('researchers', Number(e.target.value))} />
+                        </FormField>
+                      )}
+                    </div>
+                  </FieldGroup>
+                )}
+                {hostedError && <InlineError>{hostedError}</InlineError>}
                 <div className="grid grid-cols-2 gap-3.5">
                   <FormField
                     label="Accelerator budget — AccH (GPU-hours) *"
@@ -628,19 +641,6 @@ export function PlatformExperimentForm({ initial, onSaved, onCancel }: FormProps
                   </p>
                 )}
 
-                {!isEdit && (
-                  <FieldGroup label="Who runs the agents?" hint={RUN_BY_HINTS[form.run_by]}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Segmented label="Who runs the agents?" options={RUN_BY_OPTIONS} value={form.run_by} onChange={v => set('run_by', v)} />
-                      {hosted && (
-                        <FormField inline label="Researchers">
-                          <Input type="number" fieldSize="sm" className="w-20" min={1} step={1} value={form.researchers} onChange={e => set('researchers', Number(e.target.value))} />
-                        </FormField>
-                      )}
-                    </div>
-                  </FieldGroup>
-                )}
-                {hostedError && <InlineError>{hostedError}</InlineError>}
               </>
             )}
 
