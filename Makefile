@@ -309,6 +309,8 @@ tt-start:
 # a job naming latest keeps running whatever latest was when that node first pulled it. It is
 # written only by a push to the dev registry: the tests pull from there, and a publish to another
 # registry would otherwise pin them to a tag the dev registry may not hold.
+# job is the image a job that names none runs in. Registering a cluster names it at the tag of
+# the agents' images (hl cluster add), so it is pushed wherever they are.
 IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
@@ -316,6 +318,7 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	bare-agent:runtime/bare-metal/build/Dockerfile.bare-agent:. \
 	cloud-agent:runtime/cloud/build/Dockerfile.cloud-agent:. \
 	agent-launcher:runtime/cloud/build/Dockerfile.agent-launcher:. \
+	job:infra/images/job/Dockerfile:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here.
