@@ -92,8 +92,8 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxH
 	for _, agent := range create {
 		agent.OrgID = orgID
 		if _, err := tx.Exec(ctx, `
-INSERT INTO agents (id, name, org_id, performance_score, created_at)
-VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt); err != nil {
+INSERT INTO agents (id, name, org_id, kind, performance_score, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)`, agent.ID, agent.Name, agent.OrgID, agent.Kind, agent.PerformanceScore, agent.CreatedAt); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: create agent %s: %w", agent.ID, err)
 		}
 	}

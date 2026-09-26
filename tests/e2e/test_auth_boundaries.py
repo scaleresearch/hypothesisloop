@@ -217,7 +217,7 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/status", {"agent_id": mine.agent, "status": "refuted"}, 403),
         ("POST", "/platform-experiments", _platform_experiment_body("an agent's own", org.project_id), 403),
         ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}, 403),
-        ("POST", "/agents", {"id": f"agent-made-by-an-agent-{uuid.uuid4().hex[:6]}"}, 403),
+        ("POST", "/agents", {"id": f"agent-made-by-an-agent-{uuid.uuid4().hex[:6]}", "kind": "agent"}, 403),
     ])
 
     assert org.key.experiment(theirs.job_id)["status"] == "QUEUED"

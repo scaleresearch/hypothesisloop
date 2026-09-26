@@ -16,8 +16,8 @@ func TestExperimentStatsGroupsByAgentAndHypothesis(t *testing.T) {
 	suffix := uuid.New().String()[:8]
 	peID, agentA, agentB := "pe-stats-"+suffix, "agent-stats-a-"+suffix, "agent-stats-b-"+suffix
 	createTestPE(t, pool, peID, 1000)
-	createTestAgent(t, pool, agentA)
-	createTestAgent(t, pool, agentB)
+	createTestAgent(t, pool, agentA, domain.AgentKindHuman)
+	createTestAgent(t, pool, agentB, domain.AgentKindHuman)
 
 	for _, job := range []struct {
 		id, agent, hypothesis string

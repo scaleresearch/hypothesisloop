@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchExperimentsPage, fetchExperimentStats, fetchOrgClusters, fetchUnsummarizedJobIDs } from '@/lib/api'
+import { fetchExperimentsPage, fetchExperimentStats, fetchOrgClusters } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import JobsPage from '@/app/(app)/jobs/page'
 import type { Experiment, Me } from '@/types'
@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', () => ({
   cancelExperiment: vi.fn(), fetchExperimentsPage: vi.fn(), fetchExperimentStats: vi.fn(),
-  fetchOrgClusters: vi.fn(), fetchUnsummarizedJobIDs: vi.fn(),
+  fetchOrgClusters: vi.fn(),
 }))
 vi.mock('@/components/agent-select', () => ({ AgentSelect: () => null }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => null }))
@@ -29,7 +29,7 @@ const me: Me = {
 
 function job(id: string, cluster: string): Experiment {
   return {
-    id, agent_id: 'ag-1', actor: { kind: 'agent', id: 'ag-1', name: 'ag-1' }, platform_experiment_id: 'pe-1', project_id: 'prj_1', hypothesis_id: 'h1',
+    id, agent_id: 'ag-1', agent_name: 'Researcher 1', summary_due: false, actor: { kind: 'agent', id: 'ag-1', name: 'ag-1' }, platform_experiment_id: 'pe-1', project_id: 'prj_1', hypothesis_id: 'h1',
     status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: cluster, created_at: at, updated_at: at,
     accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
   } as Experiment
@@ -47,7 +47,6 @@ beforeEach(() => {
     total: 4,
   })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 4, by_status: { RUNNING: 4 } } as never)
-  vi.mocked(fetchUnsummarizedJobIDs).mockResolvedValue(new Set())
   vi.mocked(fetchOrgClusters).mockResolvedValue([
     { name: 'lab', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: true, autoscaler_enabled: false },
     { name: 'edge', org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false },

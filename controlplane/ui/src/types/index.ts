@@ -125,6 +125,8 @@ export interface Experiment {
   id: string
   parent_id?: string
   agent_id: string
+  /** What that agent is called now, its id when it has no name. */
+  agent_name: string
   /** Who submitted it; agent_id is whose job it is. */
   actor: Actor
   platform_experiment_id: string
@@ -164,6 +166,8 @@ export interface Experiment {
   metrics?: JobMetric[]
   // The write-up its agent filed, on a read of one job only.
   summary?: string
+  /** The job completed and its agent filed no summary of it. */
+  summary_due: boolean
   // When the job reached its terminal status; absent while it can still run.
   finished_at?: string
   // Lineage
@@ -406,11 +410,18 @@ interface HypothesisGraphEdge {
   created_at: string
 }
 
+// A node of the graph: its newest finding, and the job testing it that did best on the ranking
+// metric with the summary filed for that job. Each is absent when there is none.
+export interface HypothesisGraphNode extends HypothesisListItem {
+  finding?: HypothesisFinding
+  best_job?: { id: string; metric: JobMetric; summary?: string }
+}
+
 // GET /hypotheses/graph: one platform experiment's whole graph. `root` is the objective's id,
 // equal to the platform_experiment_id.
 export interface HypothesisGraph {
   root: string
-  nodes: HypothesisListItem[]
+  nodes: HypothesisGraphNode[]
   edges: HypothesisGraphEdge[]
 }
 

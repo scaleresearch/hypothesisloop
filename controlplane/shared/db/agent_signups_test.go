@@ -25,7 +25,7 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 		if signups[i].Role == "" {
 			signups[i].Role = domain.SignupRoleCompetitor
 		}
-		agent := &domain.Agent{ID: id, Name: "display-" + id, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+		agent := &domain.Agent{ID: id, Name: "display-" + id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 		if err := pes.SpawnAgent(context.Background(), pe, agent, signups[i]); err != nil {
 			t.Fatalf("spawn agent: got = %v, want = nil", err)
 		}
@@ -117,7 +117,7 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	before := agentCount()
 	spawn := func(pe string) error {
 		id, _ := domain.NewAgentID()
-		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, CreatedAt: time.Now().UTC()}
+		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, Kind: domain.AgentKindAgent, CreatedAt: time.Now().UTC()}
 		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor})
 	}
 

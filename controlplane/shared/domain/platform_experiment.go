@@ -198,6 +198,11 @@ type PlatformExperiment struct {
 	Summary        string   `json:"summary,omitempty"`
 	SignedUpAgents []string `json:"signed_up_agents,omitempty"`
 	SignupCount    int      `json:"signup_count"`
+	// HypothesisSubmitPolicy/JobSubmitPolicy independently control who may register a hypothesis
+	// vs. submit a job within this platform experiment — see SubmitterPolicy. Empty resolves to
+	// SubmitterPolicyMixed (today's behavior, unchanged) via ParseSubmitterPolicy.
+	HypothesisSubmitPolicy SubmitterPolicy `json:"hypothesis_submit_policy,omitempty"`
+	JobSubmitPolicy        SubmitterPolicy `json:"job_submit_policy,omitempty"`
 	// DefaultQuotaTier is used when a signup does not choose its own tier. Empty means this row
 	// predates the policy and ResolveQuotaTier must use the legacy kind-based default.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
@@ -285,4 +290,43 @@ func ParseSignupRole(s string) (SignupRole, error) {
 		return SignupRole(s), nil
 	}
 	return "", fmt.Errorf("unknown role %q: must be one of competitor, baseline, reviewer", s)
+}
+
+// SubmitterPolicy governs who may submit into a platform experiment — a hypothesis or a job,
+// each gated independently (see PlatformExperiment.HypothesisSubmitPolicy/JobSubmitPolicy) —
+// distinguishing a human identity from an autonomous agent identity.
+type SubmitterPolicy string
+
+const (
+	// SubmitterPolicyMixed allows both humans and agents — today's behavior, unchanged, and the
+	// default when the field is left empty.
+	SubmitterPolicyMixed SubmitterPolicy = "mixed"
+	// SubmitterPolicyHumanOnly allows only a human submitter.
+	SubmitterPolicyHumanOnly SubmitterPolicy = "human_only"
+	// SubmitterPolicyAgentOnly allows only an autonomous-agent submitter.
+	SubmitterPolicyAgentOnly SubmitterPolicy = "agent_only"
+)
+
+// ParseSubmitterPolicy resolves a requested policy. An empty string is the mixed default, so
+// every caller written before this field existed keeps meaning what it meant. Anything else
+// unrecognized is an error: defaulting a typo to mixed would silently open a restricted platform
+// experiment to submitters the operator meant to exclude.
+func ParseSubmitterPolicy(s string) (SubmitterPolicy, error) {
+	switch SubmitterPolicy(s) {
+	case "":
+		return SubmitterPolicyMixed, nil
+	case SubmitterPolicyMixed, SubmitterPolicyHumanOnly, SubmitterPolicyAgentOnly:
+		return SubmitterPolicy(s), nil
+	}
+	return "", fmt.Errorf("unknown submitter policy %q: must be one of mixed, human_only, agent_only", s)
+}
+
+// AllowsHuman reports whether p permits a human submitter.
+func (p SubmitterPolicy) AllowsHuman() bool {
+	return p != SubmitterPolicyAgentOnly
+}
+
+// AllowsAgent reports whether p permits an autonomous-agent submitter.
+func (p SubmitterPolicy) AllowsAgent() bool {
+	return p != SubmitterPolicyHumanOnly
 }

@@ -26,10 +26,10 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 	agents := make([]string, contenders)
 	for i := range agents {
 		agents[i] = "agent-" + suffix + "-" + string(rune('a'+i))
-		createTestAgent(t, pool, agents[i])
+		createTestAgent(t, pool, agents[i], domain.AgentKindAgent)
 	}
 	baseline := "baseline-" + suffix
-	createTestAgent(t, pool, baseline)
+	createTestAgent(t, pool, baseline, domain.AgentKindAgent)
 
 	pes := NewPlatformExperimentsStore(pool)
 	results := make([]error, contenders)

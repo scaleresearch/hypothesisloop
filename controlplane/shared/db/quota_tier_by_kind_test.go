@@ -17,11 +17,11 @@ func quotaTierTestDB(t *testing.T) *Pool {
 	return eventsTestDB(t)
 }
 
-func createTestAgent(t *testing.T, pool *Pool, id string) {
+func createTestAgent(t *testing.T, pool *Pool, id string, kind domain.AgentKind) {
 	t.Helper()
 	agents := NewAgentsStore(pool)
 	if err := agents.CreateAgent(context.Background(), &domain.Agent{
-		ID: id, Name: id, OrgID: "default", PerformanceScore: 0.5, CreatedAt: time.Now().UTC(),
+		ID: id, Name: id, OrgID: "default", Kind: kind, PerformanceScore: 0.5, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create agent %s: got = %v, want = nil", id, err)
 	}
@@ -40,7 +40,9 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		CurrentStage:          1,
 		// The store writes these through to CHECK-constrained columns. The service resolves the
 		// empty default (domain.ParseSubmitterPolicy) before it ever gets here, so a caller
-		// building the row itself has to resolve it too.,
+		// building the row itself has to resolve it too.
+		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed,
+		JobSubmitPolicy:        domain.SubmitterPolicyMixed,
 		// Left empty on purpose in most of this file: an empty DefaultQuotaTier is the legacy/
 		// unset-policy case, which ResolveQuotaTier now resolves to guaranteed for everyone (no
 		// AgentKind involved at all) — the exact case these tests exist to pin down.
@@ -76,8 +78,8 @@ func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	human, agent, pe := "human-"+suffix, "agent-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, human)
-	createTestAgent(t, pool, agent)
+	createTestAgent(t, pool, human, domain.AgentKindHuman)
+	createTestAgent(t, pool, agent, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
@@ -88,11 +90,24 @@ func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T)
 		t.Fatalf("signup agent: got = %v, want = nil", err)
 	}
 
+	var seenKinds map[string]domain.AgentKind
 	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+		// StartParticipant.Kind still resolves real kinds — it is just no longer read by quota
+		// allocation. Confirm the join itself is intact even though allocateStartQuotas ignores it.
+		seenKinds = make(map[string]domain.AgentKind, len(participants))
+		for _, p := range participants {
+			seenKinds[p.AgentID] = p.Kind
+		}
 		return allocateStartQuotas(pe, 4, participants), nil // 4 = budget * stage-1 explore fraction, arbitrary here
 	})
 	if err != nil || !started {
 		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
+	}
+	if seenKinds[human] != domain.AgentKindHuman {
+		t.Errorf("StartParticipant.Kind for %s = %q, want %q — the join in StartPlatformExperimentTx must resolve real kinds", human, seenKinds[human], domain.AgentKindHuman)
+	}
+	if seenKinds[agent] != domain.AgentKindAgent {
+		t.Errorf("StartParticipant.Kind for %s = %q, want %q", agent, seenKinds[agent], domain.AgentKindAgent)
 	}
 
 	byAgent := make(map[string]*domain.AgentQuota, len(quotas))
@@ -119,8 +134,8 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	agentBurstOnly, humanBurstOnly, pe := "agent-burst-"+suffix, "human-burst-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, agentBurstOnly)
-	createTestAgent(t, pool, humanBurstOnly)
+	createTestAgent(t, pool, agentBurstOnly, domain.AgentKindAgent)
+	createTestAgent(t, pool, humanBurstOnly, domain.AgentKindHuman)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
@@ -160,9 +175,9 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	humanSurvivor, agentSurvivor, cutAgent, pe := "human-"+suffix, "agent-"+suffix, "cut-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, humanSurvivor)
-	createTestAgent(t, pool, agentSurvivor)
-	createTestAgent(t, pool, cutAgent)
+	createTestAgent(t, pool, humanSurvivor, domain.AgentKindHuman)
+	createTestAgent(t, pool, agentSurvivor, domain.AgentKindAgent)
+	createTestAgent(t, pool, cutAgent, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
@@ -216,7 +231,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 	pes := NewPlatformExperimentsStore(pool)
 	for _, id := range ids {
-		createTestAgent(t, pool, id)
+		createTestAgent(t, pool, id, domain.AgentKindAgent)
 		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
@@ -291,8 +306,8 @@ func TestDonationToARecipientWithNoOverrideLandsInGuaranteedRegardlessOfKind(t *
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	donorHuman, recipientAgent, pe := "donor-"+suffix, "recipient-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, donorHuman)
-	createTestAgent(t, pool, recipientAgent)
+	createTestAgent(t, pool, donorHuman, domain.AgentKindHuman)
+	createTestAgent(t, pool, recipientAgent, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
@@ -352,8 +367,8 @@ func TestDonationToABurstOnlyRecipientLandsEntirelyInBurstRegardlessOfKind(t *te
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	donorHuman, recipientAgent, pe := "donor-"+suffix, "recipient-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, donorHuman)
-	createTestAgent(t, pool, recipientAgent)
+	createTestAgent(t, pool, donorHuman, domain.AgentKindHuman)
+	createTestAgent(t, pool, recipientAgent, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)
@@ -411,8 +426,8 @@ func TestDonationCountsTheDonorsReservedHours(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	donor, recipient, pe := "donor-"+suffix, "recipient-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, donor)
-	createTestAgent(t, pool, recipient)
+	createTestAgent(t, pool, donor, domain.AgentKindHuman)
+	createTestAgent(t, pool, recipient, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewPlatformExperimentsStore(pool)

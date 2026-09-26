@@ -221,7 +221,7 @@ export interface ExperimentsParams {
   needs_summary?: boolean
   limit?: number
   offset?: number
-  /** "created_at" | "priority_score" | "status", optionally prefixed with "-" for descending. */
+  /** "created_at" | "updated_at" | "status", optionally prefixed with "-" for descending. */
   sort?: string
 }
 
@@ -561,6 +561,11 @@ export function fetchPlatformExperimentResults(id: string): Promise<PlatformExpe
 
 export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuota[]> {
   return apiFetch<AgentQuota[]>(`/platform-experiments/${platformExpID}/quotas`)
+}
+
+// Answered 404 for an agent with no quota there: quota is granted at the start, to the agents signed up.
+export function fetchAgentQuota(platformExpID: string, agentID: string): Promise<AgentQuota> {
+  return apiFetch<AgentQuota>(`/platform-experiments/${platformExpID}/quotas/${agentID}`)
 }
 
 // Live, per-cluster accelerator capacity: what is schedulable right now, read from the metrics

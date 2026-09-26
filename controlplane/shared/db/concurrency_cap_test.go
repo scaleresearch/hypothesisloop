@@ -48,8 +48,10 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullSto
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	agentID, peID := "agent-cap-"+suffix, "pe-cap-"+suffix
-	// The guaranteed allocation is big enough that only the concurrency cap can reject a submit.
-	createTestAgent(t, pool, agentID)
+	// Human kind, not Agent: AgentKindAgent gets zero guaranteed quota (burst-only) — this test is
+	// about the concurrency cap, not the quota-tier split, so give it a guaranteed allocation big
+	// enough that only the concurrency cap can reject a submit.
+	createTestAgent(t, pool, agentID, domain.AgentKindHuman)
 	createTestPE(t, pool, peID, 1000)
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_concurrent_accelerators=$2 WHERE id=$1`, peID, cap); err != nil {
 		t.Fatalf("set cap: got = %v, want = nil", err)
@@ -105,7 +107,7 @@ func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	agentB := "agent-cap-b-" + suffix
-	createTestAgent(t, pool, agentB)
+	createTestAgent(t, pool, agentB, domain.AgentKindHuman)
 	pes := NewPlatformExperimentsStore(pool)
 	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{AgentID: agentB, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup agent B: got = %v, want = nil", err)

@@ -15,8 +15,8 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	in, out, pe := "alpha-"+suffix, "beta-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, in)
-	createTestAgent(t, pool, out)
+	createTestAgent(t, pool, in, domain.AgentKindAgent)
+	createTestAgent(t, pool, out, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 	if _, err := NewPlatformExperimentsStore(pool).Signup(ctx, pe, domain.AgentSignup{AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup: %v", err)
@@ -56,8 +56,8 @@ func TestAgentStatsCountsTop3AndAveragesScoreOverTheWholeSet(t *testing.T) {
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	placed, unplaced, pe := "placed-"+suffix, "unplaced-"+suffix, "pe-"+suffix
-	createTestAgent(t, pool, placed)
-	createTestAgent(t, pool, unplaced)
+	createTestAgent(t, pool, placed, domain.AgentKindAgent)
+	createTestAgent(t, pool, unplaced, domain.AgentKindAgent)
 	createTestPE(t, pool, pe, 10)
 	if _, err := pool.pool.Exec(ctx, `UPDATE agents SET performance_score = CASE id WHEN $1 THEN 1 ELSE 0.5 END WHERE id IN ($1, $2)`, placed, unplaced); err != nil {
 		t.Fatalf("set scores: %v", err)

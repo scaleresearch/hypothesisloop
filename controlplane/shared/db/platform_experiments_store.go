@@ -59,8 +59,8 @@ type execer interface {
 
 func insertPlatformExperiment(ctx context.Context, db execer, pe *domain.PlatformExperiment) error {
 	const q = `
-INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, agent_image, goal, created_by_kind, created_by_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`
+INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_launcher, coordinator_model, max_hosted, repository, agent_image, goal, created_by_kind, created_by_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -91,6 +91,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		metrics, pe.ReportIntervalSeconds,
 		pe.StartsAt, pe.EndsAt, string(pe.Status),
 		stages, 1,
+		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy),
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
 		pe.Repository, pe.AgentImage,
@@ -105,13 +106,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 // GetPlatformExperiment fetches a single platform experiment by ID.
 func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
-SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
+SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, hypothesis_submit_policy, job_submit_policy, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason
 FROM platform_experiments pe
 WHERE id = $1`
 
 	pe := &domain.PlatformExperiment{}
-	var status string
+	var status, hypothesisPolicy, jobPolicy string
 	var metricsRaw, stagesRaw []byte
 	var coordinator domain.HostedCoordinator
 	var createdBy domain.Actor
@@ -121,6 +122,7 @@ WHERE id = $1`
 		&metricsRaw, &pe.ReportIntervalSeconds,
 		&pe.StartsAt, &pe.EndsAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
+		&hypothesisPolicy, &jobPolicy,
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
@@ -156,17 +158,24 @@ WHERE id = $1`
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
 	pe.Status = domain.PlatformExperimentStatus(status)
+	pe.HypothesisSubmitPolicy = domain.SubmitterPolicy(hypothesisPolicy)
+	pe.JobSubmitPolicy = domain.SubmitterPolicy(jobPolicy)
 	return pe, nil
 }
 
-// PlatformExperimentExists says whether there is a platform experiment of that id, for a
-// service that needs no more of it.
-func (s *PlatformExperimentsStore) PlatformExperimentExists(ctx context.Context, id string) (bool, error) {
-	var found bool
-	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1)`, id).Scan(&found); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.PlatformExperimentExists: %w", err)
+// GetPlatformExperimentSubmitPolicies is a narrow read of just HypothesisSubmitPolicy/
+// JobSubmitPolicy, used to gate hypothesis registration (registry.Service.RegisterHypothesis)
+// without pulling the whole row through that service's Store interface.
+func (s *PlatformExperimentsStore) GetPlatformExperimentSubmitPolicies(ctx context.Context, id string) (hypothesisPolicy, jobPolicy domain.SubmitterPolicy, found bool, err error) {
+	const q = `SELECT hypothesis_submit_policy, job_submit_policy FROM platform_experiments WHERE id = $1`
+	var h, j string
+	if err := s.pool.pool.QueryRow(ctx, q, id).Scan(&h, &j); err != nil {
+		if err == pgx.ErrNoRows {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("platform_experiments_store.GetPlatformExperimentSubmitPolicies: %w", err)
 	}
-	return found, nil
+	return domain.SubmitterPolicy(h), domain.SubmitterPolicy(j), true, nil
 }
 
 // GetPlatformExperimentMetrics is a narrow read of just the declared MetricDefinitions, used to
@@ -322,6 +331,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.metrics, pe.report_interval_seconds,
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
+       pe.hypothesis_submit_policy, pe.job_submit_policy,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.agent_image, pe.goal, pe.proposed_at,
        COUNT(es.agent_id) AS signup_count
@@ -342,13 +352,14 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 	var out []*domain.PlatformExperiment
 	for rows.Next() {
 		pe := &domain.PlatformExperiment{}
-		var status string
+		var status, hypothesisPolicy, jobPolicy string
 		var metricsRaw, stagesRaw []byte
 		if err := rows.Scan(
 			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &pe.EndsAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
+			&hypothesisPolicy, &jobPolicy,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.AgentImage, &pe.Goal, &pe.ProposedAt,
 			&pe.SignupCount,
@@ -363,6 +374,8 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
+		pe.HypothesisSubmitPolicy = domain.SubmitterPolicy(hypothesisPolicy)
+		pe.JobSubmitPolicy = domain.SubmitterPolicy(jobPolicy)
 		out = append(out, pe)
 	}
 	return out, rows.Err()
@@ -423,13 +436,13 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	}
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
-    report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
-    max_concurrent_accelerators=$11
-WHERE id=$1 AND status=$10`
+    report_interval_seconds=$7, starts_at=$8, ends_at=$9, hypothesis_submit_policy=$10, job_submit_policy=$11, updated_at=NOW(),
+    max_concurrent_accelerators=$13
+WHERE id=$1 AND status=$12`
 	tag, err := s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
-		expectedStatus,
+		string(pe.HypothesisSubmitPolicy), string(pe.JobSubmitPolicy), expectedStatus,
 		pe.MaxConcurrentAccelerators,
 	)
 	if err != nil {
@@ -466,10 +479,11 @@ type StartParticipant struct {
 	AgentID     string
 	AgentExists bool
 	HasTop3     bool
-	// QuotaTierOverride is what domain.ResolveQuotaTier needs to decide which column this
-	// participant's share lands in. Read here, inside the start transaction, because the signup
-	// set is: resolving the tier from a separate query could pair one transaction's participants
-	// with another's overrides.
+	// Kind and QuotaTierOverride are the two inputs domain.ResolveQuotaTier needs to decide which
+	// column this participant's share lands in. Read here, inside the start transaction, because
+	// the signup set is: resolving the tier from a separate query could pair one transaction's
+	// participants with another's overrides.
+	Kind              domain.AgentKind
 	QuotaTierOverride domain.QuotaTier
 }
 
@@ -509,7 +523,7 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 	// another from the same pool, which is a deadlock rather than a slow path.
 	rows, err := tx.Query(ctx, `
 SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id),
-       s.quota_tier
+       COALESCE(a.kind, ''), s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
 WHERE s.platform_experiment_id = $1 AND s.flavor <> '`+domain.PlannerFlavor+`'
@@ -520,7 +534,7 @@ ORDER BY s.agent_id`, id)
 	var participants []StartParticipant
 	for rows.Next() {
 		var p StartParticipant
-		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3, &p.QuotaTierOverride); err != nil {
+		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3, &p.Kind, &p.QuotaTierOverride); err != nil {
 			rows.Close()
 			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
 		}

@@ -19,9 +19,10 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
 		BudgetAcceleratorHours: 0.5, MaxAgents: 1, EndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 		Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}},
+		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 	}
-	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
+	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}
 	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, DraftLimits{Concurrent: 1000, PerDay: 1000}); err != nil {
@@ -83,7 +84,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	}
 
 	// Nobody joins a draft: joining is for an open platform experiment.
-	other := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "x", CreatedAt: time.Now()}
+	other := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "x", Kind: domain.AgentKindAgent, CreatedAt: time.Now()}
 	if err := pes.SpawnAgent(ctx, pe, other, domain.AgentSignup{AgentID: other.ID, Role: domain.SignupRoleCompetitor, Flavor: "generalist", Model: "m"}); err != ErrSignupClosed {
 		t.Fatalf("joining a draft: got = %v, want ErrSignupClosed", err)
 	}
@@ -91,7 +92,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	// One without a planner, or with something else in its place, is not created.
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, EndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
-	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
+	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Kind: domain.AgentKindAgent}
 	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, DraftLimits{Concurrent: 1000, PerDay: 1000}); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
@@ -203,12 +204,12 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.Metrics = []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}
 		pe.Stages = []domain.Stage{{LengthPct: 40, EvictPct: 50}, {LengthPct: 60}}
 		pe.EndsAt = time.Now().UTC().Add(4 * time.Hour)
-		pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
+		pe.HypothesisSubmitPolicy, pe.JobSubmitPolicy, pe.DefaultQuotaTier = domain.SubmitterPolicyMixed, domain.SubmitterPolicyMixed, domain.QuotaTierGuaranteed
 		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
 		for i := 0; i < researchers; i++ {
-			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Researcher", PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Researcher", Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
 			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
 		}
@@ -327,10 +328,10 @@ func TestAnOrgsDraftsAreBoundedAtOnceAndPerDay(t *testing.T) {
 		pe := &domain.PlatformExperiment{
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: project, Name: "g", Goal: "g", BudgetAcceleratorHours: 0.5, MaxAgents: 1,
 			EndsAt: now.Add(time.Hour), Status: domain.PlatformExpDraft, Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30,
-			Stages:    []domain.Stage{{LengthPct: 100}},
+			Stages: []domain.Stage{{LengthPct: 100}}, HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
 			CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 		}
-		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
+		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", Kind: domain.AgentKindAgent, CreatedAt: now}
 		return pe.ID, pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "l", Flavor: domain.PlannerFlavor, Model: "m"}, limits)
 	}
 	limits := DraftLimits{Concurrent: 2, PerDay: 3}

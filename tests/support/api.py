@@ -193,10 +193,8 @@ class API:
 
     # ---- agents -------------------------------------------------------------------------------
 
-    def register_agent(self, agent_id: str) -> None:
-        body = {"id": agent_id, "name": agent_id, **({"org_id": self.org_id} if self.org_id else {})}
-        r = self.post("/agents", body)
-        assert r.status_code == 201, f"register agent {agent_id}: {r.status_code} {r.text}"
+    def register_agent(self, agent_id: str, kind: str = "agent") -> None:
+        self.hl("register", "--id", agent_id, "--name", agent_id, "--kind", kind)
 
     # ---- platform experiments -------------------------------------------------------------------
 

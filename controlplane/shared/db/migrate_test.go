@@ -84,7 +84,7 @@ func TestMoveHumanWritesCreditsTheRecordsItNamesAndDropsTheTable(t *testing.T) {
 	suffix := uuid.New().String()
 	peID, agentID, userID := "pe-writes-"+suffix, "agent-writes-"+suffix, "user-writes-"+suffix
 	createTestPE(t, pool, peID, 10)
-	createTestAgent(t, pool, agentID)
+	createTestAgent(t, pool, agentID, domain.AgentKindAgent)
 	t.Cleanup(func() {
 		pool.pool.Exec(context.Background(), `DROP TABLE IF EXISTS human_writes`) //nolint:errcheck
 	})

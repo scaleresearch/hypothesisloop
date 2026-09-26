@@ -293,7 +293,8 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "bounded", BudgetAcceleratorHours: 10,
 		MaxAgents: 2, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
-		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+		Stages:                 []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+		HypothesisSubmitPolicy: domain.SubmitterPolicyMixed, JobSubmitPolicy: domain.SubmitterPolicyMixed,
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
 	}
@@ -306,7 +307,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 			t.Fatal(err)
 		}
 		signup.AgentID = id
-		agent := &domain.Agent{ID: id, Name: id, PerformanceScore: 0.5, CreatedAt: now}
+		agent := &domain.Agent{ID: id, Name: id, Kind: domain.AgentKindAgent, PerformanceScore: 0.5, CreatedAt: now}
 		return pes.SpawnAgent(ctx, pe.ID, agent, signup)
 	}
 	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
