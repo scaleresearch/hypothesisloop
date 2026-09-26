@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { LOGIN_PATH, hasSession, overHTTPS, safeNext } from '@/lib/auth'
+import { INVITE_PATH } from '@/lib/invite'
 
 type WrittenCookie = Parameters<NextResponse['cookies']['set']>[2] & { name: string; value: string }
 
@@ -24,7 +25,9 @@ export async function middleware(request: NextRequest) {
 
   const { pathname, search, searchParams } = request.nextUrl
   let response: NextResponse
-  if (!signedIn && pathname !== LOGIN_PATH) {
+  // An invite link carries its token in the fragment, which a redirect through sign-in would lose,
+  // so its page is served to anyone and sends a visitor without a session to sign in itself.
+  if (!signedIn && pathname !== LOGIN_PATH && pathname !== INVITE_PATH) {
     const login = request.nextUrl.clone()
     login.pathname = LOGIN_PATH
     login.search = new URLSearchParams({ next: pathname + search }).toString()

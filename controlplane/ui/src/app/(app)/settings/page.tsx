@@ -5,6 +5,7 @@ import { createProject, renameOrg, renameProject } from '@/lib/api'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgClusters } from '@/components/org-clusters'
+import { OrgMembers } from '@/components/org-members'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
@@ -118,7 +119,7 @@ export default function SettingsPage() {
   const { org, project, administers } = useTenant()
   return (
     <div>
-      <PageHeader title="Settings" description={`${org.name}: its name, projects, API keys and clusters.`} />
+      <PageHeader title="Settings" description={`${org.name}: its name, projects, members, API keys and clusters.`} />
 
       {!administers && (
         <p className="mb-4 text-sm text-muted">
@@ -138,6 +139,13 @@ export default function SettingsPage() {
           </Card>
         </>
       )}
+
+      <Card>
+        <CardHeader>Members</CardHeader>
+        <CardContent scrollX>
+          <OrgMembers />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>Clusters</CardHeader>

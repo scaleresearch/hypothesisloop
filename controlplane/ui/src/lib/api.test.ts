@@ -4,6 +4,7 @@ import {
   ApiError, addHumanHypothesisComment, registerCluster, attachProjectRepo, detachProjectRepo, fetchGitHubApp, fetchProjectRepo, createAPIKey, createPlatformExperiment, fetchAgentsPage, fetchMe,
   fetchPlatformExperimentAgentToken, fetchPlatformExperimentsPage, fetchResourceCapacity, putClusterSettings,
   registerHumanHypothesis, revokeAPIKey,
+  acceptOrgInvite, createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole,
 } from '@/lib/api'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
@@ -251,5 +252,65 @@ describe('a project\'s repository', () => {
   it('cannot be attached on a deployment without a GitHub App, which answers 503', async () => {
     fetchMock().mockResolvedValue(answer(503, { reason: 'github_not_configured', message: 'this deployment has no GitHub App configured' }))
     await expect(fetchGitHubApp()).rejects.toMatchObject({ status: 503, reason: 'github_not_configured' })
+  })
+})
+
+describe('org members and invites', () => {
+  it('reads members and pending invites as a page with its total', async () => {
+    fetchMock().mockImplementation(async () => answer(200, [{ user_id: 'u1' }], { 'X-Total-Count': '3' }))
+    await expect(fetchOrgMembers('org_a')).resolves.toEqual({ items: [{ user_id: 'u1' }], total: 3 })
+    expect(sent().url.pathname).toBe('/orgs/org_a/members')
+    expect(sent().url.searchParams.get('limit')).toBe('200')
+    fetchMock().mockClear()
+    await fetchOrgInvites('org_a')
+    expect(sent().url.pathname).toBe('/orgs/org_a/invites')
+  })
+
+  it('changes a role with a PATCH naming the member', async () => {
+    fetchMock().mockResolvedValue(answer(200, { user_id: 'u2', role: 'owner' }))
+    await setOrgMemberRole('org_a', 'u2', 'owner')
+    expect(sent().init.method).toBe('PATCH')
+    expect(sent().url.pathname).toBe('/orgs/org_a/members/u2')
+    expect(sent().body).toEqual({ role: 'owner' })
+  })
+
+  it('takes an answer without a body for a removal and a revoke', async () => {
+    fetchMock().mockImplementation(async () => new Response(null, { status: 204 }))
+    await expect(removeOrgMember('org_a', 'u2')).resolves.toBeUndefined()
+    expect(sent().init.method).toBe('DELETE')
+    expect(sent().url.pathname).toBe('/orgs/org_a/members/u2')
+    fetchMock().mockClear()
+    await expect(revokeOrgInvite('inv_1')).resolves.toBeUndefined()
+    expect(sent().url.pathname).toBe('/invites/inv_1')
+  })
+
+  it('refuses the last owner with the API\'s reason and words', async () => {
+    fetchMock().mockResolvedValue(answer(409, { reason: 'last_owner', message: 'an org keeps at least one owner: make someone else an owner first' }))
+    await expect(removeOrgMember('org_a', 'u1')).rejects.toMatchObject({
+      status: 409, reason: 'last_owner', message: 'an org keeps at least one owner: make someone else an owner first',
+    })
+  })
+
+  it('creates an invite with a role and returns its token', async () => {
+    fetchMock().mockResolvedValue(answer(201, { id: 'inv_1', role: 'member', token: 'hli_abc' }))
+    await expect(createOrgInvite('org_a', 'member')).resolves.toMatchObject({ token: 'hli_abc' })
+    expect(sent().url.pathname).toBe('/orgs/org_a/invites')
+    expect(sent().body).toEqual({ role: 'member' })
+  })
+
+  it('accepts an invite with its token in the body, never in the address', async () => {
+    fetchMock().mockResolvedValue(answer(201, { org_id: 'org_a', user_id: 'u2', role: 'member' }))
+    await acceptOrgInvite('hli_abc')
+    expect(sent().init.method).toBe('POST')
+    expect(sent().url.pathname).toBe('/invites/accept')
+    expect(sent().url.href).not.toContain('hli_abc')
+    expect(sent().body).toEqual({ token: 'hli_abc' })
+  })
+
+  it('gives a refused invite its reason', async () => {
+    fetchMock().mockResolvedValue(answer(409, { reason: 'invite_expired', message: 'the invite has expired: ask an owner of the org for a new one' }))
+    const refusal = await acceptOrgInvite('hli_abc').catch((e: unknown) => e)
+    expect(refusal).toBeInstanceOf(ApiError)
+    expect(refusal).toMatchObject({ status: 409, reason: 'invite_expired' })
   })
 })

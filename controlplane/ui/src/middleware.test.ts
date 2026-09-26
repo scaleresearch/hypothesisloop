@@ -31,6 +31,13 @@ describe('a visitor without a session', () => {
     expect((await visit('/platform-experiments/pe-1')).headers.get('location')).toBe('http://ui.test/login?next=%2Fplatform-experiments%2Fpe-1')
   })
 
+  it('reaches the invite page, which keeps the token of its link before it sends them to sign in', async () => {
+    const response = await visit('/invite')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('location')).toBeNull()
+    expect((await visit('/invite/more')).headers.get('location')).toBe('http://ui.test/login?next=%2Finvite%2Fmore')
+  })
+
   it('reaches the sign-in page itself', async () => {
     const response = await visit('/login?next=%2Fjobs')
     expect(response.status).toBe(200)
@@ -45,6 +52,10 @@ describe('a signed-in visitor', () => {
     const response = await visit('/jobs')
     expect(response.status).toBe(200)
     expect(response.headers.get('x-middleware-next')).toBe('1')
+  })
+
+  it('is sent on from the sign-in page to the invite they opened', async () => {
+    expect((await visit('/login?next=%2Finvite')).headers.get('location')).toBe('http://ui.test/invite')
   })
 
   it('is sent on from the sign-in page to where they were going', async () => {

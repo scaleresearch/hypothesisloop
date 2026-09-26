@@ -450,11 +450,13 @@ export interface HypothesisWithJobs extends Hypothesis {
 // Accounts
 // ---------------------------------------------------------------------------
 
+export type OrgRole = 'owner' | 'member'
+
 export interface Org {
   id: string
   name: string
   // The caller's own role. Absent for staff looking at an org they do not belong to.
-  role?: 'owner' | 'member'
+  role?: OrgRole
   created_at: string
 }
 
@@ -472,6 +474,30 @@ export interface Me {
   name?: string
   orgs: Org[]
   projects: Project[]
+}
+
+// One person of an org. The platform holds no name and no email for them, only the id the identity
+// provider gave them.
+export interface OrgMember {
+  org_id: string
+  user_id: string
+  role: OrgRole
+  joined_at: string
+}
+
+// A pending invite to an org. No read of the API returns its token.
+export interface OrgInvite {
+  id: string
+  org_id: string
+  role: OrgRole
+  created_by: string
+  created_at: string
+  expires_at: string
+}
+
+// An invite in the answer to creating it, the one place its token appears.
+export interface CreatedOrgInvite extends OrgInvite {
+  token: string
 }
 
 export interface APIKey {

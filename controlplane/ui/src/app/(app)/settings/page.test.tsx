@@ -11,6 +11,7 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('
 vi.mock('@/lib/api', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))
 vi.mock('@/components/org-clusters', () => ({ OrgClusters: () => <p>clusters</p> }))
+vi.mock('@/components/org-members', () => ({ OrgMembers: () => <p>members</p> }))
 
 const at = '2026-01-01T00:00:00Z'
 const owner: Me = {
@@ -114,6 +115,7 @@ describe('a member of the org', () => {
     show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member' }] })
     expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys and clusters/)).toBeTruthy()
     expect(screen.getByText('clusters')).toBeTruthy()
+    expect(screen.getByText('members')).toBeTruthy()
     expect(screen.queryByText('api keys')).toBeNull()
     expect(screen.queryByLabelText('Organization name')).toBeNull()
     expect(screen.queryByLabelText('New project name')).toBeNull()

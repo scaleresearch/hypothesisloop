@@ -4,10 +4,14 @@ import type {
   ClustersResponse,
   ClusterSettings,
   CreatedAPIKey,
+  CreatedOrgInvite,
   JoinedAgent,
   Me,
   Org,
   OrgCluster,
+  OrgInvite,
+  OrgMember,
+  OrgRole,
   Project,
   RegisteredCluster,
   Agent,
@@ -627,6 +631,41 @@ export function createAPIKey(orgID: string, name: string, projectID?: string): P
 
 export function revokeAPIKey(keyID: string): Promise<APIKey> {
   return apiSend<APIKey>('DELETE', `/api-keys/${keyID}`)
+}
+
+// Oldest first. A member is named by user id alone.
+export function fetchOrgMembers(orgID: string): Promise<Page<OrgMember>> {
+  return apiFetchPage<OrgMember>(`/orgs/${orgID}/members?limit=${MAX_LIST_PAGE_SIZE}`)
+}
+
+// Demoting the last owner is answered 409 with reason last_owner.
+export function setOrgMemberRole(orgID: string, userID: string, role: OrgRole): Promise<OrgMember> {
+  return apiSend<OrgMember>('PATCH', `/orgs/${orgID}/members/${userID}`, { role })
+}
+
+// For an owner, and for a member naming themselves. The last owner is answered 409 with reason last_owner.
+export async function removeOrgMember(orgID: string, userID: string): Promise<void> {
+  await answer('DELETE', `/orgs/${orgID}/members/${userID}`)
+}
+
+// The invites that can still be accepted, newest first. No token is listed.
+export function fetchOrgInvites(orgID: string): Promise<Page<OrgInvite>> {
+  return apiFetchPage<OrgInvite>(`/orgs/${orgID}/invites?limit=${MAX_LIST_PAGE_SIZE}`)
+}
+
+// The answer is the only place the invite's token ever appears.
+export function createOrgInvite(orgID: string, role: OrgRole): Promise<CreatedOrgInvite> {
+  return apiSend<CreatedOrgInvite>('POST', `/orgs/${orgID}/invites`, { role })
+}
+
+export async function revokeOrgInvite(inviteID: string): Promise<void> {
+  await answer('DELETE', `/invites/${inviteID}`)
+}
+
+// The signed-in person joins the invite's org with the invite's role. A token that cannot be
+// accepted is answered 409 with the reason, one the platform does not know 404.
+export function acceptOrgInvite(token: string): Promise<OrgMember> {
+  return apiSend<OrgMember>('POST', '/invites/accept', { token })
 }
 
 // ---------------------------------------------------------------------------
