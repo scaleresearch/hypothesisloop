@@ -87,11 +87,10 @@ outranks this briefing. Roughly:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
-       - `image`: leave it out unless the experiment brings its own. A cluster `hl capacity`
-         shows with a `job_image` runs every job in that image (hl, hl-clone, git, uv, python)
-         and takes no job naming another; one shown without runs the image a job names, so a
-         job for it must name one. `no_cluster_for_image` says what runs where.
-         `hl capacity` lists images with a framework installed: name one, do not pip install it.
+       - `image`: `hl capacity` lists the images on offer and what each carries. Name one its
+         type's line lists, or the experiment's own, and pip install no framework. A cluster
+         shown with `only_job_image` runs that image alone: leave `image` out there.
+         `no_cluster_for_image` says what runs where.
 {code_access}
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as
