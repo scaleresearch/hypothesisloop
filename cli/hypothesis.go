@@ -54,9 +54,15 @@ const submitUsage = `usage: hl hypothesis submit --text T --builds-on ID|root [-
 Every hypothesis builds on the objective (root) or on existing hypotheses; several --builds-on
 mean a combination. While your text reads close to hypotheses it does not build on, or a
 --builds-on target is refuted, nothing is registered and the reply lists them: test the one you meant under its id, or
-resubmit naming each with --contradicts or --distinct-from. FILE shape:
+resubmit naming each with --contradicts or --distinct-from.
 
-  agent_id: agent-123
+Who registered it is whoever HL_TOKEN is, and nothing you write names them. --agent (default
+$AGENT_ID) says whose hypothesis it is: an agent's token registers its own, and a person or an
+API key names an agent to register for it, or names none for a hypothesis no agent owns.
+
+FILE shape:
+
+  agent_id: agent-123             # optional, as --agent
   platform_experiment_id: pe-123
   hypotheses:
     - key: warmup                 # local name, only for links later in this file
@@ -89,7 +95,7 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 
 func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis submit", submitUsage, stderr)
-	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
+	agent := fs.String("agent", "", "agent whose hypothesis it is (default $AGENT_ID, else the caller's own)")
 	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file of one hypothesis, or a hypotheses: list of them (see --help)")
@@ -124,12 +130,12 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 	}
 
-	writer, err := writingAgent(c, *agent)
+	owner, err := recordOwner(c, *agent)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	bodies, keys, err := buildSubmitBodies(items, flagLinks, distinctFrom, map[string]string{
-		"agent_id": writer, "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
+		"agent_id": owner, "platform_experiment_id": orEnv(*pe, platformExperimentEnv), "text": *text,
 	})
 	if err != nil {
 		return parseExit(misuse(fs, "%s", err))
@@ -159,10 +165,12 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 			return fail(stderr, fmt.Errorf("%s%w", item, err))
 		}
 		var created struct {
-			ID             string `json:"id"`
-			AgentID        string `json:"agent_id"`
-			Author         string `json:"author"`
-			AlreadyExisted bool   `json:"already_existed"`
+			ID      string `json:"id"`
+			AgentID string `json:"agent_id"`
+			Actor   struct {
+				Name string `json:"name"`
+			} `json:"actor"`
+			AlreadyExisted bool `json:"already_existed"`
 		}
 		if err := json.Unmarshal(out, &created); err != nil || created.ID == "" {
 			return fail(stderr, fmt.Errorf("item %d: response carries no id: %s", i, out))
@@ -174,8 +182,12 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 			return fail(stderr, err)
 		}
 		if created.AlreadyExisted {
+			by := created.AgentID
+			if by == "" {
+				by = created.Actor.Name
+			}
 			fmt.Fprintf(stderr, "hl: hypothesis submit: already registered as %s by %s; your links were not applied, its own are in \"links\". "+
-				"Test it as it is, or register a refinement with --builds-on %s\n", created.ID, created.AgentID+created.Author, created.ID)
+				"Test it as it is, or register a refinement with --builds-on %s\n", created.ID, by, created.ID)
 		}
 	}
 	return 0
@@ -210,7 +222,6 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 
 type submitBody struct {
 	AgentID              string   `json:"agent_id,omitempty"`
-	Author               string   `json:"author,omitempty"`
 	PlatformExperimentID string   `json:"platform_experiment_id"`
 	Text                 string   `json:"text"`
 	Links                []link   `json:"links"`
@@ -243,8 +254,11 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 
 	bodies := make([]*submitBody, len(items))
 	for i, item := range items {
+		if _, stated := item["author"]; stated {
+			return nil, nil, itemErr(items, i, fmt.Errorf("author is not a field: who registers a hypothesis is whoever HL_TOKEN is, and the platform refuses a request that states it. Remove it; agent_id says whose hypothesis it is, and is optional"))
+		}
 		fields := map[string]string{}
-		for _, name := range []string{"agent_id", "author", "platform_experiment_id", "text"} {
+		for _, name := range []string{"agent_id", "platform_experiment_id", "text"} {
 			v, err := stringField(item, name)
 			if err != nil {
 				return nil, nil, itemErr(items, i, err)
@@ -254,8 +268,8 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 			}
 			fields[name] = v
 		}
-		if fields["platform_experiment_id"] == "" || fields["text"] == "" || (fields["agent_id"] == "" && fields["author"] == "") {
-			return nil, nil, itemErr(items, i, fmt.Errorf("agent_id (or author), platform_experiment_id and text are required (via --agent/--platform-experiment/--text or --file)"))
+		if fields["platform_experiment_id"] == "" || fields["text"] == "" {
+			return nil, nil, itemErr(items, i, fmt.Errorf("platform_experiment_id and text are required (via --platform-experiment/--text or --file)"))
 		}
 		links := flagLinks
 		if len(links) == 0 {
@@ -298,7 +312,6 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 		}
 		bodies[i] = &submitBody{
 			AgentID:              fields["agent_id"],
-			Author:               fields["author"],
 			PlatformExperimentID: fields["platform_experiment_id"],
 			Text:                 fields["text"],
 			Links:                resolved,
@@ -390,25 +403,30 @@ func validLinkType(t string) bool {
 func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis link", `usage: hl hypothesis link ID --type builds_on|contradicts|related --to ID
 
-Adds one link from your own hypothesis ID (--from ID works too). Links are append-only. Prints
-the updated outgoing links.`, stderr)
-	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
+Adds one link from your own hypothesis ID (--from ID works too), or from one no agent owns.
+Links are append-only. Prints the updated outgoing links. A person or an API key linking from
+an agent's hypothesis names that agent with --agent, and is kept as who made the link.`, stderr)
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default $AGENT_ID, else the caller's own)")
 	typ := fs.String("type", "", "builds_on, contradicts or related")
 	to := fs.String("to", "", "hypothesis id the link points at")
 	from, err := parseOne(fs, args, "ID", "", "id", "from")
 	if err != nil {
 		return parseExit(err)
 	}
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
-	if *agent == "" || *typ == "" || *to == "" {
-		return parseExit(misuse(fs, "--agent, --type and --to are required"))
+	if *typ == "" || *to == "" {
+		return parseExit(misuse(fs, "--type and --to are required"))
 	}
 	if !validLinkType(*typ) {
 		return parseExit(misuse(fs, "--type must be one of %s, got %q", strings.Join(linkTypes, ", "), *typ))
 	}
-	body := map[string]string{"agent_id": *agent, "type": *typ, "to": *to}
+	owner, err := recordOwner(c, *agent)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	body := map[string]string{"type": *typ, "to": *to}
+	if owner != "" {
+		body["agent_id"] = owner
+	}
 	var out json.RawMessage
 	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(from)+"/links", body, &out); err != nil {
 		return fail(stderr, err)
@@ -422,21 +440,28 @@ the updated outgoing links.`, stderr)
 func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis comment", `usage: hl hypothesis comment ID --text T
 
-A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision.`, stderr)
-	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
+A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. It is
+written by whoever HL_TOKEN is. An agent's token writes its own agent's note; a person or an
+API key writes their own, or an agent's with --agent.`, stderr)
+	agent := fs.String("agent", "", "agent whose note it is (default $AGENT_ID, else the caller's own)")
 	text := fs.String("text", "", "the note")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
 		return parseExit(err)
 	}
-	if *agent, err = writingAgent(c, *agent); err != nil {
+	if *text == "" {
+		return parseExit(misuse(fs, "--text is required"))
+	}
+	owner, err := recordOwner(c, *agent)
+	if err != nil {
 		return fail(stderr, err)
 	}
-	if *agent == "" || *text == "" {
-		return parseExit(misuse(fs, "--agent and --text are required"))
+	body := map[string]string{"text": *text}
+	if owner != "" {
+		body["agent_id"] = owner
 	}
 	var out json.RawMessage
-	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/comments", map[string]string{"agent_id": *agent, "text": *text}, &out); err != nil {
+	if err := c.Do("POST", "/hypotheses/"+url.PathEscape(id)+"/comments", body, &out); err != nil {
 		return fail(stderr, err)
 	}
 	if err := printLine(stdout, out); err != nil {
@@ -448,14 +473,16 @@ A note on any hypothesis with no job behind it: a verified fact, a dead end, a r
 func hypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis status", `usage: hl hypothesis status ID open|inconclusive | confirmed|refuted --against CONTROL_JOB | confirmed|refuted --despite REASON
 
-Sets the verdict on your own hypothesis, or on a human-submitted one. --status VERDICT works too.
+Sets the verdict on your own hypothesis, or on one no agent owns. --status VERDICT works too.
+A person or an API key ruling on an agent's hypothesis names that agent with --agent, and is
+kept as who gave the verdict.
 confirmed and refuted say the hypothesis's jobs differ from a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
 the same job without your change), and the hypothesis has two completed jobs of its own besides
 it. One run with no measured control is inconclusive. When the record cannot show what you know
 (a failure that needs no repeat, a control measured outside this experiment), --despite takes a
 sentence of why the verdict holds anyway. What a verdict rests on is kept as a comment.`, stderr)
-	agent := fs.String("agent", "", "agent id, the one that registered ID (default $AGENT_ID)")
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default $AGENT_ID, else the caller's own)")
 	status := fs.String("status", "", "")
 	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
 	despite := fs.String("despite", "", "why a confirmed or refuted verdict holds without a repeated run and a control")
@@ -466,15 +493,19 @@ sentence of why the verdict holds anyway. What a verdict rests on is kept as a c
 	if len(operands) == 2 && *status == "" {
 		*status, operands = operands[1], operands[:1]
 	}
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
-	if len(operands) != 1 || *agent == "" || *status == "" {
-		return parseExit(misuse(fs, "want ID and a verdict, with --agent or $AGENT_ID set"))
+	if len(operands) != 1 || *status == "" {
+		return parseExit(misuse(fs, "want ID and a verdict"))
 	}
 	id := operands[0]
 	var out json.RawMessage
-	body := map[string]string{"agent_id": *agent, "status": *status}
+	owner, err := recordOwner(c, *agent)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	body := map[string]string{"status": *status}
+	if owner != "" {
+		body["agent_id"] = owner
+	}
 	if *against != "" {
 		body["against"] = *against
 	}

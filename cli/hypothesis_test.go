@@ -188,7 +188,17 @@ hypotheses:
 hypotheses:
   - text: idea one
   - agent_id: bob
-`, "item 1: agent_id (or author), platform_experiment_id and text are required"},
+`, "item 1: platform_experiment_id and text are required"},
+		"an author stated": {`links: [{type: builds_on, to: root}]
+hypotheses:
+  - text: idea one
+  - {text: idea two, author: Ada}
+`, "item 1: author is not a field: who registers a hypothesis is whoever HL_TOKEN is"},
+		"an author stated for every item": {`author: Ada
+links: [{type: builds_on, to: root}]
+hypotheses:
+  - text: idea one
+`, "author is not a field"},
 		"unplaced item": {`hypotheses:
   - text: placed
     links: [{type: builds_on, to: root}]
@@ -269,7 +279,7 @@ func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"status":409,"detail":"Nothing was registered","similar":[` +
 			`{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"},` +
-			`{"id":"hyp-2","author":"ann","status":"refuted","text":"two","reason":"refuted_parent"}]}`))
+			`{"id":"hyp-2","actor":{"kind":"user","id":"user-ann","name":"ann"},"status":"refuted","text":"two","reason":"refuted_parent"}]}`))
 	})
 	setAPIURL(t, url)
 	var stdout, stderr bytes.Buffer
@@ -515,7 +525,7 @@ func TestHypothesisCommentAndStatusUsageErrors(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
 	for _, args := range [][]string{
 		{"hypothesis", "comment", "--agent", "jane", "--text", "x"},
-		{"hypothesis", "comment", "hyp-1", "--text", "x"},
+		{"hypothesis", "comment", "hyp-1"},
 		{"hypothesis", "status", "hyp-1", "--agent", "jane"},
 		{"hypothesis", "status", "hyp-1", "hyp-2", "--agent", "jane", "--status", "open"},
 	} {

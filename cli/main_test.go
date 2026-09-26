@@ -650,7 +650,7 @@ func TestIdentityFlagsRequiredWithoutEnv(t *testing.T) {
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
 		{"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
-		{"hypothesis", "comment", "--text", "t", "h-1"},
+		{"hypothesis", "comment", "h-1"},
 		{"hypothesis", "list"},
 		{"job", "submit", "job.yaml"},
 	} {

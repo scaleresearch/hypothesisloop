@@ -42,7 +42,8 @@ func kindOf(token string) callerKind {
 // or not it names one: the platform refuses the same, and $AGENT_ID is not read for it.
 var errCoordinatorActsAsNoAgent = errors.New("this acts as an agent, and HL_TOKEN is a coordinator's, which is no agent and acts for none. " +
 	"A coordinator writes the description (hl platform-experiments update) and the summary (hl platform-experiments summary), " +
-	"adds agents (hl platform-experiments agents) and closes the run (hl platform-experiments close)")
+	"adds agents (hl platform-experiments agents) and closes the run (hl platform-experiments close). " +
+	"A hypothesis, a link or a comment it writes as itself, without --agent")
 
 // writingAgent is the agent a command writes as: the one --agent names, else $AGENT_ID. An empty
 // answer with no error means none was given.
@@ -51,6 +52,21 @@ func writingAgent(c *apiclient.Client, flagValue string) (string, error) {
 		return "", errCoordinatorActsAsNoAgent
 	}
 	return orEnv(flagValue, agentEnv), nil
+}
+
+// recordOwner is the agent whose hypothesis, link, comment or verdict a command writes: the one
+// --agent names, else $AGENT_ID, else none. With none the record is the caller's own, which the
+// platform reads off the token: an agent token's agent, and for a person, an API key or a
+// coordinator no agent at all. A coordinator writes as itself only: it acts for no agent, so
+// naming one is refused and $AGENT_ID is not read for it.
+func recordOwner(c *apiclient.Client, flagValue string) (string, error) {
+	if kindOf(c.Token) != callerCoordinator {
+		return orEnv(flagValue, agentEnv), nil
+	}
+	if flagValue != "" {
+		return "", errCoordinatorActsAsNoAgent
+	}
+	return "", nil
 }
 
 // readsEveryAgent says whether a read that defaults to the caller's own agent covers the whole

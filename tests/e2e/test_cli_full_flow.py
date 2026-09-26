@@ -74,7 +74,7 @@ def test_hl_register_returns_the_registered_agent_id(api, run_id):
     assert register_id == agent, f"hl register: expected id {agent}, got {register_id}"
 
 
-def test_cli_full_flow_happy_path(api, run_id):
+def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     """register -> platform-experiments create/start -> signup -> hypothesis submit --file/list ->
     job submit -> job list/status -> watch --until a terminal status -> hypothesis dedup. Ported as
     one sequential test since each step consumes state (pe_id, hyp_id, job_id) produced by the one
@@ -181,6 +181,24 @@ def test_cli_full_flow_happy_path(api, run_id):
     dedup = json.loads(dedup_out)
     assert dedup["already_existed"] is True
     assert dedup["id"] == hyp_id, f"hl hypothesis submit: dedup returned {dedup['id']}, want {hyp_id}"
+
+    # -- with no --agent a write is the caller's own: no agent owns it, and the actor is the credential --
+    staff = {"kind": "staff", "id": "", "name": "staff"}
+    own = json.loads(api.hl("hypothesis", "submit", "--platform-experiment", pe_id, "--text",
+                            f"an idea of the caller's own {uuid.uuid4().hex[:8]}", "--builds-on", "root"))
+    assert (own["agent_id"], own["source"], own["actor"]) == ("", "human", staff), own
+    note = json.loads(api.hl("hypothesis", "comment", own["id"], "--text", "a note of the caller's own"))
+    assert (note["agent_id"], note["actor"]) == ("", staff), note
+    links = json.loads(api.hl("hypothesis", "link", own["id"], "--type", "related", "--to", hyp_id))
+    assert {(l["type"], l["actor"]["kind"]) for l in links} == {("builds_on", "staff"), ("related", "staff")}, links
+    settled = json.loads(api.hl("hypothesis", "status", own["id"], "inconclusive"))
+    assert settled["status"] == "inconclusive" and settled["status_actor"] == staff, settled
+    for_agent = json.loads(api.hl("hypothesis", "comment", hyp_id, "--agent", agent, "--text", "a note for the agent"))
+    assert (for_agent["agent_id"], for_agent["actor"]) == (agent, staff), for_agent
+    stated = tmp_path / "stated.yaml"
+    stated.write_text(f"platform_experiment_id: {pe_id}\nauthor: Mallory\ntext: an idea under a stated name\nlinks: [{{type: builds_on, to: root}}]\n")
+    refused = api.hl_expect("hypothesis", "submit", "--file", str(stated))
+    assert refused.returncode == 2 and "author is not a field" in refused.stderr, refused.stderr
 
     api.close_platform_experiment(pe_id)
 

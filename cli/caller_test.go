@@ -50,18 +50,38 @@ func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
 }
 
 // A coordinator is no agent and acts for none. Every command that acts as one says so before any
-// request, whether --agent names one or a variable left in its environment does.
+// request, whether --agent names one or a variable left in its environment does. What it writes
+// to the hypothesis graph it writes as itself, so there only naming an agent is refused.
 func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	job := writeFile(t, "job: {image: i}\nmetadata: {hypothesis_id: hyp-1}\n")
-	commands := map[string][]string{
+	graphWrites := map[string][]string{
 		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
 		"hypothesis link":    {"hypothesis", "link", "hyp-1", "--type", "related", "--to", "hyp-2"},
 		"hypothesis comment": {"hypothesis", "comment", "hyp-1", "--text", "t"},
-		"hypothesis status":  {"hypothesis", "status", "hyp-1", "confirmed"},
-		"job submit":         {"job", "submit", job},
-		"donation request":   {"donation", "request", "--credits", "1", "--reason", "r"},
-		"donation fulfill":   {"donation", "fulfill", "don-1"},
-		"data-key":           {"data-key"},
+		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
+	}
+	spending := map[string][]string{
+		"job submit":       {"job", "submit", job},
+		"donation request": {"donation", "request", "--credits", "1", "--reason", "r"},
+		"donation fulfill": {"donation", "fulfill", "don-1"},
+		"data-key":         {"data-key"},
+	}
+	for name, args := range graphWrites {
+		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
+		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
+		t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+		t.Setenv("AGENT_ID", "left-over")
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
+			t.Fatalf("%s as itself: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
+		}
+		if _, named := (*got)[0].Body["agent_id"]; named {
+			t.Errorf("%s as itself: body = %v, want no agent named, the one left in the environment included", name, (*got)[0].Body)
+		}
+	}
+	commands := map[string][]string{}
+	for name, args := range spending {
+		commands[name] = args
 	}
 	for name, args := range commands {
 		for _, named := range [][]string{nil, {"--agent", "ag-7"}} {
@@ -75,6 +95,51 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 			}
 			if !strings.Contains(stderr.String(), "is no agent and acts for none") || !strings.Contains(stderr.String(), "hl platform-experiments summary") {
 				t.Errorf("%s %v: stderr = %q, want it to say why and what a coordinator writes", name, named, stderr.String())
+			}
+		}
+	}
+	for name, args := range graphWrites {
+		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
+		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
+		t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+		var stdout, stderr bytes.Buffer
+		if code := run(append(append([]string{}, args...), "--agent", "ag-7"), &stdout, &stderr); code != 1 || len(*got) != 0 {
+			t.Errorf("%s for an agent: exit %d with %d requests, want 1 and none. stderr: %s", name, code, len(*got), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "is no agent and acts for none") || !strings.Contains(stderr.String(), "without --agent") {
+			t.Errorf("%s for an agent: stderr = %q, want it to say a coordinator writes as itself", name, stderr.String())
+		}
+	}
+}
+
+// With no agent named and none in the environment, a write to the hypothesis graph names none:
+// the platform reads whose it is off the token, an agent's own or a person's or key's own.
+func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
+	commands := map[string][]string{
+		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
+		"hypothesis link":    {"hypothesis", "link", "hyp-1", "--type", "related", "--to", "hyp-2"},
+		"hypothesis comment": {"hypothesis", "comment", "hyp-1", "--text", "t"},
+		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
+	}
+	for _, token := range []string{derivedToken("agent:pe-1/ag-1"), "hlk_an-api-key"} {
+		for name, args := range commands {
+			got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
+			t.Setenv("HL_TOKEN", token)
+			t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+			t.Setenv("AGENT_ID", "")
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
+				t.Fatalf("%s: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
+			}
+			body := (*got)[0].Body
+			if _, named := body["agent_id"]; named {
+				t.Errorf("%s: body = %v, want no agent_id", name, body)
+			}
+			if _, stated := body["author"]; stated {
+				t.Errorf("%s: body = %v, want no author", name, body)
+			}
+			if code := run(append(append([]string{}, args...), "--agent", "ag-7"), &stdout, &stderr); code != 0 || (*got)[1].Body["agent_id"] != "ag-7" {
+				t.Errorf("%s --agent ag-7: exit %d, body = %v, want it written for ag-7", name, code, (*got)[1].Body)
 			}
 		}
 	}

@@ -44,7 +44,8 @@ hypotheses:
       # - type: contradicts
       #   to: 0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c   # an existing hypothesis id
     # distinct_from: [lr]   # after a 409 listed lr: you read it and yours is a different claim
-  # - text: "an idea authored by a human instead of an agent"
-  #   author: jane # mutually exclusive with agent_id
+  # Who registers a hypothesis is whoever HL_TOKEN is; no field names them. agent_id says whose
+  # hypothesis it is and is optional: leave it out, here and at the top, and an agent's token
+  # registers its own, while a person or an API key registers one no agent owns.
 
 # A bare top-level YAML list of mappings (no wrapping hypotheses:, no shared defaults) also works.
