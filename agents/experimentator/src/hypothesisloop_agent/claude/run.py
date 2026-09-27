@@ -51,6 +51,12 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
                      "TaskOutput", "TaskStop"]
 
 
+# The CLI's Write refuses an existing file the session has not opened with its Read, and no
+# setting lifts that: an agent that had only `cat` a file was refused its Write. Said here
+# because the briefings are the Codex backend's too.
+_FILE_TOOLS_NOTE = "\n\nWrite and Edit refuse an existing file you have not opened with Read: `cat` does not count."
+
+
 def _log_message(message, agent: str) -> None:
     """Prints the activity lines to stdout and logs the rest."""
     for line in activity.lines(message, agent, waited=_progress.waited()):
@@ -441,7 +447,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     cfg = setup.cfg
     watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     options = ClaudeAgentOptions(
-        system_prompt=setup.system_prompt,
+        system_prompt=setup.system_prompt + _FILE_TOOLS_NOTE,
         model=model,
         permission_mode="bypassPermissions",
         # No max_turns cap: this session is meant to run for the platform experiment's whole
