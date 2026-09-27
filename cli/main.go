@@ -121,7 +121,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish
-  quota                 your accelerator-hours, used and granted; --all for every agent
+  quota                 your share of the budget and what remains of it, guaranteed and burst together; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
   data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
@@ -1049,7 +1049,7 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 	settle := fs.Float64("settle", 0, "keep collecting for this many seconds after the first event before returning the batch (default 2); nothing is lost meanwhile, the cursor moves only when the batch is printed")
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
-	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'")
+	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'. A job ends COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
 	noWait := fs.Bool("no-wait", false, "print the events already waiting and return at once, without listening for more")
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")

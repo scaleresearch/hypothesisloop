@@ -77,7 +77,8 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
             '{"name":"loss","best":0.2608416958176093,"last":0.31,"basis":"per_token"}]}\n'
             '{"id":"exp-2","status":"COMPLETED"}\n')
     STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
-    QUOTA = ('{"agent_id":"agent-a","guaranteed_accelerator_hours":2,"burst_accelerator_hours":4,'
+    QUOTA = ('{"agent_id":"agent-a","share_accelerator_hours":2,"remaining_accelerator_hours":1.886634,'
+             '"guaranteed_accelerator_hours":2,"burst_accelerator_hours":4,'
              '"used_guaranteed_acch":0.11336604166666665,"used_burst_acch":0}\n')
 
     async def test_ended_jobs_arrive_with_their_metrics_and_what_is_unfinished_from_one_read_each(self):
@@ -92,7 +93,7 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
                          "experiment.status exp-2 COMPLETED\n"
                          "experiment.status exp-3 EVICTED oom\n"
                          "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
-                         "quota_used 0.113 of 2 guaranteed, 0 of 4 burst AccH")
+                         "quota_used 0.113 of 2 AccH, 1.89 remaining for guaranteed and burst jobs together")
         with open(counter.replace(".runs", ".reads")) as f:
             self.assertEqual(f.read(), "job status exp-1 exp-2\njob stats --agent agent-a\nquota\n")
 

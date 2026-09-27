@@ -111,8 +111,8 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     _, stdout = await _run_hl([hl, "quota"], env, lambda: False)
     for q in _events(stdout):
         events.append({"kind": "quota_used", "value": (
-            f"{q['used_guaranteed_acch']:.3g} of {q['guaranteed_accelerator_hours']:g} guaranteed, "
-            f"{q['used_burst_acch']:.3g} of {q['burst_accelerator_hours']:g} burst AccH")})
+            f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
+            f"{q['remaining_accelerator_hours']:.3g} remaining for guaranteed and burst jobs together")})
     return events
 
 

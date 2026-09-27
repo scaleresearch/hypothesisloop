@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -15,8 +17,15 @@ import (
 func cmdQuota(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("quota", `usage: hl quota [--agent A | --all] [--platform-experiment PE]
 
-Accelerator-hours granted and used, guaranteed and burst, one line per agent. Used includes
-running jobs. In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.`, stderr)
+Accelerator-hours granted and used, one line per agent. share_accelerator_hours is all the
+agent may spend, on guaranteed and burst jobs together, and remaining_accelerator_hours what is
+left of it. Burst gives no hours on top of the share: burst_accelerator_hours is how much of the
+share may run at burst priority, on idle capacity. A burst job needs as much room as a
+guaranteed one.
+Used counts a job that has not started at its estimate and a running one at what it has spent
+so far. A submit holds every job that has not ended at its whole estimate, so it can find less
+room than remaining shows while jobs run, and its refusal says how much is held.
+In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent, else $AGENT_ID)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
@@ -53,10 +62,38 @@ running jobs. In an experiment on CPU cores these are CPU core-hours: a core for
 		}
 		return fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it", out, "id", "platform_experiment_id", "created_at"); err != nil {
-		return fail(stderr, err)
+	if trimmed := bytes.TrimSpace(out); len(trimmed) > 0 && trimmed[0] != '[' {
+		out = slices.Concat([]byte("["), trimmed, []byte("]"))
+	}
+	var quotas []quotaLine
+	if err := json.Unmarshal(out, &quotas); err != nil {
+		return fail(stderr, fmt.Errorf("quota response: %w", err))
+	}
+	for _, q := range quotas {
+		q.Share = q.Guaranteed
+		if q.Share == 0 {
+			q.Share = q.Burst
+		}
+		q.Remaining = max(0, math.Round((q.Share-q.UsedGuaranteed-q.UsedBurst)*1e6)/1e6)
+		line, _ := json.Marshal(q)
+		fmt.Fprintf(stdout, "%s\n", line)
+	}
+	if len(quotas) == 0 {
+		fmt.Fprintln(stderr, "hl: quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it")
 	}
 	return 0
+}
+
+// quotaLine is what hl quota prints of an agent's quota: the granted and used hours the platform
+// answers, led by the two figures an agent sizes a job with.
+type quotaLine struct {
+	AgentID        string  `json:"agent_id"`
+	Share          float64 `json:"share_accelerator_hours"`
+	Remaining      float64 `json:"remaining_accelerator_hours"`
+	Guaranteed     float64 `json:"guaranteed_accelerator_hours"`
+	Burst          float64 `json:"burst_accelerator_hours"`
+	UsedGuaranteed float64 `json:"used_guaranteed_acch"`
+	UsedBurst      float64 `json:"used_burst_acch"`
 }
 
 func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
