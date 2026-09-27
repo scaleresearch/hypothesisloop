@@ -361,37 +361,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return &struct{ Body summaryReply }{Body: reply}, nil
 	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "reprioritize", Method: "POST", Path: "/experiments/reprioritize",
-		Summary: "Trigger an immediate re-prioritization pass", Tags: []string{"experiments"},
-		Description: "Staff only: the pass covers every org's queue. " +
-			"Recomputes novelty and priority for every QUEUED experiment now, instead of " +
-			"waiting for the next scheduled pass. Priority affects admission ORDER only -- it " +
-			"never admits a job that does not fit, and never evicts one. A job whose recompute " +
-			"fails keeps its previous score rather than blocking the rest of the queue.",
-	}, func(ctx context.Context, _ *struct{}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
-		// One queue serves every org and the pass re-scores all of it, so it is the platform's
-		// to trigger. Nobody loses by that: the loop runs the same pass after every tick.
-		if err := access.Staff(ctx); err != nil {
-			return nil, err
-		}
-		if err := h.svc.RePrioritize(ctx); err != nil {
-			return nil, auth.Internal(h.svc.logger, "reprioritize", err)
-		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "ok"
-		return out, nil
-	})
-
 }
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {

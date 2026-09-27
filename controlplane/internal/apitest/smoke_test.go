@@ -65,7 +65,6 @@ func TestSmoke(t *testing.T) {
 			"POST /hypotheses/query",
 			"GET /hypotheses/graph",
 			"GET /platform-experiments",
-			"reprioritize",
 		}},
 		{"cluster", rc, []string{"POST /{name}/reconcile"}},
 	} {

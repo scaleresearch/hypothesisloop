@@ -322,10 +322,6 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     assert a.api.get(f"/clusters/{runtime.cluster_id}/settings").status_code == 404, "the route keyed by what a runtime reports is still served"
     assert settings() == {"stuck_pending_timeout_seconds": 600}
 
-    for caller in (a.api, b.api):
-        assert caller.post("/experiments/reprioritize").status_code == 403, "a tenant triggered the pass over every org's queue"
-    assert api.post("/experiments/reprioritize").status_code == 200
-
     agent_a, pe_a = _running_org(a, run_id)
     agent_b, pe_b = _running_org(b, run_id)
     job_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)

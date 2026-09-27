@@ -239,7 +239,6 @@ def test_a_coordinator_token_runs_its_platform_experiment_and_creates_no_other(o
         ("POST", "/platform-experiments", _platform_experiment_body("a second one", org.project_id), 403),
         ("GET", "/me", None, 403),
         ("POST", f"/orgs/{org.org_id}/api-keys", {"name": "a way out"}, 403),
-        ("POST", "/experiments/reprioritize", None, 403),
     ])
     names = [pe["name"] for pe in org.key.get_json("/platform-experiments?limit=200")]
     assert "a second one" not in names

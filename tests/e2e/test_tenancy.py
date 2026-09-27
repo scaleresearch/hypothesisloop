@@ -419,7 +419,7 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
     assert admin.add_cluster(b.cluster, b.org_id) == admin.token(f"runtime:{b.cluster}"), "org B's runtime token changed"
 
 
-def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
+def test_capacity_stays_inside_the_org(tenants, api):
     """The connected clusters of the local stack belong to the default org and are not shared."""
     a, b = tenants
     connected = {c["cluster_name"] for c in _default_orgs_clusters(api)}
@@ -442,10 +442,6 @@ def test_capacity_and_the_queue_stay_inside_the_org(tenants, api):
     assert connected <= {c["cluster_name"] for c in api.capacity("default")["clusters"]}, "staff do not read the default org's clusters by naming it"
     assert not {c["cluster_name"] for c in api.capacity(a.org_id)["clusters"]} & connected, "staff reading one org are shown another's clusters"
     assert api.get(f"{path}?org_id=org-never-made-{uuid.uuid4().hex[:8]}").status_code == 404
-
-    assert a.api.post("/experiments/reprioritize").status_code == 403
-    for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"):
-        assert a.api.as_caller(admin.token(scope)).post("/experiments/reprioritize").status_code == 403, scope
 
 
 # One CPU core, which every cluster offers.
