@@ -1,0 +1,21 @@
+# The experiment, shaped like the body of POST /platform-experiments: what a create with
+# from_repo reads at the head of the default branch, and what a planner proposes. Uncomment and
+# fill in. What a run costs and how long it lasts is stated by whoever creates it, never here.
+#
+# name: a few words
+# description: |
+#   The brief, the only thing researchers read about the task: the goal, the metric and why it
+#   is the goal, what to vary, the gate, how to run a trial, when to stop, and
+#   BASELINE
+#     config:    the exact configuration
+#     code_ref:  <repository address>@<40 character commit>
+#     metric:    <ranking metric key> = <the value measured>
+#     measured:  <the job that measured it, or "not yet established">
+# metrics:
+#   - key: the_ranked_metric
+#     direction: maximize   # or minimize
+#     role: ranking
+#   - key: the_gate         # what makes a result wrong and not merely worse
+#     direction: minimize
+#     role: constraint
+#     bound: 0

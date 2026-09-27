@@ -1,0 +1,20 @@
+# The base job spec of this experiment. Every trial is this file, submitted unedited:
+#
+#   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
+#
+# The flags set what differs from one trial to the next, and hl fills id and code_ref from the
+# clone it runs in. `hl job submit --help` lists every field. No secret belongs here: a job takes
+# one with --secret-env.
+metadata:
+  estimated_duration_hours: REPLACE-WITH-THE-HOURS-ONE-TRIAL-TAKES
+job:
+  # REQUIRED: a job that names no image stays QUEUED and never runs. Copy the `image` of a job
+  # image `hl capacity` lists for the type below, verbatim. Delete this line only where
+  # `hl capacity` shows the cluster with only_job_image.
+  image: REPLACE-WITH-AN-IMAGE-HL-CAPACITY-LISTS
+  # hl-clone checks out the commit the job was submitted from and prints its directory.
+  command: ["bash", "-lc", "cd \"$(hl-clone)\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
+  # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines and
+  # states `cpu: N`, whole cores.
+  accelerator_type: REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS
+  accelerator_count: 1

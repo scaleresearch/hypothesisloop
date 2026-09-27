@@ -1,0 +1,35 @@
+package repotemplate
+
+import (
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// The job spec is submitted as it is once its placeholders are filled in, and a create with
+// from_repo must not take an example for an experiment: the experiment file states nothing.
+func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *testing.T) {
+	files := Files()
+	if len(files) != 3 {
+		t.Fatalf("the template holds %d files, want README.md, the experiment file and the job spec", len(files))
+	}
+	var spec struct {
+		Job map[string]any `yaml:"job"`
+	}
+	if err := yaml.Unmarshal([]byte(files[JobSpec]), &spec); err != nil || spec.Job["image"] == nil || spec.Job["command"] == nil {
+		t.Fatalf("the job spec = %v, %v, want a job with an image and a command", spec.Job, err)
+	}
+	var experiment map[string]any
+	if err := yaml.Unmarshal([]byte(files[ExperimentFile]), &experiment); err != nil || len(experiment) != 0 {
+		t.Fatalf("the experiment file states %v, %v, want nothing", experiment, err)
+	}
+	for _, path := range []string{Readme, JobSpec} {
+		if !strings.Contains(files[path], Placeholder) {
+			t.Errorf("%s marks nothing to fill in", path)
+		}
+	}
+	if !strings.Contains(files[Readme], JobSpec) || !strings.Contains(files[Readme], ExperimentFile) {
+		t.Error("the README does not name the other two files")
+	}
+}
