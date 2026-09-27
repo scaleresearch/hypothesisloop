@@ -126,7 +126,7 @@ const usage = `usage: hl <command> ...
   capacity              live accelerators per cluster, available and total
   data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
   git-credential        git's credential helper for your experiment's repository; git runs it
-  hypothesis            submit | link | comment | status | list | get | query
+  hypothesis            submit | checkout | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
   repo                  init | check: the files every experiment's repository holds
   org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept

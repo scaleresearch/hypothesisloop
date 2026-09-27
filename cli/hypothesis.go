@@ -77,6 +77,7 @@ per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
 
 var hypothesisCommands = []subcommand{
 	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},
+	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout},
 	{"link", "add a link from your own hypothesis", hypothesisLink},
 	{"comment", "add a note to a hypothesis", hypothesisComment},
 	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control", hypothesisStatus},
@@ -525,7 +526,8 @@ func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer
 	fs := newFlags("hypothesis list", `usage: hl hypothesis list [--agent A] [--status S] [--limit N] [--offset N]
 
 Most recent first, one JSON object per line with builds_on, child_count, finding_count and
-comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
+comment_count. For structure or text search use 'hl hypothesis query'. The branches a
+hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
@@ -576,7 +578,11 @@ comment_count. For structure or text search use 'hl hypothesis query'.`, stderr)
 func hypothesisGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis get", `usage: hl hypothesis get ID [--limit N]
 
-One hypothesis with its links (in and out), findings, comments and jobs, oldest first. A job is
+One hypothesis with its links (in and out), findings, comments and jobs, oldest first.
+implementations lists the branches it was run on, one per agent that ran it, each with
+agent_id, branch and code_ref, the commit its newest job there ran: a hypothesis is an idea and
+any agent may run its own code for it. base_ref is the commit a new implementation starts from
+(hl hypothesis checkout ID). A job is
 as brief as in hl job list, metrics included, with the env that differs between its jobs (all
 of it for an only job); hl job status ID prints its whole record.`, stderr)
 	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
@@ -735,4 +741,164 @@ func rowObject(columns []string, row []json.RawMessage) json.RawMessage {
 	}
 	b.WriteByte('}')
 	return b.Bytes()
+}
+
+// titleSlugLength is where the hypothesis's text is cut in a branch name.
+const titleSlugLength = 40
+
+// slug is text as part of a branch name: lowercase letters and digits, every run of anything
+// else one dash, cut to limit when limit is positive.
+func slug(text string, limit int) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(text) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
+			b.WriteByte('-')
+		}
+		if b.Len() == limit {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// implementationBranch names the branch one agent's code for one hypothesis lives on:
+// hl/<platform experiment>/<agent name>/<start of the hypothesis's text>-<end of its id>. The
+// end of the id tells apart two hypotheses that begin alike.
+func implementationBranch(platformExperiment, agentName, text, hypothesisID string) (string, error) {
+	agent, id := slug(agentName, 0), slug(strings.ReplaceAll(hypothesisID, "-", ""), 0)
+	if agent == "" || len(id) < 6 {
+		return "", fmt.Errorf("agent name %q and hypothesis id %q make no branch name", agentName, hypothesisID)
+	}
+	title := id[len(id)-6:]
+	if words := slug(text, titleSlugLength); words != "" {
+		title = words + "-" + title
+	}
+	return branchPrefix(platformExperiment) + agent + "/" + title, nil
+}
+
+func hypothesisCheckout(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("hypothesis checkout", `usage: hl hypothesis checkout ID [--from JOB]
+
+Run in your clone of the platform experiment's repository. Puts it on your branch for
+hypothesis ID: your implementation of it. A hypothesis is an idea and a branch is one agent's
+code for it, so any agent may check out any hypothesis, its own or another's, and each gets a
+branch of its own: hl/PE/<your agent name>/<start of the hypothesis text>-<end of its id>.
+
+It fetches origin first. When your branch exists, here or on origin, it is checked out as it
+is. Otherwise it is created: from the commit job JOB ran with --from JOB (any job of the
+platform experiment, to start from one particular implementation), else from base_ref of the
+hypothesis: the commit the newest completed job of the hypothesis it builds on ran, whichever
+agent's, that hypothesis's own base while it has no completed job, and the baseline job's
+commit for one that builds on the objective. To drop an idea and start again from the
+baseline, register a hypothesis that builds on root and check it out; to improve an idea,
+register one that builds on it.
+
+Prints one JSON object: branch, and base, the commit a branch it created starts from. Refused
+with the reason when there is nothing to start from (no baseline is declared yet), and when
+--from is given for a branch that exists. hl job submit pushes the branch.`, stderr)
+	agent := fs.String("agent", "", "whose branch it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
+	from := fs.String("from", "", "create the branch from the commit this `job` ran")
+	id, err := parseOne(fs, args, "ID", "", "id")
+	if err != nil {
+		return parseExit(err)
+	}
+	if *agent, err = writingAgent(c, *agent); err != nil {
+		return fail(stderr, err)
+	}
+	if *agent == "" {
+		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose branch this is"))
+	}
+	var h struct {
+		ID                 string `json:"id"`
+		PlatformExperiment string `json:"platform_experiment_id"`
+		Text               string `json:"text"`
+		BaseRef            string `json:"base_ref"`
+	}
+	if err := c.Do("GET", "/hypotheses/"+url.PathEscape(id)+"?limit=1", nil, &h); err != nil {
+		return fail(stderr, err)
+	}
+	var roster struct {
+		Agents []struct {
+			ID   string `json:"agent_id"`
+			Name string `json:"name"`
+		} `json:"agents"`
+	}
+	if err := c.Do("GET", agentsPath(h.PlatformExperiment), nil, &roster); err != nil {
+		return fail(stderr, err)
+	}
+	name := ""
+	for _, signup := range roster.Agents {
+		if signup.ID == *agent {
+			name = signup.Name
+		}
+	}
+	if name == "" {
+		return fail(stderr, fmt.Errorf("hypothesis checkout: agent %s is none of platform experiment %s, which hypothesis %s belongs to", *agent, h.PlatformExperiment, h.ID))
+	}
+	branch, err := implementationBranch(h.PlatformExperiment, name, h.Text, h.ID)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
+	}
+	base := h.BaseRef
+	if *from != "" {
+		var job struct {
+			PlatformExperiment string `json:"platform_experiment_id"`
+			CodeRef            string `json:"code_ref"`
+		}
+		if err := c.Do("GET", "/experiments/"+url.PathEscape(*from), nil, &job); err != nil {
+			return fail(stderr, err)
+		}
+		if job.PlatformExperiment != h.PlatformExperiment {
+			return fail(stderr, fmt.Errorf("hypothesis checkout: job %s is of platform experiment %s and hypothesis %s of %s: --from takes a job of the same one", *from, job.PlatformExperiment, h.ID, h.PlatformExperiment))
+		}
+		base = job.CodeRef
+	}
+	created, err := checkoutBranch("", branch, base, *from)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
+	}
+	out := struct {
+		Branch string `json:"branch"`
+		Base   string `json:"base,omitempty"`
+	}{branch, created}
+	line, _ := json.Marshal(out)
+	fmt.Fprintf(stdout, "%s\n", line)
+	return 0
+}
+
+// checkoutBranch puts the clone in dir on branch after fetching origin. A branch the clone or
+// origin has is checked out as it is, and from, the job a new one was to start from, is then
+// refused. One neither has is created at the commit of base, a code_ref, and that commit is
+// returned.
+func checkoutBranch(dir, branch, base, from string) (created string, err error) {
+	if _, err := git(dir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return "", errors.New("this is not a git repository: run it in your clone of the platform experiment's repository (hl platform-experiments show names repository_url)")
+	}
+	if _, err := git(dir, "fetch", "--quiet", "origin"); err != nil {
+		return "", err
+	}
+	_, localErr := git(dir, "rev-parse", "--quiet", "--verify", "refs/heads/"+branch)
+	_, remoteErr := git(dir, "rev-parse", "--quiet", "--verify", "refs/remotes/origin/"+branch)
+	if localErr == nil || remoteErr == nil {
+		if from != "" {
+			return "", fmt.Errorf("your branch %s exists, so nothing is created from job %s: leave --from out to check it out as it is", branch, from)
+		}
+		args := []string{"checkout", "--quiet", branch}
+		if localErr != nil {
+			args = []string{"checkout", "--quiet", "-b", branch, "--track", "origin/" + branch}
+		}
+		_, err := git(dir, args...)
+		return "", err
+	}
+	if base == "" {
+		return "", errors.New("there is no commit to start from: the hypothesis builds up to the objective and no baseline is declared yet. Wait for the baseline, or name a job to start from with --from JOB")
+	}
+	sha := base[strings.LastIndex(base, "@")+1:]
+	if _, err := git(dir, "checkout", "--quiet", "-b", branch, sha); err != nil {
+		return "", err
+	}
+	return sha, nil
 }

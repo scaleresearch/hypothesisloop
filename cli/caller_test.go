@@ -62,6 +62,7 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	}
 	spending := map[string][]string{
 		"job submit": {"job", "submit", job},
+		"checkout":   {"hypothesis", "checkout", "hyp-1"},
 		"data-key":   {"data-key"},
 		"finish":     {"platform-experiments", "agents", "finish", "--reason", "quota spent"},
 	}
