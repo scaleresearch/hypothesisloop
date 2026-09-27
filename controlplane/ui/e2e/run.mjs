@@ -607,7 +607,7 @@ async function scenarios(browser) {
   await page.route(runInstallations, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { ...runCors, 'X-Total-Count': '1' },
-      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
+      json: [{ org_id: adaMe.orgs[0].id, installation_id: 4242, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
     })
     : route.fallback())
   await page.route(runRepositories, route => route.fulfill({
@@ -1033,7 +1033,7 @@ async function scenarios(browser) {
   // install goes on to authorise, and the connect names that installation.
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
   }
   const authorizesBeforeInstall = authorizes.length
   await githubCard.getByRole('button', { name: 'Install the App on an account' }).click()
@@ -1056,7 +1056,7 @@ async function scenarios(browser) {
     status: 409,
     json: {
       reason: 'installation_choice_required', message: 'the GitHub account reaches several installations: name one',
-      installations: [{ installation_id: 4242, account_login: 'acme' }, { installation_id: 4343, account_login: 'ada-personal' }],
+      installations: [{ installation_id: 4242, account_login: 'acme', account_type: 'Organization' }, { installation_id: 4343, account_login: 'ada-personal', account_type: 'User' }],
     },
   }
   await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
@@ -1065,7 +1065,7 @@ async function scenarios(browser) {
   await choice.getByRole('button', { name: 'acme', exact: true }).waitFor()
   connectAnswer = {
     status: 201,
-    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
+    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', account_type: 'User', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
   }
   await choice.getByRole('button', { name: 'ada-personal' }).click()
   await page.waitForURL(landed)
@@ -1088,8 +1088,10 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const repositoryField = page.getByLabel('Repository').last()
   await repositoryField.click()
-  await page.getByRole('option', { name: 'A new private repository' }).waitFor()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
+  // The one connected account is a personal one, where GitHub lets the platform create nothing.
+  assert.equal(await page.getByRole('option', { name: 'A new private repository' }).count(), 0)
+  await page.getByText('GitHub lets the platform create no repository on a personal account (ada-personal)').last().waitFor()
   await repositoryField.fill('wid')
   await page.getByRole('option', { name: /ada-personal\/open/ }).waitFor({ state: 'detached' })
   assert.ok(searches.includes('wid') && !searches.includes('w'), 'the search waited for typing to pause')
@@ -1449,7 +1451,7 @@ async function scenarios(browser) {
     await otherPage.route(url => url.href.startsWith(memberInstallationsAPI), route => route.request().method() === 'GET'
       ? route.fulfill({
         headers: { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count', 'X-Total-Count': '1' },
-        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
+        json: [{ org_id: labID, installation_id: 4242, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }],
       })
       : route.fallback())
     await otherPage.goto(`${UI}/settings?project=${adaMe.projects[0].id}`)

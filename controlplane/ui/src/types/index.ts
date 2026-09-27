@@ -643,6 +643,8 @@ export interface GitHubApp {
   authorize_url: string
 }
 
+export type GitHubAccountType = 'User' | 'Organization'
+
 /**
  * An installation of the platform's GitHub App that an org connected: a GitHub account, with the
  * repositories its owner chose on GitHub. A platform experiment of the org may name any of them.
@@ -652,6 +654,8 @@ export interface GitHubInstallation {
   installation_id: number
   /** The GitHub user or organisation the App is installed on. */
   account_login: string
+  /** Which of the two it is. The platform creates repositories on an organisation only. Absent while GitHub has not said. */
+  account_type?: GitHubAccountType
   /** Who connected it: a user, the API key it was connected with, or staff. */
   connected_actor: Actor
   connected_at: string

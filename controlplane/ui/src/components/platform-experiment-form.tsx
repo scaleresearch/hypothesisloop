@@ -476,7 +476,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   <>
                     <FormField
                       label="Repository"
-                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, the platform creates a private repository for it on your connected GitHub account. Fixed once created."
+                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, the platform creates a private repository for it on your connected GitHub organisation. Fixed once created."
                     >
                       <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} />
                     </FormField>

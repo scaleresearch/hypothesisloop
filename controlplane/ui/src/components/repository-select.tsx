@@ -24,9 +24,10 @@ export function repositoryFields(value: string): { repository?: string; reposito
 /**
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
- * With none chosen the platform creates one. With no account connected it says where one is
- * connected. On a deployment whose git host is not GitHub the repository is typed: the platform
- * creates none there.
+ * With none chosen the platform creates one on a connected organisation. GitHub lets it create
+ * none on a personal account, which is said with what to do instead. With no account connected
+ * it says where one is connected. On a deployment whose git host is not GitHub the repository is
+ * typed: the platform creates none there.
  */
 export function RepositorySelect({ value, onChange }: { value: string; onChange: (repository: string) => void }) {
   const { org } = useTenant()
@@ -66,8 +67,11 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
   if (value && !value.startsWith(ON_ACCOUNT) && !listed.some(r => r.repository === value)) options.unshift({ value, label: value, badge: undefined })
   // With several accounts connected, which one a new repository goes to is the person's to say.
   const accounts = installations.data?.items ?? []
+  const organisations = accounts.filter(a => a.account_type === 'Organization')
+  const personal = accounts.filter(a => a.account_type === 'User')
+  const createsUnasked = accounts.length === 1 && organisations.length === 1
   if (accounts.length > 1) {
-    options.unshift(...accounts.map(a => ({ value: ON_ACCOUNT + a.account_login, label: `A new private repository on ${a.account_login}`, badge: undefined })))
+    options.unshift(...organisations.map(a => ({ value: ON_ACCOUNT + a.account_login, label: `A new private repository on ${a.account_login}`, badge: undefined })))
   }
   return (
     <>
@@ -79,11 +83,17 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
         onChange={onChange}
         onSearch={setQ}
         allLabel="A new private repository"
-        placeholder={accounts.length > 1 ? 'Choose a repository' : 'A new private repository'}
-        hideAllOption={accounts.length > 1}
+        placeholder={createsUnasked ? 'A new private repository' : 'Choose a repository'}
+        hideAllOption={!createsUnasked}
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}
       />
+      {personal.length > 0 && (
+        <p className="text-sm text-muted">
+          GitHub lets the platform create no repository on a personal account ({personal.map(a => a.account_login).join(', ')}): create an empty private one there and choose it, or{' '}
+          <TextLink inline href={`/settings#${GITHUB_CARD}`}>connect an organisation</TextLink>.
+        </p>
+      )}
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}
     </>
   )
