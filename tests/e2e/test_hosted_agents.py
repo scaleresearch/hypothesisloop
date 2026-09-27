@@ -418,7 +418,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         gone, ending = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
         assert gone is None and again["name"] in ending, f"after the close: instance {gone}, ending {ending}"
 
-        # After the close its token still reads and still writes the summary, and nothing else.
+        # For its wind-down after the close its token reads and writes the summary, and nothing else.
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "the final summary")
         assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
         late = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
@@ -620,14 +620,19 @@ def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id, bound = r.json()["id"], r.json()["max_hosted"]
     try:
-        assert bound >= 2, f"max_hosted = {bound}: the local settings leave room for no agent beside the coordinator"
-        # max_agents counts competitors, so reviewers are added until the machines run out.
-        for _ in range(bound - 1):
+        assert bound >= 3, f"max_hosted = {bound}: the local settings leave room for no agent beside the coordinator and the baseline's machine"
+        # max_agents counts competitors, so reviewers are added until the machines run out. One
+        # machine is the coordinator's and one is kept for an agent of role baseline.
+        for _ in range(bound - 2):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "reviewer"})
             assert r.status_code == 201, f"a hosted reviewer below the bound: {r.status_code} {r.text}"
-        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True, "role": "baseline"}, {"hosted": True}):
+        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True}):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
-            assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"{body} at the bound: {r.status_code} {r.text}"
+            assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
+        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
+        assert r.status_code == 201, f"a hosted baseline agent on the machine kept for one: {r.status_code} {r.text}"
+        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
+        assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"a second hosted baseline agent at the bound: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})
         assert r.status_code == 201, f"a self-run reviewer at the bound: {r.status_code} {r.text}"
         assert len([a for a in roster(with_repo, pe_id).values() if a["hosted"]]) == bound - 1

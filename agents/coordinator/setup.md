@@ -196,7 +196,7 @@ is all there is to do: the coordinator keeps the
 description true to what is learned and writes its findings as the experiment's summary
 (`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
-(section 4). Its token still writes the summary after the close. It reads the repository and
+(section 4). Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
 pushes nothing. It closes the experiment only when the run can produce nothing more, and says
 why in the summary first. It cannot start the experiment, run a baseline itself, act as an
 agent, or change anything of the experiment but the description (the budget, `max_agents`, the

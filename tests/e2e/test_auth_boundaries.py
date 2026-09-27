@@ -361,8 +361,9 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
 
 
 def test_tokens_after_a_close(org: Org, run_id: str):
-    """The agent's token lives the wind-down past the close and then dies; the coordinator's
-    stays, for reads and the summary. Nothing that spends or starts work gets through either."""
+    """Both tokens live the wind-down past the close and then die: the agent's and the
+    coordinator's, which reads and files the summary meanwhile. Nothing that spends or starts
+    work gets through either."""
     pe_id, (member,) = _running_experiment(org, org.key, run_id, 1)
     coordinator = org.key.as_caller(admin.token(f"coordinator:{pe_id}"))
     org.key.post(f"/experiments/{member.job_id}/cancel")
@@ -403,9 +404,11 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("POST", f"/hypotheses/{member.hypothesis_id}/comments", {"agent_id": member.agent, "text": "too late"}, 401),
     ])
     _assert_each(coordinator, "the coordinator after the wind-down", [
-        ("GET", f"/platform-experiments/{pe_id}", None, 200),
-        ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "amended"}, 200),
+        ("GET", f"/platform-experiments/{pe_id}", None, 401),
+        ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "amended"}, 401),
     ])
+    amended = org.key.post(f"/platform-experiments/{pe_id}/summary", {"summary": "amended"})
+    assert amended.status_code == 200, f"the owner amending the summary after the wind-down: {amended.status_code} {amended.text}"
 
 
 # ---- what a /watch stream delivers, and for how long ------------------------------------------

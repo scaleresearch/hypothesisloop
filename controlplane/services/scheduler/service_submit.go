@@ -134,7 +134,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if finished {
 		return &AdmissionError{
 			Reason:  "agent_finished",
-			Message: "agent finished in this platform experiment (POST /platform-experiments/{id}/agents/{agent_id}/finish), which is final: it submits no further job. Its token still reads",
+			Message: "agent finished in this platform experiment (POST /platform-experiments/{id}/agents/{agent_id}/finish), which is final: it submits no further job. Its token reads for two more minutes and then stops working",
 		}
 	}
 
