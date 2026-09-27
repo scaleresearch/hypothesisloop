@@ -106,7 +106,7 @@ class BriefingTest(unittest.TestCase):
         flat = " ".join(self.render().split())
         self.assertIn("You remove only an agent you added. One the owner added stays, whatever the mix or the count", flat)
         self.assertIn("`max_agents` counts researchers alone: baseline agents and you never count, and a researcher that finished still does", flat)
-        self.assertIn("An agent's jobs, hypotheses and branch are the agent's. You cancel, submit and comment on none", flat)
+        self.assertIn("An agent's jobs, hypotheses and branches are the agent's. You cancel, submit and comment on none", flat)
         self.assertNotIn("agents remove", flat)
 
     # Three baseline jobs failed for what the brief said of the image before a coordinator

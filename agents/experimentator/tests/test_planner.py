@@ -128,11 +128,11 @@ class BaselinePromptTest(unittest.TestCase):
     def test_its_code_goes_to_the_experiments_repository(self):
         flat = render(baseline_agent())[1]
         self.assertIn("Where it is kept: run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
-        self.assertIn("work on branch `hl/pe-1/ag-baseline`: create it off the default branch", flat)
+        self.assertIn("Work on branch `hl/pe-1/baseline`: create it off the default branch", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
         # What a researcher is told of the others' branches is not true of the agent that
         # starts the code.
-        for absent in ("{", "====", "Others push", "BASELINE `code_ref`"):
+        for absent in ("{", "====", "hl hypothesis checkout", "ag-baseline`"):
             self.assertNotIn(absent, flat)
 
     # A planner cloned three times looking for its directory, read six sample directories to

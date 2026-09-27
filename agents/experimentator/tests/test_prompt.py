@@ -21,14 +21,17 @@ class SystemPromptTest(unittest.TestCase):
             # Five of six hosted agents cloned into /tmp and then fought the working directory
             # every command starts in.
             self.assertIn("run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
-            self.assertIn("work on branch `hl/pe-1/agent-a`", flat)
             # One agent cloned into a subdirectory and one into the workspace, so their paths
             # differed, and one set up a credential helper the image already has.
             self.assertIn("`git push` needs no setup, git has your credential", flat)
-            # Told to branch off the default branch, a researcher never met the planner's seed,
-            # and the `hl-clone` a brief sent it to leaves a directory with no origin to push to.
-            self.assertIn("create it off the commit after `@` in the description's BASELINE `code_ref` "
-                          "(`git checkout -b <branch> <sha>`), or off the default branch when it names none", flat)
+            # Every job of two runs ran the baseline commit and no researcher pushed a branch:
+            # the branch was the agent's, so git followed no idea.
+            self.assertIn("before working on an idea, and after a restart, `hl hypothesis checkout ID` checks it out, "
+                          "started from its parent's last job commit, or from the baseline's under `root`", flat)
+            self.assertIn("`hl job submit` pushes it and refuses any other branch", flat)
+            self.assertIn("To improve one, yours or another agent's, register a child of it, which starts from its code", flat)
+            self.assertNotIn("git checkout -b", flat)
+            self.assertNotIn("hl/pe-1/agent-a", flat)
             self.assertLess(len(prompt.encode()), 11_000)
 
     # An agent's `pip install` went to a site its python3 never read, and `image: python` once

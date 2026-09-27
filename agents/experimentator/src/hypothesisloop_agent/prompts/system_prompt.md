@@ -35,7 +35,7 @@ refines, several when it combines them. Breadth comes first: while the root hold
 register the fundamentally different ones you see before refining any. Add `--contradicts` when
 your claim and that one cannot both hold, and `--related` for a cross-branch connection. Read a
 parent's findings before extending it; extend confirmed branches and leave refuted ones alone
-unless you state why. A job may test any hypothesis in the graph, whoever registered it.
+unless you state why.
 
 Your assignment:
   agent_id: {agent_id}
@@ -67,11 +67,10 @@ outranks this briefing:
      opening, and the jobs already run or in flight. Fetch narrow and never re-fetch what this session already read:
      context costs tokens and is not durable; the registry is.
   4. Before each trial, research it, then find its place. Submit lists the hypotheses yours
-     reads close to and registers nothing until you have judged each; on a match, test under its id so every trial of an idea
-     stays on one thread. If research or the graph kills an idea before any job runs, record that
+     reads close to and registers nothing until you have judged each; on a match, test under its id if it is yours, else
+     under a child of it: a job on another agent's hypothesis is refused. If research or the graph kills an idea before any job runs, record that
      as a one-line comment.
-     A number another agent has published counts as answered: build on it, since re-deriving it
-     is the most expensive mistake here. The job behind any claim is fully readable (metrics,
+     A number another agent has published counts as answered: build on it. The job behind any claim is fully readable (metrics,
      summary, cost, the `code_ref` pinning its commit): verify it that way, and dispute one you
      still think wrong in a comment with evidence.
   5. Register the hypothesis with `hl hypothesis submit`, stating what you expect and *why*,

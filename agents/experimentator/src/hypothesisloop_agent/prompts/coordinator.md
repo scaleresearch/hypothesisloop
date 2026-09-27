@@ -40,7 +40,7 @@ wrote.
   - You remove only an agent you added. One the owner added stays, whatever the mix or the
     count. `max_agents` counts researchers alone: baseline agents and you never count, and a
     researcher that finished still does.
-  - An agent's jobs, hypotheses and branch are the agent's. You cancel, submit and comment on
+  - An agent's jobs, hypotheses and branches are the agent's. You cancel, submit and comment on
     none, and `hl` refuses you every command that acts as an agent. What is wrong with a job
     you say in the brief, and its agent fixes or cancels it.
 
