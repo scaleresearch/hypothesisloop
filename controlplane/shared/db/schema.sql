@@ -134,8 +134,9 @@ ALTER TABLE platform_experiments DROP COLUMN IF EXISTS job_submit_policy;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS goal            TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_id   TEXT NOT NULL DEFAULT '';
--- What a draft's planner proposed (quota.Proposal as JSON) and when. Both NULL until it has, and
--- proposed_at NULL again while a revision is being planned. The launcher keeps the planner's
+-- What a draft's planner proposed (quota.Proposal as JSON) and when it answered. Both NULL until
+-- it has, and proposed_at NULL again while a revision is being planned. A decline answers too:
+-- it sets proposed_at and clears proposal, and is read as declined_at (domain.SetAnswered). The launcher keeps the planner's
 -- machine only while proposed_at is NULL.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposal    JSONB;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPTZ;

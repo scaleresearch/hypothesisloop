@@ -104,8 +104,10 @@ UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_rea
 }
 
 // Decline stores why a draft's planner proposes nothing. It answers the goal as a proposal
-// does: the draft waits for a person until waitUntil and the planner's machine is released. A
-// proposal made before no longer stands, so it is cleared and there is nothing to accept.
+// does: the draft waits for a person until waitUntil, when the platform closes it as it closes
+// a proposal nobody took up, and the planner's machine is released. A proposal made before no
+// longer stands, so it is cleared and there is nothing to accept. proposed_at is the column of
+// the planner's answer, whichever it was: with no proposal beside it the draft is declined.
 func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time) error {
 	err := s.answerDraft(ctx, id, `
 UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), ends_at = $3, updated_at = now()`, reason, waitUntil)

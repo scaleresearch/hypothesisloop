@@ -128,7 +128,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
 		Summary: "Ask a draft's planner to change its proposal, or to try again after it declined", Tags: []string{"platform-experiments"},
 		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
-			"the proposal stays readable, proposed_at is cleared, and the platform starts the planner again with what it knew, with the planning limit to propose anew. " +
+			"the proposal stays readable, proposed_at or declined_at is cleared, and the platform starts the planner again with what it knew, with the planning limit to propose anew. " +
 			"A draft its planner declined is revised the same way: say what the planner lacked, and its reason stays readable until it answers again. " +
 			"409 invalid_transition for anything but a draft its planner has answered: while the planner still works there is nothing to revise yet.",
 	}, func(ctx context.Context, in *struct {
@@ -270,10 +270,10 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if pe.Status != domain.PlatformExpDraft {
 		return nil, invalidTransition("platform experiment %s is %s: only a draft is accepted", id, pe.Status)
 	}
-	if pe.ProposedAt != nil && len(pe.Proposal) == 0 {
+	if pe.DeclinedAt != nil {
 		return nil, invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Revise it with POST /platform-experiments/%s/revise, or close it", id, id)
 	}
-	if pe.ProposedAt == nil || len(pe.Proposal) == 0 {
+	if pe.ProposedAt == nil {
 		return nil, invalidTransition("draft %s has no proposal to accept yet: its planner is still working", id)
 	}
 	var proposal Proposal
@@ -369,8 +369,8 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Decline to propose, with the reason", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
 			"nothing measurable, or nothing this platform can run. reason is read by the person who wrote the goal, in plain words, with what would make it plannable. " +
-			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and proposed_at, a proposal made before is cleared so there is nothing to accept, " +
-			"the planner's machine is released, and the person revises the draft or closes it. The next proposal clears the reason.",
+			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, a proposal made before is cleared so there is nothing to accept, " +
+			"the planner's machine is released, and the person revises the draft or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {

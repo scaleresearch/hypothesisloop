@@ -339,7 +339,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. repository is the code it works on, owner/name on GitHub, " +
 			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
 			"One made from a sentence carries goal, and while it is a draft what its planner proposed (proposal, proposed_at) and what a person asked to change (revisions): " +
-			"a draft with no proposed_at is being planned, one with it waits to be accepted.",
+			"status_reason says where a draft stands: planning, revising, proposed (proposed_at is set and it waits to be accepted) or declined (declined_at and declined_reason are set, there is nothing to accept, and it waits to be revised or closed). Either answer waits until proposal_expires_at, when the platform closes the draft.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.PlatformExperiment }, error) {

@@ -126,7 +126,7 @@ WHERE id = $1`
 	var createdBy, closedBy domain.Actor
 	var proposal []byte
 	var closesAt time.Time
-	var startedAt *time.Time
+	var startedAt, answeredAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
@@ -136,7 +136,7 @@ WHERE id = $1`
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
 		&coordinator.Instance.SeenAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
-		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &pe.ProposedAt, &pe.DeclinedReason,
+		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID,
 		&pe.DurationHours, &startedAt,
 	)
@@ -159,6 +159,7 @@ WHERE id = $1`
 	if len(proposal) > 0 {
 		pe.Proposal = proposal
 	}
+	pe.SetAnswered(answeredAt, len(proposal) > 0)
 	if pe.Goal != "" {
 		if pe.Revisions, err = s.planningRequests(ctx, id); err != nil {
 			return nil, err
@@ -342,7 +343,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, pe.summary,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.baseline_job_id,
+       pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id,
        pe.duration_hours, pe.started_at, pe.closed_at, pe.close_reason,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -365,14 +366,15 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		var status string
 		var metricsRaw, stagesRaw []byte
 		var closesAt time.Time
-		var startedAt *time.Time
+		var startedAt, answeredAt *time.Time
+		var proposed bool
 		if err := rows.Scan(
 			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
 			&pe.StartsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &pe.ProposedAt, &pe.BaselineJobID,
+			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID,
 			&pe.DurationHours, &startedAt, &pe.ClosedAt, &pe.CloseReason,
 			&pe.SignupCount,
 		); err != nil {
@@ -388,6 +390,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		if startedAt != nil {
 			pe.StartedAt = *startedAt
 		}
+		pe.SetAnswered(answeredAt, proposed)
 		pe.SetClosesAt(closesAt)
 		out = append(out, pe)
 	}

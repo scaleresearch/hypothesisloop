@@ -276,7 +276,8 @@ func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, 
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.Proposal, pe.ProposedAt, pe.DeclinedReason = proposal, &now, ""
+			pe.Proposal, pe.DeclinedReason = proposal, ""
+			pe.SetAnswered(&now, true)
 			pe.SetClosesAt(waitUntil)
 			return nil
 		}
@@ -532,10 +533,10 @@ func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Act
 		if pe.ID != id || pe.Status != domain.PlatformExpDraft {
 			continue
 		}
-		if pe.ProposedAt == nil {
+		if !pe.Answered() {
 			return db.ErrNothingProposed
 		}
-		pe.ProposedAt = nil
+		pe.SetAnswered(nil, false)
 		pe.SetClosesAt(planUntil)
 		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
@@ -608,7 +609,8 @@ func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil tim
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.DeclinedReason, pe.Proposal, pe.ProposedAt = reason, nil, &now
+			pe.DeclinedReason, pe.Proposal = reason, nil
+			pe.SetAnswered(&now, false)
 			pe.SetClosesAt(waitUntil)
 			return nil
 		}
@@ -643,8 +645,11 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	before := time.Now()
 	const why = "\"Make the model better\" names nothing to measure: say which model, on what data, and what better means."
 	code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "  " + why + "\n"})
-	if code != http.StatusOK || out["declined_reason"] != why || out["proposed_at"] == nil || out["proposal"] != nil || out["status"] != "draft" {
-		t.Fatalf("decline: got = %d %v, want the reason, an answer time and no proposal", code, out)
+	if code != http.StatusOK || out["declined_reason"] != why || out["declined_at"] == nil || out["proposed_at"] != nil || out["proposal"] != nil || out["status"] != "draft" {
+		t.Fatalf("decline: got = %d %v, want the reason, when it declined, and nothing proposed", code, out)
+	}
+	if _, read := call("GET", "/platform-experiments/pe-draft", nil); read["status_reason"].(map[string]any)["reason"] != "declined" {
+		t.Errorf("a declined draft read: status_reason = %v, want declined", read["status_reason"])
 	}
 	if wait := store.created[0].ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
 		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
@@ -656,8 +661,11 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	}
 	// The person says what was missing; the reason stays until the planner answers again.
 	code, out = call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "The small transformer in train.py, by validation loss."})
-	if code != http.StatusOK || out["proposed_at"] != nil || out["declined_reason"] != why {
+	if code != http.StatusOK || out["proposed_at"] != nil || out["declined_at"] != nil || out["declined_reason"] != why {
 		t.Fatalf("revising a declined draft: got = %d %v, want it back with the planner and the reason kept", code, out)
+	}
+	if _, read := call("GET", "/platform-experiments/pe-draft", nil); read["status_reason"].(map[string]any)["reason"] != "revising" {
+		t.Errorf("a declined draft being revised: status_reason = %v, want revising", read["status_reason"])
 	}
 	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK || out["declined_reason"] != nil || out["proposal"] == nil {
 		t.Fatalf("proposing after a decline: got = %d %v, want the proposal and no reason", code, out)

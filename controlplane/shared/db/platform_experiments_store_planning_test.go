@@ -269,7 +269,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	declined, err := pes.GetPlatformExperiment(ctx, id)
-	if err != nil || declined.DeclinedReason != "nothing here can be measured" || declined.ProposedAt == nil || len(declined.Proposal) != 0 {
+	if err != nil || declined.DeclinedReason != "nothing here can be measured" || declined.DeclinedAt == nil || declined.ProposedAt != nil || declined.ProposalExpiresAt.IsZero() || len(declined.Proposal) != 0 {
 		t.Fatalf("declined: got = %+v, %v", declined, err)
 	}
 	if wanted, _ := pes.ListLauncherAgents(ctx, launcher, 0); len(wanted) != 0 {
@@ -282,13 +282,13 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.Revise(ctx, id, "measure validation loss", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("revising a declined draft: %v", err)
 	}
-	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.ProposedAt != nil || revised.DeclinedReason == "" {
+	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.Answered() || revised.DeclinedReason == "" {
 		t.Fatalf("revised after a decline: got = %+v, want it with the planner and the reason kept", revised)
 	}
 	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil {
+	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil || proposed.DeclinedAt != nil {
 		t.Fatalf("proposed after a decline: got = %+v, want no reason", proposed)
 	}
 	if err := pes.Decline(ctx, "pe-none", "r", time.Now()); err != ErrNotDraft {
@@ -612,5 +612,47 @@ func TestADeclaredBaselineIsStoredWithTheUpdateThatDeclaresIt(t *testing.T) {
 		if listed.ID == id && listed.BaselineJobID != "job-1" {
 			t.Fatalf("listed with baseline %q, want job-1: the sweeps read it there", listed.BaselineJobID)
 		}
+	}
+}
+
+// A declined draft read proposed_at with no proposal, as if something were proposed, and waited
+// a week in that state. It reads as declined, and the limit a proposal waits by closes it.
+func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id, _ := createTestDraft(t, pool, "launcher-"+uuid.New().String()[:8])
+	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	listed := func() *domain.PlatformExperiment {
+		t.Helper()
+		drafts, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpDraft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, draft := range drafts {
+			if draft.ID == id {
+				return draft
+			}
+		}
+		t.Fatalf("%s is not among the drafts listed", id)
+		return nil
+	}
+	if draft := listed(); draft.DeclinedAt == nil || draft.ProposedAt != nil || draft.DeclinedReason == "" || draft.ProposalExpiresAt.IsZero() || !draft.PlanningEndsAt.IsZero() {
+		t.Fatalf("a declined draft, listed: got = %+v, want declined_at, its reason and proposal_expires_at", draft)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if draft := listed(); draft.ClosesAt().After(time.Now()) {
+		t.Fatalf("a declined draft past its limit closes at %v, want a moment the sweep acts on", draft.ClosesAt())
+	}
+	if err := pes.ClosePlatformExperiment(ctx, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || closed.Status != domain.PlatformExpClosed || closed.CloseReason != domain.CloseProposalExpired || closed.DeclinedAt == nil || closed.ProposalExpiresAt.IsZero() {
+		t.Fatalf("closed: got = %s %q declined at %v, %v, want closed proposal_expired and still declined", closed.Status, closed.CloseReason, closed.DeclinedAt, err)
 	}
 }

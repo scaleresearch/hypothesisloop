@@ -387,8 +387,26 @@ func (s *PlatformExperimentsService) Spend(ctx context.Context, pe *domain.Platf
 	return nil
 }
 
-// Describe sets on an open pe why it is not running yet (StatusReason).
+// draftReason is where a draft stands with its planner.
+func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
+	switch {
+	case pe.DeclinedAt != nil:
+		return &domain.StatusReason{Reason: "declined", Message: "its planner proposed no experiment, for declined_reason: revise it with POST /platform-experiments/" + pe.ID + "/revise, saying what the planner lacked, or close it. The platform closes it at proposal_expires_at"}
+	case pe.ProposedAt != nil:
+		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, revise it or close it. The platform closes it at proposal_expires_at"}
+	case len(pe.Revisions) > 0:
+		return &domain.StatusReason{Reason: "revising", Message: "its planner is answering the last of revisions and has until planning_ends_at"}
+	}
+	return &domain.StatusReason{Reason: "planning", Message: "its planner is working out how to measure the goal and has until planning_ends_at"}
+}
+
+// Describe sets on a draft where it stands with its planner, and on an open pe why it is not
+// running yet (StatusReason).
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment) error {
+	if pe.Status == domain.PlatformExpDraft {
+		pe.StatusReason = draftReason(pe)
+		return nil
+	}
 	if pe.Status != domain.PlatformExpOpen {
 		return nil
 	}
