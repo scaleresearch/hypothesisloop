@@ -209,6 +209,28 @@ func TestJobSubmitWithNoOriginSaysToWorkInTheClone(t *testing.T) {
 	}
 }
 
+func TestHLCloneGivesUpNamingTheCauseAfterItsTries(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("..", "agents", "coordinator", "experiments", "hl-clone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "sleep"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	missing := "file://" + filepath.Join(t.TempDir(), "no-such-repository")
+	cmd := exec.Command("sh", script, missing+"@"+strings.Repeat("a", 40), filepath.Join(t.TempDir(), "code"))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err = cmd.Run()
+	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+	if err == nil || stdout.Len() != 0 || len(lines) != 4 || !strings.HasPrefix(lines[0], "hl-clone: try 1 of 4") ||
+		!strings.HasPrefix(lines[3], "hl-clone: could not fetch the code: 4 tries") || !strings.Contains(lines[3], "no-such-repository") {
+		t.Fatalf("hl-clone: %v, stdout %q, stderr:\n%s", err, stdout.String(), stderr.String())
+	}
+}
+
 // hl-clone is what a job and an agent take a code_ref's commit back with.
 func TestHLCloneChecksOutTheCommitOfACodeRef(t *testing.T) {
 	script, err := filepath.Abs(filepath.Join("..", "agents", "coordinator", "experiments", "hl-clone"))

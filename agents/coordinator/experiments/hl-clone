@@ -22,8 +22,23 @@ case "$ref" in
 	;;
 esac
 
+# A job that cannot reach the repository or the platform's credential for it this second usually
+# can a few seconds later, so the fetch is tried $tries times, $pause seconds apart, and no more.
+tries=4
+pause=5
+
 mkdir -p "$dir"
 git -C "$dir" init -q
-git -C "$dir" fetch -q --depth 1 "${ref%@*}" "${ref##*@}"
+try=1
+while ! said=$(git -C "$dir" fetch -q --depth 1 "${ref%@*}" "${ref##*@}" 2>&1); do
+	said=$(printf '%s' "$said" | tr '\n' ' ')
+	if [ "$try" -eq "$tries" ]; then
+		echo "hl-clone: could not fetch the code: $tries tries to fetch ${ref##*@} from ${ref%@*} failed, the last with: $said" >&2
+		exit 1
+	fi
+	echo "hl-clone: try $try of $tries to fetch the code failed, the next is in ${pause}s: $said" >&2
+	try=$((try + 1))
+	sleep "$pause"
+done
 git -C "$dir" checkout -q FETCH_HEAD
 echo "$dir"
