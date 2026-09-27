@@ -466,7 +466,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				l.logger.Info("skipping preemption: the capacity is already being freed",
 					zap.String("exp", exp.ID), zap.String("cluster", cluster))
 			default:
-				committed, err = l.preempt(ctx, gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], burstRunning, exp)
+				committed, err = l.preempt(ctx, cluster, gAvail[cluster], nodeAvail[cluster], nodeResources[cluster], nodeResourcesTotal[cluster], nodeLabels[cluster], burstRunning, exp)
 				if err != nil {
 					l.logger.Warn("preemption failed", zap.String("exp", exp.ID), zap.Error(err))
 				}

@@ -87,7 +87,7 @@ func preemptFor(l *Loop, free map[string]int64, candidates []*domain.Experiment,
 		avail.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(preemptor.AcceleratorType)}, n)
 		nodeAvail[node] = map[string]int64{string(preemptor.AcceleratorType): n}
 	}
-	return l.preempt(context.Background(), avail, nodeAvail, nil, nil, candidates, preemptor)
+	return l.preempt(context.Background(), "cluster-a", avail, nodeAvail, nil, nil, nil, candidates, preemptor)
 }
 
 func onNodeA(observed fakeObserved, ids ...string) fakeObserved {

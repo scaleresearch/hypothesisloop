@@ -85,7 +85,11 @@ func submitErrorLevel(err error) zapcore.Level {
 // disbalance evictor down: capacity for this job is already on its way back, and a second
 // destructive pass against the same unchanged availability would kill live work for a deficit that
 // is no longer outstanding.
-func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, nodeResources map[string]map[string]int64, nodeLabels map[string]map[string]string, burstRunning []*domain.Experiment, preemptor *domain.Experiment) (committed bool, err error) {
+//
+// On a cluster of slots the preemptor arrives sized to the smallest slot that takes it, which may
+// hold no victim while a larger one does. It is sized again here, by the same rule, against what
+// is free once every candidate is gone.
+func (l *Loop) preempt(ctx context.Context, cluster string, avail domain.Footprint, nodeAvail, nodeResources, nodeResourcesTotal map[string]map[string]int64, nodeLabels map[string]map[string]string, burstRunning []*domain.Experiment, preemptor *domain.Experiment) (committed bool, err error) {
 	// Rank by real observed runtime, not wall-clock ElapsedHours(): a job stuck in a
 	// reschedule/node-death gap hasn't made more progress than one admitted more recently.
 	//
@@ -119,6 +123,19 @@ func (l *Loop) preempt(ctx context.Context, avail domain.Footprint, nodeAvail, n
 	}
 	if len(candidates) == 0 {
 		return false, nil
+	}
+	if hasSlots(nodeLabels) {
+		freeable := cloneNodeCapacity(nodeResources)
+		for _, victim := range candidates {
+			creditNode(nil, freeable[nodeOf[victim.ID]], victim)
+		}
+		resolved, misfit := resolveOntoSlot(preemptor, cluster, nodeResourcesTotal, freeable, nodeLabels)
+		if misfit != "" {
+			return false, nil
+		}
+		sized := *preemptor
+		sized.ResolvedJob = resolved
+		preemptor = &sized
 	}
 
 	// footprintSize collapses a multi-dimension footprint into one scalar, purely for the

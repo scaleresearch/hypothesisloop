@@ -57,11 +57,12 @@ func takesWholeSlot(shape domain.NodeShape, nodeKey string, accelerators, resour
 // resolveOntoSlot sizes exp's job to the slot it is to hold on a cluster of slots: its cpu,
 // memory and storage become that slot's, whether the job named a quantity or "max".
 //
-// sizes is each slot's whole size and free what each has free now. The slot is one whose
-// accelerators are exactly the job's, of its type, that carries the job's node selector and is
-// at least as large as every quantity the job named. Of those a free one is taken before a
-// taken one, and the smallest before a larger: a job that must wait or preempt is sized to the
-// least it needs. Which slot of that size the job lands on is decided when it is claimed.
+// sizes is each slot's whole size and free what each has free: now, or for a preemption once its
+// candidates are gone. The slot is one whose accelerators are exactly the job's, of its type,
+// that carries the job's node selector and is at least as large as every quantity the job named.
+// Of those a free one is taken before a taken one, and the smallest before a larger: a job that
+// must wait or preempt is sized to the least it needs. Which slot of that size the job lands on
+// is decided when it is claimed.
 //
 // misfit is the not_admitted_reason when no slot of the cluster takes the job.
 func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (resolved *domain.JobSpec, misfit string) {

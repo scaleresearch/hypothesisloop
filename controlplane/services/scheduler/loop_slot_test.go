@@ -631,3 +631,78 @@ func TestSlotsHeldBySmallJobsArePromisedToNoOne(t *testing.T) {
 		t.Fatalf("desired-free = %v, want only the free cpu slot", got)
 	}
 }
+
+// Two shapes take the job. The smaller is held by a guaranteed job and the larger by a burst job,
+// so the only victim is on the larger one: the job is sized to that slot and its holder preempted.
+// Sized to the smallest shape before victims were sought, the job found none and waited.
+func TestAGuaranteedJobPreemptsOnTheSmallestShapeThatHasAVictim(t *testing.T) {
+	c := newSlots().add("small-0", 1, size(8000, 32, 100)).add("large-0", 1, size(16000, 64, 200))
+	holder := pinnedTo(sized(t, c, h100Job("holder", "2")), "small-0")
+	holder.CapacityTier = domain.CapacityGuaranteed
+	c.take("small-0")
+	victim := pinnedTo(sized(t, c, h100Job("burst", "2")), "large-0")
+	for _, exp := range []*domain.Experiment{holder, victim} {
+		exp.Status, exp.ClusterName, exp.EstimatedCostAccH = domain.StatusRunning, rented, 1
+		exp.CreatedAt = time.Now().Add(-time.Hour)
+	}
+	c.take("large-0")
+	nodes := map[string]string{"holder": "small-0", "burst": "large-0"}
+	guaranteed := h100Job("guaranteed", "4")
+	guaranteed.CapacityTier = domain.CapacityGuaranteed
+	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{holder, victim}}
+	l, _ := slotLoop(store, c, fakeObserved{node: nodes})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.requeued, []string{"burst"}) {
+		t.Fatalf("preempted %v (reason %q), want the burst job on the larger slot", store.requeued, store.reasons["guaranteed"])
+	}
+
+	// Its instance still holds the slot: the capacity is promised and nothing more is preempted.
+	store.running, store.requeued = []*domain.Experiment{holder}, nil
+	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.requeued) != 0 || len(store.written) != 0 {
+		t.Fatalf("while the slot is being freed: preempted %v, admitted %v", store.requeued, store.written)
+	}
+
+	c.free["large-0"] = size(16000, 64, 200)
+	c.accelerators["large-0"] = map[string]int64{h100: 1}
+	l, _ = slotLoop(store, c, fakeObserved{node: nodes})
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if job := store.written["guaranteed"]; slotOf(job) != "large-0" || job.CPU != "16" {
+		t.Fatalf("admitted as %+v (reason %q)", job, store.reasons["guaranteed"])
+	}
+}
+
+// With a burst job on each shape, the victim is the one on the smaller slot, though the one on
+// the larger has run least: the job takes the least that it needs.
+func TestAGuaranteedJobPreemptsOnTheSmallerShapeWhenBothHaveAVictim(t *testing.T) {
+	c := newSlots().add("small-0", 1, size(8000, 32, 100)).add("large-0", 1, size(16000, 64, 200))
+	var running []*domain.Experiment
+	nodes := map[string]string{}
+	for _, node := range []string{"small-0", "large-0"} {
+		victim := pinnedTo(sized(t, c, h100Job("burst-on-"+node, "2")), node)
+		victim.Status, victim.ClusterName, victim.EstimatedCostAccH = domain.StatusRunning, rented, 1
+		victim.CreatedAt = time.Now().Add(-time.Hour)
+		running = append(running, victim)
+		nodes[victim.ID] = node
+		c.take(node)
+	}
+	guaranteed := h100Job("guaranteed", "4")
+	guaranteed.CapacityTier = domain.CapacityGuaranteed
+	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: running}
+	l, _ := slotLoop(store, c, fakeObserved{node: nodes, elapsed: map[string]float64{"burst-on-small-0": 5, "burst-on-large-0": 1}})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.requeued, []string{"burst-on-small-0"}) {
+		t.Fatalf("preempted %v, want the burst job on the smaller slot", store.requeued)
+	}
+}
