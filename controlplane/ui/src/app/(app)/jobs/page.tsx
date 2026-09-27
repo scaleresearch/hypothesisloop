@@ -28,6 +28,7 @@ import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { listProject, useExperimentAccess } from '@/lib/read-only'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
+import { Branch } from '@/components/code-ref'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -229,7 +230,7 @@ function JobsPageContent() {
                 <th className="w-[130px]">Accelerator</th>
                 <th className="w-[120px] text-right">Best metric</th>
                 <th className="w-[92px] text-right">Est. cost</th>
-                <th title="Under each hypothesis: the settings that differ between this page's jobs of it">Hypothesis · varied settings</th>
+                <th title="Under each hypothesis: the branch the job ran on, and the settings that differ between this page's jobs of it">Hypothesis · branch · varied settings</th>
                 <SortableTh className="w-[104px]" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
                 <th className="w-20"></th>
               </tr>
@@ -301,6 +302,7 @@ function JobsPageContent() {
                     <td className="truncate text-xs" title={j.hypothesis}>
                       <TextLink href={`/hypotheses/${j.hypothesis_id}`} onClick={e => e.stopPropagation()}>{j.hypothesis}</TextLink>
                       <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
+                        {j.branch && <><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />{' '}</>}
                         {envSettings(j, variedByHypothesis.get(j.hypothesis_id) ?? [])}
                       </div>
                     </td>

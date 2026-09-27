@@ -14,6 +14,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
+import { Branch } from '@/components/code-ref'
 import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
@@ -297,6 +298,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             <Table>
               <tbody>
                 {j.job?.image && <Row label="Image" value={j.job.image} />}
+                {j.branch && <Row label="Branch" value={<Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />} />}
                 {j.code_ref && <Row label="Code (git commit)" value={j.code_ref} />}
                 {j.config_hash && <Row label="Configuration checksum" value={j.config_hash} />}
                 {j.data_ref && <Row label="Data" value={j.data_ref} />}

@@ -173,8 +173,11 @@ export interface Experiment {
   summary_due: boolean
   // When the job reached its terminal status; absent while it can still run.
   finished_at?: string
-  // Lineage
-  code_ref?: string
+  // Lineage: the commit it ran, repository_url@sha, and the branch that commit was pushed on, one
+  // agent's implementation of the job's hypothesis. branch is empty on a job from before branches
+  // were kept.
+  code_ref: string
+  branch: string
   config_hash?: string
   data_ref?: string
 }

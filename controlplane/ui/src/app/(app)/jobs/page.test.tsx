@@ -32,6 +32,7 @@ function job(id: string, cluster: string): Experiment {
     id, agent_id: 'ag-1', agent_name: 'Researcher 1', summary_due: false, actor: { kind: 'agent', id: 'ag-1', name: 'ag-1' }, platform_experiment_id: 'pe-1', project_id: 'prj_1', hypothesis_id: 'h1',
     status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: cluster, created_at: at, updated_at: at,
     accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
+    code_ref: 'https://github.com/acme/widgets@0123456789abcdef', branch: 'hl/pe-1/warmup-ag-1',
   } as Experiment
 }
 
@@ -95,5 +96,23 @@ describe('the cluster of a job', () => {
     await screen.findByText('own-0001…')
     expect(vi.mocked(fetchExperimentsPage).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
     expect(vi.mocked(fetchExperimentStats).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
+  })
+})
+
+describe('the branch of a job', () => {
+  it('is named without its experiment\'s prefix and opens in the repository its commit is in', async () => {
+    vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [job('own-0001', 'lab'), { ...job('old-0001', 'lab'), branch: '' }], total: 2 })
+    const resolved = resolveTenant(me, '')
+    if (resolved.state !== 'selected') throw new Error('no tenant')
+    render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <TenantContext.Provider value={resolved.tenant}><JobsPage /></TenantContext.Provider>
+      </SWRConfig>,
+    )
+    const branch = await screen.findByRole('link', { name: 'warmup-ag-1' })
+    expect(branch.getAttribute('href')).toBe('https://github.com/acme/widgets/tree/hl/pe-1/warmup-ag-1')
+    expect(branch.getAttribute('title')).toBe('hl/pe-1/warmup-ag-1')
+    // A job from before branches were kept names none.
+    expect(screen.getAllByRole('link', { name: 'warmup-ag-1' })).toHaveLength(1)
   })
 })
