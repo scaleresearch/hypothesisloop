@@ -17,6 +17,22 @@ import (
 	"time"
 )
 
+var readAt = time.Date(2026, 10, 6, 21, 31, 44, 0, time.UTC)
+
+func TestMain(m *testing.M) {
+	clock = func() time.Time { return readAt }
+	os.Exit(m.Run())
+}
+
+// printed is what a watch prints for these events: each on a line, with when it was read.
+func printed(events ...string) string {
+	out := ""
+	for _, event := range events {
+		out += strings.TrimSuffix(event, "}") + `,"received_at":"2026-10-06T21:31:44Z"}` + "\n"
+	}
+	return out
+}
+
 func TestParseUntil(t *testing.T) {
 	fn, err := parseUntil("status in COMPLETED,FAILED,EVICTED")
 	if err != nil {
@@ -405,7 +421,7 @@ func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T
 	if first, second := <-sinces, <-sinces; first != "" || second != "12" {
 		t.Errorf("since on connect and on reconnect: got = %q, %q, want = none, then the largest cursor 12", first, second)
 	}
-	if got, want := stdout.String(), queued+"\n"+running+"\n"+completed+"\n"; got != want {
+	if got, want := stdout.String(), printed(queued, running, completed); got != want {
 		t.Errorf("output: got = %q, want = %q", got, want)
 	}
 }
@@ -453,7 +469,7 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if got, want := stdout.String(), first+"\n"+second+"\n"; got != want {
+	if got, want := stdout.String(), printed(first, second); got != want {
 		t.Errorf("output: got = %q, want = %q", got, want)
 	}
 	if elapsed > 1200*time.Millisecond {
@@ -493,7 +509,7 @@ func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testi
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if got, want := stdout.String(), event+"\n"; got != want {
+	if got, want := stdout.String(), printed(event); got != want {
 		t.Errorf("output: got = %q, want = %q", got, want)
 	}
 	state, err := loadCursor(cursorFile)
@@ -548,7 +564,7 @@ func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
 		}
 		want, wantCursor := "", int64(0)
 		if waiting != "" {
-			want, wantCursor = waiting+"\n", 10
+			want, wantCursor = printed(waiting), 10
 		}
 		if got := stdout.String(); got != want {
 			t.Errorf("output: got = %q, want = %q", got, want)
@@ -572,7 +588,7 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 		wantCursor int64
 	}{
 		{[]string{finding}, "", 0},
-		{[]string{finding, finding, finished}, finding + "\n" + finished + "\n", 11},
+		{[]string{finding, finding, finished}, printed(finding, finished), 11},
 	} {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

@@ -283,7 +283,7 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 			continue
 		}
 		position, _ := event["position"].(float64)
-		arrived := heldEvent{line: line, identity: string(identity), position: int64(position), cursor: int64(c)}
+		arrived := heldEvent{line: receivedAt(line, clock()), identity: string(identity), position: int64(position), cursor: int64(c)}
 		if kind, _ := event["kind"].(string); w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake[kind] {
 			// A reconnect replays what is held, since the cursor has not passed it.
 			if !slices.ContainsFunc(w.held, func(h heldEvent) bool { return h.identity == arrived.identity }) {
@@ -302,6 +302,16 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 		}
 	}
 	return !w.settleBy.IsZero()
+}
+
+// clock is the time an event is stamped with as it is read.
+var clock = time.Now
+
+// receivedAt is the event line with received_at, when hl read it from the stream, as its last
+// field: the platform sends no time with an event. A live event is read as it happens, and one
+// that waited from before the watch as it is replayed.
+func receivedAt(line string, at time.Time) string {
+	return strings.TrimSuffix(strings.TrimSpace(line), "}") + `,"received_at":"` + at.UTC().Format(time.RFC3339) + `"}`
 }
 
 // print writes one event and moves the cursor past it. The cursor moves only once the event is

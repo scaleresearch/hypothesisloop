@@ -1149,6 +1149,9 @@ func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int
 
 Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
 or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.
+received_at is when hl read the event, in UTC: the platform sends no time with one. An event
+that happens while you watch is read as it happens. One that waited from before the watch
+carries the time of this read and happened earlier.
 A job that waits is told as experiment.blocked, and once as job.held when it has waited longer
 than its estimate: value is the code of what it waits for (not_admitted_reason), detail the
 sentence (not_admitted_message).`, stderr)
