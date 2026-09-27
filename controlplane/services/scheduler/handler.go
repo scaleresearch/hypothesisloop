@@ -75,6 +75,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up, or that has not reported what it has, is not judged. " +
 			"metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with hypothesis_id = the platform_experiment_id, which stands for the objective as it does in a builds_on link. " +
 			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
+			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {

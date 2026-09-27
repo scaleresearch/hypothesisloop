@@ -13,12 +13,15 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 )
+
+const unreachableAfter = 5 * time.Second
 
 // Object is one stored object under a prefix.
 type Object struct {
@@ -47,11 +50,40 @@ func New(endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client
 	if _, err := url.Parse(endpoint); err != nil {
 		return nil, fmt.Errorf("objectstore: parse endpoint %q: %w", endpoint, err)
 	}
+	// A store that is down is known within seconds, well inside the time a submit may take.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: unreachableAfter}).DialContext
+	transport.ResponseHeaderTimeout = unreachableAfter
 	return &Client{
 		Endpoint: strings.TrimSuffix(endpoint, "/"), Region: region, Bucket: bucket,
 		AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
-		HTTP: &http.Client{Timeout: 20 * time.Second},
+		HTTP: &http.Client{Timeout: 20 * time.Second, Transport: transport},
 	}, nil
+}
+
+// Unavailable is a call the store did not answer: it could not be reached, did not answer in
+// time, or answered a 5xx. A handler answers it 503 with its reason and never a bare 500.
+type Unavailable struct{ Err error }
+
+func (e *Unavailable) Error() string { return "objectstore: unavailable: " + e.Err.Error() }
+func (e *Unavailable) Unwrap() error { return e.Err }
+
+// Unavailable is the reason and the sentence a caller is answered with.
+func (e *Unavailable) Unavailable() (reason, message string) {
+	return "object_store_unavailable", "the platform's object store is not answering, so nothing that measures or keys durable data can be answered: try again shortly"
+}
+
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, &Unavailable{Err: err}
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		return nil, &Unavailable{Err: fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))}
+	}
+	return resp, nil
 }
 
 // URI renders an s3:// address for a prefix in this client's bucket — what a job is handed and
@@ -113,7 +145,7 @@ func (c *Client) listPage(ctx context.Context, prefix, token string) ([]Object, 
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("objectstore: list %q: %w", prefix, err)
 	}

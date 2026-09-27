@@ -76,7 +76,7 @@ func (c *Client) DeleteDataKey(ctx context.Context, accessKeyID string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return fmt.Errorf("objectstore: delete data key %s: %w", accessKeyID, err)
 	}
@@ -108,7 +108,7 @@ func (c *Client) createKey(ctx context.Context, key domain.DataKey, policy Polic
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return fmt.Errorf("objectstore: create data key for %s: %w", description, err)
 	}

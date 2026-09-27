@@ -297,9 +297,17 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (Principal, error) 
 const InternalError = "internal error"
 
 // Internal logs a failure of the platform's own, with what the request was doing, and returns the
-// 500 that says nothing about it. Every handler answers such a failure through it.
+// 500 that says nothing about it. Every handler answers such a failure through it. A failure that
+// says which dependency was down (Unavailable) is answered 503 with that reason instead.
 func Internal(logger *zap.Logger, what string, err error, fields ...zap.Field) *Error {
 	logger.Error(what, append(fields, zap.Error(err))...)
+	var down interface {
+		Unavailable() (reason, message string)
+	}
+	if errors.As(err, &down) {
+		reason, message := down.Unavailable()
+		return &Error{status: http.StatusServiceUnavailable, Message: message, Reason: reason}
+	}
 	return &Error{status: http.StatusInternalServerError, Message: InternalError}
 }
 

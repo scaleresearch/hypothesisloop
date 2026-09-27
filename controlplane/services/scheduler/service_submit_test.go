@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -59,6 +61,30 @@ func TestSubmitAdmitsAnAgentUnderItsDurableDataCeiling(t *testing.T) {
 
 	if err := s.enforceDataCeiling(context.Background(), exp); err != nil {
 		t.Fatalf("enforceDataCeiling = %v, want nil for an agent holding less than the ceiling", err)
+	}
+}
+
+// A store that is down is the platform's failure and says so: the handler answers the error 503
+// object_store_unavailable through auth.Internal, where a bare error would be a 500.
+func TestSubmitWithTheObjectStoreDownAnswers503NamingIt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	client, err := objectstore.New(srv.URL, "us-east-1", "hl-data", "key", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{dataStore: client, maxDataBytesPerAgent: 1000}
+
+	err = s.enforceDataCeiling(context.Background(), &domain.Experiment{ID: "job", AgentID: "agent", PlatformExperimentID: "pe-1"})
+	var admission *AdmissionError
+	if err == nil || errors.As(err, &admission) {
+		t.Fatalf("enforceDataCeiling = %v, want a platform failure and no refusal of the job", err)
+	}
+	refusal := auth.Internal(zap.NewNop(), "submit experiment", err)
+	if refusal.GetStatus() != http.StatusServiceUnavailable || refusal.Reason != "object_store_unavailable" {
+		t.Fatalf("answered %d %q, want 503 object_store_unavailable", refusal.GetStatus(), refusal.Reason)
 	}
 }
 

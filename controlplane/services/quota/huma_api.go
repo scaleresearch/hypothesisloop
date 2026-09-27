@@ -557,6 +557,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
 			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one. " +
+			"503 object_store_unavailable while the object store does not answer. " +
 			"404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`

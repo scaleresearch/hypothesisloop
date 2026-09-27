@@ -65,7 +65,7 @@ func (c *Client) put(ctx context.Context, key string, body []byte) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return fmt.Errorf("objectstore: put %s: %w", key, err)
 	}
@@ -83,7 +83,7 @@ func (c *Client) get(ctx context.Context, key string, maxBytes int64) ([]byte, b
 	if err != nil {
 		return nil, false, err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("objectstore: get %s: %w", key, err)
 	}
