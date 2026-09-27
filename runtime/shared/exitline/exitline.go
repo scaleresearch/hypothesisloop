@@ -4,6 +4,7 @@
 package exitline
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -35,14 +36,25 @@ func Find(lines []string) (code int, found bool) {
 	return 0, false
 }
 
-// lastOutputBytes bounds the line LastOutput returns: it travels in a job's failure reason.
+// lastOutputBytes bounds what LastOutput returns: it travels in a job's failure reason, behind
+// the runtime's own words and inside domain's failureCauseDetailRunes.
 const lastOutputBytes = 300
 
-// LastOutput is the last thing a job said among lines, on one printable line of at most
-// lastOutputBytes bytes: the last line that is neither blank nor the wrapper's exit line. Empty
-// when the job said nothing.
+// lastOutputLines is how many lines LastOutput carries: an error is often followed by a few lines
+// of advice, and the last line alone is then the advice.
+const lastOutputLines = 5
+
+// lastOutputSeparator stands between the lines of LastOutput, which is itself one line.
+const lastOutputSeparator = " | "
+
+// LastOutput is the last things a job said among lines, as one printable line of at most
+// lastOutputBytes bytes: its last lastOutputLines lines that are neither blank nor the wrapper's
+// exit line, the most recent last, as many of them as fit whole. The last line alone is cut where
+// it does not fit. Empty when the job said nothing.
 func LastOutput(lines []string) string {
-	for i := len(lines) - 1; i >= 0; i-- {
+	var said []string
+	size := 0
+	for i := len(lines) - 1; i >= 0 && len(said) < lastOutputLines; i-- {
 		if strings.HasPrefix(strings.TrimSpace(lines[i]), prefix) {
 			continue
 		}
@@ -56,11 +68,19 @@ func LastOutput(lines []string) string {
 		if line == "" {
 			continue
 		}
-		for len(line) > lastOutputBytes {
-			_, size := utf8.DecodeLastRuneInString(line)
-			line = line[:len(line)-size]
+		if len(said) == 0 {
+			for len(line) > lastOutputBytes {
+				_, last := utf8.DecodeLastRuneInString(line)
+				line = line[:len(line)-last]
+			}
+		} else if size+len(lastOutputSeparator)+len(line) > lastOutputBytes {
+			break
+		} else {
+			size += len(lastOutputSeparator)
 		}
-		return line
+		size += len(line)
+		said = append(said, line)
 	}
-	return ""
+	slices.Reverse(said)
+	return strings.Join(said, lastOutputSeparator)
 }
