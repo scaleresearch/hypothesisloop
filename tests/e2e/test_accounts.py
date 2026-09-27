@@ -398,7 +398,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         assert a.api.experiment(job_a)["cluster_name"] == name, "the owner's own job was withdrawn with the others"
         assert name not in _capacity_names(b.api)
         assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text, "a cluster no longer shared is still listed to another org"
-        assert b.api.get(settings).status_code == 404, "sharing a cluster gave another org its settings"
+        assert b.api.patch(own_path, {"stuck_pending_timeout_seconds": 1}).status_code == 404, "sharing a cluster gave another org its settings"
 
         # Org B removes its own cluster, which nothing ran on, and is then an org with none.
         assert a.api.hl_expect("cluster", "remove", name_b).returncode != 0, "org A removed org B's cluster"

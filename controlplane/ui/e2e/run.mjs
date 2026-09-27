@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -11,7 +11,6 @@ import { startProxy } from './proxy.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..', '..', '..')
-const shots = join(here, 'screenshots')
 // The one origin the API allows a browser from and the GitHub App returns to. Port 3000 itself
 // belongs to the UI the stack's owner runs: the run serves its own copy on UI_PORT, and its
 // browser reaches that copy under this origin through the proxy.
@@ -26,7 +25,6 @@ const STACK_LOCK = '/tmp/hl-stack.lock'
 const SETTINGS = join(repo, 'controlplane', 'settings', '.hypothesisloop.dev.yaml')
 const run = randomUUID().slice(0, 8)
 
-// Reduced motion turns the fade-in of panels off, so a screenshot shows them as they end up.
 const VIEW = { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' }
 
 const person = first => ({ id: randomUUID(), name: `UI E2E ${first} ${run}` })
@@ -228,17 +226,6 @@ async function cleanUp() {
   if (failures.length > 0) throw new Error(`the run left something behind on the stack:\n  ${failures.join('\n  ')}`)
 }
 
-let step = 0
-// `focus` is scrolled into view first: the app scrolls inside its main pane, so a full-page
-// screenshot is the viewport.
-async function shot(page, name, focus) {
-  if (focus) await focus.scrollIntoViewIfNeeded()
-  step += 1
-  const path = join(shots, `${String(step).padStart(2, '0')}-${name}.png`)
-  await page.screenshot({ path, fullPage: true })
-  console.log(`  screenshot ${path}`)
-}
-
 function section(title) {
   console.log(`\n== ${title}`)
 }
@@ -294,8 +281,6 @@ function idleReport(clusterID) {
 
 async function main() {
   await requireLocalStack()
-  rmSync(shots, { recursive: true, force: true })
-  mkdirSync(shots, { recursive: true })
   const idp = await startIdentityProvider({ port: 54399, keyPath: join(repo, 'localdev', '.dev-jwt-key.pem'), ui: UI })
   const closers = [() => idp.close()]
   try {
@@ -347,15 +332,8 @@ async function play(closers) {
   // Chromium reaches loopback addresses directly unless told that they go through the proxy too.
   const browser = await chromium.launch({ proxy: { server: `http://127.0.0.1:${PROXY_PORT}`, bypass: '<-loopback>' } })
   closers.push(() => browser.close())
-  try {
-    await waitForUI(ui)
-    await scenarios(browser)
-  } catch (error) {
-    for (const context of browser.contexts()) {
-      for (const page of context.pages()) await shot(page, 'failure')
-    }
-    throw error
-  }
+  await waitForUI(ui)
+  await scenarios(browser)
 }
 
 async function scenarios(browser) {
@@ -366,11 +344,9 @@ async function scenarios(browser) {
   await visitorPage.getByRole('heading', { level: 1 }).waitFor()
   assert.equal(new URL(visitorPage.url()).pathname, '/', 'a visitor without a session stays on the landing page')
   assert.equal(await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).count(), 0)
-  await shot(visitorPage, 'landing-signed-out')
   await visitorPage.getByRole('link', { name: 'Sign up' }).click()
   await visitorPage.waitForURL(`${UI}/login?mode=sign-up`)
   await visitorPage.getByRole('heading', { name: 'Create your account' }).waitFor()
-  await shot(visitorPage, 'sign-up')
   await visitorPage.getByRole('link', { name: 'Sign in' }).click()
   await visitorPage.waitForURL(`${UI}/login`)
   await visitorPage.getByRole('heading', { name: 'Sign in' }).waitFor()
@@ -386,13 +362,11 @@ async function scenarios(browser) {
   assert.equal(visitorPage.url(), `${UI}/login`, 'the visitor is still on the sign-in page')
   assert.ok(await visitorPage.getByRole('button', { name: 'Continue with Google' }).isDisabled())
   assert.ok(await visitorPage.getByRole('button', { name: 'Continue with GitHub' }).isEnabled())
-  await shot(visitorPage, 'sign-in-provider-refused')
 
   section('a sign-in that does not complete says so')
   await visitorPage.goto(`${UI}/auth/callback?code=not-a-code&next=%2Fjobs`)
   await visitorPage.waitForURL(`${UI}/login?notice=failed`)
   await visitorPage.getByText('Sign-in did not complete. Try again.').waitFor()
-  await shot(visitorPage, 'sign-in-failed')
   await visitorPage.goto(`${UI}/login?notice=__proto__`)
   await visitorPage.getByRole('button', { name: 'Continue with GitHub' }).waitFor()
   assert.equal(await visitorPage.locator('.error-banner').count(), 0, 'an unknown notice shows nothing')
@@ -410,7 +384,6 @@ async function scenarios(browser) {
   section('the landing page offers a signed-in visitor the experiments')
   await visitorPage.goto(UI)
   assert.equal(await visitorPage.getByRole('link', { name: 'Sign in' }).count(), 0)
-  await shot(visitorPage, 'landing-signed-in')
   await visitorPage.getByRole('link', { name: 'Experiments', exact: true }).click()
   await visitorPage.waitForURL(`${UI}/platform-experiments`)
   await visitor.close()
@@ -428,7 +401,6 @@ async function scenarios(browser) {
   await page.waitForURL(`${UI}/login?next=%2Fjobs%3Fstatus%3DRUNNING`)
   await page.getByRole('button', { name: 'Continue with GitHub' }).waitFor()
   assert.equal(await page.getByRole('button').count(), 3, 'the login page has one button for each configured provider')
-  await shot(page, 'login')
 
   await signIn(page, ada, `${UI}/jobs?status=RUNNING`)
   const { authorizeRequests } = await idpState()
@@ -466,10 +438,8 @@ async function scenarios(browser) {
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().waitFor()
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
-  await shot(page, 'first-run-home')
   await page.getByRole('link', { name: 'Experiments', exact: true }).click()
   await noneOfItsOwn(page).waitFor()
-  await shot(page, 'first-run-empty-project')
 
   section('creating a platform experiment in the selected project')
   await page.getByRole('button', { name: 'Advanced', exact: true }).click()
@@ -477,7 +447,6 @@ async function scenarios(browser) {
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(experimentName)
   await choose(page, page.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
   await page.getByRole('button', { name: 'Add', exact: true }).click()
-  await shot(page, 'create-platform-experiment')
   await page.getByRole('button', { name: 'Next: budget and rules' }).click()
   const created = page.waitForRequest(r => r.url() === `${API}/platform-experiments` && r.method() === 'POST')
   await page.getByRole('button', { name: 'Create experiment' }).click()
@@ -485,7 +454,6 @@ async function scenarios(browser) {
   const adaMe = await (await api((await created).headers().authorization.slice(7), '/me')).json()
   assert.equal(createBody.project_id, adaMe.projects[0].id, 'the new experiment is sent with the project')
   await page.getByText(experimentName).first().waitFor()
-  await shot(page, 'platform-experiment-created')
 
   section('adding and removing agents on the experiment page')
   await page.getByText(experimentName).first().click()
@@ -506,7 +474,6 @@ async function scenarios(browser) {
   const agentEnv = await page.getByTestId('secret').first().innerText()
   // An agent is started with the API's address and its token, and nothing else.
   assert.match(agentEnv, /^API_URL=http\S+\nHL_TOKEN=hls_\S+$/)
-  await shot(page, 'self-run-agent-tokens', page.getByTestId('secret').first())
   const agentToken = agentEnv.match(/HL_TOKEN=(\S+)/)[1]
   const experimentID = new URL(experimentURL).pathname.split('/').pop()
   // The token says which agent of which platform experiment it is.
@@ -545,7 +512,6 @@ async function scenarios(browser) {
   await hostedRefusal.waitFor()
   await page.unroute(hostedAddURL, refuseHosted)
   assert.equal(await agentRows.count(), 2, 'the refused agent is not listed')
-  await shot(page, 'hosted-agent-refused', hostedRefusal)
 
   section('removing an agent ends its token')
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 200, 'the agent token still works before its agent is removed')
@@ -554,7 +520,6 @@ async function scenarios(browser) {
   await agentRows.filter({ hasText: agentID }).waitFor({ state: 'detached' })
   assert.equal(await agentRows.count(), 1)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 401, 'the same request is refused once the agent is removed')
-  await shot(page, 'experiment-agents', agentRows.last())
 
   section('a hosted agent shows what became of its machine')
   // Stood in for: an agent the platform really hosts needs a repository and a launcher that rents.
@@ -585,7 +550,6 @@ async function scenarios(browser) {
   await stoppedRow.getByRole('button', { name: 'Exit log' }).click()
   await stoppedRow.getByText('the last lines it wrote').waitFor()
   await agentRows.filter({ hasText: 'ag-hosted-new' }).getByText('not reported yet').waitFor()
-  await shot(page, 'hosted-agent-health', stoppedRow)
   await page.unroute(agentsAPI)
 
   section('home: Advanced opens the full form in a dialog, and the new experiment is created and started from there')
@@ -593,7 +557,6 @@ async function scenarios(browser) {
   await page.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
   await page.getByText(experimentName).first().waitFor()
   assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Advanced')
-  await shot(page, 'home-with-experiments')
   await page.getByRole('button', { name: 'Advanced', exact: true }).click()
   const homeDialog = page.getByRole('dialog')
   const homeExperimentName = `ui-e2e-home-${run}`
@@ -614,7 +577,6 @@ async function scenarios(browser) {
   await confirmWith(page, 'Start')
   assert.equal((await refusedStart).status(), 400)
   await page.locator('.error-banner').first().waitFor()
-  await shot(page, 'home-experiment-start-refused', page.locator('.error-banner').first())
   // A self-run agent: the platform rents nothing for it.
   await page.getByRole('button', { name: 'Me', exact: true }).click()
   await page.getByRole('button', { name: 'Add agent' }).click()
@@ -627,7 +589,6 @@ async function scenarios(browser) {
   await page.getByText('The experiment is running:').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Start now' }).count(), 0, 'a started experiment is not started again')
   assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'running')
-  await shot(page, 'home-experiment-started')
 
   section('home: Create and run composes create, one call an agent, and start, and nothing is rented')
   // The stack has no GitHub account connected, and an agent the platform really hosts has a
@@ -706,7 +667,6 @@ async function scenarios(browser) {
   assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}`)).json()).status, 'running', 'the API says it is running')
   assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}/agents`)).json()).agents.length, 2, 'and holds the two agents')
   assert.equal(await page.locator('.error-banner').count(), 0)
-  await shot(page, 'home-create-and-run')
 
   section('home: a run the API stops part way opens the experiment and says which step failed')
   // The first hosted agent is refused, as by a deployment with no launcher registered.
@@ -718,7 +678,6 @@ async function scenarios(browser) {
   const stoppedExperiment = await (await api(await tokenOf(ada), `/platform-experiments/${stoppedID}`)).json()
   assert.equal(stoppedExperiment.status, 'open', 'the experiment exists and was not started')
   await page.getByRole('button', { name: 'Start now' }).waitFor()
-  await shot(page, 'home-run-stopped', stoppedBanner)
   await stoppedBanner.getByRole('button', { name: 'Dismiss' }).click()
   await stoppedBanner.waitFor({ state: 'detached' })
   await page.unroute(runWrite)
@@ -813,7 +772,6 @@ async function scenarios(browser) {
   const ideaPanel = page.locator('main').filter({ hasText: ideaText })
   await ideaPanel.getByText(ada.name).first().waitFor()
   await ideaPanel.getByText('human', { exact: true }).first().waitFor()
-  await shot(page, 'idea-by-signed-in-name')
 
   section('a comment is shown under the signed-in name')
   const ideaPage = `${UI}/hypotheses/${idea.id}?project=${adaMe.projects[0].id}`
@@ -825,7 +783,6 @@ async function scenarios(browser) {
   const note = page.locator('div', { hasText: noteText }).filter({ hasText: ada.name }).last()
   await note.getByText('human', { exact: true }).waitFor()
   await note.getByText(ada.name).waitFor()
-  await shot(page, 'comment-by-signed-in-name')
 
   section('settings: a second project, then switching projects shows only what each holds')
   await page.goto(`${UI}/settings`)
@@ -850,17 +807,14 @@ async function scenarios(browser) {
   await page.getByText(/New experiment in .+ \/ second$/).waitFor()
   await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0, 'the other project\'s experiment is not listed')
-  await shot(page, 'switched-project-is-empty')
   await selectInNav(page, 'Project', 'Default project')
   await page.getByText(experimentName).first().waitFor()
-  await shot(page, 'switched-back-shows-experiment')
 
   section('settings: renaming the project and the org')
   await page.goto(`${UI}/settings`)
   await page.getByLabel('Name of project second').fill('Default project')
   await page.getByLabel('Name of project second').locator('..').getByRole('button', { name: 'Rename' }).click()
   await page.getByLabel('Name of project second').locator('..').getByText('already').waitFor()
-  await shot(page, 'project-rename-collision', page.getByLabel('Name of project second'))
   await page.getByLabel('Name of project second').fill('renamed')
   await page.getByLabel('Name of project second').locator('..').getByRole('button', { name: 'Rename' }).click()
   await page.getByLabel('Name of project renamed').waitFor()
@@ -877,7 +831,6 @@ async function scenarios(browser) {
   const keyToken = await page.getByTestId('secret').innerText()
   assert.match(keyToken, /^hlk_/)
   secrets.add(keyToken)
-  await shot(page, 'api-key-created', page.getByTestId('secret'))
   await page.getByRole('button', { name: 'Copy' }).click()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), keyToken)
   assert.equal((await (await api(keyToken, '/me')).json()).kind, 'key')
@@ -891,7 +844,6 @@ async function scenarios(browser) {
   await confirmWith(page, 'Revoke')
   await page.getByText(/^revoked /).waitFor()
   assert.equal((await api(keyToken, '/me')).status, 401, 'a revoked key is refused')
-  await shot(page, 'api-key-revoked', page.getByText(/^revoked /))
 
   section('compute: adding a cluster shows its start command, which can be shown again')
   const clusterName = `ui-e2e-${run}`
@@ -921,10 +873,8 @@ async function scenarios(browser) {
   )
   assert.ok(!nodeCommand.includes(runtimeToken) && !nodeCommand.includes('hl cluster token'), 'the node command holds no token and needs no hl')
   assert.equal(await page.getByTestId('runtime-token').innerText(), runtimeToken, 'the token the node command asks for is shown beside it')
-  await shot(page, 'cluster-added-bare-metal', page.getByTestId('secret'))
   await page.getByRole('group', { name: 'Kind of cluster' }).getByRole('button', { name: 'Kubernetes cluster' }).click()
   await page.getByRole('cell', { name: clusterName }).first().waitFor()
-  await shot(page, 'cluster-added', page.getByRole('cell', { name: clusterName }).first())
   await page.getByRole('button', { name: 'Hide' }).click()
   await page.getByRole('button', { name: 'Show start command' }).click()
   assert.equal(await page.getByTestId('secret').innerText(), command, 'asking again shows the same command')
@@ -956,11 +906,9 @@ async function scenarios(browser) {
   await advanced.getByLabel('scale-up timeout').fill('5000')
   await advanced.getByRole('button', { name: 'Save' }).click()
   await advanced.locator('.text-error').waitFor()
-  await shot(page, 'cluster-settings-refused', advanced)
   await advanced.getByLabel('scale-up timeout').fill('600')
   await advanced.getByRole('button', { name: 'Save' }).click()
   await advanced.getByText('stuck-pending timeout: 900s · scale-up timeout: 600s').waitFor()
-  await shot(page, 'cluster-settings-saved', advanced)
   const savedSettings = (await (await api(await tokenOf(ada), clustersAPI)).json()).clusters.find(c => c.name === clusterName)
   assert.equal(savedSettings.stuck_pending_timeout_seconds, 900)
   assert.equal(savedSettings.scale_up_timeout_seconds, 600)
@@ -972,7 +920,6 @@ async function scenarios(browser) {
   assert.equal(new URL((await capacityRead).url()).searchParams.get('org_id'), adaMe.orgs[0].id, 'capacity is read for the selected org')
   await page.getByRole('cell', { name: new RegExp(clusterName) }).first().waitFor()
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
-  await shot(page, 'cluster-page')
   assert.equal(await page.getByRole('link', { name: 'Statistics' }).count(), 0, 'the nav offers Statistics to staff alone')
   const statistics = new URL(page.url())
   statistics.pathname = '/statistics'
@@ -1000,7 +947,6 @@ async function scenarios(browser) {
     assert.equal((await (await appRead).json()).reason, 'github_not_configured')
     await githubCard.getByText('This deployment has no GitHub App configured, so no GitHub account can be connected.').waitFor()
     assert.equal(await githubCard.getByRole('button', { name: 'Connect GitHub' }).count(), 0)
-    await shot(page, 'github-not-configured', githubCard)
   }
 
   section('github: connecting leaves for GitHub once and returns to the card, with the real API\'s answer')
@@ -1020,7 +966,6 @@ async function scenarios(browser) {
   const landed = `${UI}/settings?project=${secondProjectID}#github`
   await page.reload()
   await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
-  await shot(page, 'github-none-connected', githubCard)
   await githubCard.getByRole('button', { name: 'Connect GitHub' }).dblclick()
   await page.waitForURL(landed)
   assert.equal(authorizes.length, 1, 'a double click left for GitHub once')
@@ -1034,13 +979,11 @@ async function scenarios(browser) {
   assert.equal(refusedConnect.status(), stackHasGitHub ? 422 : 503)
   assert.equal((await refusedConnect.json()).reason, stackHasGitHub ? 'code_rejected' : 'github_not_configured')
   await githubCard.locator('.error-banner', { hasText: 'GitHub was not connected:' }).waitFor()
-  await shot(page, 'github-connect-refused', githubCard)
 
   section('github: a replayed return, a forged one and Back do nothing')
   await page.goto(returns[0])
   await page.waitForURL(`${UI}/settings?project=${adaMe.projects[0].id}#github`)
   await githubCard.locator('.error-banner', { hasText: 'This return from GitHub does not belong to a connect started in this tab' }).waitFor()
-  await shot(page, 'github-return-refused', githubCard)
   await page.goto(`${UI}/settings/repository?project=${secondProjectID}&code=stolen&state=forged`)
   await page.waitForURL(landed)
   await githubCard.locator('.error-banner', { hasText: 'This return from GitHub does not belong to a connect started in this tab' }).waitFor()
@@ -1057,7 +1000,6 @@ async function scenarios(browser) {
   await page.waitForURL(landed)
   await githubCard.locator('.error-banner', { hasText: 'GitHub did not authorise the App: The user has denied your application access.' }).waitFor()
   assert.equal(connects.length, 1, 'a refusal by GitHub is not sent to the API')
-  await shot(page, 'github-declined', githubCard)
   await configure({ githubDeclines: false })
 
   section('github: the App installed nowhere, several accounts to choose from, then connected, listed and disconnected')
@@ -1081,7 +1023,6 @@ async function scenarios(browser) {
   await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
   await page.waitForURL(landed)
   await githubCard.locator('.error-banner', { hasText: 'Your GitHub account reaches no installation of the App.' }).waitFor()
-  await shot(page, 'github-app-not-installed', githubCard)
 
   // Installing the App returns with the installation it made and no state: the tab that left to
   // install goes on to authorise, and the connect names that installation.
@@ -1097,7 +1038,6 @@ async function scenarios(browser) {
   await githubCard.getByText('Connected acme.').waitFor()
   const accountRow = githubCard.getByRole('row', { name: /acme/ })
   await accountRow.getByText(ada.name).waitFor()
-  await shot(page, 'github-connected', githubCard)
 
   await accountRow.getByRole('button', { name: 'Disconnect' }).click()
   await page.getByRole('dialog').getByText(`Disconnect acme from ${ada.name} Lab?`).waitFor()
@@ -1118,7 +1058,6 @@ async function scenarios(browser) {
   await page.waitForURL(landed)
   const choice = githubCard.getByRole('group', { name: 'GitHub account to connect' })
   await choice.getByRole('button', { name: 'acme', exact: true }).waitFor()
-  await shot(page, 'github-choose-account', githubCard)
   connectAnswer = {
     status: 201,
     json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
@@ -1155,7 +1094,6 @@ async function scenarios(browser) {
   await page.getByRole('tab', { name: '2. Budget and rules' }).click()
   await page.getByRole('button', { name: 'More settings' }).click()
   await page.getByLabel('Agent image').fill('ghcr.io/ada/agent:1')
-  await shot(page, 'create-experiment-repository', page.getByLabel('Agent image'))
   await page.keyboard.press('Escape')
   await page.unroute(url => url.href.startsWith(repositoriesAPI))
   await page.unroute(url => url.href.startsWith(installationsAPI))
@@ -1167,7 +1105,6 @@ async function scenarios(browser) {
   await page.route(`${API}/orgs`, route => route.abort())
   await createInNav(page, 'organization', `${ada.name} Second`)
   await page.locator('.wa-nav-create .text-error').waitFor()
-  await shot(page, 'new-organization-api-failing')
   await page.unroute(`${API}/orgs`)
   await page.locator('.wa-nav-create').getByRole('button', { name: 'Create' }).dblclick()
   await page.waitForURL(/\/platform-experiments\?project=/)
@@ -1178,7 +1115,6 @@ async function scenarios(browser) {
   await page.getByText(`New experiment in ${ada.name} Second / Default project`).waitFor()
   await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0)
-  await shot(page, 'second-org-is-empty')
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await page.getByRole('heading', { name: 'Settings' }).waitFor()
   assert.equal(await page.getByRole('cell', { name: 'laptop' }).count(), 0, 'the other org\'s API key is not listed')
@@ -1188,7 +1124,6 @@ async function scenarios(browser) {
   await page.waitForFunction(name => document.querySelector('.wa-nav-tenant input')?.value.startsWith(`${name} (`), `${ada.name} Lab`)
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().click()
   assert.equal(await page.getByRole('option', { name: new RegExp(`^${ada.name} Lab \\(`) }).count(), 2, 'two orgs of one name are told apart')
-  await shot(page, 'two-orgs-same-name')
   await page.keyboard.press('Escape')
   await page.getByLabel('Organization name').fill(`${ada.name} Second`)
   await page.getByLabel('Organization name').locator('..').getByRole('button', { name: 'Rename' }).click()
@@ -1203,13 +1138,11 @@ async function scenarios(browser) {
   assert.match(shownKey, /^hlk_/)
   secrets.add(shownKey)
   await page.getByLabel('Key name').fill('half-typed')
-  await shot(page, 'token-on-show-before-switch', page.getByTestId('secret').first())
   await selectInNav(page, 'Organization', `${ada.name} Second`)
   await page.getByText(`${ada.name} Second: its name, projects, members, API keys and GitHub accounts.`).waitFor()
   assert.equal(await page.getByTestId('secret').count(), 0, 'the other org\'s key is gone')
   assert.ok(!(await page.content()).includes(shownKey), 'the other org\'s API key is nowhere on the page')
   assert.equal(await page.getByLabel('Key name').inputValue(), '', 'the half-typed key name is gone')
-  await shot(page, 'token-gone-after-switch')
   await selectInNav(page, 'Organization', `${ada.name} Lab`)
   await page.getByText(`${ada.name} Lab: its name, projects, members, API keys and GitHub accounts.`).waitFor()
 
@@ -1218,7 +1151,6 @@ async function scenarios(browser) {
   await page.goto(`${UI}/jobs`)
   await page.getByText('Cannot reach the API to load your account').waitFor()
   assert.equal(await page.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).count(), 0)
-  await shot(page, 'api-unreachable')
   await page.unroute(`${API}/me`)
   await page.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor({ timeout: 60_000 })
 
@@ -1237,7 +1169,6 @@ async function scenarios(browser) {
   await signIn(otherPage, bob, `${UI}/platform-experiments`)
   await noneOfItsOwn(otherPage).waitFor()
   assert.equal(await otherPage.getByText(experimentName).count(), 0)
-  await shot(otherPage, 'second-account-sees-nothing')
   const foreignRead = otherPage.waitForResponse(r => r.url() === `${API}/platform-experiments/${experimentID}`)
   await otherPage.goto(`${UI}/platform-experiments/${experimentID}`)
   const foreign = await foreignRead
@@ -1246,10 +1177,8 @@ async function scenarios(browser) {
   await otherPage.locator('.error-banner').waitFor()
   assert.equal((await otherPage.locator('.error-banner').innerText()).trim(), `Could not load this platform experiment: ${refusal.message ?? refusal.error}`)
   assert.ok(!(await otherPage.content()).includes(experimentName), 'the experiment\'s name is nowhere on the page')
-  await shot(otherPage, 'second-account-opens-foreign-experiment')
   await otherPage.goto(`${UI}/jobs?project=${adaMe.projects[0].id}`)
   await otherPage.getByText('is not available to you').waitFor()
-  await shot(otherPage, 'foreign-project-in-url')
   await otherPage.getByRole('button', { name: /^Go to / }).click()
   await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
 
@@ -1281,7 +1210,6 @@ async function scenarios(browser) {
     await card.getByText('Shared · read only').waitFor()
     assert.equal(await card.getByRole('button', { name: 'Edit' }).count(), 0, 'a shared experiment of another org offers no edit')
     await otherPage.getByRole('button', { name: 'Advanced', exact: true }).waitFor()
-    await shot(otherPage, 'shared-in-the-list', card)
 
     section('shared: it opens on the experiment page from the reader\'s own project, with nothing to change')
     await card.click()
@@ -1300,13 +1228,11 @@ async function scenarios(browser) {
     }
     assert.equal(await otherPage.locator('.error-banner').count(), 0, 'every read of the page is answered')
     assert.ok([null, ...bobProjects].includes(new URL(otherPage.url()).searchParams.get('project')), 'the URL names no project of the other org')
-    await shot(otherPage, 'shared-read-only')
 
     await otherPage.getByRole('link', { name: /Hypotheses →/ }).click()
     await otherPage.waitForURL(u => u.pathname === '/hypotheses' && u.searchParams.get('pe') === experimentID)
     await otherPage.getByRole('link', { name: 'Experiment →' }).waitFor()
     assert.equal(await otherPage.getByRole('button', { name: /Add idea/ }).count(), 0, 'its graph takes no idea')
-    await shot(otherPage, 'shared-hypotheses')
     await otherPage.getByRole('link', { name: 'Experiment →' }).click()
     await otherPage.waitForURL(u => u.pathname === `/platform-experiments/${experimentID}`)
 
@@ -1314,7 +1240,6 @@ async function scenarios(browser) {
     await otherPage.waitForURL(u => u.pathname === '/jobs' && u.searchParams.get('platform_experiment_id') === experimentID)
     await otherPage.getByText(/^No jobs in /).waitFor()
     assert.equal(await otherPage.getByRole('button', { name: 'Cancel' }).count(), 0)
-    await shot(otherPage, 'shared-jobs')
 
     // What the pages asked: the lists of what is in the shared experiment by its id, never
     // within a project of the reader's, nothing but reads, and nothing the API refused.
@@ -1403,7 +1328,6 @@ async function scenarios(browser) {
   await adaRow.getByRole('button', { name: 'Leave' }).click()
   await confirmWith(page, 'Leave')
   await page.locator('.error-banner', { hasText: 'an org keeps at least one owner' }).waitFor()
-  await shot(page, 'members-last-owner-refused', adaRow)
 
   await page.getByRole('button', { name: 'Create invite link' }).click()
   const revokedLink = await page.getByTestId('secret').innerText()
@@ -1411,7 +1335,6 @@ async function scenarios(browser) {
   secrets.add(revokedLink.split('#')[1])
   await page.getByRole('button', { name: 'Copy', exact: true }).click()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), revokedLink)
-  await shot(page, 'invite-link-created', page.getByTestId('secret'))
   await page.getByRole('button', { name: 'I have sent it' }).click()
   await page.reload()
   assert.equal((await pendingInvites()).length, 1)
@@ -1429,7 +1352,6 @@ async function scenarios(browser) {
   await otherPage.getByRole('button', { name: 'Accept invite' }).click()
   await otherPage.locator('.error-banner', { hasText: 'This invite was revoked.' }).waitFor()
   assert.equal(otherPage.url(), `${UI}/invite`, 'the token is out of the address')
-  await shot(otherPage, 'invite-revoked')
 
   section('members: a signed-out person opens the link, signs in, accepts and lands in the org')
   await page.getByRole('button', { name: 'Create invite link' }).click()
@@ -1441,20 +1363,16 @@ async function scenarios(browser) {
   await danPage.getByRole('button', { name: 'Sign in to accept' }).click()
   await danPage.waitForURL(`${UI}/login?next=%2Finvite`)
   await signIn(danPage, dan, `${UI}/invite`)
-  await shot(danPage, 'invite-offered')
   await danPage.getByRole('button', { name: 'Accept invite' }).click()
   await danPage.waitForURL(`${UI}/platform-experiments?project=${labProject}`)
   const danID = (await (await api(await tokenOf(dan), '/me')).json()).user_id
   assert.match(danID, /^[\w-]+$/)
   assert.deepEqual(await pendingInvites(), [], 'an accepted invite is no longer pending')
 
-  // The page is still on /invite from the revoked link, and an address that differs only in its
-  // fragment does not load it again.
-  await otherPage.goto('about:blank')
+  // The page is still on /invite from the revoked link, so only the fragment changes.
   await otherPage.goto(inviteAddress)
   await otherPage.getByRole('button', { name: 'Accept invite' }).click()
   await otherPage.locator('.error-banner', { hasText: 'This invite was already accepted' }).waitFor()
-  await shot(otherPage, 'invite-already-used')
   await otherPage.goto(`${UI}/invite`)
   await otherPage.locator('.error-banner', { hasText: 'This page holds no invite.' }).waitFor()
 
@@ -1468,14 +1386,12 @@ async function scenarios(browser) {
   await danPage.goto(ideaPage)
   await danPage.getByText('Registered by').getByText(ada.name).waitFor()
   await danPage.locator('div', { hasText: noteText }).filter({ hasText: ada.name }).last().waitFor()
-  await shot(danPage, 'idea-read-by-another-member')
   await danPage.goto(`${UI}/settings?project=${labProject}`)
   await danOwnRow.waitFor()
   await danOwnRow.getByRole('button', { name: 'Leave' }).waitFor()
   assert.equal(await danPage.getByRole('button', { name: 'Create invite link' }).count(), 0)
   assert.equal(await danPage.getByRole('button', { name: 'Remove' }).count(), 0)
   assert.equal(await danPage.getByLabel(/^Role of /).count(), 0)
-  await shot(danPage, 'members-as-member', danOwnRow)
 
   await page.reload()
   const roleChange = () => page.waitForResponse(r => r.request().method() === 'PATCH' && r.url() === `${API}/orgs/${labOrg}/members/${danID}`)
@@ -1483,7 +1399,6 @@ async function scenarios(browser) {
   await choose(page, page.getByLabel(`Role of ${dan.name}`), 'owner')
   await confirmWith(page, 'Make owner')
   assert.equal((await changed).status(), 200)
-  await shot(page, 'members-as-owner', page.getByLabel(`Role of ${dan.name}`))
   await danPage.reload()
   await danPage.getByRole('button', { name: 'Create invite link' }).waitFor()
   changed = roleChange()
@@ -1513,7 +1428,6 @@ async function scenarios(browser) {
     assert.equal(await otherPage.getByLabel('Organization name').count(), 0)
     assert.equal(await otherPage.getByRole('button', { name: 'Create API key' }).count(), 0)
     assert.equal(await otherPage.getByRole('button', { name: '+ New project' }).count(), 0)
-    await shot(otherPage, 'member-settings')
     await otherPage.getByRole('link', { name: 'Compute Resources' }).first().click()
     const memberRow = otherPage.getByRole('row', { name: new RegExp(clusterName) })
     await memberRow.getByRole('switch').and(otherPage.locator(':disabled')).waitFor()
@@ -1521,7 +1435,6 @@ async function scenarios(browser) {
     assert.equal(await otherPage.getByRole('button', { name: 'Advanced' }).count(), 0, 'a member is offered no settings')
     assert.equal(await otherPage.getByRole('button', { name: 'Show start command' }).count(), 0, 'nor a start command')
     assert.equal((await api(await tokenOf(bob), `${clustersAPI}/${clusterName}`, 'PATCH', { stuck_pending_timeout_seconds: 60 })).status, 403, 'which the API refuses a member too')
-    await shot(otherPage, 'member-cluster-page', memberRow)
     await otherPage.getByRole('link', { name: 'Experiments', exact: true }).click()
     await otherPage.getByText(`${experimentName}-edited`).first().waitFor()
 
@@ -1539,7 +1452,6 @@ async function scenarios(browser) {
     await memberGitHub.getByRole('cell', { name: 'acme', exact: true }).waitFor()
     assert.equal(await memberGitHub.getByRole('button').count(), 0, 'a member connects and disconnects nothing')
     assert.deepEqual(appReads, [], 'a member\'s page asks nothing about the App')
-    await shot(otherPage, 'member-github-accounts', memberGitHub)
     await otherPage.unroute(url => url.href.startsWith(memberInstallationsAPI))
   } finally {
     assert.equal((await api(await tokenOf(ada), `/orgs/${labID}/members/${bobID}`, 'DELETE')).status, 204)
@@ -1552,11 +1464,9 @@ async function scenarios(browser) {
     await otherPage.getByText(`Clusters Default org can run on`).waitFor()
     await otherPage.getByText('All Clusters · every org · staff only').waitFor()
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
-    await shot(otherPage, 'staff-cluster-page', otherPage.getByRole('columnheader', { name: 'Autoscaler' }))
     await otherPage.goto(`${UI}/statistics`)
     await otherPage.getByRole('heading', { name: 'Scheduler quality' }).waitFor()
     await otherPage.getByText('Burst eviction rate').waitFor()
-    await shot(otherPage, 'staff-statistics', otherPage.getByText('Burst eviction rate'))
   } finally {
     hlAdmin('user', 'staff', bob.id, 'off')
   }
@@ -1608,7 +1518,6 @@ async function scenarios(browser) {
   await configure({ revoke: eve.id })
   await shortPage.waitForURL(/\/login\?notice=ended&next=/, { timeout: 150_000 })
   await shortPage.getByText('Your session ended.').waitFor()
-  await shot(shortPage, 'session-ended')
   await shortLived.close()
 
   section('a token the API refuses ends at the sign-in page and does not loop')
@@ -1620,7 +1529,6 @@ async function scenarios(browser) {
   await refusedPage.getByText('The API did not accept your session.').waitFor()
   await refusedPage.waitForTimeout(1_500)
   assert.match(refusedPage.url(), /\/login\?notice=refused/, 'the page stays on sign-in')
-  await shot(refusedPage, 'session-refused')
   await refused.close()
   await configure({ audience: 'hypothesisloop-dev' })
 

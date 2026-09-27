@@ -8,7 +8,8 @@ becomes an open platform experiment with a hosted coordinator and its researcher
 
 No launcher process, no provider and no model is involved. What the planner would do is done
 here with its own token, which the launcher's desired state carries, and each reconcile call is
-the one a launcher makes. A draft names no repository, so nothing here needs GitHub.
+the one a launcher makes. On a stack with a GitHub App the draft keeps its code in the sandbox
+repository, which is only named here: nothing is pushed to it.
 
 Exclusive, as test_hosted_agents.py is: it asks as the one launcher the local control plane
 gives hosted machines to.
@@ -57,7 +58,8 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
     try:
         assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 2.0, draft
         assert draft["actor"]["kind"] in ("staff", "user", "key"), draft["actor"]
-        assert "repository_url" not in draft
+        named = api.sandbox_repository()
+        assert draft.get("repository_url") == (f"https://github.com/{named}.git" if named else None), draft
 
         # Its one agent is the planner, and the launcher is asked for its machine.
         roster = api.agents(pe_id)

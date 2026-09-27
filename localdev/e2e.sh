@@ -83,7 +83,7 @@ fi
 echo "make e2e (pid $$) since $(date '+%Y-%m-%d %H:%M:%S')" > "${lock}/owner"
 cleanup() {
   if [[ -z "${nodes_were_up}" ]]; then
-    bash localdev/k3s-macos/dev-nodes-down.sh || true
+    bash "${repo}/localdev/k3s-macos/dev-nodes-down.sh" || true
   fi
   rm -f "${kubeconfig}"
   rm -rf "${lock}"

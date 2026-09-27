@@ -49,7 +49,7 @@ const run = randomUUID().slice(0, 6)
 const person = { id: randomUUID(), name: `Walk ${run}` }
 const notes = []
 const note = text => { notes.push(text); console.log(`NOTE ${text}`) }
-const shot = async (page, name) => console.log(`STEP ${name}`)
+const passed = name => console.log(`STEP ${name}`)
 const hlAdmin = (...args) => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], {
   cwd: repo, env: { ...process.env, HYPOTHESISLOOP_CONFIG: SETTINGS }, encoding: 'utf8',
 })
@@ -90,15 +90,15 @@ async function main() {
     token = (await (await fetch(`${IDP}/test/token`, { method: 'POST', body: JSON.stringify({ user: person }) })).json()).access_token
     await page.goto(UI)
     await page.waitForLoadState('networkidle')
-    await shot(page, 'first-page')
+    passed('first-page')
     await page.getByRole('link', { name: 'Sign in' }).first().click()
     await page.waitForLoadState('networkidle')
-    await shot(page, 'login')
+    passed('login')
     await page.getByRole('button', { name: /github/i }).click()
     await page.waitForURL(url => !url.pathname.startsWith('/login') && !url.pathname.startsWith('/auth'), { timeout: 60000 })
     await page.waitForLoadState('networkidle')
     console.log(`landed on ${page.url()}`)
-    await shot(page, 'after-sign-in')
+    passed('after-sign-in')
 
     // The org's GitHub account, before and after it is connected.
     const me = await (await fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } })).json()
@@ -106,14 +106,14 @@ async function main() {
     console.log(`org ${org.id} "${org.name}", project "${me.projects[0].name}"`)
     await page.goto(`${UI}/settings`)
     await page.waitForLoadState('networkidle')
-    await shot(page, 'settings-before-github')
+    passed('settings-before-github')
     if (!noRepository) {
       hlAdmin('github', 'connect', org.id, INSTALLATION)
       note('GitHub was connected with hl-admin: the Connect GitHub button needs a person at GitHub')
     }
     await page.reload()
     await page.waitForLoadState('networkidle')
-    await shot(page, 'settings-github-and-clusters')
+    passed('settings-github-and-clusters')
     await page.goto(`${UI}/cluster`)
     await page.waitForLoadState('networkidle')
     for (const cluster of off) {
@@ -122,10 +122,10 @@ async function main() {
       if (await use.isChecked()) await use.click()
       await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for the jobs of ${org.name}`)
     }
-    await shot(page, 'compute-resources')
+    passed('compute-resources')
     await page.goto(`${UI}/platform-experiments`)
     await page.waitForLoadState('networkidle')
-    await shot(page, 'console')
+    passed('console')
     if (until === 'form') return
 
     // The home page starts from a sentence; the form this walk fills is behind Advanced.
@@ -141,15 +141,15 @@ async function main() {
       await page.getByRole('option', { name: REPOSITORY }).click()
       await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
     }
-    await shot(page, 'form-repository-chosen')
+    passed('form-repository-chosen')
     await form.getByRole('button', { name: 'Next: budget and rules' }).click()
     await form.getByRole('button', { name: 'Hosted agents' }).click()
     await form.getByLabel('Researchers').fill(String(RESEARCHERS))
-    await shot(page, 'form-competition-settings')
+    passed('form-competition-settings')
     if (until === 'filled') return
     await form.getByRole('button', { name: 'Create and run' }).click()
     await page.waitForTimeout(700)
-    await shot(page, 'pressed-create-and-run')
+    passed('pressed-create-and-run')
     await page.waitForURL(/\/platform-experiments\/pe-/, { timeout: 120000 })
     experimentID = new URL(page.url()).pathname.split('/').pop()
     console.log(`experiment ${experimentID}`)
@@ -161,12 +161,12 @@ async function main() {
       marks[name] = Math.round((Date.now() - started) / 1000)
       console.log(`MARK ${name} at ${marks[name]}s`)
       await page.waitForTimeout(1500)
-      await shot(page, name)
+      passed(name)
     }
     await mark('just-created')
     if (until === 'created') return
-    for (const at of [10, 25]) { await sleep((at * 1000) - (Date.now() - started)); await shot(page, `after-${at}s`) }
-    let lastShot = Date.now()
+    for (const at of [10, 25]) { await sleep((at * 1000) - (Date.now() - started)); passed(`after-${at}s`) }
+    let lastPrinted = Date.now()
     while (Date.now() - started < LONGEST) {
       const pe = await read(`/platform-experiments/${experimentID}`)
       const agents = (await read(`/platform-experiments/${experimentID}/agents`)).agents ?? []
@@ -181,13 +181,13 @@ async function main() {
       if (pe.summary) await mark('summary')
       if (instances.some(i => i.stopped)) await mark('an-agent-stopped')
       if (pe.status === 'closed') { await mark('closed'); break }
-      if (Date.now() - lastShot > 5 * 60 * 1000) { lastShot = Date.now(); await shot(page, `at-${Math.round((Date.now() - started) / 60000)}min`) }
+      if (Date.now() - lastPrinted > 5 * 60 * 1000) { lastPrinted = Date.now(); passed(`at-${Math.round((Date.now() - started) / 60000)}min`) }
       await sleep(10000)
     }
     for (const path of ['/jobs', '/hypotheses', '/cluster', '/platform-experiments']) {
       await page.goto(`${UI}${path}`)
       await page.waitForLoadState('networkidle')
-      await shot(page, `end${path.replace('/', '-')}`)
+      passed(`end${path.replace('/', '-')}`)
     }
     console.log(`MARKS ${JSON.stringify(marks)}`)
     if (problems.length) console.log(`PROBLEMS\n${[...new Set(problems)].join('\n')}`)
