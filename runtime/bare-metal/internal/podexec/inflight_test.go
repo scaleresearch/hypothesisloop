@@ -25,6 +25,7 @@ type fakeContainer struct {
 	labels map[string]string
 	host   *container.HostConfig
 	state  string
+	exit   int
 }
 
 // fakeEngine is a container engine whose pulls, creates and stops block until the test lets
@@ -145,7 +146,7 @@ func (f *fakeEngine) ContainerInspect(ctx context.Context, id string, _ client.C
 	if c == nil {
 		return client.ContainerInspectResult{}, fmt.Errorf("container %s: %w", id, errdefs.ErrNotFound)
 	}
-	return client.ContainerInspectResult{Container: container.InspectResponse{HostConfig: c.host, State: &container.State{}}}, nil
+	return client.ContainerInspectResult{Container: container.InspectResponse{HostConfig: c.host, State: &container.State{ExitCode: c.exit}}}, nil
 }
 
 func (f *fakeEngine) ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {

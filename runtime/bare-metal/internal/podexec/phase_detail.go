@@ -46,7 +46,7 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 			return podexecPhaseReason(resp.Container.State.Error), resp.Container.State.Error, restartCount, scheduledNodes, "", nil
 		}
 		if resp.Container.State.ExitCode != 0 {
-			return "", fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
+			return domain.PhaseReasonContainerFailed, fmt.Sprintf("container exited with code %d", resp.Container.State.ExitCode), restartCount, scheduledNodes, "", nil
 		}
 		return "", "", restartCount, scheduledNodes, "", nil
 	}

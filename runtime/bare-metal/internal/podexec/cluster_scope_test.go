@@ -3,6 +3,7 @@ package podexec
 import (
 	"bytes"
 	"context"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"log"
 	"os"
 	"slices"
@@ -98,5 +99,25 @@ func TestAContainerCarriesTheClusterThatStartedIt(t *testing.T) {
 	}
 	if cs.Labels[LabelCluster] != "east" {
 		t.Fatalf("labels = %v, want the cluster named", cs.Labels)
+	}
+}
+
+func TestAContainerThatExitedNonZeroIsReportedAsFailedWithItsCode(t *testing.T) {
+	engine := newFakeEngine()
+	for id, exit := range map[string]int{"crashed": 3, "finished": 0} {
+		c := jobContainer("east", "exited", true)
+		c.labels[LabelExperimentID] = id
+		c.exit = exit
+		engine.containers[containerName(id)] = c
+	}
+	east := newFakeExecutor(engine)
+	east.clusterName = "east"
+
+	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "crashed", 0)
+	if err != nil || reason != domain.PhaseReasonContainerFailed || message != "container exited with code 3" {
+		t.Fatalf("phase detail = %q %q (err %v), want the failure and its exit code", reason, message, err)
+	}
+	if reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "finished", 0); err != nil || reason != "" || message != "" {
+		t.Fatalf("phase detail of a clean exit = %q %q (err %v), want none", reason, message, err)
 	}
 }
