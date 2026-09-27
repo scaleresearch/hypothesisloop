@@ -120,7 +120,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage: hl <command> ...
 
-  platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
+  platform-experiments  [list] | get | create [FILE] | start | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
   quota                 your share of the budget and what a job submitted now may still hold of it; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -569,7 +569,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -681,21 +681,30 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 // experiment.yaml) — while the platform experiment is still open, every field including metrics
 // is editable; once running, only name and description are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--name NAME] [FIELDS.yaml]
+	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description-file FILE] [--description TEXT] [--baseline-job JOB] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and leaves every other as it is. The brief is one command:
 
   hl platform-experiments update --description-file brief.md
 
+--baseline-job JOB declares the baseline while the platform experiment is open, with the
+description whose BASELINE block names JOB and its code_ref. It does not start without one. The
+platform reads JOB itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
+of role baseline here), baseline_not_completed, baseline_without_finding (its summary is not
+filed), brief_without_baseline, baseline_missing_metric (a declared metric JOB never reported),
+baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (the budget does
+not cover JOB's cost once per researcher). The last two are the owner's to change.
+
 FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
 budget_accelerator_hours, max_agents, ends_at, metrics, report_interval_seconds. While the
 platform experiment is open any of them can change; once it runs only name and description do.
 The experiment as changed is checked like a create, so neither name nor description is emptied.
-A coordinator's token changes the description only.`, stderr)
+A coordinator's token changes the description and declares the baseline, and nothing else.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	description := fs.String("description", "", "the new description")
 	descriptionFile := fs.String("description-file", "", "read the new description from this file, - for stdin")
+	baselineJob := fs.String("baseline-job", "", "the completed `job` that measured the baseline")
 	operands, err := parseArgs(fs, args)
 	if err != nil {
 		return parseExit(err)
@@ -722,6 +731,9 @@ A coordinator's token changes the description only.`, stderr)
 	}
 	if *description != "" {
 		body["description"] = *description
+	}
+	if *baselineJob != "" {
+		body["baseline_job_id"] = *baselineJob
 	}
 	if *descriptionFile != "" {
 		var raw []byte

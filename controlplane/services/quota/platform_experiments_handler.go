@@ -30,8 +30,9 @@ type PlatformExperimentsHandler struct {
 	launch AgentLaunch
 	// What a draft may spend, from the settings file's planning section.
 	planning Planning
-	// baseline reads what a proposal's baseline job did; readBaseline unless a test sets another.
-	baseline baselineReader
+	// reachable reads the accelerator types an org's jobs can be placed on now; reachableTypes
+	// unless a test sets another.
+	reachable func(ctx context.Context, orgID string) (map[string]bool, error)
 
 	// repos is the git host platform experiments keep their code on.
 	repos githost.Provider
@@ -43,7 +44,7 @@ func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githos
 		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
 	}
 	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
-	h.baseline = h.readBaseline
+	h.reachable = h.reachableTypes
 	return h
 }
 
@@ -168,6 +169,23 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return clusters, nil
 	}
 	return placeableBy(orgID, registered, clusters), nil
+}
+
+// reachableTypes are the accelerator types jobs of orgID can be placed on now.
+func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, orgID string) (map[string]bool, error) {
+	clusters, err := h.liveCapacity(ctx, orgID, false)
+	if err != nil {
+		return nil, err
+	}
+	reachable := map[string]bool{}
+	for _, cluster := range clusters {
+		for _, accelerator := range cluster.Accelerators {
+			if accelerator.Total > 0 {
+				reachable[accelerator.AcceleratorType] = true
+			}
+		}
+	}
+	return reachable, nil
 }
 
 // withResources adds each cluster's cores and memory, and the clusters that have no accelerator

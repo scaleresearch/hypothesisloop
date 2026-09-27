@@ -38,9 +38,10 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
 	if drafts, ok := store.(*draftStore); ok {
-		handler.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
+		svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return drafts.baseline, nil
 		}
+		handler.reachable = func(context.Context, string) (map[string]bool, error) { return drafts.reachable, nil }
 	}
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
@@ -224,8 +225,10 @@ type draftStore struct {
 
 	// over is the limit the org is at.
 	over *db.PlanningLimitError
-	// baseline is what the platform's records say of the job a proposal names.
-	baseline *Baseline
+	// baseline is what the platform's records say of the job a proposal names, and reachable
+	// the accelerator types the org's jobs can be placed on.
+	baseline  *Baseline
+	reachable map[string]bool
 
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
@@ -307,9 +310,11 @@ func draftWithPlanner() *draftStore {
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		baseline: &Baseline{
-			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc", EstimatedDurationHours: 0.3},
-			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, ObservedHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
+			Job:       &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc", EstimatedDurationHours: 0.3},
+			OwnerRole: domain.SignupRoleBaseline,
+			Finding:   true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, ObservedHours: 0.2,
 		},
+		reachable: map[string]bool{"rtx-4090": true},
 	}
 }
 
@@ -533,24 +538,24 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 
 	for name, c := range map[string]struct {
 		more   map[string]any
-		change func(*Baseline)
+		change func(*draftStore)
 		reason string
 	}{
-		"no job named":                {map[string]any{"baseline_job_id": ""}, func(*Baseline) {}, "no_baseline"},
-		"a job of someone else":       {nil, func(b *Baseline) { b.Job.AgentID = "ag-other" }, "no_baseline"},
-		"a job of another experiment": {nil, func(b *Baseline) { b.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
-		"a job that failed":           {nil, func(b *Baseline) { b.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
-		"nothing filed":               {nil, func(b *Baseline) { b.Finding = false }, "baseline_without_finding"},
+		"no job named":                {map[string]any{"baseline_job_id": ""}, func(*draftStore) {}, "no_baseline"},
+		"a job of someone else":       {nil, func(s *draftStore) { s.baseline.Job.AgentID = "ag-other" }, "no_baseline"},
+		"a job of another experiment": {nil, func(s *draftStore) { s.baseline.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
+		"a job that failed":           {nil, func(s *draftStore) { s.baseline.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
+		"nothing filed":               {nil, func(s *draftStore) { s.baseline.Finding = false }, "baseline_without_finding"},
 		// A planner that did not know the file's shape probed it with a brief of "x", and that
 		// probe was stored as the proposal a person was asked to accept.
-		"a brief that omits the baseline": {nil, func(b *Baseline) { b.Job.CodeRef = "git://seed@other" }, "brief_without_baseline"},
-		"a metric nothing reports":        {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
-		"a gate the baseline fails":       {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
-		"a type nobody has now":           {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
-		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
+		"a brief that omits the baseline": {nil, func(s *draftStore) { s.baseline.Job.CodeRef = "git://seed@other" }, "brief_without_baseline"},
+		"a metric nothing reports":        {nil, func(s *draftStore) { delete(s.baseline.Reported, "val_loss") }, "baseline_missing_metric"},
+		"a gate the baseline fails":       {gated, func(s *draftStore) { s.baseline.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
+		"a type nobody has now":           {nil, func(s *draftStore) { s.reachable = map[string]bool{} }, "accelerator_unreachable"},
+		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*draftStore) {}, "budget_below_baseline"},
 	} {
 		store := draftWithPlanner()
-		c.change(store.baseline)
+		c.change(store)
 		_, call := planningAPI(t, store, thePlanner)
 		code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(c.more))
 		if code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].ProposedAt != nil {
@@ -568,7 +573,7 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 	// another, and the stored proposal answers it.
 	cpu := draftWithPlanner()
 	cpu.baseline.Job.AcceleratorType = domain.CPUType
-	cpu.baseline.Reachable = map[string]bool{string(domain.CPUType): true}
+	cpu.reachable = map[string]bool{string(domain.CPUType): true}
 	_, call = planningAPI(t, cpu, thePlanner)
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": "rtx-4090"})); code != http.StatusUnprocessableEntity {
 		t.Errorf("a proposal that states a type: got = %d %v, want 422 for a field the body does not have", code, out)

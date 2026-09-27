@@ -204,6 +204,10 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	if code := run([]string{"platform-experiments", "update", "--platform-experiment", "pe-2", "--name", "renamed", fields}, &stdout, &stderr); code != 0 {
 		t.Fatalf("update fields of a named experiment: exit %d, stderr %s", code, stderr.String())
 	}
+	// The baseline is declared with the brief that hands it over, in the one call.
+	if code := run([]string{"platform-experiments", "update", "--description-file", file, "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("declare the baseline: exit %d, stderr %s", code, stderr.String())
+	}
 	if code := run([]string{"platform-experiments", "update"}, &stdout, &stderr); code != 2 {
 		t.Errorf("an update that names no field: exit %d, want 2", code)
 	}
@@ -213,6 +217,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},
+		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n", "baseline_job_id": "job-1"}},
 	}
 	if !reflect.DeepEqual(*got, want) {
 		t.Fatalf("requests = %+v\nwant %+v", *got, want)
@@ -226,7 +231,7 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 			t.Errorf("%s: exit %d, want 2", name, code)
 		}
 	}
-	if len(*got) != 5 {
+	if len(*got) != 6 {
 		t.Errorf("a refused summary was sent: %+v", *got)
 	}
 }

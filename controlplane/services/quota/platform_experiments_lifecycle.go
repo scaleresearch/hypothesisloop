@@ -160,6 +160,10 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 // field of the patch can change. Once it runs, only the name and the description can: admission
 // and the stage ladder have already acted on the rest. A closed one, and a draft, which its
 // planner's proposal fills, take no patch.
+//
+// baseline_job_id declares the baseline. An open experiment that has one, or is given one, is
+// held as patched to what that job did (checkBaseline), so its brief, its metrics and its budget
+// cannot leave the baseline behind before it starts.
 func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patch PlatformExperimentPatch) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -168,13 +172,13 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if pe == nil {
 		return nil, refuseUpdate(404, "experiment_not_found", "no platform experiment %s", id)
 	}
-	if patch.empty() {
+	if len(patch.carried()) == 0 {
 		return nil, refuseUpdate(422, "nothing_to_change", "the body names no field: send the fields that change")
 	}
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
 	}
-	if locked := patch.beyondTheBrief(false); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
+	if locked := patch.carried("name", "description"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
 		return nil, refuseUpdate(409, "experiment_running", "only name and description change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
 	}
 	expectedStatus := pe.Status
@@ -206,6 +210,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
 	}
+	if patch.BaselineJobID != nil {
+		patched.BaselineJobID = *patch.BaselineJobID
+	}
 	if _, err := s.validate(CreatePlatformExperimentRequest{
 		Name: patched.Name, Description: patched.Description,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
@@ -214,6 +221,16 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
 	}, time.Now().UTC()); err != nil {
 		return nil, err
+	}
+	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
+		baseline, err := s.baseline(ctx, &patched, patched.BaselineJobID)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.Update: read baseline: %w", err)
+		}
+		if err := checkBaseline(&patched, baseline); err != nil {
+			return nil, err
+		}
+		patched.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
 	}
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {

@@ -369,7 +369,13 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
 			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
-			"A coordinator's token changes `description` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
+			"`baseline_job_id` declares the baseline while the experiment is open, and POST /platform-experiments/{id}/start takes none without one. The job is read from the platform's own records and the declaration refused with 422: " +
+			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +
+			"brief_without_baseline (the description, as patched, names neither the job nor its code_ref: its BASELINE block does), baseline_missing_metric (a declared metric the job never reported), " +
+			"baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not cover the job's cost once for each of max_agents). " +
+			"Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. " +
+			"An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its brief, metrics and budget cannot leave the baseline behind. " +
+			"A coordinator's token changes `description` and `baseline_job_id` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -379,10 +385,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, err
 		}
 		// A coordinator's token is handed to a machine the platform rents, so it changes the
-		// brief and nothing a run's cost or length follows from.
+		// brief and declares the baseline, and nothing a run's cost or length follows from.
 		if caller, _ := auth.FromContext(ctx); caller.Kind == auth.KindCoordinator {
-			if others := in.Body.beyondTheBrief(true); len(others) > 0 {
-				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
+			if others := in.Body.carried("description", "baseline_job_id"); len(others) > 0 {
+				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and baseline_job_id and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 			}
 		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body)

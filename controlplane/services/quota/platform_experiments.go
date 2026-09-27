@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -114,6 +115,8 @@ type PlatformExperimentsService struct {
 	dataStore      *objectstore.Client
 	// maxDataBytesPerAgent is the durable-data ceiling admission refuses a submit on, 0 for none.
 	maxDataBytesPerAgent int64
+	// baseline reads what a declared baseline job did; readBaseline unless a test sets another.
+	baseline baselineReader
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
@@ -131,7 +134,7 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 	if observedGapCap <= 0 {
 		panic("quota: NewPlatformExperimentsService requires a positive observation cadence — it must match the controller's and the settler's")
 	}
-	return &PlatformExperimentsService{
+	s := &PlatformExperimentsService{
 		store:          store,
 		usage:          metricsdb.NewUsageTracker(metricsDBURL),
 		metricsDBURL:   metricsDBURL,
@@ -139,6 +142,8 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		logger:         logger,
 		observedGapCap: observedGapCap,
 	}
+	s.baseline = s.readBaseline
+	return s
 }
 
 // CreatePlatformExperimentRequest is the body of POST /platform-experiments, and what a
@@ -216,7 +221,7 @@ func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
 // quota tier are fixed at creation and are no fields of it.
 type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
-	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty. The one field a coordinator's token changes."`
+	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
 	MaxAgents                 *int                       `json:"max_agents,omitempty"`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
@@ -224,31 +229,32 @@ type PlatformExperimentPatch struct {
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
 	StartsAt                  *time.Time                 `json:"starts_at,omitempty"`
 	EndsAt                    *time.Time                 `json:"ends_at,omitempty"`
+	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"Declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. Taken while the platform experiment is open."`
 }
 
-// beyondTheBrief names the fields the patch carries other than name and description (and name
-// too when alsoName is set): the ones a running experiment no longer takes, and with the name
-// the ones a coordinator's token never sets.
-func (p PlatformExperimentPatch) beyondTheBrief(alsoName bool) []string {
+// carried names the fields the patch carries, without those in except.
+func (p PlatformExperimentPatch) carried(except ...string) []string {
 	var out []string
-	carried := func(field string, set bool) {
-		if set {
-			out = append(out, field)
+	for _, field := range []struct {
+		name string
+		set  bool
+	}{
+		{"name", p.Name != nil},
+		{"description", p.Description != nil},
+		{"budget_accelerator_hours", p.BudgetAcceleratorHours != nil},
+		{"max_agents", p.MaxAgents != nil},
+		{"max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil},
+		{"metrics", p.Metrics != nil},
+		{"report_interval_seconds", p.ReportIntervalSeconds != nil},
+		{"starts_at", p.StartsAt != nil},
+		{"ends_at", p.EndsAt != nil},
+		{"baseline_job_id", p.BaselineJobID != nil},
+	} {
+		if field.set && !slices.Contains(except, field.name) {
+			out = append(out, field.name)
 		}
 	}
-	carried("name", alsoName && p.Name != nil)
-	carried("budget_accelerator_hours", p.BudgetAcceleratorHours != nil)
-	carried("max_agents", p.MaxAgents != nil)
-	carried("max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil)
-	carried("metrics", p.Metrics != nil)
-	carried("report_interval_seconds", p.ReportIntervalSeconds != nil)
-	carried("starts_at", p.StartsAt != nil)
-	carried("ends_at", p.EndsAt != nil)
 	return out
-}
-
-func (p PlatformExperimentPatch) empty() bool {
-	return p.Name == nil && p.Description == nil && len(p.beyondTheBrief(false)) == 0
 }
 
 // AgentResult is (agentID, finalMetric) used when closing an experiment.

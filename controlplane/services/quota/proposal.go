@@ -52,12 +52,6 @@ type storedProposal struct {
 	domain.BaselineReading
 }
 
-// baselineHeadroom is how far over the baseline's observed hours the estimate of a job that
-// states none is set. A job holds its whole estimate of its agent's quota until it ends: an
-// estimate of 2.2 times the run let one job at a time fit a researcher's share, and one under
-// the run reserves less than the job spends.
-const baselineHeadroom = 1.5
-
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
 type ProposedAgent struct {
 	Flavor          string         `json:"flavor,omitempty"`
@@ -238,15 +232,25 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if in.Body.BaselineJobID == "" {
 			return nil, refusedProposal("no_baseline", "baseline_job_id is required: the job that measured the baseline, completed, with its finding filed")
 		}
-		baseline, err := h.baseline(ctx, pe, in.Body.BaselineJobID)
+		baseline, err := h.svc.baseline(ctx, pe, in.Body.BaselineJobID)
 		if err != nil {
 			return nil, h.refusal("read baseline", err)
 		}
-		if baseline != nil && baseline.Job != nil && baseline.Job.PlatformExperimentID != in.ID {
-			baseline = nil
-		}
-		if err := checkBaseline(in.Body, experiment, plannerID, baseline); err != nil {
+		if err := checkBaseline(&domain.PlatformExperiment{
+			ID: in.ID, Description: experiment.Description, Metrics: experiment.Metrics,
+			BudgetAcceleratorHours: in.Body.BudgetAcceleratorHours, MaxAgents: len(in.Body.Agents), BaselineJobID: in.Body.BaselineJobID,
+		}, baseline); err != nil {
 			return nil, err
+		}
+		if baseline.Job.AgentID != plannerID {
+			return nil, refusedProposal("no_baseline", "baseline_job_id %q is no job of yours in this draft: run the baseline with `hl job submit` and name that job", in.Body.BaselineJobID)
+		}
+		reachable, err := h.reachable(ctx, baseline.Job.OrgID)
+		if err != nil {
+			return nil, h.refusal("read capacity", err)
+		}
+		if ran := string(baseline.Job.AcceleratorType); !reachable[ran] {
+			return nil, refusedProposal("accelerator_unreachable", "the baseline ran on %s, which no cluster this org's jobs can be placed on has now: run it again on a type `hl capacity` lists", ran)
 		}
 		stored, err := json.Marshal(storedProposal{Proposal: in.Body, BaselineReading: domain.BaselineReading{AcceleratorType: baseline.Job.AcceleratorType}})
 		if err != nil {

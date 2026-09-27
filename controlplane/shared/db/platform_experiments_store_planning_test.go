@@ -456,3 +456,37 @@ func TestABaselineStoredInAProposalMovesToItsColumns(t *testing.T) {
 		t.Fatalf("the proposal keeps %v, %v, want its budget and its type alone", left, err)
 	}
 }
+
+// A declared baseline is written with the change that declares it, and only while the platform
+// experiment is in the status the check was made for.
+func TestADeclaredBaselineIsStoredWithTheUpdateThatDeclaresIt(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	pe, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || pe.BaselineJobID != "" || pe.JobEstimatedDurationHours != 0 {
+		t.Fatalf("a new platform experiment: got = %+v, %v, want no baseline", pe, err)
+	}
+	pe.Description, pe.BaselineJobID, pe.JobEstimatedDurationHours = "BASELINE measured: job-1", "job-1", 0.3
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err == nil {
+		t.Fatal("an update checked for a running experiment was written to an open one")
+	}
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+		t.Fatal(err)
+	}
+	got, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || got.BaselineJobID != "job-1" || got.JobEstimatedDurationHours != 0.3 || got.Description != "BASELINE measured: job-1" {
+		t.Fatalf("got = baseline %q with an estimate of %g, %v, want job-1 and 0.3", got.BaselineJobID, got.JobEstimatedDurationHours, err)
+	}
+	open, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, listed := range open {
+		if listed.ID == id && listed.BaselineJobID != "job-1" {
+			t.Fatalf("listed with baseline %q, want job-1: the sweeps read it there", listed.BaselineJobID)
+		}
+	}
+}

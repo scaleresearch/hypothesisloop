@@ -447,13 +447,13 @@ func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context,
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
-    max_concurrent_accelerators=$11
+    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13
 WHERE id=$1 AND status=$10`
 	tag, err := s.pool.pool.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
 		expectedStatus,
-		pe.MaxConcurrentAccelerators,
+		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: %w", err)
