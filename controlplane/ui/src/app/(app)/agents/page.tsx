@@ -9,7 +9,6 @@ import {
   ApiError, fetchAgentQuota, fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage,
   fetchExperimentStats, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
 } from '@/lib/api'
-import { quotaRemainingAccH } from '@/lib/quota'
 import type { Draft } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
@@ -46,7 +45,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
   )
   if (!q) return null
   const unit = unitOf(pe)
-  const totalRem = quotaRemainingAccH(q)
+  const room = q.remaining_guaranteed_accelerator_hours > 0 || q.remaining_burst_accelerator_hours > 0
   return (
     <tr className="bg-foreground/5">
       <td colSpan={colSpan} className="pl-7 text-2xs">
@@ -60,7 +59,10 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
             <Badge status="burst" className="mr-1">Burst</Badge>
             <span className="font-mono">{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</span> {unit} used
           </span>
-          <span className={totalRem > 0 ? 'text-success' : 'text-danger'}><span className="font-mono">{formatAccH(totalRem)}</span> {unit} left</span>
+          <span className={room ? 'text-success' : 'text-danger'} title="The largest job a submit is admitted with now: every job that has not ended holds its whole estimate">
+            room for a job of <span className="font-mono">{formatAccH(q.remaining_guaranteed_accelerator_hours)}</span> guaranteed
+            or <span className="font-mono">{formatAccH(q.remaining_burst_accelerator_hours)}</span> burst {unit}
+          </span>
         </div>
       </td>
     </tr>
