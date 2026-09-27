@@ -77,7 +77,7 @@ What you produce, in this order:
      rank on, never a figure your own code computes. Budget = that cost x those trials, with
      a fifth to spare. Duration =
      how long they take run side by side, plus a few minutes per trial for a researcher to
-     read and decide: a goal whose trials take minutes is an hour or less. One researcher per
+     read and decide, and nothing on top. One researcher per
      direction that differs in kind, each with a flavor that fits it, and 2 unless there are
      plainly more such directions. Write the arithmetic in `sizing_reason`: the person reads
      it beside the three numbers. `report_interval_seconds` is how often your harness really

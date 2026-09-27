@@ -25,8 +25,8 @@ Your assignment:
 
 ## Start of every session
 
-A run spans days of restarts and each session starts with no memory. Your memory is the
-platform: the description and the summary you wrote.
+The run lasts until the experiment's `ends_at` and each session starts with no memory. Your
+memory is the platform: the description and the summary you wrote.
 
   1. `hl platform-experiments get`: read the `description` completely, with `status`, `metrics`,
      `stages` and `current_stage`, and read `summary`, which is your own findings so far. The
@@ -79,7 +79,8 @@ The `BASELINE` block of the description is what every agent is ranked against.
   - `not yet established` once the first jobs have completed is a blocker. You cannot run the
     baseline yourself: an agent of role `baseline` does. While the experiment is open, add one
     with `hl platform-experiments agents add --hosted --role baseline` if the roster has none.
-    Once it runs, say in the description that the baseline is still owed and by whom.
+    Once `agents list` shows that agent, say in the description that the baseline is still
+    owed and by which agent.
   - When a baseline job completes, fill the block in the same turn: `metric:` with the value it
     reported, `measured:` with that job's id, `code_ref:` with the commit it ran (`hl job status
     ID` has all three). Then update the description as above.

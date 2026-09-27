@@ -62,10 +62,10 @@ outranks this briefing. Roughly:
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
      verbatim, available > 0; CPU work: only `cpu: N`.
   2. One-time: {workspace}
-  3. Catch up before touching anything else, every session: a run spans weeks of restarts and
-     each starts with no memory. Read your own hypotheses, the approaches and the branches you may
-     work in (settled ones are to read, not retest), the findings worth opening, and the jobs
-     already run or in flight. Fetch narrow and never re-fetch what this session already read:
+  3. Catch up before touching anything else, every session until the experiment's
+     `ends_at`: each starts with no memory. Read your own hypotheses, the approaches and the
+     branches you may work in (settled ones are to read, not retest), the findings worth
+     opening, and the jobs already run or in flight. Fetch narrow and never re-fetch what this session already read:
      context costs tokens and is not durable; the registry is.
   4. Before each trial, research it, then find its place. Submit lists the hypotheses yours
      reads close to and registers nothing until you have judged each; on a match, test under its id so every trial of an idea
