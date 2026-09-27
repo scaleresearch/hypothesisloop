@@ -54,6 +54,10 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("A `job.held` update says why a job still waits: cancel and resubmit it smaller if no "
                       "cluster can fit what it asks, else wait.", " ".join(self.render("generalist").split()))
 
+    def test_a_trial_leaves_its_estimate_to_the_one_measured_on_the_baseline(self):
+        self.assertIn("Leave `--estimated-duration-hours` out: the platform applies the one it measured on the baseline. "
+                      "State one only for a trial clearly longer or shorter.", " ".join(self.render("generalist").split()))
+
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())

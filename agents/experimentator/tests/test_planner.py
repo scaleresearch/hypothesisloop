@@ -174,6 +174,10 @@ class BaselinePromptTest(unittest.TestCase):
         flat = render(baseline_agent())[1]
         self.assertIn("`--estimated-duration-hours` your guess, the committed file unedited", flat)
         self.assertIn("The file states no estimate", flat)
+        # The baseline left "--estimated-duration-hours H" in the job spec's header, so both
+        # researchers stated estimates of two and six times the measured one, which never applied.
+        self.assertIn("The file states no estimate: nothing is measured yet, so guess generously", flat)
+        self.assertIn("the `--env` that vary it, and no estimate: theirs is measured on your job", flat)
         self.assertIn("Never run a good baseline a second time", flat)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.

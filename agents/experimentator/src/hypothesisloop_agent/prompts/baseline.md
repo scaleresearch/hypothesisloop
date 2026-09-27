@@ -45,14 +45,16 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
      naming or registering one is refused. `hl job submit .hypothesisloop/job.yaml` with
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
-     The file states no estimate: guess generously, within quota. Then end your turn,
+     The file states no estimate: nothing is measured yet, so guess generously, within
+     quota. Then end your turn,
      which is to answer in one line and call no tool: the result arrives as a message. Never
      poll, sleep or block in `hl watch`. A job that failed, or completed without one of the experiment's
      `metrics`, has its cause in `hl job logs ID`: fix it, commit and submit again, as often
      as you know a fix. Never run a good baseline a second time.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took and what it cost (`hl job cost`), and how a
-     researcher runs a trial (the job.yaml submitted unedited and the `--env` that vary it).
+     researcher runs a trial (the job.yaml submitted unedited, the `--env` that vary it, and
+     no estimate: theirs is measured on your job).
      The coordinator copies it into the brief.
   5. `hl platform-experiments agents finish --reason "baseline measured by job ID"`, then end
      your turn.
