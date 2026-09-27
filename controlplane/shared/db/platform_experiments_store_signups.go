@@ -397,6 +397,13 @@ func (s *PlatformExperimentsStore) AgentFinishedAt(ctx context.Context, platform
 	return finishedAt, nil
 }
 
+// runEndSQL is why the run of signup s is over, a domain.RunEnd, empty while it goes on.
+const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
+            WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
+            WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
+            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
+            ELSE '' END`
+
 // The last two columns are whether the agent's run ended long enough ago for its machine to be
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
@@ -411,11 +418,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
            (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
            (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '`+string(domain.SignupRolePlanner)+`'))`) + `,
-       CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
-            WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
-            WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
-            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
-            ELSE '' END`
+       ` + runEndSQL
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {

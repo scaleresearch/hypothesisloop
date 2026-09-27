@@ -61,6 +61,23 @@ const (
 	RunEndPlanned RunEnd = "planned"
 )
 
+// ReleasedBecause is what the exit log of a machine says that the platform took down on purpose,
+// the wind-down after its run's end having passed. It is no machine the provider lost.
+func (e RunEnd) ReleasedBecause() string {
+	const released = "the platform released the machine on purpose: "
+	switch e {
+	case RunEndClosed:
+		return released + "its platform experiment closed"
+	case RunEndCut:
+		return released + "its agent was cut at a stage boundary"
+	case RunEndFinished:
+		return released + "its agent finished"
+	case RunEndPlanned:
+		return released + "its planner answered the draft, and a revision of the draft starts a new machine"
+	}
+	return released + "its run is over"
+}
+
 // AgentInstance is the recorded outcome of a hosted agent's machine, as its launcher reported it.
 type AgentInstance struct {
 	// Name is the name the machine was last asked for under, without the launcher's prefix.
@@ -90,8 +107,10 @@ type AgentInstance struct {
 	ProgressAt *time.Time `json:"progress_at,omitempty"`
 	// EndReason is why the last machine that ended was given up on: "exited" (its command
 	// ended), "gone" (its provider no longer lists it), "never_seen" (no machine came to be),
-	// "still_starting" (it did not come up in time) or "silent" (it ran and made no progress).
-	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent"`
+	// "still_starting" (it did not come up in time), "silent" (it ran and made no progress) or
+	// "released" (the platform took it down because its run was over, and ExitLog says which
+	// end that was). Only "released" is the platform's own doing and no failure of the machine.
+	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,released"`
 	// Released means the run the machine was for is over and its wind-down has passed: the
 	// platform experiment closed, or the agent was cut. The launcher is no longer asked for the
 	// machine and has destroyed it, so what it last reported of it says nothing any more.

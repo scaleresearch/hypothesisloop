@@ -743,6 +743,34 @@ func TestAMachineThatWasListedAndIsGoneIsAnExitAtOnce(t *testing.T) {
 	}
 }
 
+// A planner that answered its draft is no longer asked for, and its launcher takes the machine
+// down. A revision asks for the planner again: the machine that is not listed then was released
+// by the platform, and is no machine its provider lost.
+func TestAMachineThePlatformReleasedIsNotOneItsProviderLost(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-planner")}}}}
+	first := mustReconcile(t, store, observed())
+	machine := first.Instances[0].Name
+	mustReconcile(t, store, observed(ObservedInstance{Name: machine, State: "running"}))
+
+	store.Over = map[string]domain.RunEnd{"pe-1/ag-planner": domain.RunEndPlanned}
+	if answer := mustReconcile(t, store, observed(ObservedInstance{Name: machine, State: "running"})); len(answer.Instances) != 0 || len(answer.Ending) != 0 {
+		t.Fatalf("answer = %+v, want the machine no longer asked for", answer)
+	}
+	released := *store.Find("pe-1", "ag-planner")
+	if released.Name != "" || released.EndReason != string(db.InstanceReleased) || released.Restarts != 0 || released.ExitLog != domain.RunEndPlanned.ReleasedBecause() {
+		t.Fatalf("recorded %+v, want released on purpose", released)
+	}
+
+	store.Over = nil
+	answer := mustReconcile(t, store, observed())
+	if len(answer.Instances) != 1 {
+		t.Fatalf("answer = %+v, want a machine for the revision", answer)
+	}
+	if recorded := store.Find("pe-1", "ag-planner"); recorded.Restarts != 0 || recorded.Stopped || recorded.EndReason != string(db.InstanceReleased) || strings.Contains(recorded.ExitLog, "lost") {
+		t.Fatalf("recorded %+v, want no restart spent and no machine lost", recorded)
+	}
+}
+
 // Restarts are spent under one image and one launcher config. What stopped an agent may have
 // been either, for every agent of every org at once, so a change of either starts it again.
 func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *testing.T) {

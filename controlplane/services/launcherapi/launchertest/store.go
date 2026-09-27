@@ -23,6 +23,10 @@ type Store struct {
 	// Listed are the launchers the agents were listed for, and WindDown the last one asked with.
 	Listed   []string
 	WindDown time.Duration
+	// Over holds, by platform experiment and agent id joined with a slash, the agents whose run
+	// ended longer ago than the wind-down, and why: the launcher is no longer asked to keep
+	// them, and the next question releases their machines.
+	Over map[string]domain.RunEnd
 
 	// ProgressWrites counts the times a progress marker was written down.
 	ProgressWrites int
@@ -50,6 +54,9 @@ func (s *Store) ListLauncherAgents(_ context.Context, launcher string, windDown 
 	s.WindDown = windDown
 	listed := []db.LauncherAgent{}
 	for _, agent := range s.ByLauncher[launcher] {
+		if _, over := s.Over[agent.PlatformExperimentID+"/"+agent.AgentID]; over {
+			continue
+		}
 		if agent.Instance != nil {
 			instance := *agent.Instance
 			agent.Instance = &instance
@@ -69,6 +76,25 @@ func (s *Store) ListLauncherCoordinators(_ context.Context, launcher string, _ t
 		}
 	}
 	return listed, s.Err
+}
+
+// ReleaseInstances records the machines of the agents in Over as released by the platform.
+func (s *Store) ReleaseInstances(_ context.Context, launcher string, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Err != nil {
+		return s.Err
+	}
+	now := epoch.Add(s.clock)
+	for _, agent := range s.ByLauncher[launcher] {
+		end, over := s.Over[agent.PlatformExperimentID+"/"+agent.AgentID]
+		if !over || agent.Instance == nil || agent.Instance.Name == "" {
+			continue
+		}
+		agent.Instance.Name, agent.Instance.Reported, agent.Instance.ExitedAt = "", "", &now
+		agent.Instance.EndReason, agent.Instance.ExitLog = string(db.InstanceReleased), end.ReleasedBecause()
+	}
+	return nil
 }
 
 // Find is the stored instance of an agent, or with no agent id of the coordinator.

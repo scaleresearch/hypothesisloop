@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -30,6 +31,9 @@ const (
 	// InstanceSilent: the launcher reports it as running, and what it reports of the machine's
 	// progress has not changed for the limit. Inside the limit nothing is recorded.
 	InstanceSilent InstanceEnd = "silent"
+	// InstanceReleased: the platform stopped asking for it because its run is over, and the
+	// launcher took it down. Recorded by ReleaseInstances alone, and it spends no restart.
+	InstanceReleased InstanceEnd = "released"
 )
 
 // progressStampsPerLimit is how often inside one progress limit a machine's progress is written
@@ -139,6 +143,42 @@ RETURNING `+c.prefix+`restarts, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: %w", err)
 	}
 	return after, true, nil
+}
+
+// ReleaseInstances records, for every machine of launcher whose agent or coordinator the launcher
+// is no longer asked to keep, that the platform released it and why: the name is cleared, the end
+// is InstanceReleased and the exit log says which end of the run it was. The launcher takes such
+// a machine down on its next answer, so without the record a later question about the same agent,
+// a planner whose draft is revised, finds a machine that was seen and is gone and counts a
+// machine the provider lost. No restart is spent. A pass with nothing to release writes nothing.
+func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launcher string, windDown time.Duration) error {
+	sentences := map[string]string{}
+	for _, end := range []domain.RunEnd{"", domain.RunEndClosed, domain.RunEndCut, domain.RunEndFinished, domain.RunEndPlanned} {
+		sentences[string(end)] = end.ReleasedBecause()
+	}
+	because, err := json.Marshal(sentences)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.ReleaseInstances: %w", err)
+	}
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE experiment_signups s
+SET instance_name = '', instance_state = '', instance_exited_at = now(), instance_end_reason = '`+string(InstanceReleased)+`',
+    instance_exit_log = $3::jsonb ->> (`+runEndSQL+`)
+WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
+  AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
+		launcher, windDown.Seconds(), because); err != nil {
+		return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
+	}
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments pe
+SET coordinator_instance_name = '', coordinator_instance_state = '', coordinator_instance_exited_at = now(),
+    coordinator_instance_end_reason = '`+string(InstanceReleased)+`', coordinator_instance_exit_log = $3
+WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_instance_name <> ''
+  AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
+		launcher, windDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
+		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
+	}
+	return nil
 }
 
 // RegisterLauncher makes an agent-launcher's token work. Registering one again changes nothing.

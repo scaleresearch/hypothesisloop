@@ -21,6 +21,7 @@ import (
 type Store interface {
 	ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherAgent, error)
 	ListLauncherCoordinators(ctx context.Context, launcher string, windDown time.Duration) ([]db.LauncherCoordinator, error)
+	ReleaseInstances(ctx context.Context, launcher string, windDown time.Duration) error
 	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error
@@ -133,6 +134,11 @@ func (h *Handler) imageOf(agentImage string) string {
 // logged and left out and the rest of the list stands. It also records whether the launcher
 // holds machines once it has acted on the answer, which is what its removal waits for.
 func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed) (*Desired, error) {
+	// A machine this answer no longer names is taken down by the launcher: that is written
+	// down first, as the platform's own doing, so no later answer reads it as lost.
+	if err := h.store.ReleaseInstances(ctx, launcher, domain.AgentWindDown); err != nil {
+		return nil, err
+	}
 	agents, err := h.store.ListLauncherAgents(ctx, launcher, domain.AgentWindDown)
 	if err != nil {
 		return nil, err
@@ -244,7 +250,9 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 // observe holds the machine asked for under one.instance.Name against what the launcher reports
 // of that name, and records its end when the report says so:
 //   - exited: at once, with the end of its output.
-//   - reported before and not now: at once. The provider took it away.
+//   - reported before and not now: at once. The provider took it away. A machine the platform
+//     released itself is never here: ReleaseInstances cleared its name when it stopped being
+//     asked for.
 //   - never reported: once the boot limit has passed since it was asked for. No machine could
 //     be created, and the launcher's own log says what its provider answered.
 //   - starting: once the boot limit has passed since it was first reported.
@@ -266,7 +274,7 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 	reported, listed := seen[name]
 	switch {
 	case !listed && one.instance.SeenAt != nil:
-		return end(db.InstanceGone, "the machine was running and its provider no longer lists it")
+		return end(db.InstanceGone, "the provider lost the machine: it was running, the platform still asks for it, and its provider no longer lists it")
 	case !listed:
 		return end(db.InstanceNeverSeen, fmt.Sprintf("no machine was listed %s after it was asked for, which is the boot limit: its launcher could not create it, and the launcher's log says what the provider answered", h.cfg.BootLimit))
 	case reported.State == stateExited:

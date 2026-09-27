@@ -204,6 +204,8 @@ func (noLauncherAgents) ListLauncherCoordinators(context.Context, string, time.D
 	panic("the launcher handler reached its store")
 }
 
+func (noLauncherAgents) ReleaseInstances(context.Context, string, time.Duration) error { return nil }
+
 func (noLauncherAgents) AskInstance(context.Context, string, string, string, string) error {
 	panic("the launcher handler reached its store")
 }

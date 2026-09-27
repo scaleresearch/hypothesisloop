@@ -508,3 +508,106 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 		}
 	}
 }
+
+// A machine the launcher is no longer asked to keep is taken down by the launcher. That is the
+// platform's doing and is written down as such, with which end of the run it was, so that it is
+// never read as a machine the provider lost: a planner whose draft is revised is asked for a new
+// machine with no restart spent.
+func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	launcher := "launcher-" + uuid.New().String()[:8]
+	const windDown = 2 * time.Minute
+	running := "running"
+	rent := func(pe, agent, name string) {
+		t.Helper()
+		if err := pes.AskInstance(ctx, pe, agent, name, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := pes.ObserveInstance(ctx, pe, agent, name, domain.InstanceRunning, &running, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := func() {
+		t.Helper()
+		if err := pes.ReleaseInstances(ctx, launcher, windDown); err != nil {
+			t.Fatal(err)
+		}
+	}
+	instanceOfAgent := func(pe, agent string) domain.AgentInstance {
+		t.Helper()
+		signup, err := pes.GetAgentSignup(ctx, pe, agent)
+		if err != nil || signup == nil || signup.Instance == nil {
+			t.Fatalf("signup: got = %+v, %v", signup, err)
+		}
+		return *signup.Instance
+	}
+
+	draft, planner := createTestDraft(t, pool, launcher)
+	rent(draft, planner, "planner-machine")
+	closing := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, closing, 10)
+	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"})[0]
+	setPEStatus(t, pool, closing, domain.PlatformExpRunning, time.Hour)
+	rent(closing, agent, "agent-machine")
+	coordinated := createTestPEWithCoordinator(t, pool, launcher)
+	rent(coordinated, "", "coordinator-machine")
+
+	// Everything is still asked for: nothing is released.
+	release()
+	if got := instanceOfAgent(draft, planner); got.Name != "planner-machine" || got.EndReason != "" || got.ExitedAt != nil {
+		t.Fatalf("a planner at work was released: %+v", got)
+	}
+	if got := instanceOfAgent(closing, agent); got.Name != "agent-machine" || got.EndReason != "" {
+		t.Fatalf("an agent of a running experiment was released: %+v", got)
+	}
+
+	// The planner proposed and its wind-down passed, and both experiments closed and theirs did.
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = now() - make_interval(secs => $2) WHERE id = $1`, draft, (windDown + time.Second).Seconds()); err != nil {
+		t.Fatal(err)
+	}
+	for _, pe := range []string{closing, coordinated} {
+		setPEStatus(t, pool, pe, domain.PlatformExpClosed, windDown+time.Second)
+	}
+	// Within the wind-down a machine is still the launcher's to keep.
+	fresh := createTestPEWithCoordinator(t, pool, launcher)
+	rent(fresh, "", "fresh-coordinator-machine")
+	setPEStatus(t, pool, fresh, domain.PlatformExpClosed, time.Second)
+	release()
+	release()
+
+	for what, got := range map[string]domain.AgentInstance{"planner": instanceOfAgent(draft, planner), "agent": instanceOfAgent(closing, agent)} {
+		if got.Name != "" || got.EndReason != string(InstanceReleased) || got.ExitedAt == nil || got.Restarts != 0 || got.Stopped {
+			t.Fatalf("%s: got = %+v, want released with no restart spent", what, got)
+		}
+	}
+	if log := instanceOfAgent(draft, planner).ExitLog; log != domain.RunEndPlanned.ReleasedBecause() {
+		t.Fatalf("planner's exit log: %q", log)
+	}
+	if log := instanceOfAgent(closing, agent).ExitLog; log != domain.RunEndClosed.ReleasedBecause() {
+		t.Fatalf("agent's exit log: %q", log)
+	}
+	closed, err := pes.GetPlatformExperiment(ctx, coordinated)
+	if err != nil || closed.Coordinator == nil || closed.Coordinator.Instance.Name != "" || closed.Coordinator.Instance.EndReason != string(InstanceReleased) ||
+		closed.Coordinator.Instance.ExitLog != domain.RunEndClosed.ReleasedBecause() || closed.Coordinator.Instance.Restarts != 0 {
+		t.Fatalf("coordinator of a closed experiment: got = %+v, %v", closed.Coordinator, err)
+	}
+	winding, err := pes.GetPlatformExperiment(ctx, fresh)
+	if err != nil || winding.Coordinator.Instance.Name != "fresh-coordinator-machine" || winding.Coordinator.Instance.EndReason != "" {
+		t.Fatalf("coordinator inside its wind-down: got = %+v, %v", winding.Coordinator, err)
+	}
+
+	// The draft is revised: the planner is asked for again, and the machine that was released
+	// is not one that was seen and is gone.
+	if err := pes.Revise(ctx, draft, "it must fit one accelerator", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().UTC().Add(30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, recorded, err := pes.EndInstance(ctx, draft, planner, "planner-machine", InstanceGone, "lost", time.Minute, 3); err != nil || recorded {
+		t.Fatalf("the released machine was recorded as lost: %v, %v", recorded, err)
+	}
+	release()
+	if got := instanceOfAgent(draft, planner); got.Restarts != 0 || got.EndReason != string(InstanceReleased) {
+		t.Fatalf("after the revision: got = %+v", got)
+	}
+}
