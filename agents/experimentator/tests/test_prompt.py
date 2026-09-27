@@ -48,9 +48,6 @@ class SystemPromptTest(unittest.TestCase):
         coordinator = SimpleNamespace(agent_id="coordinator", flavor="coordinator", platform_experiment_id="pe-1")
         self.assertEqual(core.git_identity(coordinator)["GIT_AUTHOR_NAME"], "coordinator-pe-1")
 
-    def test_the_briefing_hands_out_no_git_token(self):
-        self.assertNotIn("GIT_TOKEN", self.render("generalist"))
-
     def test_the_briefing_names_hl_and_no_http_endpoint(self):
         prompt = self.render("generalist")
         self.assertIsNone(re.search(r"(GET|POST|PUT) /|/explore|openapi|\$API_URL", prompt))

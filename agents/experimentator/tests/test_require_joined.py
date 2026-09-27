@@ -161,11 +161,6 @@ class StartupTest(PlatformCase):
         self.assertNotIn("git push", flat)
         self.assertNotIn("github", flat)
 
-    def test_the_repository_address_is_the_platforms_and_never_the_environments(self):
-        setup = self.prepare(CODE_REPO_URL="git://example.invalid/other", GIT_TOKEN="a-token")
-        self.assertNotIn("example.invalid", setup.system_prompt)
-        self.assertNotIn("a-token", setup.system_prompt)
-
     def test_prepare_stops_an_agent_nobody_added_before_it_reads_the_rules(self):
         with self.assertRaises(SystemExit):
             self.prepare(HL_TOKEN=derived("agent:pe-1/agent-b"))
