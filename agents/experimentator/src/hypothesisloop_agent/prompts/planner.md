@@ -21,7 +21,7 @@ Your assignment:
 person asked you to change since, oldest first, and `proposal` what you proposed before. Read it
 first, every time you start or are told to continue. With revisions, the last one is what the
 person wants now: change the proposal to meet it, keep what it does not touch, and say in
-`questions` what you could not meet. `ends_at` is your deadline and `hl quota` your whole
+`questions` what you could not meet. `planning_ends_at` is your deadline and `hl quota` your whole
 budget: a draft with no proposal by then is closed, and a later one is refused.
 
 What you produce, in this order:
