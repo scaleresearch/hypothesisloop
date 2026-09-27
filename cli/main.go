@@ -146,10 +146,15 @@ has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
 
-// openNotice is what the caller can do about an open platform experiment, which starts within a
-// minute of its baseline being declared. agent is the agent the command acts as, empty for
-// none, and baselineJob the declared baseline job, empty for none.
-func openNotice(c *apiclient.Client, platformExperiment, agent, baselineJob string) (string, error) {
+// statusReason is why an open platform experiment is not running yet, as its GET answers it.
+type statusReason struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+// openNotice is the caller's own next step in an open platform experiment, then why the
+// platform has not started it. agent is the agent the command acts as, empty for none.
+func openNotice(c *apiclient.Client, platformExperiment, agent string, why statusReason) (string, error) {
 	role := ""
 	if agent != "" {
 		roles, err := rolesOf(c, platformExperiment)
@@ -158,17 +163,17 @@ func openNotice(c *apiclient.Client, platformExperiment, agent, baselineJob stri
 		}
 		role = roles[agent]
 	}
+	step := ""
 	switch {
 	case agent != "" && role != "baseline":
-		return "open: every job submit is refused until the platform starts the run, within a minute of the baseline being declared; prepare, then end your turn and the start arrives as an update", nil
-	case baselineJob != "":
-		return "open: the baseline is declared and the platform starts the run within a minute", nil
+		step = "every job submit is refused until the platform starts the run; prepare, then end your turn and the start arrives as an update. "
+	case why.Reason != "baseline_required":
 	case agent != "":
-		return "open: your job is admitted now. Measure the baseline with one job, file its summary (hl job summary), then hl platform-experiments agents finish; the run starts once the baseline is declared", nil
+		step = "your job is admitted now. Measure the baseline with one job, file its summary (hl job summary), then hl platform-experiments agents finish. "
 	case kindOf(c.Token) == callerCoordinator:
-		return "open: add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job; the run starts then", nil
+		step = "add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job. "
 	}
-	return "open: the run starts within a minute once a baseline is declared. An agent added with hl platform-experiments agents add --role baseline measures it, and hl platform-experiments update --baseline-job JOB declares it", nil
+	return "open: " + step + why.Message, nil
 }
 
 // subcommand is one command of a group. The group's listing takes its synopsis from the command's
@@ -632,7 +637,7 @@ Minimal shape:
   budget_accelerator_hours: 10
   max_agents: 4               # researchers only: a finished one still counts, baseline agents
                               # and the coordinator never do
-  duration_hours: 24          # counted from the start; or ends_at, one of the two
+  duration_hours: 24          # how long the run lasts, counted from the moment it starts
   coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:
     - key: val_accuracy
@@ -646,8 +651,11 @@ It is created open and nothing runs yet. Add the researchers while it is open
 the coordinator adds the baseline agent and declares its job. Without it you do both: add an
 agent with --role baseline, and once its job is COMPLETED with a summary, run
 hl platform-experiments update --description-file brief.md --baseline-job JOB. The platform
-starts the run within a minute of a valid baseline, and closes an experiment still open without
-one after planning.baseline_limit_minutes (90).
+starts the run within a minute once the baseline is declared, a researcher has joined and
+starts_at, when the file states one, has passed; nothing else starts it. While it is open
+hl platform-experiments get answers in status_reason what the start waits for and in
+baseline_due_at when the platform closes it, with close_reason baseline_limit_reached, if it is
+not running by then.
 
 The experiment keeps its code in a repository on the deployment's git host. On GitHub,
 repository: owner/name names one a GitHub account connected to the org covers. Left out, the
@@ -723,8 +731,9 @@ baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (t
 not cover JOB's cost once per researcher). The last two are the owner's to change.
 
 FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
-budget_accelerator_hours, max_agents, ends_at, metrics, report_interval_seconds. While the
+budget_accelerator_hours, max_agents, duration_hours, metrics, report_interval_seconds. While the
 platform experiment is open any of them can change; once it runs only name and description do.
+max_agents below the researchers that joined is 409 max_agents_below_researchers.
 The experiment as changed is checked like a create, so neither name nor description is emptied.
 A coordinator's token changes the description and declares the baseline, and nothing else.`, stderr)
 	pe := experimentFlag(fs)
@@ -884,9 +893,13 @@ before no longer stands. The person may answer with a revision, which starts you
 func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
 
-The platform experiment: its status, description, metrics, stages and current_stage. A draft
-has no ends_at: it carries planning_ends_at while it is planned and proposal_expires_at once
-its planner answered, when the platform closes it if nothing happened by then.`, stderr)
+The platform experiment: its status, description, metrics, stages and current_stage, and in
+consumed_accelerator_hours what it spent of its budget. One moment says when the platform
+closes it if nobody does: planning_ends_at on a draft being planned, proposal_expires_at once
+its planner answered, baseline_due_at while it is open, and ends_at, which is started_at plus
+duration_hours, once it runs. status_reason says where a draft stands (planning, revising,
+proposed, declined) and why an open one is not running yet (baseline_required, starts_at_ahead,
+no_researchers, budget_spent, starting).`, stderr)
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -903,8 +916,10 @@ its planner answered, when the platform closes it if nothing happened by then.`,
 	// Ahead of the record, whose description is long: a reader of its first lines must not miss it.
 	if out["status"] == "open" {
 		_, _, agent := scopeOf(c.Token)
-		baselineJob, _ := out["baseline_job_id"].(string)
-		notice, err := openNotice(c, id, agent, baselineJob)
+		reason, _ := out["status_reason"].(map[string]any)
+		code, _ := reason["reason"].(string)
+		message, _ := reason["message"].(string)
+		notice, err := openNotice(c, id, agent, statusReason{Reason: code, Message: message})
 		if err != nil {
 			return fail(stderr, err)
 		}

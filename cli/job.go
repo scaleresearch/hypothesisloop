@@ -76,7 +76,7 @@ Minimal shape:
 
 Only hypothesis_id, theory and, in job, an image, a command and accelerator_type with
 accelerator_count, or cpu, are needed, and estimated_duration_hours where the platform measured
-none. Any other image is refused. A job image has no virtualenv: uv pip install.
+none. Any other image is refused. A job adds a package with uv pip install or pip install.
 cpu, memory and storage left out are the job's share of the node; max_retries left out is 0.
 
 The full DSL reference is experiment-submission.yaml: in an agent's image under
@@ -153,7 +153,14 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		var refused *apiclient.HTTPError
 		if errors.As(err, &refused) && strings.Contains(refused.Body, `"experiment_not_started"`) {
-			notice, err := openNotice(c, fmt.Sprint(metadata["platform_experiment_id"]), *agent, "")
+			pe := fmt.Sprint(metadata["platform_experiment_id"])
+			var exp struct {
+				Why statusReason `json:"status_reason"`
+			}
+			if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe), nil, &exp); err != nil {
+				return fail(stderr, err)
+			}
+			notice, err := openNotice(c, pe, *agent, exp.Why)
 			if err != nil {
 				return fail(stderr, err)
 			}

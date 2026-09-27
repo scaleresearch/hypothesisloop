@@ -52,12 +52,12 @@ data_quota_exceeded until some is deleted.`, stderr)
 		// Quota is granted at the start, so before it the agent has none: no error of its own.
 		var refused *apiclient.HTTPError
 		var exp struct {
-			Status      string `json:"status"`
-			BaselineJob string `json:"baseline_job_id"`
+			Status string       `json:"status"`
+			Why    statusReason `json:"status_reason"`
 		}
 		if errors.As(err, &refused) && refused.Status == 404 &&
 			c.Do("GET", "/platform-experiments/"+url.PathEscape(*pe), nil, &exp) == nil && exp.Status == "open" {
-			notice, err := openNotice(c, *pe, *agent, exp.BaselineJob)
+			notice, err := openNotice(c, *pe, *agent, exp.Why)
 			if err != nil {
 				return fail(stderr, err)
 			}
@@ -129,8 +129,8 @@ such a name or the full registry address of an image of your own, host first, an
 else is refused at submit (unknown_job_image), as is a job no cluster could run with its image
 (no_cluster_for_image). Every job names one: a line without only_job_image is of a cluster that runs the
 image a job names, and a line with it is of a cluster that runs that image and no other, so a
-job meant for it names that image; job_image_carries says what is installed in it. The offered
-images have no virtualenv: a job adds a package with uv pip install. A line with
+job meant for it names that image; job_image_carries says what is installed in it. A job adds a
+package with uv pip install or pip install, into the Python it runs. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented.

@@ -55,7 +55,7 @@ command lines and shell history; write it to an env file the container reads.`, 
 	flavor := fs.String("flavor", "", "the specialization the agent runs")
 	hyperparameters := fs.String("hyperparameters", "", "a JSON object of knobs the agent reads back")
 	model := fs.String("model", "", "the model the agent runs on; omitted, the platform's default")
-	name := fs.String("name", "", "display name of a created agent; omitted, its generated id")
+	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
 	named := experimentFlag(fs)
@@ -94,7 +94,8 @@ func agentsRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	fs := newFlags("platform-experiments agents remove", `usage: hl platform-experiments agents remove [--platform-experiment PE] AGENT
 
 Takes the agent out of a platform experiment that is still open: its token stops working and a
-hosted agent's machine is taken down. A coordinator's token removes only an agent it added.
+hosted agent's machine is taken down. A coordinator's token removes only an agent it added,
+and 403 agent_not_added_by_coordinator answers for any other.
 Refused once the experiment has started; from then on an agent leaves by being cut or by the
 experiment closing.`, stderr)
 	named := experimentFlag(fs)
@@ -112,7 +113,8 @@ experiment closing.`, stderr)
 func agentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments agents list", `usage: hl platform-experiments agents list [--platform-experiment PE]
 
-Every agent that joined the platform experiment, in the order they did. No token is listed:
+Every agent that joined the platform experiment, in the order they did, each with its role and
+in actor whose credential added it. A draft's planner has role planner. No token is listed:
 hl platform-experiments agents add --agent ID prints a self-run agent's token again.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {

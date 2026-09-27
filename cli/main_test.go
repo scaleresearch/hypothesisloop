@@ -151,7 +151,7 @@ func TestPlatformExperimentsCreateManyFromYAMLList(t *testing.T) {
 	}
 	// The file is sent as written: a time it leaves out is the platform's to default or refuse.
 	for i, body := range submittedBodies {
-		if _, sent := body["starts_at"]; sent || body["ends_at"] != nil {
+		if _, sent := body["starts_at"]; sent {
 			t.Fatalf("item %d carries a time the file did not state: %+v", i, body)
 		}
 	}
@@ -246,11 +246,14 @@ func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
 
 func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/agents"):
 			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"jane","role":"competitor"}]}`))
-			return
+		case r.Method == "GET":
+			_, _ = w.Write([]byte(`{"id":"pe-1","status":"open","status_reason":{"reason":"baseline_required","message":"pe-1 has no baseline"}}`))
+		default:
+			http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
 		}
-		http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
 	})
 	setAPIURL(t, url)
 	jobFile := t.TempDir() + "/job.yaml"
@@ -260,7 +263,8 @@ func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
 	if code != 1 || stdout.Len() != 0 || strings.Count(stderr.String(), "\n") != 1 ||
-		!strings.HasPrefix(stderr.String(), "hl: job submit: open: every job submit is refused until the platform starts the run") {
+		!strings.HasPrefix(stderr.String(), "hl: job submit: open: every job submit is refused until the platform starts the run") ||
+		!strings.HasSuffix(stderr.String(), "pe-1 has no baseline\n") {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
@@ -743,7 +747,7 @@ func TestJobStatusPrintsTheRecordAndNothingElse(t *testing.T) {
 
 // A coordinator that read "wait" of an open experiment waited instead of adding the baseline
 // agent, and a baseline agent's job is admitted while it is open: each caller is told its own
-// next step, on stderr, and stdout stays the record alone.
+// next step, then the platform's status_reason, on stderr, and stdout stays the record alone.
 func TestOpenPlatformExperimentTellsEachCallerItsNextStep(t *testing.T) {
 	record := map[string]any{"id": "pe-1", "status": "open", "starts_at": "2000-01-01T00:00:00Z"}
 	recordingServer(t, func(_ int, r recorded) any {
@@ -753,19 +757,24 @@ func TestOpenPlatformExperimentTellsEachCallerItsNextStep(t *testing.T) {
 		return record
 	})
 	for _, tc := range []struct {
-		token, status, baselineJob, want string
+		token, status, reason, want string
 	}{
-		{derivedToken("coordinator:pe-1"), "open", "", "open: add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job; the run starts then"},
-		{derivedToken("coordinator:pe-1"), "open", "job-1", "open: the baseline is declared and the platform starts the run within a minute"},
-		{derivedToken("agent:pe-1/ag-b"), "open", "", "open: your job is admitted now."},
-		{derivedToken("agent:pe-1/ag-r"), "open", "", "open: every job submit is refused until the platform starts the run"},
-		{derivedToken("agent:pe-1/ag-r"), "open", "job-1", "open: every job submit is refused until the platform starts the run"},
-		{"hlk_person", "open", "", "open: the run starts within a minute once a baseline is declared."},
+		{derivedToken("coordinator:pe-1"), "open", "baseline_required", "open: add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job. why baseline_required"},
+		{derivedToken("coordinator:pe-1"), "open", "no_researchers", "open: why no_researchers"},
+		{derivedToken("agent:pe-1/ag-b"), "open", "baseline_required", "open: your job is admitted now."},
+		{derivedToken("agent:pe-1/ag-b"), "open", "starting", "open: why starting"},
+		{derivedToken("agent:pe-1/ag-r"), "open", "baseline_required", "open: every job submit is refused until the platform starts the run"},
+		{derivedToken("agent:pe-1/ag-r"), "open", "starts_at_ahead", "open: every job submit is refused until the platform starts the run; prepare, then end your turn and the start arrives as an update. why starts_at_ahead"},
+		{"hlk_person", "open", "baseline_required", "open: why baseline_required"},
 		{"hlk_person", "running", "", ""},
 		{"hlk_person", "closed", "", ""},
 	} {
 		t.Setenv("HL_TOKEN", tc.token)
-		record["status"], record["baseline_job_id"] = tc.status, tc.baselineJob
+		record["status"] = tc.status
+		delete(record, "status_reason")
+		if tc.reason != "" {
+			record["status_reason"] = map[string]any{"reason": tc.reason, "message": "why " + tc.reason}
+		}
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
 			t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -780,7 +789,7 @@ func TestOpenPlatformExperimentTellsEachCallerItsNextStep(t *testing.T) {
 		}
 		if got := stderr.String(); !strings.HasPrefix(got, want) || (want == "") != (got == "") || strings.Count(got, "\n") > 1 ||
 			strings.Contains(got, "starts in") {
-			t.Fatalf("%s %s baseline %q: stderr %q, want it to begin %q", tc.token, tc.status, tc.baselineJob, got, want)
+			t.Fatalf("%s %s %s: stderr %q, want it to begin %q", tc.token, tc.status, tc.reason, got, want)
 		}
 	}
 }
@@ -796,7 +805,7 @@ func TestQuotaBeforeTheStartSaysWhatTheCallerDoes(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/agents"):
 			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"jane","role":"competitor"}]}`))
 		default:
-			_, _ = w.Write([]byte(`{"id":"pe-1","status":"` + status + `","starts_at":"2000-01-01T00:00:00Z"}`))
+			_, _ = w.Write([]byte(`{"id":"pe-1","status":"` + status + `","status_reason":{"reason":"baseline_required","message":"pe-1 has no baseline"}}`))
 		}
 	})
 	setAPIURL(t, url)
