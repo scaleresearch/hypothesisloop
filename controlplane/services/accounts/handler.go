@@ -589,7 +589,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		enabled                    bool
 	}{
 		{"disable", "Turn a cluster off for an org's jobs",
-			"From here on no job of the org is placed on the cluster, by the scheduler or by hand, and the capacity the org reads leaves it out. " +
+			"From here on no job of the org is placed on the cluster, and the capacity the org reads leaves it out. " +
 				"The org's jobs already placed there are not touched: they run to their end. A queued job of an org that turned off every cluster " +
 				"it could use waits with not_admitted_reason clusters_disabled. ", false},
 		{"enable", "Turn a cluster on again for an org's jobs",

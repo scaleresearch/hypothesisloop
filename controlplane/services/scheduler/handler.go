@@ -303,29 +303,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return &struct{ Body *domain.Experiment }{Body: exp}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "admit-experiment", Method: "POST", Path: "/experiments/{id}/admit",
-		Summary: "Force-admit a QUEUED experiment onto a named cluster", Tags: []string{"experiments"},
-		Description: "Operator endpoint. Requires an explicit valid cluster_name and still respects capacity accounting. " +
-			"The cluster must be the caller's own and must take the job: one of the job's org, or a shared one. " +
-			"A cluster the job's org turned off for its jobs answers 409 cluster_disabled: nobody places a job there by hand either.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			ClusterName string `json:"cluster_name"`
-		}
-	}) (*struct{ Body *domain.Experiment }, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if in.Body.ClusterName != "" {
-			if err := access.Cluster(ctx, in.Body.ClusterName); err != nil {
-				return nil, err
-			}
-		}
-		return h.admit(ctx, in.ID, in.Body.ClusterName)
-	})
-
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
@@ -424,10 +401,6 @@ func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 // ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
 const ReasonSummaryExists = "summary_exists"
 
-// ReasonClusterDisabled is the reason of the 409 a placement by hand is answered with when the
-// job's org turned the named cluster off.
-const ReasonClusterDisabled = "cluster_disabled"
-
 // admissionStatusError maps an AdmissionError to a huma error with the historical
 // status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
 func admissionStatusError(err error) huma.StatusError {
@@ -445,141 +418,6 @@ func admissionStatusError(err error) huma.StatusError {
 	default:
 		return huma.Error422UnprocessableEntity(admErr.Message)
 	}
-}
-
-// admit force-admits a QUEUED experiment onto an operator-named cluster, going through the
-// same capacity-claiming transition normal admission uses.
-func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ Body *domain.Experiment }, error) {
-	if clusterName == "" {
-		return nil, huma.Error400BadRequest("cluster_name is required")
-	}
-	exp, err := h.svc.store.GetExperiment(ctx, id)
-	if err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	if exp == nil {
-		return nil, huma.Error404NotFound("experiment not found")
-	}
-	if exp.Status != domain.StatusQueued {
-		return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
-	}
-	// The same rule the tick places by (eligibleClusters): a job goes to a cluster of its own
-	// org or to a shared one, and never to one its org turned off, whoever asks. The administrator
-	// of a shared cluster does not overrule the org a job belongs to.
-	cluster, err := h.svc.store.GetCluster(ctx, clusterName)
-	if err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	if cluster == nil {
-		return nil, huma.Error400BadRequest("cluster is not registered")
-	}
-	if !cluster.OpenTo(exp.OrgID) {
-		return nil, huma.Error409Conflict("cluster " + clusterName + " takes the jobs of its own org only, and this job is another org's")
-	}
-	if !cluster.EnabledFor(exp.OrgID) {
-		return nil, api.Refuse(http.StatusConflict, ReasonClusterDisabled, "cluster "+clusterName+" is turned off for the jobs of this job's org: an owner of that org turns it on with POST /orgs/{id}/clusters/{name}/enable")
-	}
-	// This manual admit path bypasses the ordinary tick's cluster-local "max" resolution (see
-	// loop_tick.go's resolveClusterLocalResources) entirely — it names a cluster directly rather
-	// than searching for one, so there is no tick-time placement search to hang resolution off of.
-	// Refuse rather than silently admit against a footprint that reads every "max" field as
-	// zero (see domain.Experiment.Footprint's doc comment): let the ordinary scheduler tick
-	// admit a job that still needs "max" resolved instead.
-	if jobNeedsMaxResolution(exp.Job) {
-		return nil, huma.Error409Conflict("experiment still has an unresolved job.cpu/memory/storage \"max\" sentinel — manual admission does not resolve it; wait for the ordinary scheduler tick to admit this experiment")
-	}
-
-	// The same capability admission checks: a job that spans nodes goes only to a cluster that
-	// reports it runs such jobs. Admitted anywhere else it is refused by the runtime every pass.
-	if exp.Job.Nodes() > 1 {
-		capable, err := h.svc.workload.GetMultiNodeCapability(ctx)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-		}
-		if !capable[clusterName] {
-			return nil, huma.Error422UnprocessableEntity("cluster does not run jobs that span more than one node")
-		}
-	}
-
-	resolved, err := h.svc.grace.Resolve(exp.Job)
-	if err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	// The job is planned as this admission resolves it, from the submitted job. Whatever an
-	// earlier admission resolved, a slot pin included, belongs to that admission.
-	candidate := *exp
-	candidate.ResolvedJob = &resolved
-	clusterActive := false
-	if err := h.svc.recordAdmission(ctx, id, time.Now().UTC()); err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-		gAvail, _, err := readFlavorCapacity(ctx, h.svc.workload, h.svc.logger)
-		if err != nil {
-			return false, err
-		}
-		avail, ok := gAvail[clusterName]
-		clusterActive = ok
-		if !ok {
-			return false, nil
-		}
-		nodeAvail, err := h.svc.workload.GetAcceleratorCapacityByNode(ctx)
-		if err != nil {
-			return false, err
-		}
-		nodeResources, err := h.svc.workload.GetNodeResourceCapacity(ctx)
-		if err != nil {
-			return false, err
-		}
-		nodeLabels, err := h.svc.workload.GetNodeLabels(ctx)
-		if err != nil {
-			return false, err
-		}
-		// On a cluster of slots the job is sized to a free one, as the tick would size it.
-		if hasSlots(nodeLabels[clusterName]) {
-			onSlot, misfit := resolveOntoSlot(exp, clusterName, nodeResources[clusterName], nodeResources[clusterName], nodeLabels[clusterName])
-			if misfit != "" {
-				return false, nil
-			}
-			if resolved, err = h.svc.grace.Resolve(*onSlot); err != nil {
-				return false, err
-			}
-		}
-		if !domain.Fits(avail, candidate.Footprint()) {
-			return false, nil
-		}
-		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, &candidate, &resolved), nil
-	})
-	if err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	if !claimed {
-		if !clusterActive {
-			return nil, huma.Error400BadRequest("cluster is not active")
-		}
-		current, err := h.svc.store.GetExperiment(ctx, id)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-		}
-		if current == nil || current.Status != domain.StatusQueued {
-			return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
-		}
-		return nil, huma.Error422UnprocessableEntity("insufficient capacity on requested cluster")
-	}
-	exp.Status = domain.StatusSubmitted
-	exp.ClusterName = clusterName
-	exp.ResolvedJob = &resolved
-	exp.UpdatedAt = time.Now().UTC()
-	if err := h.svc.workload.CreateWorkload(ctx, exp); err != nil {
-		if rollbackErr := h.svc.store.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); rollbackErr != nil {
-			return nil, auth.Internal(h.svc.logger, "admit experiment: workload creation failed and admission rollback failed", errors.Join(err, rollbackErr), zap.String("id", id), zap.String("cluster", clusterName))
-		}
-		return nil, auth.Internal(h.svc.logger, "admit experiment: workload creation failed", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	if err := h.svc.NameJobs(ctx, exp); err != nil {
-		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
-	}
-	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
 // admissionHTTPStatus maps an admission reason to the appropriate HTTP status code.

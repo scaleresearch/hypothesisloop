@@ -237,8 +237,8 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
 
     # -- same physical hardware, reached via this host's bare-node agent (no k3s/DRA at all) --
     # Detach box-a from k3s now: it stays a schedulable, guaranteed-capacity node until the
-    # fixture's own teardown, so leaving it attached races the explicit admit() below -- the normal
-    # k3s scheduler can (and does) auto-admit the SUBMITTED job onto it before that call lands.
+    # fixture's own teardown, and the scheduler would place the next job there. Detached, the
+    # bare-node cluster is the only one that reports the device.
     _lib_detach_node()
     bare_cluster = f"tt-bare-e2e-{run_id}"
     agent_bin = tmp_path / "bare-agent"
@@ -287,7 +287,6 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
             job_overrides=dict(TT_JOB_OVERRIDES),
             job_id=f"tt-bare-{run_id[:8]}",
         )
-        api.admit(bare_job, bare_cluster)
 
         bare_final = eventually(
             f"{bare_job} to reach a terminal status on the bare-node agent",

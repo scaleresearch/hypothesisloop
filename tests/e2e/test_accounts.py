@@ -352,12 +352,6 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         kept = {k for k in ("hypothesis", "theory", "org_id", "platform_experiment_id", "hypothesis_id") if handed.get(k)}
         assert not kept, f"the runtime is handed {kept} of the job, which no workload is built from"
 
-        assert b.api.admit(job_b, name).status_code == 404, "org B force-admitted onto org A's cluster"
-        assert a.api.admit(job_b, name).status_code == 404, "org A force-admitted org B's job"
-        refused = api.admit(job_b, name)
-        assert refused.status_code == 409, f"staff placing org B's job on org A's cluster: {refused.status_code} {refused.text}"
-        assert b.api.experiment(job_b)["status"] == "QUEUED"
-
         share = f"/orgs/{a.org_id}/clusters/{name}"
         for caller in (a.api, b.api):
             assert _status(caller, "PATCH", share, {"shared": True}).status_code == 403
@@ -495,12 +489,6 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
         kept = b.api.experiment(running)
         assert kept["cluster_name"] == name and kept["status"] in ("SUBMITTED", "RUNNING"), f"the job placed before the cluster was turned off: {kept}"
         assert running in {e["id"] for e in runtime.reconcile()}, "the runtime is no longer told to run the job placed before"
-
-        refused = api.admit(waiting, name)
-        assert refused.status_code == 409 and refused.json()["reason"] == "cluster_disabled", (
-            f"staff placing org B's job on a cluster org B turned off: {refused.status_code} {refused.text}"
-        )
-        assert b.api.experiment(waiting)["status"] == "QUEUED"
 
         # The other org is placed there as before.
         of_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)

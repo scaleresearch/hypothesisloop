@@ -144,17 +144,9 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
 
 
 def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted: list[str]) -> None:
-    def force_admit(job_id: str, cluster: str) -> bool:
-        for _ in range(5):
-            r = api.admit(job_id, cluster)
-            if r.status_code == 200:
-                return True
-        return False
-
     # -- real GPU job to completion --
     job = api.submit_job(pe_id, agent, hours=0.02, job_overrides={"accelerator_type": acc_type, "accelerator_count": 1})
     submitted.append(job)
-    force_admit(job, cluster_name)
 
     final = eventually(
         f"{job} to reach a terminal status",
@@ -194,7 +186,6 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
         metadata_overrides={},
     )
     submitted.append(job3)
-    force_admit(job3, cluster_name)
 
     eventually(
         f"{job3} reaches RUNNING",
@@ -234,7 +225,6 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
 
     job4 = api.submit_job(pe_id, agent, hours=0.02, job_overrides={"accelerator_type": acc_type, "accelerator_count": 1})
     submitted.append(job4)
-    force_admit(job4, cluster_name)
     final4 = eventually(
         f"{job4} to reach a terminal status after eviction",
         lambda: api.experiment(job4),
@@ -281,7 +271,6 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
     k3s_acc_type = f"nvidia.com/gpu.product={k3s_product}"
     job5 = api.submit_job(pe_id, agent, hours=0.02, job_overrides={"accelerator_type": k3s_acc_type, "accelerator_count": 1})
     submitted.append(job5)
-    force_admit(job5, "k3s-nvidia")
     final5 = eventually(
         f"{job5} to reach a terminal status via k3s/device-plugin",
         lambda: api.experiment(job5),

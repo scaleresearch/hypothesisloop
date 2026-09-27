@@ -16,7 +16,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func get(t *testing.T, r chi.Router, path string) (int, string) {
@@ -36,7 +35,7 @@ func TestSmoke(t *testing.T) {
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, nil))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, nil, nil, worldRepositories{}, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
+		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
 	quota.RegisterSessionsHuma(doc, nil, zap.NewNop())

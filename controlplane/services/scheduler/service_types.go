@@ -8,7 +8,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
@@ -26,7 +25,6 @@ type Store interface {
 	// callers that need whole-set totals rather than a page of rows.
 	ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error)
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
-	MarkQueued(ctx context.Context, id, reason string) error
 	GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error)
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
@@ -50,9 +48,6 @@ type Store interface {
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
-	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
-	// GetCluster returns a registered cluster, nil for a name nobody registered.
-	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
 }
 
 // QuotaService handles experiment-scoped quota checks and debits, across every resource
@@ -62,26 +57,6 @@ type QuotaService interface {
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
-}
-
-// WorkloadClient manages backend-executed workloads, potentially across multiple target
-// clusters. No DeleteWorkload: a job's desired existence derives from the experiment's own
-// status, so "deleting" just means transitioning away from SUBMITTED/RUNNING.
-type WorkloadClient interface {
-	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
-	// GetFlavorCapacity returns available physical capacity per cluster (see
-	// LoopWorkloadClient.GetFlavorCapacity). Used by the operator admit endpoint to verify the
-	// target cluster has room, across every dimension, before admitting onto it.
-	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
-	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
-	// GetNodeResourceCapacity reports free CPU/memory/storage per node — admission must prove a
-	// job fits one node in every dimension, not just in accelerators.
-	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
-	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
-	// GetMultiNodeCapability reports which clusters run a job that spans more than one node.
-	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
-	// GetClusterIDs maps each connected cluster's name to the id it reports.
-	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
 
 // NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.
@@ -115,7 +90,6 @@ type CodeHost interface {
 type Service struct {
 	store        Store
 	quota        QuotaService
-	workload     WorkloadClient
 	novelty      NoveltyDetector
 	hypotheses   HypothesisStore
 	codeHost     CodeHost
@@ -123,12 +97,8 @@ type Service struct {
 	credits      domain.QuotaConfig
 	loop         Triggerable
 	settler      QuotaSettler
-	grace        domain.GraceLimits
 	metricsDBURL string
-	// recordAdmission marks the start of a run in the metrics store, so that time queued before
-	// it is never billed.
-	recordAdmission func(ctx context.Context, experimentID string, at time.Time) error
-	logger          *zap.Logger
+	logger       *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
 	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
 	// of the store at admission and nowhere else. Not enforced mid-write — that needs a gateway in
@@ -141,12 +111,10 @@ type Service struct {
 func NewService(
 	store Store,
 	quota QuotaService,
-	workload WorkloadClient,
 	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
 	codeHost CodeHost,
 	settler QuotaSettler,
-	grace domain.GraceLimits,
 	metricsDBURL string,
 	logger *zap.Logger,
 ) *Service {
@@ -159,18 +127,13 @@ func NewService(
 	return &Service{
 		store:        store,
 		quota:        quota,
-		workload:     workload,
 		novelty:      novelty,
 		hypotheses:   hypotheses,
 		codeHost:     codeHost,
 		settler:      settler,
-		grace:        grace,
 		metricsDBURL: metricsDBURL,
-		recordAdmission: func(ctx context.Context, experimentID string, at time.Time) error {
-			return metricsdb.RecordAdmission(ctx, metricsDBURL, experimentID, at)
-		},
-		logger:  logger,
-		weights: domain.DefaultSchedulingWeights(),
+		logger:       logger,
+		weights:      domain.DefaultSchedulingWeights(),
 	}
 }
 

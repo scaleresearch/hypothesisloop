@@ -29,7 +29,7 @@ import uuid
 
 import pytest
 
-from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, TEST_CPU_TYPE
+from conftest import API_URL, REPO_ROOT, TEST_CPU_TYPE
 from support import admin
 from support.wait import eventually
 
@@ -73,7 +73,7 @@ def job_override(sleep_seconds: int) -> dict:
 
 
 @pytest.fixture
-def bare_agent(tmp_path, run_id: str):
+def bare_agent(api, tmp_path, run_id: str):
     """Builds and launches a real bare-agent process against the local control plane under its own
     UUID-namespaced cluster name, waits for it to register, and tears it down unconditionally:
     kills the process and removes any container it left behind, labeled by this test's own agent
@@ -86,6 +86,14 @@ def bare_agent(tmp_path, run_id: str):
     )
 
     cluster_name = f"bare-e2e-{uuid.uuid4().hex[:8]}-{run_id}"
+    # The cluster is the only one a new org's jobs use, so the scheduler places them there.
+    subject = f"user-{cluster_name}"
+    home = admin.add_user(subject, f"Bare node {cluster_name}")
+    org = api.as_caller(admin.add_api_key(subject, home["org_id"]), home["org_id"], home["project_id"])
+    runtime_token = admin.add_cluster(cluster_name, home["org_id"])
+    for cluster in org.get_json(f"/orgs/{home['org_id']}/clusters")["clusters"]:
+        if cluster["name"] != cluster_name:
+            org.post(f"/orgs/{home['org_id']}/clusters/{cluster['name']}/disable").raise_for_status()
     scratch_dir = tmp_path / "scratch"
     scratch_dir.mkdir()
     log_path = tmp_path / "bare-agent.log"
@@ -93,7 +101,7 @@ def bare_agent(tmp_path, run_id: str):
     env = {
         "CLUSTER_NAME": cluster_name,
         "API_URL": API_URL,
-        "RUNTIME_TOKEN": admin.add_cluster(cluster_name, DEFAULT_ORG),
+        "RUNTIME_TOKEN": runtime_token,
         "SCRATCH_DIR": str(scratch_dir),
         "NODE_NAME": f"bare-e2e-node-{run_id}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
@@ -104,7 +112,7 @@ def bare_agent(tmp_path, run_id: str):
     platform_agent = f"agent-bare-e2e-{uuid.uuid4().hex[:8]}-{run_id}"
 
     try:
-        yield agent_bin, cluster_name, log_path, platform_agent
+        yield org, cluster_name, log_path, platform_agent
     finally:
         proc.kill()
         try:
@@ -136,7 +144,7 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
     """One sequential flow, ported as a single test since every step consumes state (cluster
     registration, resolved engine, platform experiment, agent) produced by the one before it --
     the same reason the bash scenario runs it as a single script."""
-    agent_bin, cluster_name, log_path, agent = bare_agent
+    org, cluster_name, log_path, agent = bare_agent
 
     # -- bare-agent process started, waiting for its first reconcile --
     eventually(
@@ -158,9 +166,9 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
             break
     assert engine is not None, f"could not determine which container engine the bare-agent resolved to (see {log_path})"
 
-    api.register_agent(agent)
-    pe_id = api.create_platform_experiment(f"bare-e2e-{run_id}", 1.0, 1, report_interval_seconds=10)
-    api.signup_and_start(pe_id, [agent])
+    org.register_agent(agent)
+    pe_id = org.create_platform_experiment(f"bare-e2e-{run_id}", 1.0, 1, report_interval_seconds=10)
+    org.signup_and_start(pe_id, [agent])
 
     # A job left RUNNING forever (e.g. this test asserting out early) would outlive its bare-agent
     # process once the fixture kills it -- its cluster never reports again, so every future poll of
@@ -169,14 +177,14 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
     # too. Cancel unconditionally on exit, same duty the bash scenario's `cleanup`/`trap EXIT` served.
     submitted_jobs: list[str] = []
     try:
-        _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submitted_jobs)
+        _run_bare_node_flow(org, pe_id, agent, cluster_name, engine, deadline, submitted_jobs)
     finally:
         for j in submitted_jobs:
             try:
-                api.cancel_job(j)
+                org.cancel_job(j)
             except Exception:
                 pass
-        api.close_platform_experiment(pe_id)
+        org.close_platform_experiment(pe_id)
 
 
 def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submitted_jobs: list[str]) -> None:
@@ -189,7 +197,6 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     # ==> run a job to completion, verify a real container backed it --
     job = api.submit_job(pe_id, agent, hours=0.01, job_overrides=job_override(2))
     submitted_jobs.append(job)
-    api.admit(job, cluster_name).raise_for_status()
 
     exp = eventually(
         f"{job} to reach RUNNING/COMPLETED on the bare-node cluster",
@@ -208,7 +215,7 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     )
     assert any(
         a["accelerator_type"] == TEST_CPU_TYPE and a["kind"] == "cpu" and a["total"] >= 1
-        for c in api.capacity(DEFAULT_ORG)["clusters"] if c["cluster_name"] == cluster_name
+        for c in api.capacity()["clusters"] if c["cluster_name"] == cluster_name
         for a in c["accelerators"]
     ), f"the bare-metal node does not report its cores as {TEST_CPU_TYPE}"
 
@@ -257,7 +264,6 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     # ==> cancel a running job, verify it actually stops --
     job2 = api.submit_job(pe_id, agent, hours=0.01, job_overrides=job_override(60))
     submitted_jobs.append(job2)
-    api.admit(job2, cluster_name).raise_for_status()
 
     exp2 = eventually(
         f"{job2} to reach RUNNING on the bare-node cluster",

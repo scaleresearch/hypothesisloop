@@ -213,8 +213,6 @@ def test_another_org_writes_nothing(tenants):
         ("POST", "/experiments", body_as_b),
         ("POST", f"/experiments/{b.job_id}/cancel", None),
         ("POST", f"/experiments/{b.job_id}/summary", {"summary": "taken over"}),
-        ("POST", f"/experiments/{b.job_id}/admit", {"cluster_name": a.cluster}),
-        ("POST", f"/experiments/{a.job_id}/admit", {"cluster_name": b.cluster}),
         ("POST", f"/experiments/{b.job_id}/metrics", {"metric_name": "val_accuracy", "fraction_complete": 0.5, "metric_value": 1}),
         ("POST", "/hypotheses", {"agent_id": a.agent, "platform_experiment_id": b.pe_id, "text": "intruding",
                                  "links": [{"type": "builds_on", "to": b.pe_id}], "distinct_from": []}),
@@ -366,7 +364,6 @@ def test_cluster_settings_belong_to_the_clusters_org(tenants, api):
         name = cluster["cluster_name"]
         for path in (f"/orgs/default/clusters/{name}", f"/orgs/{a.org_id}/clusters/{name}"):
             assert a.api.patch(path, {"scale_up_timeout_seconds": 61}).status_code == 404
-        assert a.api.post(f"/experiments/{a.job_id}/admit", {"cluster_name": name}).status_code == 404
     assert listed() == before
 
 

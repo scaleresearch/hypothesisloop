@@ -128,7 +128,7 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 	// "max" is the slot's size like any other request.
 	greedy := h100Job("greedy", domain.MaxResourceSentinel)
 	greedy.Job.Memory = domain.MaxResourceSentinel
-	if job := sized(t, c, greedy).EffectiveJob(); job.CPU != "8" || job.Memory != "32Gi" || job.Storage != "100Gi" || jobNeedsMaxResolution(job) {
+	if job := sized(t, c, greedy).EffectiveJob(); job.CPU != "8" || job.Memory != "32Gi" || job.Storage != "100Gi" {
 		t.Fatalf("a \"max\" job resolved to %s cpu, %s, %s", job.CPU, job.Memory, job.Storage)
 	}
 	// A grouped job of one node is resolved on its group.

@@ -100,7 +100,6 @@ func TestAnAbsentRowAndAnotherOrgsRowReadTheSame(t *testing.T) {
 		"hypothesis":          {access.Within(ctx, "hypothesis", "pe-b"), access.Within(ctx, "hypothesis", "pe-missing")},
 		"job":                 {access.Experiment(ctx, "job-b"), access.Experiment(ctx, "job-missing")},
 		"agent":               {access.Agent(ctx, "agent-b"), access.Agent(ctx, "agent-unregistered")},
-		"cluster":             {access.Cluster(ctx, "cluster-b"), access.Cluster(ctx, "cluster-unregistered")},
 		"project":             {access.Project(ctx, "prj-b"), access.Project(ctx, "prj-missing")},
 	} {
 		theirs, absent := pair[0], pair[1]
@@ -172,16 +171,6 @@ func TestNamingAnAgent(t *testing.T) {
 			t.Errorf("spender: %s stating (%q, %q): got = (%q, %q, %d), want (%q, %q, %d)", c.caller, c.pe, c.agent, pe, agent, status(err), c.wantPE, c.wantAgent, c.want)
 		}
 	}
-}
-
-func TestClusterAccess(t *testing.T) {
-	runChecks(t, "cluster", twoOrgs().Cluster, []check{
-		{"user of A", "cluster-a", 200}, {"user of A", "cluster-b", 404}, {"user of A", "cluster-unregistered", 404},
-		{"staff", "cluster-b", 200}, {"staff", "cluster-unregistered", 200},
-		{"user of A and B", "cluster-b", 200}, {"key of A", "cluster-a", 200}, {"key of A", "cluster-b", 404},
-		{"key of A's project a", "cluster-a", 404}, {"coordinator of pe-a", "cluster-a", 404},
-		{"agent in pe-a", "cluster-a", 404}, {"user with no org", "cluster-a", 404},
-	})
 }
 
 func TestOnlyStaffPassTheStaffCheck(t *testing.T) {
@@ -271,7 +260,6 @@ func TestARequestWithNoPrincipalReachesNothing(t *testing.T) {
 		"platform experiment": access.PlatformExperiment(ctx, "pe-a"),
 		"job":                 access.Experiment(ctx, "job-a"),
 		"agent":               access.Agent(ctx, "agent-a"),
-		"cluster":             access.Cluster(ctx, "cluster-a"),
 		"project":             access.Project(ctx, "prj-a"),
 	} {
 		if status(err) != http.StatusUnauthorized {

@@ -237,7 +237,6 @@ var routes = []route{
 	{method: "GET", path: "/experiments", request: "/experiments?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/experiments/stats", request: "/experiments/stats?platform_experiment_id=<pe>", rule: listed(agentAudience, reached)},
 	{method: "GET", path: "/experiments/{id}", request: "/experiments/<job>", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "POST", path: "/experiments/{id}/admit", request: "/experiments/<job>/admit", body: `{"cluster_name":"<cluster>"}`, rule: orgLevel(coordinatorAudience, http.StatusNotFound, reached)},
 	{method: "POST", path: "/experiments/{id}/cancel", request: "/experiments/<job>/cancel", rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/experiments/{id}/summary", request: "/experiments/<job>/summary", body: `{"summary":"s"}`, rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/experiments/reprioritize", rule: staffOnly},
@@ -442,7 +441,6 @@ var cases = []struct {
 	{"an owner turning on a cluster nobody registered", "user", "POST", "/orgs/org-a/clusters/cluster-none/enable", "", 404},
 	{"staff turning a cluster off for an org's jobs", "staff", "POST", "/orgs/org-a/clusters/cluster-a/disable", "", reached},
 	{"staff turning off a cluster the org cannot use", "staff", "POST", "/orgs/org-a/clusters/cluster-b/disable", "", 404},
-	{"a member placing a job on a cluster by hand", member, "POST", "/experiments/job-own/admit", `{"cluster_name":"cluster-a"}`, 403},
 	{"an API key accepting an invite", "org key", "POST", "/invites/accept", `{"token":"hli_t"}`, 403},
 
 	{"the shared platform experiments, listed by a person of another org", "user", "GET", "/platform-experiments?shared=true", "", reached},

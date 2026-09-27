@@ -613,8 +613,7 @@ An org decides which of those clusters its jobs use. `hl cluster disable my-clus
 registered or one the platform shares, and `hl cluster enable` (`.../enable`) turns it on again;
 an owner does the same with the switch on the cluster's row on Compute Resources. The decision is that
 org's alone: a shared cluster one org turned off still takes every other org's jobs. From then on
-no job of the org is placed there, by the scheduler or by `POST /experiments/{id}/admit`, which
-answers 409 `cluster_disabled`. The org's jobs already placed there are not touched and run to
+no job of the org is placed there. The org's jobs already placed there are not touched and run to
 their end. A job whose org turned off every cluster it could use waits with
 `not_admitted_reason: clusters_disabled`. `enabled` in `hl cluster list` shows the state, and a
 cluster that is off is left out of `hl capacity`.

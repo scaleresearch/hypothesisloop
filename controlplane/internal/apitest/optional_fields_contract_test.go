@@ -13,7 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // A field added to an existing request body must not become required, and huma makes it required
@@ -65,7 +64,7 @@ func openAPISpec(t *testing.T) map[string]any {
 	quota.RegisterAgentsHuma(doc, platformExperiments)
 	quota.RegisterPlanningHuma(doc, platformExperiments)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, nil, nil, worldRepositories{}, contractSettler{}, domain.GraceLimits{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
+		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	doc.MountExplore(r)
 

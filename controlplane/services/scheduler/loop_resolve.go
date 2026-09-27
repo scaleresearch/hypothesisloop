@@ -313,20 +313,6 @@ func resolveOrValidateDimension(qty, canonicalKey string, bound int64) (resolved
 	return qty, ""
 }
 
-// jobNeedsMaxResolution reports whether any CPU/memory/storage field of job (top-level or any
-// group's own) still carries the literal domain.MaxResourceSentinel — used by the manual
-// operator /admit endpoint (handler.go), which bypasses the ordinary tick's cluster-local
-// resolution entirely, to refuse rather than silently admit against a footprint that reads every
-// unresolved "max" field as zero.
-func jobNeedsMaxResolution(job domain.JobSpec) bool {
-	for _, g := range job.NodeGroups() {
-		if g.CPU == domain.MaxResourceSentinel || g.Memory == domain.MaxResourceSentinel || g.Storage == domain.MaxResourceSentinel {
-			return true
-		}
-	}
-	return false
-}
-
 // canonicalQuantityValue parses a JobSpec-style quantity string into the canonical unit
 // domain.NodeResource* uses for key (millicores for CPU, bytes for memory/storage).
 func canonicalQuantityValue(key, qty string) (float64, error) {

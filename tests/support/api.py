@@ -546,13 +546,6 @@ class API:
     def cancel_job(self, job_id: str) -> None:
         self.post(f"/experiments/{job_id}/cancel").raise_for_status()
 
-    def admit(self, job_id: str, cluster_name: str) -> requests.Response:
-        """POST /experiments/{id}/admit: force-admits a QUEUED experiment onto a named cluster,
-        going through the same capacity-claiming transition ordinary admission uses (see
-        controlplane/services/scheduler/handler.go's admit) -- for tests that must pin a job to a
-        specific cluster rather than leaving cluster choice to the scheduler."""
-        return self.post(f"/experiments/{job_id}/admit", {"cluster_name": cluster_name})
-
     def experiment_data(self, job_id: str) -> requests.Response:
         """Raw response for GET /experiments/{id}/data (a live listing of what the job left under
         its own prefix), so a caller can distinguish HTTP status from an empty-but-200 body -- a

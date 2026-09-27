@@ -23,7 +23,7 @@ import (
 //   - A person leaves an org by themselves, whatever their role. An invite is accepted by a
 //     signed-in person, for themselves. The store keeps an org from losing its last owner.
 //   - A cluster is administered by the administrators of the org that registered it, whatever is
-//     done to it: its settings, its priority, its identity, placing a job on it by hand, removing it. Only
+//     done to it: its settings, its priority, its identity, removing it. Only
 //     staff share it.
 //   - A caller sees the clusters its jobs can be placed on: its orgs' own and the shared ones.
 //     Of a cluster another org owns it sees the name and whether it is connected.
@@ -195,29 +195,6 @@ func (a *Access) KeyEnd(ctx context.Context, key *domain.APIKey) error {
 		return nil
 	}
 	return a.administers(ctx, p, key.OrgID)
-}
-
-// Cluster admits the principal to administer one registered cluster by its name alone. A cluster
-// outside the caller's reach, and every cluster for a token narrowed to one project or one
-// platform experiment, is not found. Staff pass on a name with no row and get the handler's own
-// answer for it.
-func (a *Access) Cluster(ctx context.Context, name string) error {
-	p, err := principal(ctx)
-	if err != nil {
-		return err
-	}
-	if p.Kind == KindStaff {
-		return nil
-	}
-	cluster, err := a.placement.GetCluster(ctx, name)
-	if err != nil {
-		return err
-	}
-	scope := p.Scope()
-	if cluster == nil || !scope.AdmitsOrg(cluster.OrgID) || scope.ProjectID != "" || scope.PlatformExperimentID != "" {
-		return NotFound("cluster")
-	}
-	return a.administers(ctx, p, cluster.OrgID)
 }
 
 // ProjectAdmin admits the caller to change one project, and returns it. A project the caller
