@@ -21,6 +21,10 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
         self.assertIn("agent_id: ag-planner", flat)
         self.assertIn("`hl platform-experiments propose`", flat)
+        # Every proposal of two runs asked for 3 researchers over 3 hours for goals met in 40 minutes.
+        self.assertIn("the smallest plan that can reach the goal", flat)
+        self.assertIn("Write the arithmetic in `sizing_reason`", flat)
+        self.assertIn("`hl job cost` shows what the platform billed", flat)
         self.assertNotIn("Every agent competes", flat)
         for word in ("One ranked metric that is the goal itself", "role `constraint`", "BASELINE block", "`hl job summary`",
                      "With revisions, the last one is what the person wants now"):

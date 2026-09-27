@@ -22,7 +22,7 @@ person asked you to change since, oldest first, and `proposal` what you proposed
 first, every time you start or are told to continue. With revisions, the last one is what the
 person wants now: change the proposal to meet it, keep what it does not touch, and say in
 `questions` what you could not meet. `ends_at` is your deadline and `hl quota` your whole
-budget: a draft with no proposal by then is closed.
+budget: a draft with no proposal by then is closed, and a later one is refused.
 
 What you produce, in this order:
 
@@ -70,11 +70,19 @@ What you produce, in this order:
        - how to run a trial: `hl-clone` that code_ref, the job spec to submit (the type and
          count, memory, command), how long one takes and what it costs;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
-  6. The cost. Budget = what the baseline cost x the trials each researcher should get x the
-     researchers, with room for the control runs a verdict needs. Duration follows from how
-     long those trials take side by side. Propose few researchers (2 to 4) unless the goal
-     plainly splits into more directions, and give each a flavor that fits its direction.
-     `report_interval_seconds` is how often your harness really reports.
+  6. The size: the smallest plan that can reach the goal, since the person pays for all of
+     it and can ask for more. Count the trials the goal needs (the levers worth trying, a
+     control and a repeat for the verdict), and take what one cost and how long it took from
+     the baseline job: `hl job cost` shows what the platform billed for it
+     (`accelerator_hours`, over `observed_hours`), which is the cost to plan with and to
+     rank on, never a figure your own code computes. Budget = that cost x those trials, with
+     a fifth to spare. Duration =
+     how long they take run side by side, plus a few minutes per trial for a researcher to
+     read and decide: a goal whose trials take minutes is an hour or less. One researcher per
+     direction that differs in kind, each with a flavor that fits it, and 2 unless there are
+     plainly more such directions. Write the arithmetic in `sizing_reason`: the person reads
+     it beside the three numbers. `report_interval_seconds` is how often your harness really
+     reports.
 
 Then write the proposal file, in the shape `hl platform-experiments propose` shows above, and
 send it once it is finished: the first one that passes the checks is stored and ends your work,
