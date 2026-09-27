@@ -497,6 +497,22 @@ func TestJobMetricsPointsAreJSONLinesAndTheHelpSaysSo(t *testing.T) {
 	}
 }
 
+// A refusal of the platform is one line of reason and message, for a cancel and a summary as
+// for a submit.
+func TestARefusedCancelOrSummaryPrintsItsReasonAndMessage(t *testing.T) {
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"reason": "invalid_transition", "message": "job job-1 is COMPLETED: only a QUEUED, SUBMITTED or RUNNING job is cancelled"}`, http.StatusConflict)
+	}))
+	for _, args := range [][]string{{"job", "cancel", "job-1"}, {"job", "summary", "job-1", "--text", "t"}} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr)
+		if code != 1 || stdout.Len() != 0 || strings.Count(stderr.String(), "\n") != 1 ||
+			!strings.HasSuffix(stderr.String(), `HTTP 409: {"reason":"invalid_transition","message":"job job-1 is COMPLETED: only a QUEUED, SUBMITTED or RUNNING job is cancelled"}`+"\n") {
+			t.Fatalf("%v: exit %d, stdout %q, stderr %q", args, code, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestJobStatusNotFound(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)

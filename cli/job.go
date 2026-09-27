@@ -49,6 +49,9 @@ of the experiment. The baseline job itself has none measured and states one. hl 
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
+A submit is refused with a reason: unknown_job_image for an image that is neither, as below;
+no_cluster_for_image when no cluster could run the job with its image, or with none;
+experiment_closed after the experiment's end.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
@@ -66,7 +69,7 @@ Minimal shape:
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
-    image: python                 # a job_image name from 'hl capacity', or a full registry address
+    image: python                 # a job_image name from 'hl capacity', or a full address, host first
     accelerator_type: ...         # a job on CPU states only its cores instead: cpu: 4
     accelerator_count: 1
     ...
@@ -264,12 +267,11 @@ type jobBrief struct {
 	CreatedAt         string          `json:"created_at"`
 }
 
-// briefMetrics prints a job's metrics as name: best and last, at six significant digits, with
-// the basis when it is not raw.
+// briefMetrics prints a job's metrics as name: value, at six significant digits, with the basis
+// when it is not raw. The value is the one the job is read by, which the metric's role decides.
 type briefMetrics []struct {
 	Name  string  `json:"name"`
-	Best  float64 `json:"best"`
-	Last  float64 `json:"last"`
+	Value float64 `json:"value"`
 	Basis string  `json:"basis"`
 }
 
@@ -280,8 +282,7 @@ func (m briefMetrics) MarshalJSON() ([]byte, error) {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		fmt.Fprintf(&b, `%q:{"best":%s,"last":%s`, metric.Name,
-			strconv.FormatFloat(metric.Best, 'g', 6, 64), strconv.FormatFloat(metric.Last, 'g', 6, 64))
+		fmt.Fprintf(&b, `%q:{"value":%s`, metric.Name, strconv.FormatFloat(metric.Value, 'g', 6, 64))
 		if metric.Basis != "raw" {
 			fmt.Fprintf(&b, `,"basis":%q`, metric.Basis)
 		}
@@ -361,7 +362,9 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
-One job per line, newest first: ids, status, metrics (best and last of each declared metric),
+One job per line, newest first: ids, status, metrics (one value per declared metric: on a
+ranking metric the job's best in its direction, on a constraint or an attribute its last, so
+report a ranking metric as a result, never as a running timer),
 ran_on (the machine: numbers compare only between jobs that share it), reasons, theory, cost
 and env, the settings that differ between the listed jobs (all of them for a job listed
 alone). hl job status ID
@@ -422,7 +425,8 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job, its whole record: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
-EVICTED, REJECTED or CANCELLED), metrics, finished_at, summary, phase_detail and the spec.
+EVICTED, REJECTED or CANCELLED), metrics (one value each, as in hl job list), finished_at,
+summary, phase_detail and the spec.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
 how its process ended (container_failed, oom_killed), when its runtime reported that.
 ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id (the
@@ -593,7 +597,7 @@ func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdo
 }
 
 func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a job that has not ended and prints it, CANCELLED. What it held of your quota is released, down to what it spent running.", stderr)
+	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a job that has not ended and prints it, CANCELLED. What it held of your quota is released, down to what it spent running. A job that has ended is refused invalid_transition, with its status.", stderr)
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
