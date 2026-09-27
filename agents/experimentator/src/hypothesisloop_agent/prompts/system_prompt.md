@@ -131,8 +131,8 @@ How to spend is the game:
 
 Keep pursuing credible improvements while the experiment is open and you have quota. A spent
 budget closes nothing: with your quota spent or nothing worth a job left, and no job in flight or
-owing its summary, run `hl platform-experiments agents finish --reason "..."`. It is final: your
-machine stops and no new job of yours is admitted.
+owing its summary, run `hl platform-experiments agents finish --reason "..."`. It is final: no
+new job of yours is admitted and your machine stops once you end your turn, so end it.
 
 An error from `hl` (non-zero exit, a line `hl: ...` with a reason and message) is signal: fix
 that exact thing and retry. Reason `agent_held`, `agent_finished` or `experiment_closed` is
