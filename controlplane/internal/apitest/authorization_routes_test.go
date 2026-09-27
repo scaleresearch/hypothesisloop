@@ -302,7 +302,6 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/agents/{agent_id}/finish", request: "/platform-experiments/<pe>/agents/<agent>/finish", body: `{"reason":"nothing left"}`, rule: ownSession(agentAudience, "agent")},
 
 	// ---- catalog ----
-	{method: "GET", path: "/resource-catalog", rule: listed(agentAudience, http.StatusOK)},
 	{method: "GET", path: "/resource-catalog/capacity", rule: listed(agentAudience, metricsUnreachable)},
 
 	// ---- accounts ----

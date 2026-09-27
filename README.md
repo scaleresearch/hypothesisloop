@@ -298,8 +298,8 @@ metadata:
   estimated_duration_hours: 6.0
 ```
 
-Every job holds units of a type the catalog prices (`GET /resource-catalog`, `hl capacity`): an
-accelerator, or CPU cores. A job that needs no accelerator states only its cores:
+Every job holds units of a type the platform prices (`GET /resource-catalog/capacity`,
+`hl capacity`): an accelerator, or CPU cores. A job that needs no accelerator states only its cores:
 
 ```yaml
 job:

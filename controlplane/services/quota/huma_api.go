@@ -652,14 +652,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	// ---- resource catalog ----
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-resource-catalog", Method: "GET", Path: "/resource-catalog",
-		Summary: "Get accelerator/CPU/RAM/storage billing rates", Tags: []string{"resource-catalog"},
-		Description: "Static reference data: which accelerator types exist and their billing rates. Listed here does NOT mean any cluster has one free — see /resource-catalog/capacity.",
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body ResourceCatalog }, error) {
-		return &struct{ Body ResourceCatalog }{Body: peh.catalog}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
 		Description: "Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own " +
