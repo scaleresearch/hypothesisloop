@@ -37,8 +37,8 @@ func (s *settingsStore) ListExperimentsWithStatus(_ context.Context, status doma
 // unobservableBackend runs the job on a type the metrics store cannot yet name.
 type unobservableBackend struct{ *scaleUpBackend }
 
-func (unobservableBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, error) {
-	return "", errors.New("no observation yet")
+func (unobservableBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, bool, error) {
+	return "", false, nil
 }
 
 // idsBackend is scaleUpBackend with a cluster id read that can fail and is counted.
@@ -377,6 +377,6 @@ type phaseByJobBackend struct {
 	phases map[string]workload.JobPhase
 }
 
-func (b *phaseByJobBackend) PollJobPhase(_ context.Context, exp *domain.Experiment) (workload.JobPhase, error) {
-	return b.phases[exp.ID], nil
+func (b *phaseByJobBackend) PollJobPhase(_ context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+	return b.phases[exp.ID], true, nil
 }

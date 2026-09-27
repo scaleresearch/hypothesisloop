@@ -26,17 +26,19 @@ type scaleUpBackend struct {
 	// experiment's current cluster/attempt (see TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound).
 	phaseDetailFound *bool
 	phaseErr         error
+	// phaseUnreported is a cluster with no status snapshot inside the liveness window.
+	phaseUnreported bool
 	// reason is what the runtime reports the job waits for, and firstReported when the attempt
 	// first reported each reason.
 	reason        string
 	firstReported map[string]time.Time
 }
 
-func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, error) {
-	return b.phase, b.phaseErr
+func (b *scaleUpBackend) PollJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, bool, error) {
+	return b.phase, !b.phaseUnreported, b.phaseErr
 }
-func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, error) {
-	return b.admittedType, nil
+func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, bool, error) {
+	return b.admittedType, true, nil
 }
 func (b *scaleUpBackend) PollPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, schedulingReason string, found bool, err error) {
 	found = true
@@ -354,29 +356,34 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 
 // A job whose every rank bound is past the placement deadline. A cluster that stops reporting its
 // phase releases the reservation at the admission deadline. A job the runtime reports as pending
-// and placed is starting and has the longer start timeout.
+// and placed is starting and has the longer start timeout. A cluster with no report yet is where
+// every placed job is for a moment, so it is no error; a phase that cannot be read is one, under
+// the same deadline.
 func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 	window := int64(600)
-	noPhase := errors.New("no snapshot")
+	unreadable := errors.New("metrics store unreachable")
 	for _, tc := range []struct {
 		name         string
+		unreported   bool
 		phaseErr     error
 		submittedAgo time.Duration
 		checkpoint   *int64
 		status       domain.ExperimentStatus
 		wantEvicted  bool
 	}{
-		{name: "no phase inside the admission deadline", phaseErr: noPhase, submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
-		{name: "no phase past the admission deadline", phaseErr: noPhase, submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
-		{name: "no phase inside the checkpoint window", phaseErr: noPhase, submittedAgo: 12 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "no phase inside the admission deadline", unreported: true, submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "no phase past the admission deadline", unreported: true, submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
+		{name: "no phase inside the checkpoint window", unreported: true, submittedAgo: 12 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "unreadable phase inside the admission deadline", phaseErr: unreadable, submittedAgo: 2 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
+		{name: "unreadable phase past the admission deadline", phaseErr: unreadable, submittedAgo: 6 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
 		{name: "pulling its image past the admission deadline", submittedAgo: 20 * time.Minute, status: domain.StatusSubmitted, wantEvicted: false},
 		{name: "pending past the start timeout", submittedAgo: 31 * time.Minute, status: domain.StatusSubmitted, wantEvicted: true},
 		{name: "pending past the start timeout inside the checkpoint window", submittedAgo: 35 * time.Minute, checkpoint: &window, status: domain.StatusSubmitted, wantEvicted: false},
-		{name: "running job with no phase", phaseErr: noPhase, submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
+		{name: "running job with no phase", unreported: true, submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
 		{name: "running job reading pending", submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
 	} {
 		store := &lifecycleStore{}
-		backend := &scaleUpBackend{phase: workload.JobPhasePending, phaseErr: tc.phaseErr, scheduledNodes: 1}
+		backend := &scaleUpBackend{phase: workload.JobPhasePending, phaseUnreported: tc.unreported, phaseErr: tc.phaseErr, scheduledNodes: 1}
 		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
 			WithStuckPendingTimeout(5 * time.Minute).WithStartTimeout(30 * time.Minute)
 		exp := scaleUpExperiment(1, tc.submittedAgo)
@@ -384,8 +391,8 @@ func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 		exp.ResolvedJob = &domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}
 
 		err := w.reconcileOne(context.Background(), exp, nil, clusterA)
-		if (err != nil) != (tc.phaseErr != nil) {
-			t.Errorf("%s: reconcile error = %v", tc.name, err)
+		if !errors.Is(err, tc.phaseErr) {
+			t.Errorf("%s: reconcile error = %v, want %v", tc.name, err, tc.phaseErr)
 		}
 		reasons := append(append([]string{}, store.requeuedReasons...), store.terminalReasons...)
 		if evicted := len(reasons) > 0; evicted != tc.wantEvicted {

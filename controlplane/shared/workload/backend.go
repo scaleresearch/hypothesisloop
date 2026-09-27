@@ -20,8 +20,10 @@ type Backend interface {
 	// to queue or suspend; if the backend needs to do its own gating, do it here.
 	CreateWorkload(ctx context.Context, exp *domain.Experiment) error
 
-	// PollJobPhase reports the current lifecycle phase of exp's job.
-	PollJobPhase(ctx context.Context, exp *domain.Experiment) (JobPhase, error)
+	// PollJobPhase reports the current lifecycle phase of exp's job. found=false means its
+	// cluster has reported no status within the liveness window: a job just placed is in that
+	// state until its runtime's next report.
+	PollJobPhase(ctx context.Context, exp *domain.Experiment) (phase JobPhase, found bool, err error)
 
 	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
 	// domain.PhaseDetail), plus the gang-readiness facts the scale-up-timeout watcher needs
@@ -34,8 +36,9 @@ type Backend interface {
 	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
 
 	// GetAdmittedAcceleratorType reports which accelerator type the job actually ran on. Backends that can
-	// substitute a different flavor than requested should read that back here.
-	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
+	// substitute a different flavor than requested should read that back here. found=false means
+	// no sample of this admission names a type yet, as in the first moments of a started job.
+	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (acceleratorType domain.AcceleratorType, found bool, err error)
 
 	// GetFlavorCapacity reports free capacity per connected cluster as a domain.Footprint (see
 	// domain.CapacityFootprint): available[cluster] is what can be claimed now, desiredFree[cluster]

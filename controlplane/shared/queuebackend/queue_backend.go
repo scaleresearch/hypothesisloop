@@ -59,16 +59,10 @@ var _ workload.Backend = (*Backend)(nil)
 // that could disagree with experiments.status.
 func (b *Backend) CreateWorkload(_ context.Context, _ *domain.Experiment) error { return nil }
 
-// PollJobPhase reads the latest fresh phase metric pushed by the cluster agent.
-func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error) {
-	phase, found, err := metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
-	if err != nil {
-		return workload.JobPhasePending, err
-	}
-	if !found {
-		return workload.JobPhasePending, fmt.Errorf("queuebackend: no current job-status snapshot for experiment %s in cluster %s", exp.ID, exp.ClusterName)
-	}
-	return phase, nil
+// PollJobPhase reads the latest fresh phase metric pushed by the cluster agent. found=false means
+// the cluster has no status snapshot inside the liveness window.
+func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
 }
 
 // PollPhaseDetail reads the runtime's latest reported explanation for why exp's container
@@ -95,9 +89,11 @@ func (b *Backend) PhaseReportedSince(ctx context.Context, exp *domain.Experiment
 // preemption would otherwise be readable through the tail of its previous pod's samples, and
 // comparing this against the newly reserved flavor would report a placement mismatch that
 // happened one admission ago.
-func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error) {
+//
+// found=false means no sample of this admission names a type yet.
+func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, bool, error) {
 	if exp.SubmittedAt == nil {
-		return "", fmt.Errorf("queuebackend: experiment %s has no submission time to read its accelerator type against", exp.ID)
+		return "", false, fmt.Errorf("queuebackend: experiment %s has no submission time to read its accelerator type against", exp.ID)
 	}
 	now := time.Now().UTC()
 	window := b.connectedWithin
@@ -105,16 +101,9 @@ func (b *Backend) GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Ex
 		window = sinceSubmit
 	}
 	if window <= 0 {
-		return "", fmt.Errorf("queuebackend: accelerator type for %s is not observed yet", exp.ID)
+		return "", false, nil
 	}
-	t, found, err := metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, now, window)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", fmt.Errorf("queuebackend: accelerator type for %s is not observed yet", exp.ID)
-	}
-	return t, nil
+	return metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, now, window)
 }
 
 // GetFlavorCapacity returns two views of each connected cluster's free capacity:

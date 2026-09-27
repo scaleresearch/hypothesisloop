@@ -340,12 +340,15 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	w.logger.Info("job_watcher: experiment running", zap.String("id", exp.ID))
 	var admittedType domain.AcceleratorType
 	if exp.AcceleratorCount > 0 {
-		var err error
-		admittedType, err = w.backend.GetAdmittedAcceleratorType(ctx, exp)
+		observedType, observed, err := w.backend.GetAdmittedAcceleratorType(ctx, exp)
 		if err != nil {
-			w.logger.Warn("job_watcher: observed accelerator type not yet available, will retry", zap.String("id", exp.ID), zap.Error(err))
+			w.logger.Error("job_watcher: read observed accelerator type", zap.String("id", exp.ID), zap.Error(err))
 			return "", runningTypeUnobservable
 		}
+		if !observed {
+			return "", runningTypeUnobservable
+		}
+		admittedType = observedType
 		if !admittedType.Is(exp.AcceleratorType) {
 			w.logger.Error("job_watcher: observed accelerator type disagrees with desired flavor",
 				zap.String("id", exp.ID), zap.String("desired", string(exp.AcceleratorType)), zap.String("observed", string(admittedType)))

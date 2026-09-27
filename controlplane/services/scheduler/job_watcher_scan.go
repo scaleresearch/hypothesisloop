@@ -139,16 +139,22 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// plainly Running — they were merely blocked from being *marked* RUNNING, which is a different
 	// fault with a different remedy, and refunding them as never-started billed nobody for real
 	// hardware.
-	phase, err := w.backend.PollJobPhase(ctx, exp)
-	if err != nil {
+	phase, reported, err := w.backend.PollJobPhase(ctx, exp)
+	if err != nil || !reported {
 		// A bound job is past the placement deadline above, and a cluster that stops reporting
-		// never yields a phase to act on, so the admission deadline is its only bound.
+		// never yields a phase to act on, so the admission deadline is its only bound. A cluster
+		// that has not reported yet is where every placed job is until its runtime's next
+		// report: the same deadlines bound it and there is nothing else to do. A RUNNING job on
+		// a cluster gone quiet is the controller's call (controller.checkSilence).
 		if exp.Status != domain.StatusRunning && bound {
 			if deadlineErr := w.evictIfStuckPending(ctx, exp, waitingFor, clusterIDs, domain.EvictionStuckPending); deadlineErr != nil {
 				return deadlineErr
 			}
 		}
-		return fmt.Errorf("poll actual phase: %w", err)
+		if err != nil {
+			return fmt.Errorf("poll actual phase: %w", err)
+		}
+		return nil
 	}
 
 	switch phase {

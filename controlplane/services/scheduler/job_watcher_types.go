@@ -66,8 +66,11 @@ type QuotaSettler interface {
 // deliberately backend-agnostic: JobWatcher never assumes Kubernetes (or any other
 // execution engine) underneath. Implemented by the PostgreSQL/metrics desired-state backend.
 type JobBackendClient interface {
-	PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, error)
-	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (domain.AcceleratorType, error)
+	// PollJobPhase's found=false means the job's cluster has reported no status within the
+	// liveness window, which every job is in between its placement and its runtime's next report.
+	PollJobPhase(ctx context.Context, exp *domain.Experiment) (phase workload.JobPhase, found bool, err error)
+	// GetAdmittedAcceleratorType's found=false means no sample of this admission names a type yet.
+	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (acceleratorType domain.AcceleratorType, found bool, err error)
 	// PollPhaseDetail is the runtime's latest explanation for why a job has not started (see
 	// domain.PhaseDetail), plus the gang-readiness facts checkScaleUpDeadline needs.
 	// found=false means no runtime has reported one yet.
