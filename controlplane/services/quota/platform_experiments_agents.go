@@ -383,7 +383,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
-			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are. " +
+			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
 			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 not_running anywhere else. Calling it again changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`

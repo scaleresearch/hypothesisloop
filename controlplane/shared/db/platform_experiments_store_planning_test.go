@@ -475,6 +475,29 @@ func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *te
 	held("renamed while running", 5)
 }
 
+// An agent's token is wound down from the moment it finished, which is read here.
+func TestAnAgentsFinishIsReadWithItsMoment(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	agents := spawnTestAgents(t, pes, id,
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"})
+	if err := pes.FinishAgent(ctx, id, agents[0], "the baseline is measured"); err != nil {
+		t.Fatal(err)
+	}
+	if at, err := pes.AgentFinishedAt(ctx, id, agents[0]); err != nil || at == nil || time.Since(*at) > time.Minute {
+		t.Errorf("the agent that finished: got = %v, %v, want the moment it did", at, err)
+	}
+	for name, agent := range map[string]string{"its neighbour at work": agents[1], "an agent that never joined": "ag-none"} {
+		if at, err := pes.AgentFinishedAt(ctx, id, agent); err != nil || at != nil {
+			t.Errorf("%s: got = %v, %v, want no moment", name, at, err)
+		}
+	}
+}
+
 // Without a baseline an open platform experiment never starts. One the platform closes before
 // its end time says why, and one that reached its end says that.
 func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -151,51 +150,37 @@ func TestASessionIsWrittenByItsOwnerAndReadByItsOwnerAndTheOrgThatOwnsTheExperim
 	}
 }
 
-func TestTheOrgReadsASessionAfterTheExperimentClosed(t *testing.T) {
-	closedAt := time.Now().Add(-domain.AgentWindDown - time.Hour)
-	placement := authtest.Placement{PlatformExperiments: sessionPlacement.PlatformExperiments, ClosedAt: map[string]time.Time{"pe-1": closedAt}}
+// Nothing about a session depends on the platform experiment's status: the org reads it for as
+// long as it is kept, and stores none whenever it asks.
+func TestTheOrgReadsASessionAndStoresNone(t *testing.T) {
 	store := &memorySessions{stored: map[string][]byte{"pe-1/ag-1": []byte("the agent's")}}
 	for name, caller := range map[string]auth.Principal{
 		"an owner of the org": {Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}},
 		"an org key":          {Kind: auth.KindKey, OrgIDs: []string{"org-a"}},
 		"staff":               {Kind: auth.KindStaff},
 	} {
-		if code, out := sessionCall(t, store, placement, caller, "GET", agentSession, nil); code != http.StatusOK || string(out) != "the agent's" {
-			t.Errorf("%s, long after the close: %d %s, want the stored session", name, code, out)
+		if code, out := sessionCall(t, store, sessionPlacement, caller, "GET", agentSession, nil); code != http.StatusOK || string(out) != "the agent's" {
+			t.Errorf("%s: %d %s, want the stored session", name, code, out)
 		}
-		if code, out := sessionCall(t, store, placement, caller, "PUT", agentSession, []byte("overwritten")); code != http.StatusForbidden {
-			t.Errorf("%s storing after the close: %d %s, want 403", name, code, out)
+		if code, out := sessionCall(t, store, sessionPlacement, caller, "PUT", agentSession, []byte("overwritten")); code != http.StatusForbidden {
+			t.Errorf("%s storing: %d %s, want 403", name, code, out)
 		}
 	}
 }
 
-// A coordinator's token still reads after the close. It stores nothing more once the wind-down
-// is over, as nothing else is accepted from a run that ended.
-func TestASessionIsStoredThroughTheWindDownAndNoLonger(t *testing.T) {
-	closedFor := func(d time.Duration) authtest.Placement {
-		closedAt := time.Now().Add(-d)
-		return authtest.Placement{
-			PlatformExperiments: sessionPlacement.PlatformExperiments,
-			ClosedAt:            map[string]time.Time{"pe-1": closedAt},
-		}
-	}
+// A coordinator's last turn is the one that writes the summary and closes, so its session is
+// stored with the token as it resolves once the experiment is closed, which leaves it reads and
+// the writes marked for after the close. In four real runs that turn was never stored: the
+// write was refused as one of the others. The token itself ends with the wind-down.
+func TestACoordinatorStoresItsSessionAfterTheClose(t *testing.T) {
 	store := &memorySessions{stored: map[string][]byte{}}
-	// The coordinator as its token resolves once the experiment is closed, which leaves it reads
-	// and the writes marked for after the close. In four real runs the turn that wrote the
-	// summary and closed was never stored: the write was refused as one of the others.
 	coordinator := coordinator
 	coordinator.PlatformExperimentClosed, coordinator.RunOver = true, true
-	if code, body := sessionCall(t, store, closedFor(domain.AgentWindDown-10*time.Second), coordinator, "PUT", coordinatorSession, []byte("last turn")); code != http.StatusOK {
-		t.Fatalf("inside the wind-down: %d %s, want 200", code, body)
+	if code, body := sessionCall(t, store, sessionPlacement, coordinator, "PUT", coordinatorSession, []byte("last turn")); code != http.StatusOK {
+		t.Fatalf("storing after the close: %d %s, want 200", code, body)
 	}
-	over := closedFor(domain.AgentWindDown + time.Second)
-	for path, caller := range map[string]auth.Principal{agentSession: agentOne, coordinatorSession: coordinator} {
-		if code, body := sessionCall(t, store, over, caller, "PUT", path, []byte("too late")); code != http.StatusConflict {
-			t.Fatalf("PUT %s after the wind-down: %d %s, want 409", path, code, body)
-		}
-	}
-	if code, body := sessionCall(t, store, over, coordinator, "GET", coordinatorSession, nil); code != http.StatusOK || string(body) != "last turn" {
-		t.Fatalf("reading after the wind-down: %d %s, want what was stored in it", code, body)
+	if code, body := sessionCall(t, store, sessionPlacement, coordinator, "GET", coordinatorSession, nil); code != http.StatusOK || string(body) != "last turn" {
+		t.Fatalf("reading after the close: %d %s, want what was stored", code, body)
 	}
 }
 

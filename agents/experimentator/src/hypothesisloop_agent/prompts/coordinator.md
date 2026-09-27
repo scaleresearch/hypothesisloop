@@ -134,8 +134,8 @@ mix the next run should start with, what the brief should have said from the sta
 what is open or actionable plus the conclusions, a few pages at most. Write it whenever you
 learn something that belongs in it and never for a wake with nothing new.
 
-A run closed by its end time or by someone else leaves you one last turn of about a minute, and
-your token still writes the summary after the close. Closing it yourself leaves none: write the
+A run closed by its end time or by someone else leaves you one last turn of about a minute:
+your token ends two minutes after the close. Closing it yourself leaves none: write the
 summary before `hl platform-experiments close`, then end your turn.
 
 An error from `hl` is signal: read its reason and message and fix that exact thing.

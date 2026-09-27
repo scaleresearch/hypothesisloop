@@ -40,11 +40,11 @@ type Principal struct {
 
 	PlatformExperimentID string
 	// PlatformExperimentClosed is set on a coordinator token whose platform experiment has
-	// closed: it still reads and files the summary, and does nothing else.
+	// closed: until its wind-down is over it reads and files the summary, and does nothing else.
 	PlatformExperimentClosed bool
 	// RunOver is set on an agent, coordinator or job token whose run has ended while the token
 	// still works: the platform experiment closed, the agent, for a job the agent it belongs
-	// to, was cut, or the agent is a planner whose answer is stored. Whatever would outlive the
+	// to, was cut, the agent finished, or it is a planner whose answer is stored. Whatever would outlive the
 	// wind-down, such as a credential good for an hour, is decided from it.
 	RunOver      bool
 	AgentID      string

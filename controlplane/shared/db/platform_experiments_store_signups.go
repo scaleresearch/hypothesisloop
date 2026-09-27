@@ -325,6 +325,20 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)
 	return finished, nil
 }
 
+// AgentFinishedAt returns when the agent finished in the platform experiment, nil while it has
+// not, and for an agent that is not in it.
+func (s *PlatformExperimentsStore) AgentFinishedAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
+	var finishedAt *time.Time
+	err := s.pool.pool.QueryRow(ctx, `SELECT finished_at FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID).Scan(&finishedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.AgentFinishedAt: %w", err)
+	}
+	return finishedAt, nil
+}
+
 // The last two columns are whether the agent's run ended long enough ago for its machine to be
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.

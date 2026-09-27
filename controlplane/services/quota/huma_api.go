@@ -521,8 +521,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
 		OperationID: "set-platform-experiment-summary", Method: "POST", Path: "/platform-experiments/{id}/summary",
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
-		Description: "Writable after the experiment closes — this is the one field whose whole point " +
-			"is to be written once the run is over and the results are in.",
+		Description: "Writable after the experiment closes: it is the one field whose whole point " +
+			"is to be written once the run is over and the results are in. A person or an API key writes it at any time. " +
+			"A coordinator's token writes it until two minutes after the close, when the token ends (401).",
 	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {

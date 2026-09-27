@@ -27,6 +27,7 @@ type fakeDirectory struct {
 	cutAt    map[string]time.Time
 	// answeredAt is when a planner answered its draft, by platform experiment and agent.
 	answeredAt map[string]time.Time
+	finishedAt map[string]time.Time
 	// notSignedUp and launchers are read by the methods in roster_test.go.
 	notSignedUp map[string]bool
 	launchers   map[string]bool
@@ -85,6 +86,10 @@ func (d *fakeDirectory) PlannerAnsweredAt(_ context.Context, pe, agent string) (
 	return at(d.answeredAt, pe+"/"+agent), d.fail
 }
 
+func (d *fakeDirectory) AgentFinishedAt(_ context.Context, pe, agent string) (*time.Time, error) {
+	return at(d.finishedAt, pe+"/"+agent), d.fail
+}
+
 func (d *fakeDirectory) ClusterOrg(_ context.Context, name string) (string, bool, error) {
 	org, ok := d.clusters[name]
 	return org, ok, d.fail
@@ -102,6 +107,7 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 		ended:      map[string]bool{},
 		cutAt:      map[string]time.Time{},
 		answeredAt: map[string]time.Time{},
+		finishedAt: map[string]time.Time{},
 		clusters:   map[string]string{"cluster-a": "org-a"},
 		staff:      map[string]bool{},
 		homes:      map[string][]string{},
@@ -162,15 +168,17 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 		scope  string
 		change func(*fakeDirectory)
 	}{
-		"runtime of an unregistered cluster":                      {RuntimeScope("cluster-typo"), func(*fakeDirectory) {}},
-		"job that has ended":                                      {JobScope("job-a"), func(d *fakeDirectory) { d.ended["job-a"] = true }},
-		"job that does not exist":                                 {JobScope("job-missing"), func(*fakeDirectory) {}},
-		"agent of a platform experiment closed a wind-down ago":   {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
-		"agent of a missing platform experiment":                  {AgentScope("pe-missing", "agent-1"), func(*fakeDirectory) {}},
-		"agent that was cut a wind-down ago":                      {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown }},
-		"agent cut long ago in a platform experiment just closed": {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
-		"planner that answered its draft a wind-down ago":         {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
-		"coordinator of a missing platform experiment":            {CoordinatorScope("pe-missing"), func(*fakeDirectory) {}},
+		"runtime of an unregistered cluster":                          {RuntimeScope("cluster-typo"), func(*fakeDirectory) {}},
+		"job that has ended":                                          {JobScope("job-a"), func(d *fakeDirectory) { d.ended["job-a"] = true }},
+		"job that does not exist":                                     {JobScope("job-missing"), func(*fakeDirectory) {}},
+		"agent of a platform experiment closed a wind-down ago":       {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
+		"agent of a missing platform experiment":                      {AgentScope("pe-missing", "agent-1"), func(*fakeDirectory) {}},
+		"agent that was cut a wind-down ago":                          {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown }},
+		"agent cut long ago in a platform experiment just closed":     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
+		"planner that answered its draft a wind-down ago":             {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
+		"agent that finished a wind-down ago":                         {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = woundDown }},
+		"coordinator of a platform experiment closed a wind-down ago": {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
+		"coordinator of a missing platform experiment":                {CoordinatorScope("pe-missing"), func(*fakeDirectory) {}},
 	} {
 		a, directory := newTestAuthenticator(t)
 		token := mustMint(t, testSecret, tc.scope)
@@ -180,13 +188,13 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 	}
 
 	a, directory := newTestAuthenticator(t)
-	directory.cutAt["pe-a/agent-2"] = woundDown
+	directory.cutAt["pe-a/agent-2"], directory.finishedAt["pe-a/agent-2"] = woundDown, woundDown
 	if _, err := a.Authenticate(ctx, mustMint(t, testSecret, AgentScope("pe-a", "agent-1"))); err != nil {
-		t.Errorf("an agent whose rival was cut: got = %v, want it still admitted", err)
+		t.Errorf("an agent whose rival was cut and finished: got = %v, want it still admitted", err)
 	}
 }
 
-func TestAnAgentTokenOutlivesCloseAndCutByTheWindDownOnly(t *testing.T) {
+func TestAnAgentTokenOutlivesTheEndOfItsRunByTheWindDownOnly(t *testing.T) {
 	ctx := context.Background()
 	lastInstant := testNow.Add(-domain.AgentWindDown + time.Second)
 	for name, change := range map[string]func(*fakeDirectory){
@@ -195,6 +203,8 @@ func TestAnAgentTokenOutlivesCloseAndCutByTheWindDownOnly(t *testing.T) {
 		"agent cut this instant":                          func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = testNow },
 		"agent cut a second short of it":                  func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = lastInstant },
 		"planner answered a second short of it":           func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = lastInstant },
+		"agent finished this instant":                     func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = testNow },
+		"agent finished a second short of it":             func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = lastInstant },
 	} {
 		a, directory := newTestAuthenticator(t)
 		change(directory)
@@ -205,7 +215,9 @@ func TestAnAgentTokenOutlivesCloseAndCutByTheWindDownOnly(t *testing.T) {
 	}
 }
 
-func TestACoordinatorTokenOutlivesCloseAndSaysSo(t *testing.T) {
+// A coordinator writes its closing summary after the close, in the wind-down its machine is kept
+// for. Its token says the experiment is closed for as long as it works, and works no longer.
+func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	ctx := context.Background()
 	token := mustMint(t, testSecret, CoordinatorScope("pe-a"))
@@ -213,11 +225,19 @@ func TestACoordinatorTokenOutlivesCloseAndSaysSo(t *testing.T) {
 	if err != nil || open.PlatformExperimentClosed {
 		t.Fatalf("while open: got = %+v, %v, want it admitted and not marked closed", open, err)
 	}
-	directory.closedAt["pe-a"] = testNow.Add(-30 * 24 * time.Hour)
-	closed, err := a.Authenticate(ctx, token)
-	if err != nil || closed.Kind != KindCoordinator || !closed.PlatformExperimentClosed {
-		t.Fatalf("a month after close: got = %+v, %v, want it admitted and marked closed", closed, err)
+	for name, closedAt := range map[string]time.Time{
+		"closed this instant":                  testNow,
+		"closed a second short of a wind-down": testNow.Add(-domain.AgentWindDown + time.Second),
+	} {
+		directory.closedAt["pe-a"] = closedAt
+		closed, err := a.Authenticate(ctx, token)
+		if err != nil || closed.Kind != KindCoordinator || !closed.PlatformExperimentClosed {
+			t.Fatalf("%s: got = %+v, %v, want it admitted and marked closed", name, closed, err)
+		}
 	}
+	directory.closedAt["pe-a"] = testNow.Add(-domain.AgentWindDown)
+	p, err := a.Authenticate(ctx, token)
+	assertRefused(t, "a wind-down after the close", p, err)
 }
 
 func TestForgedTokensAreRefusedBeforeAnyRowIsRead(t *testing.T) {

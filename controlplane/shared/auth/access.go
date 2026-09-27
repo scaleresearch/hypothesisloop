@@ -245,19 +245,15 @@ func (a *Access) ActAs(ctx context.Context, agentID string) error {
 // here even to a read.
 //
 // WriteSession admits only the one the session belongs to: the agent agentID with its own
-// token, or with no agentID the platform experiment's coordinator with its. Writing is refused
-// once the platform experiment has been closed for domain.AgentWindDown, when an agent's token
-// has ended and a coordinator's is left to read and to file the summary.
+// token, or with no agentID the platform experiment's coordinator with its. Either token ends
+// domain.AgentWindDown after its run did, and with it the writing.
 func (a *Access) WriteSession(ctx context.Context, platformExperimentID, agentID string) error {
-	p, closedAt, err := a.sessionCaller(ctx, platformExperimentID)
+	p, err := a.sessionCaller(ctx, platformExperimentID)
 	if err != nil {
 		return err
 	}
 	if !ownsSession(p, platformExperimentID, agentID) {
 		return forbidden("a session is written only by the agent or the coordinator it belongs to, with its own token")
-	}
-	if closedAt != nil && !time.Now().Before(closedAt.Add(domain.AgentWindDown)) {
-		return &Error{status: http.StatusConflict, Message: "platform experiment " + platformExperimentID + " is closed and its wind-down is over: no session is stored any more"}
 	}
 	return nil
 }
@@ -267,7 +263,7 @@ func (a *Access) WriteSession(ctx context.Context, platformExperimentID, agentID
 // They read it while the platform experiment runs and after it has closed. Another agent of the
 // platform experiment and its coordinator read no agent's session.
 func (a *Access) ReadSession(ctx context.Context, platformExperimentID, agentID string) error {
-	p, _, err := a.sessionCaller(ctx, platformExperimentID)
+	p, err := a.sessionCaller(ctx, platformExperimentID)
 	if err != nil {
 		return err
 	}
@@ -277,22 +273,22 @@ func (a *Access) ReadSession(ctx context.Context, platformExperimentID, agentID 
 	return nil
 }
 
-func (a *Access) sessionCaller(ctx context.Context, platformExperimentID string) (Principal, *time.Time, error) {
+func (a *Access) sessionCaller(ctx context.Context, platformExperimentID string) (Principal, error) {
 	p, err := principal(ctx)
 	if err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
 	if err := validID("platform experiment", platformExperimentID); err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
-	tenancy, closedAt, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
+	tenancy, _, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
 	if err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
 	if !p.Scope().Unrestricted() && (tenancy == nil || !p.Scope().Admits(*tenancy)) {
-		return Principal{}, nil, NotFound("platform experiment")
+		return Principal{}, NotFound("platform experiment")
 	}
-	return p, closedAt, nil
+	return p, nil
 }
 
 func ownsSession(p Principal, platformExperimentID, agentID string) bool {

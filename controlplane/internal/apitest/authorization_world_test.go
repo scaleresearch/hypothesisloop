@@ -100,6 +100,10 @@ func (w *world) ExperimentTenancy(_ context.Context, id string) (*domain.Tenancy
 
 func (w *world) AgentCutAt(context.Context, string, string) (*time.Time, error) { return nil, nil }
 
+func (w *world) AgentFinishedAt(context.Context, string, string) (*time.Time, error) {
+	return nil, nil
+}
+
 func (w *world) PlannerAnsweredAt(context.Context, string, string) (*time.Time, error) {
 	return nil, nil
 }
