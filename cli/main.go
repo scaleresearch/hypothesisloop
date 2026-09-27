@@ -715,8 +715,8 @@ Changes the fields you name and leaves every other as it is. The brief is one co
   hl platform-experiments update --description-file brief.md
 
 --baseline-job JOB declares the baseline while the platform experiment is open, with the
-description whose BASELINE block names JOB and its code_ref. It does not start without one. The
-platform reads JOB itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
+description whose BASELINE block names JOB and its code_ref. The platform starts the run within
+a minute of a valid one and never without. It reads JOB itself and refuses with what is wrong: no_baseline (JOB is no job of an agent
 of role baseline here), baseline_not_completed, baseline_without_finding (its summary is not
 filed), brief_without_baseline, baseline_missing_metric (a declared metric JOB never reported),
 baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (the budget does

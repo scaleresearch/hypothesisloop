@@ -46,6 +46,7 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 The only way an agent joins a platform experiment, and only while it is open. The first form creates one agent; the second joins one that is
 registered already. For several agents, run it once for each. With --hosted the platform runs the agent.
+max_agents counts researchers (role competitor) alone, finished ones too.
 Without it the line printed carries the agent's token: start the agent yourself with that as
 HL_TOKEN and the API's address as API_URL, which is all it needs. Keep the token out of
 command lines and shell history; write it to an env file the container reads.`, stderr)
@@ -93,8 +94,9 @@ func agentsRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	fs := newFlags("platform-experiments agents remove", `usage: hl platform-experiments agents remove [--platform-experiment PE] AGENT
 
 Takes the agent out of a platform experiment that is still open: its token stops working and a
-hosted agent's machine is taken down. Refused once the experiment has started; from then on an
-agent leaves by being cut or by the experiment closing.`, stderr)
+hosted agent's machine is taken down. A coordinator's token removes only an agent it added.
+Refused once the experiment has started; from then on an agent leaves by being cut or by the
+experiment closing.`, stderr)
 	named := experimentFlag(fs)
 	agent, err := parseOne(fs, args, "AGENT", "", "agent")
 	if err != nil {

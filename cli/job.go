@@ -73,9 +73,8 @@ Minimal shape:
 
 Only hypothesis_id, theory and, in job, an image, a command and accelerator_type with
 accelerator_count, or cpu, are needed, and estimated_duration_hours where the platform measured
-none. Any other image value is refused. The platform's job images have no virtualenv: install
-with uv pip install --system. cpu, memory and storage left out are the job's share of the node;
-max_retries left out is 0.
+none. Any other image is refused. A job image has no virtualenv: uv pip install --system.
+cpu, memory and storage left out are the job's share of the node; max_retries left out is 0.
 
 The full DSL reference is experiment-submission.yaml: in an agent's image under
 $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, stderr)

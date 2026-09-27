@@ -95,7 +95,9 @@ silently improvise.
    creates the experiment with. `hl repo init` in a clone adds the files it lacks and overwrites
    none. The platform checks no repository at a direct create, so before agents start run
    `hl repo check` in a clone at the baseline commit and fix what it names
-   (`experiment-checklist.md`, "A ready repository"). A job spec here whose `image` is still a
+   (`agents/coordinator/experiments/template/experiment-checklist.md`, "A ready repository"). It
+   checks the layout and that each file is valid, and never that the files describe this
+   experiment, so read them against the brief. A job spec here whose `image` is still a
    `REPLACE-WITH` names an address only a deployment knows: fill it in in the clone as step 4
    says, commit and push.
    Agents can push to the repository, so protecting its default branch is the repository
@@ -122,21 +124,23 @@ silently improvise.
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
    publishes the S3 store (Silo) on `:9000` and creates the bucket; the host address is reachable from the
    control-plane containers as well, so one value serves both.
-4. **Job image.** The control plane decides a job's image when it admits the job, and no
-   runtime puts one in. `hl capacity` ends with the images the deployment offers (`job_image`
-   its name, `image` what `job.image` takes, `carries` what is installed), names on each
-   type's line the ones that suit it (`job_images`), and marks a cluster that runs one image
-   and no other with `only_job_image`. So the base job spec names an image from that list that
-   suits the hardware, and leaves `image` out only when the cluster it is meant for shows
-   `only_job_image`. A job that names no image is placed on such a cluster only, and a job
-   that names an image is never placed on a cluster whose `only_job_image` is another one:
-   either stays QUEUED with `not_admitted_reason: no_cluster_for_image`. `make images`
-   builds and pushes the offered image with no framework, `make job-images` the others.
-   An experiment whose job spec names an offered image (`dummy-data-search-demo` names
-   `python`) takes the `image` value of that entry from `hl capacity`, verbatim, into
-   `.hypothesisloop/job.yaml` in the clone of its repository.
-   An experiment whose seed builds an image of its own names that one, so it needs a cluster
-   without `only_job_image` that can pull it. Build it before agents start (e.g.
+4. **Job image.** Every job names its image, on CPU, GPU and chip clusters alike, and
+   `job.image` is one of two things: the name of a job image exactly as `hl capacity` shows it,
+   or the full registry address of an image of the experiment's own. Anything else is refused
+   at submit. `hl capacity` ends with the job images the deployment offers (`job_image` the
+   name, `carries` what is installed), names on each type's line the ones that suit it
+   (`job_images`), and marks a cluster that runs one image and no other with `only_job_image`:
+   a job meant for that cluster names that image, and one that names another is never placed
+   there and stays QUEUED with `not_admitted_reason: no_cluster_for_image`. The platform's job
+   images come without a virtualenv, so a plain `uv pip install` stops with no environment to
+   install into: a job installs with `uv pip install --system PACKAGE`, which works in each of
+   them. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
+   `python` image and hides the framework a framework image carries. `make images` builds and
+   pushes the offered image with no framework, `make job-images` the others. An experiment
+   whose job spec runs in an offered image states its name (`dummy-data-search-demo` states
+   `image: python`).
+   An experiment whose seed builds an image of its own names that one, by its full
+   registry address, so it needs a cluster without `only_job_image` that can pull it. Build it before agents start (e.g.
    `make sparse-sdpa-workload-image`) and smoke-test it
    on real hardware (`podman run --device /dev/tenstorrent/0 -v
    /dev/hugepages-1G:/dev/hugepages-1G ...`) — a missing hugepages mount fails with
@@ -162,7 +166,7 @@ experiment is: `name`, `description`, `metrics`. Confirm its `description` is st
 `experiment.md`'s current `EXPERIMENT DESCRIPTION` block verbatim (the only thing agents read
 about the objective — system prompt is experiment-agnostic). A copy of
 `agents/coordinator/experiments/template/run.yaml`, kept outside the tree, states this run:
-`repository`, `budget_accelerator_hours`, `max_agents`, `starts_at`, `duration_hours`. They
+`repository`, `budget_accelerator_hours`, `max_agents`, `duration_hours`, `coordinator_hosted`. They
 depend on `NUM_AGENTS`/`CHIPS_PER_AGENT`/`planned_run_hours`, decided now, not ahead of time.
 Fill in every `REPLACE-WITH`, then:
 
@@ -171,7 +175,8 @@ Fill in every `REPLACE-WITH`, then:
 
 `controlplane/settings/examples/experiment.yaml` is the full DSL reference.
 
-Required of a direct create (`GET $API_URL/openapi.json` is the source of truth): `name`,
+Required of a direct create (`$API_URL/explore/coordinator` reads the API out in plain text and
+`GET $API_URL/openapi.json` is the source of truth): `name`,
 `description`, `metrics`, `budget_accelerator_hours`, a positive `max_agents`, and exactly one
 of `duration_hours` and `ends_at` (RFC3339). A run lasts 30 days at most
 (`quota.max_platform_experiment_days`), and one stated longer is refused `run_too_long`.
@@ -183,6 +188,12 @@ the request and never read from the repository. A deployment on a plain git host
 `from_repo` (`experiment_file_unsupported`), so the command above states everything and works
 on both.
 
+Creating makes the experiment, `open`, and no agent. From there every experiment goes the same
+way, whoever does each part: the researchers are added (section 4), a baseline agent measures
+the control, its job is declared as the baseline, and the platform starts the run within a
+minute of the declaration. Nobody starts it by hand, and `duration_hours` counts from that
+start.
+
 The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
 has it run the coordinator: one more machine beside the agents', started from the same image with the
@@ -190,22 +201,28 @@ platform experiment's coordinator token and briefed with
 `agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
 for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
-default applies. Both keys are read from the request only. Creating makes the experiment and no agent. With a hosted coordinator
-and hosted agents, creating the experiment, adding the agents and `hl platform-experiments start`
-is all there is to do: the coordinator keeps the
+default applies. Both keys are read from the request only. With a hosted coordinator and hosted
+agents, creating the experiment and adding the researchers is all there is to do: the
+coordinator adds the baseline agent, declares its job, keeps the
 description true to what is learned and writes its findings as the experiment's summary
 (`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
-(section 4). Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
+(section 4). `hl platform-experiments agents session coordinator` writes out what it said and
+saw. Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
 pushes nothing. It closes the experiment only when the run can produce nothing more, and says
-why in the summary first. It cannot start the experiment, run a baseline itself, act as an
-agent, or change anything of the experiment but the description (the budget, `max_agents`, the
-schedule and the stages answer 403 to its token); it writes those down for you.
+why in the summary first. It adds agents and removes only the ones it added. It cannot run a
+baseline itself, act as an agent, or change anything of the experiment but the description (the
+budget, `max_agents`, the schedule and the stages answer 403 to its token); it writes those
+down for you.
+
+Without `coordinator_hosted` you are the coordinator, with your own token: you add the baseline
+agent and declare its job, as the baseline item below says, and supervise with `supervise.md`.
 
 - `budget_accelerator_hours = NUM_AGENTS * CHIPS_PER_AGENT * planned_run_hours` — not a round
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
-- `max_agents` is the size of the ranked field — every agent that signs up competes and counts
-  against it, there is no separate role that doesn't.
+- `max_agents` is how many researchers (agents of role `competitor`, whatever their flavor) may
+  join over the whole run. One that finished or was cut still counts. Agents of role
+  `baseline`, reviewers, the planner and the coordinator never count.
 - `metrics`: `{key, direction, role?}[]` — `"role":"ranking"` on the metric `experiment.md` calls
   RANKING METRIC, no role on the rest.
 - Every reported metric value has an implicit `metric_basis`, default `"raw"`. If a job's value
@@ -245,33 +262,33 @@ schedule and the stages answer 403 to its token); it writes those down for you.
   reliably stop an in-flight retry loop by itself.
 - **The baseline is measured and declared before the experiment starts, and the platform holds
   you to it.** The `BASELINE` block lives inside the `EXPERIMENT DESCRIPTION` block you just
-  posted (see `experiment-checklist.md` item 1 for its four lines) and says
+  posted (see item 1 of
+  `agents/coordinator/experiments/template/experiment-checklist.md` for its four
+  lines) and says
   `measured: not yet established` at the create. While the experiment is `open`:
   1. add one agent with `hl platform-experiments agents add --role baseline` (`--hosted` to have
-     the platform run it). It holds a quota at once, its job is the only one an open experiment
-     accepts, and it takes no share at the start;
+     the platform run it). It holds a quota at once, its jobs are the only ones an open
+     experiment accepts, it does not count against `max_agents`, and it takes no share at the
+     start;
   2. it runs the repository's job spec, files the job's summary and finishes;
   3. fill the block (`code_ref:`, `metric:`, `measured:` the job's id) and declare it:
      `hl platform-experiments update --description-file FILE --baseline-job JOB`. A refusal
      names what does not hold: the job, the brief, a gate the baseline breaks, or a budget that
      does not cover one such trial for each of `max_agents`.
-  `hl platform-experiments start` answers `baseline_required` until then, and an experiment
-  still open without a baseline `planning.baseline_limit_minutes` after its `starts_at` is
-  closed (`baseline_limit_reached`). A hosted coordinator does steps 1 and 3 itself.
-- `starts_at` must leave time to add every agent (step 4), never "now". Agents join only while
-  the status is `open`, and it flips to `running` within a minute of `starts_at` passing once at
-  least one agent has joined and the baseline is declared (`SweepAutoStart` in
-  `controlplane/services/quota/platform_experiments_lifecycle.go`). Quota is divided at that
-  moment over the agents present, and one added later is refused `signup_closed`. How long an
-  agent's container takes to boot no longer matters: an agent is in the experiment from the
-  moment it is added, whenever its harness starts. Add the whole roster in one go, or keep
-  `starts_at` a few minutes out until it is complete.
+  A hosted coordinator does steps 1 and 3 itself. Without one you do them. The platform starts
+  the run within a minute of a valid declaration, and an experiment still open without a
+  baseline after `planning.baseline_limit_minutes` (90) is closed (`baseline_limit_reached`).
+- Add every researcher (step 4) before the baseline is declared. Agents join only while the
+  status is `open`. Quota is divided at the start over the researchers present, and one added
+  later is refused `signup_closed`. How long an agent's container takes to boot does not
+  matter: an agent is in the experiment from the moment it is added, whenever its harness
+  starts.
 
 ## 3. Decide the flavor mix and the sweep
 
-Every agent that signs up competes — ranked, cut at stage boundaries, eligible for the top-3
-bonus. There is no other role, and the platform never branches on one: every agent's jobs are
-admitted, billed, evicted and settled by identical code.
+Every researcher competes: ranked, cut at stage boundaries, eligible for the top-3 bonus. The
+baseline agent of step 2 is the one agent that does not. Every agent's jobs are admitted,
+billed, evicted and settled by identical code.
 
 What differs between agents is two independent things, both decided here and set when the agents
 are added (step 4):
@@ -381,7 +398,8 @@ environment. `hl` in the container reads its agent and its platform experiment f
 so no command of an agent names either. A lost token is printed again by
 `hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
 nothing for an agent that already joined. `hl platform-experiments agents remove` takes an agent
-out again while the experiment is still open.
+out again while the experiment is still open. A coordinator's token removes only an agent it
+added itself.
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
 mount with `--userns=keep-id -v ~/.claude/.credentials.json:/agent/.claude/.credentials.json:ro

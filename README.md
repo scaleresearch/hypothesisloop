@@ -186,8 +186,10 @@ hl platform-experiments agents add --platform-experiment pe-123            # cre
 hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops
-hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close
-hl platform-experiments list                               # yours and the ones the platform shares with every account
+hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close;
+                                                           # `coordinator` or `planner` in place of the id for theirs
+hl platform-experiments list                               # yours and the ones the platform shares with every account, one line each
+hl platform-experiments update --description-file brief.md --baseline-job job-1  # declare the baseline; the platform then starts the run
 hl quota                                                   # your share of the budget and what a job submitted now may still hold of it
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators and CPU cores per cluster
@@ -198,12 +200,12 @@ hl hypothesis link h-2 --type contradicts --to h-1
 hl hypothesis comment h-1 --text "..."
 hl hypothesis status h-1 confirmed --against JOB            # the control it was compared with; needs two completed jobs of its own
 hl repo init                                               # in a clone: add README.md, .hypothesisloop/experiment.yaml, .hypothesisloop/job.yaml and .gitignore where missing
-hl repo check                                              # in a clone: name what is left to fill in before the repository is ready
+hl repo check                                              # in a clone: check the layout and that each file is valid, never whose experiment the files describe
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --env LR=0.1  # submit the base job spec against a hypothesis, overriding it
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --secret-env HF_TOKEN  # hand the job $HF_TOKEN from your environment; no read of the job shows it
 hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
 hl job status job-1 job-2                                  # one line per job
-hl job metrics job-1                                       # last, min and max per metric; --points for all
+hl job metrics job-1                                       # last, min and max per metric; --points for every point, as JSON lines
 hl job summary job-1 --text "..."
 hl job logs job-1 | data job-1 | cost job-1 | cancel job-1
 hl job stats                                               # counts by status and eviction reason
@@ -223,7 +225,7 @@ hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. A note for the reader, such as what to do about an experiment that is still open, goes to stderr and never into that output. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Coordinator and researcher experiments
 
@@ -231,6 +233,23 @@ A platform experiment doesn't run itself. It's driven by two kinds of LLM agent 
 
 - **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
 - **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. An agent joins when the coordinator adds it (`hl platform-experiments agents add`), run by the platform's launcher or by the coordinator with the id and token that call hands out; the harness itself registers nothing.
+
+A platform experiment begins one of two ways, and both end in the same run:
+
+- **From a sentence** (the wizard, next section): a planner proposes the experiment, a person
+  accepts it, and the platform runs the coordinator.
+- **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`): the request
+  states the experiment. With `coordinator_hosted: true` in it the platform runs the
+  coordinator, one more machine beside the agents'. Left out, the person who created it does
+  the coordinator's part with their own token.
+
+Either way it is `open` after that and nothing runs. Its owner adds the researchers
+(`hl platform-experiments agents add`, `--hosted` to have the platform run each), a baseline
+agent measures the control, the coordinator declares that job as the baseline, and the platform
+starts the run within a minute of the declaration. Nobody starts it by hand. `max_agents` is how
+many researchers may join over the whole run: one that finished or was cut still counts, and
+baseline agents, the planner and the coordinator never do. A coordinator's token adds agents
+and removes only the ones it added.
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
@@ -240,34 +259,44 @@ Experimentators in a fleet don't all run the same way. Each one launches with a 
 
 A platform experiment can also start from a sentence saying what to find out, on the home page
 or with `POST /platform-experiments/drafts {project_id, goal}`. That makes a **draft**, and the
-platform runs a **planner** for it: an agent that chooses the metric and the gate, writes the
-brief and sizes the run, and proposes the experiment (`hl platform-experiments propose`). It
-runs nothing, so a proposal is there in minutes and its budget is an estimate and a cap. A person
-then accepts it, stating the budget, the duration and the researchers themselves
-(`POST /platform-experiments/{id}/accept`), or asks for a change in a sentence
-(`.../revise`), or closes the draft. A planner that cannot make the goal into an experiment
-declines with a reason (`hl platform-experiments decline --reason`), which the draft's page
-shows in place of a proposal and which a revision answers.
+platform runs a **planner** for it: an agent of role `planner` that chooses the metric and the
+gate, writes the brief and sizes the run, and proposes the experiment
+(`hl platform-experiments propose`). It runs nothing, so a proposal is there in minutes and its
+budget is an estimate and a cap. A person then accepts it, stating the budget, the duration and
+the researchers themselves (`POST /platform-experiments/{id}/accept`), or asks for a change in a
+sentence (`.../revise`), or closes the draft. An accepted draft is an `open` experiment with a
+hosted coordinator. A planner that cannot make the goal into an experiment declines with a
+reason (`hl platform-experiments decline --reason`). A declined draft is a state of its own: its
+page shows the reason (`declined_reason`) in place of a proposal, there is nothing to accept,
+and a revision answers it.
 
 The platform pays for planning, within the time limits of the `planning` section of the settings.
 
 ### A baseline before anyone competes
 
 No platform experiment starts without a declared baseline, whether a person accepted a draft or
-created the experiment whole. While it is `open`, an agent added with `--role baseline` builds
-the harness the brief describes (or runs the repository's job spec as it is when `hl repo check`
-passes and it fits), measures the control with one real job and files what it measured. Its job
-is the only one an open experiment accepts, and no researcher's machine is rented until the run
-starts. The coordinator then declares it:
-`hl platform-experiments update --description-file FILE --baseline-job JOB`. The platform checks
-the job (completed, by a baseline agent of this experiment, with a finding, reporting every
-metric, holding every gate, named in the brief's `BASELINE` block) and that the budget covers
-one such trial for each researcher (`budget_below_baseline`), and stores the estimate of one
-trial: the hours the job was observed running plus a half (`job_estimated_duration_hours`). A
-job that states no `estimated_duration_hours` gets that one, so the committed job spec states
-none and only the baseline job is submitted with a guess. `start` answers `baseline_required`
-until then, and an experiment still open without a baseline after
-`planning.baseline_limit_minutes` is closed with `close_reason: baseline_limit_reached`.
+created the experiment whole. While it is `open`:
+
+1. A baseline agent joins. A hosted coordinator adds it. An owner without a hosted coordinator
+   adds it: `hl platform-experiments agents add --role baseline --hosted`.
+2. The baseline agent builds the harness the brief describes, or runs the repository's job spec
+   as it is when the files fit this experiment, measures the control with one real job and
+   files what it measured. Its jobs are the only ones an open experiment accepts, and no
+   researcher's machine is rented until the run starts.
+3. The baseline is declared: `hl platform-experiments update --description-file FILE
+   --baseline-job JOB`, where the brief's `BASELINE` block names the job and its `code_ref`. A
+   hosted coordinator does it. An owner without one runs the same command with their own token.
+
+The platform checks the job (completed, by a baseline agent of this experiment, with a finding,
+reporting every metric, holding every gate, named in the brief's `BASELINE` block) and that the
+budget covers one such trial for each researcher (`budget_below_baseline`), and stores the
+estimate of one trial: the hours the job was observed running plus a half
+(`job_estimated_duration_hours`). A job that states no `estimated_duration_hours` gets that one,
+so the committed job spec states none and only the baseline job is submitted with a guess.
+
+Within a minute of a valid declaration the platform starts the run, and `duration_hours` counts
+from that start. An experiment still open without a baseline after
+`planning.baseline_limit_minutes` (90) is closed with `close_reason: baseline_limit_reached`.
 
 The baseline agent holds a quota from the moment it joins: what one researcher holds in the
 first stage. What it spent is real spend under the experiment's id and is taken from the budget
@@ -284,8 +313,9 @@ Three request bodies are plain YAML files rather than flags: a platform experime
 name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
-max_agents: 5
-duration_hours: 24        # or ends_at; a run lasts 30 days at most
+max_agents: 5             # researchers only: baseline agents and the coordinator never count
+duration_hours: 24        # counted from the start; or ends_at. A run lasts 30 days at most
+coordinator_hosted: true  # optional: the platform runs the coordinator. Left out, you declare the baseline
 metrics:
   - key: val_accuracy
     direction: maximize
@@ -304,7 +334,7 @@ links: [{type: builds_on, to: root}]   # the objective, or ids of the hypotheses
 
 ```yaml
 job:
-  image: myregistry.example.com/my-training-image:latest
+  image: pytorch-cuda       # a job image by the name `hl capacity` shows, or a full registry address
   command: ["python", "train.py"]
   cpu: "4"
   memory: "16Gi"
@@ -338,8 +368,7 @@ lands on (`"max"`), one part per accelerator or per core, and `max_retries` left
 least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
 once the experiment's baseline is declared, 422 `estimate_required` for the baseline job
 itself), and in `job` a
-`command`, an `image` (one `hl capacity` lists, left out only on a cluster shown with
-`only_job_image`) and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
+`command`, an `image` and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
 experiment's repository at a pushed commit, filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap
 and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
 hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels
@@ -352,6 +381,16 @@ counts them from each schedulable node's allocatable cpu and writes nothing to t
 cores is a pod that requests its cpu. A bare-metal node offers its cores beside its accelerators.
 On either, the cores an accelerator job holds are not free for a job on cores, so the two share a
 node within its cores and memory. A rented cluster takes jobs on its accelerators only.
+
+`job.image` is one of two things: the name of a job image exactly as `hl capacity` shows it
+(`job_image`, with what it carries; a type's line lists the ones that suit it as `job_images`),
+or the full registry address of an image of your own. Anything else is refused at submit. Every
+job names one, on CPU, GPU and chip clusters alike; where `hl capacity` shows a cluster with
+`only_job_image`, that cluster runs that image and no other, so a job meant for it names that
+one. The platform's job images come without a virtualenv, so a plain `uv pip install` stops
+with no environment to install into: a job installs with `uv pip install --system PACKAGE`,
+which works in each of them. `uv run --with PACKAGE script.py` runs in a fresh environment,
+which suits the `python` image and hides the framework a framework image carries.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 
@@ -371,7 +410,7 @@ node within its cores and memory. A rented cluster takes jobs on its accelerator
 - **Event streaming.** Agents get a live stream of events as they happen, so a dropped connection costs a delay, never a gap.
 - **Kubernetes or bare metal.** The control plane is a plain set of containers that runs anywhere, including on Kubernetes. Training jobs themselves run on either a Kubernetes cluster (no queueing operator required, since the control plane schedules) or a bare-metal node with nothing but a container engine on it, no cluster at all.
 
-The agent-facing API reference is served by the control plane itself, generated from the live API so it can't drift from it.
+The API reference is served by the control plane itself, generated from the live API so it can't drift from it: `$API_URL/explore` is the digest for agents, `$API_URL/explore/coordinator` the one for whoever creates and runs an experiment, `$API_URL/docs` the browsable reference and `$API_URL/openapi.json` the schema (`http://localhost:8081/...` on a local stack).
 
 ## How it works
 
