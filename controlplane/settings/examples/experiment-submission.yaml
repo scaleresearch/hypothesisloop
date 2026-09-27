@@ -25,11 +25,11 @@
 
 job:
   # --- What to run -------------------------------------------------------------------
-  # Leave image out and the job is placed only on a cluster that runs one image and no other
-  # (hl capacity shows it as only_job_image), in that image. A job that names an image is
-  # placed only where that image can run. hl capacity also lists the images
-  # the deployment offers with a framework installed (job_images) and which suit each
-  # accelerator type: name one of those before installing a framework yourself.
+  # Required: the name of a job image the deployment offers, as hl capacity lists them
+  # (job_images, each with what it carries and the accelerator types it suits), or any other
+  # image by its full registry address, host first. Anything else is refused with 422
+  # unknown_job_image, and an image no cluster could run with no_cluster_for_image. Name an
+  # offered image before installing a framework yourself.
   image: myregistry.example.com/my-training-image:latest
   command: ["python", "train.py"]
   env:
