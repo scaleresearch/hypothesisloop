@@ -108,13 +108,13 @@ whole number, and no accelerator_type, and holds that many cores. accelerator_ty
 string a job spec takes; a type with none available queues and never errors. Last, one line per
 image the deployment offers a job to run in: job_image its name, image what job.image takes,
 carries what is installed. A type's line names in job_images the ones that suit it, so a job
-there names one of those and installs no framework. A cluster's line with job_image is of a
-cluster that runs a job that names no image, in that one, and job_image_carries says what is
-installed in it. With only_job_image it runs no other
-image, so a job meant for it leaves job.image out. A line without job_image is of a cluster that
-runs only jobs that name their image. A line with on_demand is of a cluster that rents a machine
-when a job needs one: nothing stands by, total is the most it rents at once and available is what
-it may still rent, so a job there starts after its machine is rented.
+there names one of those and installs no framework. A cluster's line with only_job_image is of
+a cluster that runs that image and no other, so a job meant for it leaves job.image out, and
+job_image_carries says what is installed in it. A line without only_job_image is of a cluster
+that runs the image a job names, and a job that names none is not placed there. A line with
+on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
+the most it rents at once and available is what it may still rent, so a job there starts after
+its machine is rented.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -130,7 +130,6 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		Clusters  []struct {
 			Name         string            `json:"cluster_name"`
 			JobImage     string            `json:"job_image"`
-			JobImageDef  bool              `json:"job_image_default"`
 			Carries      string            `json:"job_image_carries"`
 			OnDemand     bool              `json:"on_demand"`
 			Resources    json.RawMessage   `json:"resources"`
@@ -147,13 +146,10 @@ key and an agent token have one org and need no --org. A person in several orgs 
 	for _, cl := range out.Clusters {
 		prefix := []string{"cluster", cl.Name}
 		if cl.JobImage != "" {
-			prefix = append(prefix, "job_image", cl.JobImage)
+			prefix = append(prefix, "only_job_image", cl.JobImage)
 		}
 		if cl.Carries != "" {
 			prefix = append(prefix, "job_image_carries", cl.Carries)
-		}
-		if cl.JobImage != "" && !cl.JobImageDef {
-			prefix = append(prefix, "only_job_image", "true")
 		}
 		if cl.OnDemand {
 			prefix = append(prefix, "on_demand", "true")

@@ -99,7 +99,7 @@ func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {
 		return map[string]any{"clusters": []any{
 			map[string]any{"cluster_name": "rented", "on_demand": true, "job_image": "registry.test/platform-job:7", "job_image_carries": "PyTorch", "accelerators": []any{map[string]any{"accelerator_type": "RTX", "available": 2, "total": 2}}},
 			map[string]any{"cluster_name": "k8s", "accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 8, "total": 8}}},
-			map[string]any{"cluster_name": "own", "job_image": "registry.test/platform-job:7", "job_image_default": true,
+			map[string]any{"cluster_name": "own",
 				"resources":    map[string]any{"cpu_cores_available": 28, "cpu_cores_total": 32, "memory_bytes_available": 1 << 36, "memory_bytes_total": 1 << 37},
 				"accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 1, "total": 1}}},
 		}, "job_images": []any{map[string]any{"name": "pytorch-cuda", "image": "registry.test/job-pytorch-cuda:7", "carries": "PyTorch"}}}
@@ -109,10 +109,10 @@ func TestCapacitySaysWhichClusterRunsEveryJobInItsOwnImage(t *testing.T) {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	want := []string{
-		`{"cluster":"rented","job_image":"registry.test/platform-job:7","job_image_carries":"PyTorch","only_job_image":"true","on_demand":"true","accelerator_type":"RTX","available":2,"total":2}`,
+		`{"cluster":"rented","only_job_image":"registry.test/platform-job:7","job_image_carries":"PyTorch","on_demand":"true","accelerator_type":"RTX","available":2,"total":2}`,
 		`{"cluster":"k8s","accelerator_type":"L40","available":8,"total":8}`,
-		`{"cluster":"own","job_image":"registry.test/platform-job:7","cpu_cores_available":28,"cpu_cores_total":32,"memory_bytes_available":68719476736,"memory_bytes_total":137438953472}`,
-		`{"cluster":"own","job_image":"registry.test/platform-job:7","accelerator_type":"L40","available":1,"total":1}`,
+		`{"cluster":"own","cpu_cores_available":28,"cpu_cores_total":32,"memory_bytes_available":68719476736,"memory_bytes_total":137438953472}`,
+		`{"cluster":"own","accelerator_type":"L40","available":1,"total":1}`,
 		`{"carries":"PyTorch","image":"registry.test/job-pytorch-cuda:7","job_image":"pytorch-cuda"}`,
 	}
 	if !reflect.DeepEqual(lines(stdout.String()), want) {
