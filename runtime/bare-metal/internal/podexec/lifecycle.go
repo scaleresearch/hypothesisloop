@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 
 	"github.com/moby/moby/client"
@@ -17,7 +18,9 @@ import (
 //
 // The devices are chosen here, in the pass. The pull and start then run in their own goroutine
 // under ctx, so a slow pull holds up no other job; a failure is logged and the next pass, finding
-// the job still without a container, tries again.
+// the job still without a container, tries again. How the pull ended is remembered: a pass that
+// finds the image of this very spec and attempt can never be pulled starts no further pull and
+// returns the job as unrunnable with what the engine said.
 func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) error {
 	if _, busy := e.operations()[exp.ID]; busy {
 		return nil
@@ -57,11 +60,17 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		})
 		return nil
 	}
+	if failed, ok := e.pullFailures()[exp.ID]; ok && failed.reason != "" &&
+		failed.labels[LabelDesiredSpecHash] == spec.Labels[LabelDesiredSpecHash] && failed.labels[LabelAttempt] == spec.Labels[LabelAttempt] {
+		return &agentexec.Unrunnable{Reason: failed.reason, Why: failed.message}
+	}
 	e.begin(ctx, exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
-		if err := e.startContainer(ctx, spec); err != nil {
-			return fmt.Errorf("podexec: start container for %s: %w", exp.ID, err)
+		err := e.pullImage(ctx, spec.Image)
+		e.recordPull(ctx, exp.ID, spec.Labels, err)
+		if err != nil {
+			return err
 		}
-		return nil
+		return e.startContainer(ctx, spec)
 	})
 	return nil
 }
@@ -183,7 +192,8 @@ func (e *Executor) ListManagedJobs(ctx context.Context) ([]string, error) {
 // before reapTerminal prunes it.
 //
 // A job whose image is still being pulled has no container and is listed from its operation, so
-// the control plane hears it is pending instead of reading its absence as gone.
+// the control plane hears it is pending instead of reading its absence as gone. So is a job
+// between a failed pull and its retry, listed from the failure.
 func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, error) {
 	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
@@ -202,6 +212,11 @@ func (e *Executor) ListManagedJobsForStatus(ctx context.Context) ([]string, erro
 	}
 	for id, op := range ops {
 		if op.starting {
+			ids = append(ids, id)
+		}
+	}
+	for id, failed := range e.pullFailures() {
+		if failed.reason == "" && !slices.Contains(ids, id) {
 			ids = append(ids, id)
 		}
 	}
@@ -284,6 +299,10 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		pending.Attempt = attemptOf(op.labels)
 		return pending, nil
 	}
+	if failed, ok := e.pullFailures()[experimentID]; ok && failed.reason == "" {
+		pending.Attempt = attemptOf(failed.labels)
+		return pending, nil
+	}
 	return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
 }
 
@@ -336,6 +355,7 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 // running nor created while its stop is still inside the grace, and removing it then would kill a
 // job in the middle of its checkpoint.
 func (e *Executor) reapTerminal(ctx context.Context, desiredIDs map[string]bool) error {
+	e.forgetPullsExcept(desiredIDs)
 	ops := e.operations()
 	containers, err := e.listManagedContainers(ctx)
 	if err != nil {

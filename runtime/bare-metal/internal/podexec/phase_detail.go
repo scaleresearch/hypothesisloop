@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // PollPhaseDetail inspects experimentID's container (if one exists yet) for an error and
-// restart count. Read live on every call — no caching (important.md #4). A job whose image
-// could never be pulled never gets a container to inspect at all; that case is left to the
-// generic stuck-pending timeout rather than a runtime-side cache of the launch failure, which
-// would be exactly the in-RAM state important.md #4 rules out. Returns empty reason/message and
-// nil error when there is nothing notable to report.
+// restart count. Read live on every call — no caching (important.md #4). Returns empty
+// reason/message and nil error when there is nothing notable to report.
 //
 // A job whose image is being pulled reports what a k8s pod in ContainerCreating does: it has
-// landed on this node (scheduledNodes 1) and has no reason yet. Between two failed pulls it has
-// no operation and reads as gone, which is what the stuck-pending timeout bounds.
+// landed on this node (scheduledNodes 1) and has no reason yet. Once a pull has failed and is
+// being retried, the message is what the engine said of the last one, until a pull succeeds or
+// the stuck-pending timeout ends the wait. An image that can never be pulled is not reported
+// here: CreateWorkload returns that job as unrunnable.
 func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
 	op, busy := e.operations()[experimentID]
 	containers, err := e.listManagedContainers(ctx)
@@ -50,10 +50,29 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 		}
 		return "", "", restartCount, scheduledNodes, "", nil
 	}
+	if failed, ok := e.pullFailures()[experimentID]; ok && failed.reason == "" {
+		return "", failed.message, 0, 1, "", nil
+	}
 	if busy && op.starting {
 		return "", "", 0, 1, "", nil
 	}
 	return "", "", 0, 0, "", nil
+}
+
+// pullFailureReason is the reason an image can never be pulled, read from the class the engine
+// answered the pull with (the registry's own status, which podman and docker both pass on), and
+// empty for a failure worth retrying. A registry that answers a missing or private image with
+// anything else reaches here as an engine error like any outage and is retried. A malformed
+// reference is refused with no class of its own, in the words podexecPhaseReason reads.
+func pullFailureReason(err error) string {
+	switch {
+	case errdefs.IsNotFound(err), errdefs.IsUnauthorized(err), errdefs.IsPermissionDenied(err):
+		return domain.PhaseReasonImagePullFailed
+	case errdefs.IsInvalidArgument(err):
+		return domain.PhaseReasonInvalidImage
+	default:
+		return podexecPhaseReason(err.Error())
+	}
 }
 
 // podexecPhaseReason classifies a container engine's own error text into the control plane's

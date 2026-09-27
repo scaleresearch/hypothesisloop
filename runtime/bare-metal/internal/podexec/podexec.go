@@ -97,7 +97,9 @@ type Executor struct {
 	// unscoped is the containers already reported as started before containers were scoped.
 	unscoped map[string]bool
 	inFlight map[string]operation
-	workers  sync.WaitGroup
+	// failedPulls is each job's last pull, when it failed.
+	failedPulls map[string]failedPull
+	workers     sync.WaitGroup
 }
 
 // engine is the part of the Engine API client this package calls.

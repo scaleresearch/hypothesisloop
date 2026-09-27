@@ -2,8 +2,10 @@ package podexec
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 const fakeAcceleratorType = "example.com/chip=fake"
@@ -226,8 +229,7 @@ func (f *fakeEngine) ImageInspect(ctx context.Context, image string, _ ...client
 
 type fakePull struct{ client.ImagePullResponse }
 
-func (fakePull) Read([]byte) (int, error) { return 0, io.EOF }
-func (fakePull) Close() error             { return nil }
+func (fakePull) Wait(context.Context) error { return nil }
 
 func (f *fakeEngine) ImagePull(ctx context.Context, image string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
 	f.sawDeadline(ctx, "pull")
@@ -240,6 +242,9 @@ func (f *fakeEngine) ImagePull(ctx context.Context, image string, _ client.Image
 	f.mu.Unlock()
 	if fail {
 		return nil, fmt.Errorf("registry unreachable")
+	}
+	if image == "absent" {
+		return nil, fmt.Errorf("manifest unknown: %w", errdefs.ErrNotFound)
 	}
 	if err := f.wait(ctx, "pull "+image); err != nil {
 		return nil, err
@@ -559,11 +564,51 @@ func TestAFailedPullIsRetriedByTheNextPass(t *testing.T) {
 	if got := f.state("retried"); got != "" {
 		t.Fatalf("job has a %s container after a failed pull", got)
 	}
+	if ids, err := e.ListManagedJobsForStatus(ctx); err != nil || !slices.Contains(ids, "retried") {
+		t.Fatalf("status lists %v (err %v), want the job between its failed pull and the retry", ids, err)
+	}
+	if status, err := e.PollJobStatus(ctx, "retried"); err != nil || status.Phase != workload.JobPhasePending {
+		t.Fatalf("status = %+v (err %v), want pending", status, err)
+	}
+	reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "retried", 0)
+	if err != nil || reason != "" || !strings.Contains(message, "registry unreachable") {
+		t.Fatalf("phase detail = %q %q (err %v), want the engine's error as the message and no reason that ends the job", reason, message, err)
+	}
 	pass(t, ctx, e, job)
 	eventually(t, "the retry runs the job", func() bool { return f.state("retried") == "running" })
 	if got := f.count(f.pulls, "flaky"); got != 2 {
 		t.Fatalf("%d pulls, want the failed one and one retry", got)
 	}
+	eventually(t, "the start has returned", idle(e, "retried"))
+	if _, message, _, _, _, _ := e.PollPhaseDetail(ctx, "retried", 0); message != "" {
+		t.Fatalf("phase detail still says %q after the pull succeeded", message)
+	}
+}
+
+func TestAnImageThatCanNeverBePulledMakesTheJobUnrunnable(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f)
+	ctx := t.Context()
+	job := fakeJob("hopeless", "absent", 0)
+
+	pass(t, ctx, e, job)
+	eventually(t, "the failed pull has returned", idle(e, "hopeless"))
+	err := e.CreateWorkload(ctx, job)
+	var unrunnable *agentexec.Unrunnable
+	if !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonImagePullFailed || !strings.Contains(unrunnable.Why, "manifest unknown") {
+		t.Fatalf("CreateWorkload = %v, want an Unrunnable for a failed image pull carrying the engine's error", err)
+	}
+	if got := f.count(f.pulls, "absent"); got != 1 {
+		t.Fatalf("%d pulls, want one: an image that is not there is not pulled again", got)
+	}
+	if ids, err := e.ListManagedJobsForStatus(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("status lists %v (err %v), want nothing: the loop reports an unrunnable job itself", ids, err)
+	}
+
+	pass(t, ctx, e)
+	pass(t, ctx, e, job)
+	eventually(t, "the job is pulled again once it was gone from desired state", func() bool { return f.count(f.pulls, "absent") == 2 })
+	eventually(t, "that pull has returned", idle(e, "hopeless"))
 }
 
 func TestShutdownCancelsOperationsAndWaitsForThem(t *testing.T) {

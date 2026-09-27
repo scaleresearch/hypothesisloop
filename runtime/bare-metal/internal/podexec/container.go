@@ -3,7 +3,6 @@ package podexec
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"sort"
 	"strings"
@@ -197,9 +196,6 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 		hostConfig.StorageOpt = map[string]string{"size": spec.StorageOptSize}
 	}
 
-	if err := e.pullImage(ctx, spec.Image); err != nil {
-		return err
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -260,17 +256,16 @@ func (e *Executor) pullImage(ctx context.Context, image string) error {
 	if _, err := e.docker.ImageInspect(ctx, image); err == nil {
 		return nil
 	} else if !errdefs.IsNotFound(err) {
-		return fmt.Errorf("podexec: inspect image %s: %w", image, err)
+		return fmt.Errorf("inspect image %s: %w", image, err)
 	}
 	body, err := e.docker.ImagePull(ctx, image, client.ImagePullOptions{})
 	if err != nil {
-		return fmt.Errorf("podexec: pull image %s: %w", image, err)
+		return fmt.Errorf("pull image %s: %w", image, err)
 	}
-	defer body.Close()
-	// The engine streams progress and reports a mid-stream failure only in the body, so the pull
-	// is not complete until the stream is drained.
-	if _, err := io.Copy(io.Discard, body); err != nil {
-		return fmt.Errorf("podexec: pull image %s: %w", image, err)
+	// The engine streams progress and reports a failure after its first byte only in the body, so
+	// the pull has not succeeded until the stream ends without one.
+	if err := body.Wait(ctx); err != nil {
+		return fmt.Errorf("pull image %s: %w", image, err)
 	}
 	return nil
 }

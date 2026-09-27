@@ -21,6 +21,45 @@ type operation struct {
 	cancel   context.CancelFunc
 }
 
+// failedPull is how a job's last pull ended, when it failed. A failed pull leaves nothing in the
+// engine to read it back from, so it is kept here, and like the operations it describes only
+// what this process did: after a restart the next pass pulls again and learns it anew.
+type failedPull struct {
+	labels map[string]string
+	// reason is set for an image that can never be pulled and empty for a pull worth retrying.
+	reason  string
+	message string
+}
+
+// recordPull keeps the outcome of the pull that just returned for experimentID. A pull that
+// succeeded or was cancelled says nothing against the image.
+func (e *Executor) recordPull(ctx context.Context, experimentID string, labels map[string]string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err == nil || ctx.Err() != nil {
+		delete(e.failedPulls, experimentID)
+		return
+	}
+	if e.failedPulls == nil {
+		e.failedPulls = map[string]failedPull{}
+	}
+	e.failedPulls[experimentID] = failedPull{labels: labels, reason: pullFailureReason(err), message: err.Error()}
+}
+
+// pullFailures is the failed pulls remembered right now. Read it after operations: a pull that
+// fails in between has by then recorded its failure, so the job is seen from one or the other.
+func (e *Executor) pullFailures() map[string]failedPull {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return maps.Clone(e.failedPulls)
+}
+
+func (e *Executor) forgetPullsExcept(desiredIDs map[string]bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	maps.DeleteFunc(e.failedPulls, func(id string, _ failedPull) bool { return !desiredIDs[id] })
+}
+
 // begin runs one operation for experimentID under ctx, which must outlive the call: cancelling
 // it is how shutdown stops the operation. A job that already has one in flight gets no second.
 func (e *Executor) begin(ctx context.Context, experimentID, what string, op operation, run func(context.Context) error) {
