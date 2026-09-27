@@ -65,6 +65,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
 			"metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. " +
 			"An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. " +
+			"metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the job_estimated_duration_hours the platform measured on the platform experiment's baseline job (in its proposal), and 422 estimate_required where it measured none. " +
 			"metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",

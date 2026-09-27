@@ -20,16 +20,6 @@ func withServer(t *testing.T, handler http.HandlerFunc) string {
 	return srv.URL
 }
 
-// experimentRead answers the read hl job submit makes of its platform experiment, here one with
-// no measured estimate, and says whether r was that read.
-func experimentRead(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != "GET" || !strings.HasPrefix(r.URL.Path, "/platform-experiments/") {
-		return false
-	}
-	_, _ = w.Write([]byte("{}"))
-	return true
-}
-
 func setAPIURL(t *testing.T, url string) {
 	t.Helper()
 	old := os.Getenv("API_URL")
@@ -197,9 +187,6 @@ func TestJobSubmitFromYAML(t *testing.T) {
 func TestJobSubmitHeldForSummariesNamesEachCommand(t *testing.T) {
 	var listQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if experimentRead(w, r) {
-			return
-		}
 		if r.Method == "GET" {
 			listQuery = r.URL.RawQuery
 			_, _ = w.Write([]byte(`[{"id":"job-1"},{"id":"job-2"}]`))
@@ -248,9 +235,6 @@ func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
 
 func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if experimentRead(w, r) {
-			return
-		}
 		http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
 	})
 	setAPIURL(t, url)
@@ -267,9 +251,6 @@ func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 
 func TestJobSubmitHeldForSummariesStaysOneAcceptedLineWhenTheLookupFails(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if experimentRead(w, r) {
-			return
-		}
 		if r.Method == "GET" {
 			http.Error(w, `{"detail":"failed to list experiments"}`, http.StatusInternalServerError)
 			return
@@ -573,7 +554,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestIdentityFlagsDefaultToEnv(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
-		if r.Method == "GET" && r.Path != "/platform-experiments/pe-env" {
+		if r.Method == "GET" {
 			return []any{}
 		}
 		return map[string]any{"id": "x"}
@@ -614,8 +595,8 @@ func TestIdentityFlagsDefaultToEnv(t *testing.T) {
 	if code := run([]string{"job", "submit", jobFile}, &stdout, &stderr); code != 0 {
 		t.Fatalf("job submit: exit %d, stderr %s", code, stderr.String())
 	}
-	if metadata, _ := (*got)[1].Body["metadata"].(map[string]any); (*got)[0].Path != "/platform-experiments/pe-env" || metadata["agent_id"] != "agent-env" {
-		t.Fatalf("job submit read %s and sent %+v", (*got)[0].Path, (*got)[1].Body)
+	if metadata, _ := (*got)[0].Body["metadata"].(map[string]any); metadata["agent_id"] != "agent-env" {
+		t.Fatalf("job submit body = %+v", (*got)[0].Body)
 	}
 
 	*got = nil

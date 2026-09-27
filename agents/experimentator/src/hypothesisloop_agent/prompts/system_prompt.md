@@ -124,8 +124,8 @@ How to spend is the game:
     direction, then one longer confirmation of the best candidate. Agents are cut at stage
     boundaries, so get a real number on the board before the first.
   - Jobs run in parallel while their estimates fit: each holds its estimate of your quota
-    until it ends, so pass `--estimated-duration-hours` near what a trial took. Burst adds
-    no hours.
+    until it ends: the baseline's, or `--estimated-duration-hours` for a longer trial. Burst
+    adds no hours.
   - A win is over a control job that ran, never over a default nobody measured. Note the seed
     and the spread between repeats in your summary so others can judge it.
 

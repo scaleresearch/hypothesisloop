@@ -465,5 +465,5 @@ type ExperimentMeta struct {
 	// PriorityClass today). Optional — scheduler.Service.Submit defaults an empty value to
 	// guaranteed.
 	CapacityTier           CapacityTier `json:"capacity_tier,omitempty" yaml:"capacity_tier,omitempty"`
-	EstimatedDurationHours float64      `json:"estimated_duration_hours" yaml:"estimated_duration_hours"`
+	EstimatedDurationHours float64      `json:"estimated_duration_hours,omitempty" yaml:"estimated_duration_hours,omitempty" required:"false" doc:"The hours the job is expected to run, which it holds of its agent's quota until it ends. Left out, it is the one the platform measured on the platform experiment's baseline job, and the submit is refused where there is none."`
 }

@@ -77,8 +77,10 @@ class PlannerPromptTest(unittest.TestCase):
     # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.
     def test_the_baseline_runs_once_and_the_platform_sets_the_trials_estimate(self):
         flat = " ".join(self.render().split())
+        self.assertIn('--theory "..."` and `--estimated-duration-hours` your guess, the committed file unedited', flat)
+        self.assertIn("The file states no estimate", flat)
         self.assertIn("never run the baseline again to correct it", flat)
-        self.assertIn("the platform sets a trial's estimate to the baseline's `observed_hours` (`hl job cost`) plus a half", flat)
+        self.assertIn("the baseline's `observed_hours` (`hl job cost`) plus a half, and every later submit that states none gets it", flat)
         self.assertIn("each trial holds one and a half times the baseline's `accelerator_hours`", flat)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.

@@ -42,10 +42,11 @@ one committed base spec serves every job that differs only in its hypothesis, en
 tier, with nothing to edit and nothing to commit. Prints the accepted job's id, status,
 code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
-was billed (hl job cost ID). Without --estimated-duration-hours a job takes the estimate its
-platform experiment measured: what the baseline job ran plus a half, in the experiment's
-proposal as job_estimated_duration_hours. FILE's estimated_duration_hours is used only where
-none was measured, as for the baseline job itself. A submit refused for quota fits once a job of
+was billed (hl job cost ID). A job that states no estimate, in FILE or with
+--estimated-duration-hours, gets the one the platform measured on its platform experiment's
+baseline job: what that job ran plus a half, job_estimated_duration_hours in the experiment's
+proposal. Where none was measured (a draft's baseline job itself, an experiment created
+directly) a job that states none is refused. hl job status ID shows the estimate applied. A submit refused for quota fits once a job of
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
@@ -71,8 +72,8 @@ Minimal shape:
     accelerator_count: 1
     ...
 
-Only hypothesis_id, theory, estimated_duration_hours and, in job, a command with
-accelerator_type and accelerator_count, or cpu, are needed. cpu, memory and storage left out
+Only hypothesis_id, theory and, in job, a command with accelerator_type and accelerator_count,
+or cpu, are needed, and estimated_duration_hours where the platform measured none. cpu, memory and storage left out
 are the job's share of the node; max_retries left out is 0.
 
 The full DSL reference is experiment-submission.yaml: in an agent's image under
@@ -84,7 +85,7 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's or $PLATFORM_EXPERIMENT_ID)"),
 		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
-	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run (default the platform experiment's measured estimate, else FILE's)")
+	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
 	var secretEnv stringList
@@ -136,15 +137,6 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	if err := fillCodeRef(metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
-	if pe := fmt.Sprint(metadata["platform_experiment_id"]); *estimate == "" && pe != "" {
-		measured, err := measuredEstimate(c, pe)
-		if err != nil {
-			return fail(stderr, err)
-		}
-		if measured > 0 {
-			metadata["estimated_duration_hours"] = measured
-		}
-	}
 	body["metadata"] = metadata
 	// The reply repeats the submitted spec; only what the platform decided is printed.
 	var out struct {
@@ -186,21 +178,6 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	}
 	fmt.Fprintln(stderr, "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: "+strings.Join(commands, "; "))
 	return 0
-}
-
-// measuredEstimate is the estimate a job of the platform experiment is submitted with: what the
-// platform read from the baseline job when the experiment was proposed, 0 where it read none. A
-// job spec is committed before its baseline has run, so the estimate it states is a guess.
-func measuredEstimate(c *apiclient.Client, platformExperiment string) (float64, error) {
-	var pe struct {
-		Proposal struct {
-			Hours float64 `json:"job_estimated_duration_hours"`
-		} `json:"proposal"`
-	}
-	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(platformExperiment), nil, &pe); err != nil {
-		return 0, err
-	}
-	return pe.Proposal.Hours, nil
 }
 
 // summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.

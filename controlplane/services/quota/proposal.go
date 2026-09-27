@@ -49,18 +49,13 @@ type Proposal struct {
 // beside it what the platform read from the baseline job.
 type storedProposal struct {
 	Proposal
-	// AcceleratorType is the type the baseline job ran on, which the run's jobs are sized for.
-	// On domain.CPUType the budget is CPU core-hours.
-	AcceleratorType domain.AcceleratorType `json:"accelerator_type"`
-	// JobEstimatedDurationHours is the estimate a trial is submitted with: what the baseline job
-	// ran, with baselineHeadroom. Absent for a baseline too short to be observed alive.
-	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero"`
+	domain.BaselineReading
 }
 
-// baselineHeadroom is how far over the baseline's observed hours a trial's estimate is set. A
-// job holds its whole estimate of its agent's quota until it ends: an estimate of 2.2 times the
-// run let one job at a time fit a researcher's share, and one under the run reserves less than
-// the job spends.
+// baselineHeadroom is how far over the baseline's observed hours the estimate of a job that
+// states none is set. A job holds its whole estimate of its agent's quota until it ends: an
+// estimate of 2.2 times the run let one job at a time fit a researcher's share, and one under
+// the run reserves less than the job spends.
 const baselineHeadroom = 1.5
 
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
@@ -213,8 +208,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"no_baseline, baseline_not_completed, baseline_without_finding, brief_without_baseline, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
 			"The stored proposal also answers what the platform read from the baseline job, and a body that states either is refused: accelerator_type, the type it ran on, " +
-			"and job_estimated_duration_hours, one and a half times the hours it was observed running. That is the estimated_duration_hours of a trial: hl job submit sends it for a job that passes no --estimated-duration-hours, " +
-			"whatever the job spec states, so the estimate the baseline itself was submitted with is only a guess and is held to nothing.",
+			"and job_estimated_duration_hours, one and a half times the hours it was observed running. That is the estimated_duration_hours of every job of the platform experiment that states none (POST /experiments), " +
+			"so the estimate the baseline job itself was submitted with is a guess and is held to nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body Proposal
@@ -253,7 +248,9 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := checkBaseline(in.Body, experiment, plannerID, baseline); err != nil {
 			return nil, err
 		}
-		stored, err := json.Marshal(storedProposal{Proposal: in.Body, AcceleratorType: baseline.Job.AcceleratorType, JobEstimatedDurationHours: baselineHeadroom * baseline.ObservedHours})
+		stored, err := json.Marshal(storedProposal{Proposal: in.Body, BaselineReading: domain.BaselineReading{
+			AcceleratorType: baseline.Job.AcceleratorType, JobEstimatedDurationHours: baselineHeadroom * baseline.ObservedHours,
+		}})
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}

@@ -293,6 +293,31 @@ const (
 	CloseProposalExpired      CloseReason = "proposal_expired"
 )
 
+// BaselineReading is what the platform read from the baseline job of a proposal and keeps
+// beside it in Proposal. A planner states neither field.
+type BaselineReading struct {
+	// AcceleratorType is the type the baseline job ran on, which the run's jobs are sized for.
+	// On CPUType the budget is CPU core-hours.
+	AcceleratorType AcceleratorType `json:"accelerator_type"`
+	// JobEstimatedDurationHours is the estimate of a job that states none: the hours the
+	// baseline job was observed running, with headroom. Absent for a baseline too short to be
+	// observed alive.
+	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero"`
+}
+
+// JobEstimatedDurationHours is the estimate the platform measured for a job of p that states
+// none, 0 when p has no proposal or its baseline was not observed.
+func (p *PlatformExperiment) JobEstimatedDurationHours() (float64, error) {
+	if len(p.Proposal) == 0 {
+		return 0, nil
+	}
+	var read BaselineReading
+	if err := json.Unmarshal(p.Proposal, &read); err != nil {
+		return 0, fmt.Errorf("platform experiment %s: decode stored proposal: %w", p.ID, err)
+	}
+	return read.JobEstimatedDurationHours, nil
+}
+
 // PlanningRequest is one request to a draft's planner to change its proposal.
 type PlanningRequest struct {
 	Message string    `json:"message"`

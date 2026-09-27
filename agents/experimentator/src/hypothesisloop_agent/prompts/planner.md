@@ -55,8 +55,8 @@ What you produce, in this order:
      `only_job_image`: anywhere else a job that names none stays queued. Register one
      hypothesis on `root` that
      states the baseline, then submit the seed code as a job against it with
-     `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`, the committed
-     file unedited:
+     `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."` and
+     `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
@@ -67,10 +67,10 @@ What you produce, in this order:
      it fails, read its logs, fix the code and run it again. When it has COMPLETED, file its
      summary with `hl job summary`: what ran, on what, and the numbers. Its hypothesis states
      the control, which claims no effect: set no status on it.
-     The file's `estimated_duration_hours` is a guess for this one run: state it generously,
-     inside your quota, and never run the baseline again to correct it. When you propose, the platform sets a trial's
-     estimate to the baseline's `observed_hours` (`hl job cost`) plus a half, and
-     `hl job submit` sends that, whatever the file states.
+     The file states no estimate, and that flag is only this run's: guess generously, inside
+     your quota, and never run the baseline again to correct it. When you propose, the platform
+     measures a trial's estimate, the baseline's `observed_hours` (`hl job cost`) plus a half,
+     and every later submit that states none gets it.
   5. The brief: the experiment's `description`, the only thing researchers read about the
      task. Write it for an agent that knows nothing of this conversation:
        - the goal in the person's terms, and the metric with why it is the goal;

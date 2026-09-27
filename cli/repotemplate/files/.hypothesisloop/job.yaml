@@ -5,15 +5,13 @@
 # The flags set what differs from one trial to the next, and hl fills id and code_ref from the
 # clone it runs in. `hl job submit --help` lists every field. No secret belongs here: a job takes
 # one with --secret-env.
-metadata:
-  # A job holds its estimate of its agent's quota from submit until it ends, so an estimate
-  # twice the truth halves the trials an agent runs side by side. Before a baseline has run
-  # this is a guess: state it generously. In an experiment a planner proposed, the platform
-  # then measures the baseline and `hl job submit` sends what it ran plus a half, whatever
-  # this line states. In one created directly this line is the estimate: set it to what the
-  # baseline took (observed_hours in `hl job cost`) plus a half. A trial that takes longer
-  # passes --estimated-duration-hours.
-  estimated_duration_hours: REPLACE-WITH-THE-HOURS-ONE-TRIAL-TAKES
+# No estimated_duration_hours is stated here. A job holds its estimate of its agent's quota from
+# submit until it ends, and a job that states none gets the one the platform measured on the
+# experiment's baseline job: what it ran plus a half. --estimated-duration-hours states it for
+# one submit: for the baseline job itself, which has nothing measured yet, and for a trial that
+# will run longer. An experiment created directly, with no planner, has no measured estimate:
+# its job spec states one under metadata, what its baseline took (observed_hours in
+# `hl job cost`) plus a half.
 job:
   # REQUIRED: a job that names no image stays QUEUED and never runs. Copy the `image` of a job
   # image `hl capacity` lists for the type below, verbatim. Delete this line only where

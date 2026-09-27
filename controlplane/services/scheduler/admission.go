@@ -30,6 +30,7 @@ const (
 	ReasonMalformed           = "malformed"
 	ReasonRateLimited         = "rate_limited"
 	ReasonJobTooLong          = "job_too_long"
+	ReasonEstimateRequired    = "estimate_required"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"
 )
 

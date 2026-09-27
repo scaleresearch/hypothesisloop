@@ -70,6 +70,23 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// The estimate is the one the submit states, and nothing replaces a stated one. A submit that
+	// states none takes what the platform measured on the experiment's baseline job, and with
+	// neither there is nothing to hold of the agent's quota.
+	if exp.EstimatedDurationHours == 0 {
+		measured, err := pe.JobEstimatedDurationHours()
+		if err != nil {
+			return fmt.Errorf("scheduler: %w", err)
+		}
+		if measured == 0 {
+			return &AdmissionError{
+				Reason:  ReasonEstimateRequired,
+				Message: fmt.Sprintf("the job states no estimated_duration_hours and platform experiment %s has no measured one (job_estimated_duration_hours of its proposal, read from its baseline job): state the hours it is expected to run with hl job submit --estimated-duration-hours H", pe.ID),
+			}
+		}
+		exp.EstimatedDurationHours = measured
+	}
+
 	// 2. Structural validation.
 	if err := ValidateExperiment(exp, s.credits); err != nil {
 		return err

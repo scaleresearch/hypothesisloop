@@ -243,9 +243,9 @@ platform runs a **planner** for it: an agent that chooses the metric, writes see
 a baseline with a real job and proposes the experiment (`hl platform-experiments propose`). The
 platform checks the proposal against what the baseline job did before it stores it, and stores
 with it the estimate of one trial: the hours that job was observed running plus a half
-(`job_estimated_duration_hours`). `hl job submit` sends that for every job that passes no
-`--estimated-duration-hours`, so the estimate in the job spec is only the guess the baseline ran
-with. A person
+(`job_estimated_duration_hours`). A job of the experiment that states no
+`estimated_duration_hours` gets that one, so the job spec a planner commits states none and
+only the baseline job is submitted with a guess (`--estimated-duration-hours`). A person
 then accepts it, stating the budget, the duration and the researchers themselves
 (`POST /platform-experiments/{id}/accept`), or asks for a change in a sentence
 (`.../revise`), or closes the draft. A planner that cannot make the goal into an experiment
@@ -319,7 +319,9 @@ with 400, and so is a job with neither an accelerator nor cores.
 
 A job states little else. `cpu`, `memory` and `storage` left out are the job's share of the node it
 lands on (`"max"`), one part per accelerator or per core, and `max_retries` left out is 0. The
-least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours`, and in `job` a
+least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
+where the platform measured one on the experiment's baseline job, 422 `estimate_required`
+where it measured none), and in `job` a
 `command`, an `image` (one `hl capacity` lists, left out only on a cluster shown with
 `only_job_image`) and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
 experiment's repository at a pushed commit, filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap
