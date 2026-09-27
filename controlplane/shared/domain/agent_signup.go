@@ -152,11 +152,6 @@ const CoordinatorFlavor = "coordinator"
 // AgentFlavors: the platform signs the planner up, with role SignupRolePlanner.
 const PlannerFlavor = "planner"
 
-// MeasuresBaseline says the agent is one whose job measures the platform experiment's baseline.
-func (s AgentSignup) MeasuresBaseline() bool {
-	return s.Role == SignupRoleBaseline
-}
-
 // SharesBudget says the agent is given a share of the budget when its platform experiment
 // starts: every role but baseline, whose quota is its own from the moment it joins, and planner.
 func (s AgentSignup) SharesBudget() bool {

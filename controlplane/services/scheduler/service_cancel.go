@@ -176,7 +176,7 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 	if err != nil {
 		return nil, fmt.Errorf("summary: read signup: %w", err)
 	}
-	if signup != nil && signup.MeasuresBaseline() {
+	if signup != nil && signup.Role == domain.SignupRoleBaseline {
 		return nil, nil
 	}
 	return h, nil

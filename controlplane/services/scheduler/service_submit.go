@@ -111,7 +111,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		if err != nil {
 			return fmt.Errorf("scheduler: read signup: %w", err)
 		}
-		if signup == nil || !signup.MeasuresBaseline() {
+		if signup == nil || signup.Role != domain.SignupRoleBaseline {
 			return &AdmissionError{
 				Reason:  "experiment_not_started",
 				Message: fmt.Sprintf("platform experiment %s has not started; until it runs it accepts only the job of an agent of role baseline, which measures its baseline", pe.ID),
