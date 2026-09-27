@@ -591,7 +591,10 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session", stderr)
+	fs := newFlags("platform-experiments", `usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
+
+list prints one platform experiment per line as compact JSON, without description and summary
+(hl platform-experiments get prints both). A closed one carries close_reason.`, stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -613,11 +616,13 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			q.Set("shared", strconv.FormatBool(*shared))
 		}
 	})
-	var out any
+	var out json.RawMessage
 	if err := c.Do("GET", "/platform-experiments?"+q.Encode(), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	if err := printLines(stdout, stderr, "platform-experiments list: none", out, "description", "summary"); err != nil {
+		return fail(stderr, err)
+	}
 	return 0
 }
 

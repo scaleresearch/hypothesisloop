@@ -81,22 +81,34 @@ func TestPlatformExperimentsCreateNeedsAProject(t *testing.T) {
 	}
 }
 
-func TestPlatformExperimentsList(t *testing.T) {
+// Every list of hl is one compact JSON object per line, this one included.
+func TestPlatformExperimentsListIsOneCompactLineEach(t *testing.T) {
+	list := []map[string]string{
+		{"id": "pe-1", "status": "closed", "close_reason": "baseline_limit_reached", "description": "a long brief", "summary": "a long summary"},
+		{"id": "pe-2", "status": "open"},
+	}
 	var gotQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]string{{"id": "pe-1"}})
+		_ = json.NewEncoder(w).Encode(list)
 	})
 	setAPIURL(t, url)
 
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "--limit", "5"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	for _, args := range [][]string{{"platform-experiments", "--limit", "5"}, {"platform-experiments", "list", "--limit", "5"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 || gotQuery != "limit=5" {
+			t.Fatalf("%v: exit %d, query %q, stderr %s", args, code, gotQuery, stderr.String())
+		}
+		want := `{"close_reason":"baseline_limit_reached","id":"pe-1","status":"closed"}` + "\n" + `{"id":"pe-2","status":"open"}` + "\n"
+		if stdout.String() != want {
+			t.Fatalf("%v: stdout %q, want %q", args, stdout.String(), want)
+		}
 	}
-	if gotQuery != "limit=5" {
-		t.Fatalf("got query %q", gotQuery)
+	list = []map[string]string{}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "list"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.String() != "hl: platform-experiments list: none\n" {
+		t.Fatalf("empty: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
 

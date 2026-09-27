@@ -345,7 +345,7 @@ func TestPlatformExperimentsListPassesSharedOnAsTheFilterItIs(t *testing.T) {
 	if code != 0 || (*calls)[0].path != "/platform-experiments?limit=20&project_id=prj-env" {
 		t.Fatalf("no flag: exit code = %d, calls = %+v, stderr = %s, want no shared filter", code, *calls, stderr)
 	}
-	if !strings.Contains(stdout, `"shared": true`) || !strings.Contains(stdout, `"shared": false`) {
+	if !strings.Contains(stdout, `"shared":true`) || !strings.Contains(stdout, `"shared":false`) {
 		t.Fatalf("no flag: stdout = %s, want each platform experiment with its shared mark", stdout)
 	}
 	if code, _, _ := hl(t, "platform-experiments", "list", "--shared"); code != 0 || (*calls)[1].path != "/platform-experiments?limit=20&project_id=prj-env&shared=true" {
