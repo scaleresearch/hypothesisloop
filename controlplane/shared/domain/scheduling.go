@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // SchedulingWeights controls how the priority components are combined.
 type SchedulingWeights struct {
 	W1Novelty        float64 `json:"w1_novelty"`
@@ -26,6 +28,10 @@ type QuotaConfig struct {
 	// DefaultStages is the elimination ladder applied to a platform experiment created
 	// without its own.
 	DefaultStages []Stage `json:"default_stages"`
+	// DefaultQuotaTier is the default_quota_tier of a platform experiment created without its own.
+	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
+	// MaxRunLength is the longest a platform experiment may run, from its start to its ends_at.
+	MaxRunLength time.Duration `json:"max_run_length,omitempty"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment. 0 means unlimited.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`

@@ -66,26 +66,9 @@ func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID
 	return h.repos.Reachable(ctx, projectID, repository)
 }
 
-// statedByTheRequest are the fields a create without from_repo must carry, though the schema
-// leaves them to the experiment file.
-var statedByTheRequest = []string{"name", "description", "metrics"}
-
 // neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
 // the branch the file is read from, so these come from the request and from nowhere else.
 var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "ends_at", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image"}
-
-// missing lists the fields of statedByTheRequest the body did not carry.
-func (r CreatePlatformExperimentRequest) missing() []string {
-	var carried map[string]json.RawMessage
-	_ = json.Unmarshal(r.raw, &carried)
-	var out []string
-	for _, key := range statedByTheRequest {
-		if _, ok := carried[key]; !ok {
-			out = append(out, key)
-		}
-	}
-	return out
-}
 
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.
@@ -96,12 +79,16 @@ func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePla
 	}
 	merged, err := decodeExperimentBase(data)
 	if err != nil {
-		return req, invalidPlatformExperiment(err)
+		return req, invalidExperimentFile(req.Repository, err)
 	}
 	if err := json.Unmarshal(req.raw, (*createFields)(&merged)); err != nil {
 		return req, fmt.Errorf("lay the request over the experiment file: %w", err)
 	}
 	return merged, nil
+}
+
+func invalidExperimentFile(repository string, err error) error {
+	return api.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+repository+" cannot be used: "+err.Error())
 }
 
 // ExperimentFile is what a repository's experiment file states of a platform experiment: the
@@ -131,7 +118,7 @@ func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, project
 	}
 	base, err := decodeExperimentBase(data)
 	if err != nil {
-		return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+named+" cannot be used: "+err.Error())
+		return nil, invalidExperimentFile(named, err)
 	}
 	return &ExperimentFile{
 		Repository: named, Name: base.Name, Description: base.Description, Metrics: base.Metrics,

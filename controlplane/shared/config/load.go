@@ -184,6 +184,12 @@ func (c *Config) build() error {
 	if c.Quota.DefaultMaxConcurrentAccelerators <= 0 {
 		return fmt.Errorf("quota default_max_concurrent_accelerators must be positive")
 	}
+	if tier := domain.QuotaTier(c.Quota.DefaultQuotaTier); tier != domain.QuotaTierGuaranteed && tier != domain.QuotaTierBurstOnly {
+		return fmt.Errorf("quota default_quota_tier must be guaranteed or burst_only")
+	}
+	if c.Quota.MaxPlatformExperimentDays <= 0 {
+		return fmt.Errorf("quota max_platform_experiment_days must be positive")
+	}
 	s := c.Scheduler
 	if s.LoopHeartbeatSeconds <= 0 || s.JobPollIntervalSeconds <= 0 ||
 		s.StuckPendingTimeoutSeconds <= 0 || s.StartTimeoutSeconds <= 0 || s.ClusterUnreachableAfterSeconds <= 0 ||

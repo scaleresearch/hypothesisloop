@@ -43,6 +43,12 @@ type QuotaConfig struct {
 	// appear on demand, removing the live-capacity ceiling that otherwise bounded concurrency —
 	// "unlimited" is not offered, this default is what "I don't care" means.
 	DefaultMaxConcurrentAccelerators int `yaml:"default_max_concurrent_accelerators"`
+	// DefaultQuotaTier is the tier of a signup that states none, in a platform experiment that
+	// states no default_quota_tier: guaranteed or burst_only.
+	DefaultQuotaTier string `yaml:"default_quota_tier"`
+	// MaxPlatformExperimentDays is the longest a platform experiment may run, from its start
+	// to its ends_at. Required and positive: until its end an experiment may rent machines.
+	MaxPlatformExperimentDays int `yaml:"max_platform_experiment_days"`
 
 	MaxAcceleratorCountPerJob int     `yaml:"max_accelerator_count_per_job"`
 	MaxCPUCoresPerJob         float64 `yaml:"max_cpu_cores_per_job"`

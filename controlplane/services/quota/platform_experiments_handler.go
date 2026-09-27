@@ -27,7 +27,7 @@ type PlatformExperimentsHandler struct {
 
 	// Set via WithAgentLaunch.
 	launch AgentLaunch
-	// What a draft may spend, DefaultPlanning unless WithPlanning set another.
+	// What a draft may spend, from the settings file's planning section.
 	planning Planning
 	// baseline reads what a proposal's baseline job did; readBaseline unless a test sets another.
 	baseline baselineReader
@@ -37,8 +37,11 @@ type PlatformExperimentsHandler struct {
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
-func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, logger *zap.Logger) *PlatformExperimentsHandler {
-	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: DefaultPlanning}
+func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, planning Planning, logger *zap.Logger) *PlatformExperimentsHandler {
+	if planning.AllowanceAcceleratorHours <= 0 || planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.MaxConcurrentPerOrg <= 0 || planning.MaxPerDayPerOrg <= 0 {
+		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
+	}
+	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
 	h.baseline = h.readBaseline
 	return h
 }

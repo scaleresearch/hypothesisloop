@@ -208,6 +208,11 @@ func (noLauncherAgents) EndInstance(context.Context, string, string, string, db.
 	panic("the launcher handler reached its store")
 }
 
+var worldPlanning = quota.Planning{
+	AllowanceAcceleratorHours: 2, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
+	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,
+}
+
 // reached is what a request answers once every check let it through and the handler asked a
 // service for something: the services here hold no store, so that first ask panics.
 const reached = 599
@@ -265,7 +270,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", authenticator, access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
+	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Launcher: worldLauncher, DefaultModel: "model-1", SigningSecret: worldSecret, MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterPlanningHuma(doc, peHandler)

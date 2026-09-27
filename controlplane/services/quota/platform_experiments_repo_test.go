@@ -163,14 +163,14 @@ func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.Pl
 func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
 	t.Helper()
 	store := &createdStore{}
-	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30}, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},
 	}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(placement), zap.NewNop())
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, repos, zap.NewNop()))
+	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()))
 	return store, func(method, path string, body any) *httptest.ResponseRecorder {
 		var payload bytes.Buffer
 		if body != nil {
@@ -188,9 +188,12 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 
 var ownerOfA = authtest.As{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
 
+// runEndsAt is an end within the platform's longest run.
+var runEndsAt = time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+
 // run is what a request with from_repo must always state itself.
 func run(more map[string]any) map[string]any {
-	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": "2027-01-01T00:00:00Z"}
+	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": runEndsAt.Format(time.RFC3339)}
 	for key, value := range more {
 		body[key] = value
 	}
@@ -200,7 +203,7 @@ func run(more map[string]any) map[string]any {
 func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call := repoAPI(t, ownerOfA, repos)
-	rec := call("POST", "/platform-experiments", run(map[string]any{"description": ""}))
+	rec := call("POST", "/platform-experiments", run(map[string]any{"description": "the request's brief"}))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("got = %d %s, want 201", rec.Code, rec.Body)
 	}
@@ -212,12 +215,12 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 		t.Fatalf("created = %+v, want the file's name, cadence and metrics", pe)
 	}
 	// The file says 40 hours, 6 agents and an end in 2026. None of it is read.
-	if pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || !pe.EndsAt.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
+	if pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || !pe.EndsAt.Equal(runEndsAt) {
 		t.Fatalf("created = %+v, want the request's budget, agent count and end", pe)
 	}
-	// A field the body carries wins over the file even when it carries the zero value.
-	if pe.Description != "" {
-		t.Fatalf("description = %q, want the empty one the request stated", pe.Description)
+	// A field the body carries wins over the file.
+	if pe.Description != "the request's brief" {
+		t.Fatalf("description = %q, want the one the request stated", pe.Description)
 	}
 	// The file is read from the repository as GitHub names it, which is also what is stored.
 	if len(repos.asked) != 1 || repos.asked[0] != "prj-a "+testRepository {
@@ -249,12 +252,12 @@ func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
 }
 
 // Without from_repo nothing can supply a field the body leaves out, so what only the caller can
-// say is required. The rest has a default: the report interval is the platform's, there is no
-// start time, and the length is a duration or an end.
+// say is required. The rest is the platform's setting: the report interval is, there is no start
+// time, and the length is a duration or an end.
 func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	whole := func() map[string]any {
 		return map[string]any{
-			"project_id": "prj-a", "name": "by hand", "description": "", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 2,
+			"project_id": "prj-a", "name": "by hand", "description": "the brief", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 2,
 			"metrics": []map[string]any{{"key": "loss", "direction": "minimize"}},
 		}
 	}
@@ -268,7 +271,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if pe.ReportIntervalSeconds != 30 || !pe.StartsAt.IsZero() || pe.EndsAt.Before(before.Add(2*time.Hour)) || pe.EndsAt.After(time.Now().Add(2*time.Hour)) {
 		t.Fatalf("created = %+v, want the platform's report interval, no start and an end two hours on", pe)
 	}
-	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "duration_hours"} {
+	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "max_agents", "duration_hours"} {
 		body := whole()
 		delete(body, field)
 		rec := call("POST", "/platform-experiments", body)
@@ -277,7 +280,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		}
 	}
 	both := whole()
-	both["ends_at"] = "2027-01-01T00:00:00Z"
+	both["ends_at"] = runEndsAt.Format(time.RFC3339)
 	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_length") {
 		t.Errorf("a duration and an end: got = %d %s, want 422 invalid_length", rec.Code, rec.Body)
 	}
@@ -300,8 +303,8 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	invalid := whole()
 	invalid["metrics"] = []map[string]any{}
 	repos.notCreated = api.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
-	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusBadRequest {
-		t.Errorf("a body with no ranking metric: got = %d %s, want 400 before any repository is asked for", rec.Code, rec.Body)
+	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_metrics") {
+		t.Errorf("a body with no ranking metric: got = %d %s, want 422 invalid_metrics before any repository is asked for", rec.Code, rec.Body)
 	}
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
 		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
@@ -375,7 +378,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 // meant reading the experiment, rebuilding its whole body and sending it back. It is a PATCH of
 // the fields that change.
 func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
-	starts, ends := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	starts, ends := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
 	live := func(status domain.PlatformExperimentStatus) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "kept", Description: "the brief agents work from", Status: status,
@@ -409,7 +412,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 	}
 	// While it is open, what a run costs and how it is judged can still change.
 	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
-		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "ends_at": "2027-02-01T00:00:00Z",
+		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "ends_at": "2026-06-25T00:00:00Z",
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
 	})
 	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || stored.MaxAgents != 6 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
@@ -428,6 +431,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_field", "name"},
+		"an end decades out":            {domain.PlatformExpOpen, map[string]any{"ends_at": "2099-01-01T00:00:00Z"}, 422, "run_too_long", "30 days"},
 		"no ranked metric":              {domain.PlatformExpOpen, map[string]any{"metrics": []map[string]any{}}, 422, "invalid_field", "metrics"},
 		"a concurrency cap of zero":     {domain.PlatformExpOpen, map[string]any{"max_concurrent_accelerators": 0}, 422, "invalid_field", "max_concurrent_accelerators"},
 		"the repository, fixed":         {domain.PlatformExpOpen, map[string]any{"description": "d", "repository": "other/one"}, 422, "", ""},

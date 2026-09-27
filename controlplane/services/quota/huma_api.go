@@ -148,14 +148,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "Operator/dashboard endpoint. project_id, name, description, metrics and budget_accelerator_hours are required, and so is how long it lasts: " +
-			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither). " +
-			"max_agents left out is max_hosted, report_interval_seconds left out is the platform's default, and with no starts_at it starts when it is started. " +
-			"default_quota_tier controls signups that omit quota_tier and defaults to \"guaranteed\". " +
+		Description: "Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours and max_agents are required, and so is how long it lasts: " +
+			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither), and at most the platform's quota.max_platform_experiment_days from starts_at, or from this create without one (422 run_too_long). " +
+			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, and " +
+			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. With no starts_at it starts when it is started. " +
+			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long. " +
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
 			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents, duration_hours and ends_at " +
 			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
-			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 and names the file. " +
+			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 invalid_experiment_file and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
 			"It is not read from the file, and is fixed from then on. " +
@@ -199,31 +200,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
 			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
 		}
-		// What is wrong with a body laid over the experiment file may be the file's doing, so every
-		// such refusal has one status and names the file.
-		invalid := func(reason string) error { return huma.Error400BadRequest(reason) }
 		if in.Body.FromRepo {
-			invalid = func(reason string) error {
-				return huma.Error422UnprocessableEntity("with " + domain.ExperimentFile + " of the repository under the request: " + reason)
-			}
 			if in.Body.Repository == "" {
 				return nil, api.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
 			}
 			named := in.Body.Repository
 			body, err := peh.fromRepo(ctx, in.Body)
 			body.Repository = named
-			if errors.Is(err, ErrInvalidPlatformExperiment) {
-				return nil, invalid(err.Error())
-			}
 			if err != nil {
 				return nil, err
 			}
 			in.Body = body
-		} else if missing := in.Body.missing(); len(missing) > 0 {
-			return nil, huma.Error422UnprocessableEntity(strings.Join(missing, ", ") + " must be stated: only with from_repo may the repository's experiment file state them")
-		}
-		if in.Body.Name == "" || in.Body.BudgetAcceleratorHours <= 0 {
-			return nil, invalid("name and budget_accelerator_hours are required")
 		}
 		hosting, err := peh.withHosting(ctx, in.Body)
 		if err != nil {
@@ -235,12 +222,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
 		pe, err := peh.svc.Create(ctx, hosting)
+		// What is wrong with a body laid over the experiment file may be the file's doing.
+		var refused *api.Refusal
+		if in.Body.FromRepo && errors.As(err, &refused) {
+			return nil, api.Refuse(refused.GetStatus(), refused.Reason, "with "+domain.ExperimentFile+" of the repository under the request: "+refused.Message)
+		}
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
 			return nil, err
-		}
-		if errors.Is(err, ErrInvalidPlatformExperiment) {
-			return nil, invalid(err.Error())
 		}
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "create platform experiment", err)
@@ -374,7 +363,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
 			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
 			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
-			"409 experiment_not_editable for a draft or a closed one, 422 invalid_field for a value that cannot be taken. " +
+			"409 experiment_not_editable for a draft or a closed one, 422 invalid_field for a value that cannot be taken, " +
+			"422 run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
 			"A coordinator's token changes `description` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {

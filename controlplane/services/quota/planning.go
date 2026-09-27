@@ -34,13 +34,6 @@ type Planning struct {
 	MaxPerDayPerOrg     int
 }
 
-// DefaultPlanning is what the settings file ships with (its planning section), for a handler
-// built without one, as tests build it.
-var DefaultPlanning = Planning{
-	AllowanceAcceleratorHours: 2.0, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
-	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,
-}
-
 // draftNameLength bounds the name a draft takes from its goal until the proposal names it.
 const draftNameLength = 80
 
@@ -64,10 +57,10 @@ func draftName(goal string) string {
 func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, prepare func(context.Context, *domain.PlatformExperiment) error) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
-		return nil, invalidPlatformExperiment(errors.New("goal is required: one sentence saying what you want to find out"))
+		return nil, refuseUpdate(422, "invalid_goal", "goal is required: one sentence saying what you want to find out")
 	}
 	if len(goal) > domain.MaxGoalBytes {
-		return nil, invalidPlatformExperiment(fmt.Errorf("goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes))
+		return nil, refuseUpdate(422, "invalid_goal", "goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes)
 	}
 	if launch.Launcher == "" || launch.DefaultModel == "" || launch.MaxHosted <= 0 {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
@@ -80,6 +73,8 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
 	now := time.Now().UTC()
+	// A draft states nothing of a run yet, so what its planner's job runs under is the platform's.
+	settings := s.withSettings(CreatePlatformExperimentRequest{})
 	pe := &domain.PlatformExperiment{
 		ID:                     "pe-" + uuid.New().String()[:8],
 		ProjectID:              projectID,
@@ -89,12 +84,12 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		BudgetAcceleratorHours: planning.AllowanceAcceleratorHours,
 		MaxAgents:              1,
 		Metrics:                []domain.MetricDefinition{},
-		ReportIntervalSeconds:  30,
+		ReportIntervalSeconds:  settings.ReportIntervalSeconds,
 		PlanningEndsAt:         now.Add(planning.Limit),
 		Status:                 domain.PlatformExpDraft,
-		Stages:                 s.cfg.DefaultStages,
+		Stages:                 settings.Stages,
 		CurrentStage:           1,
-		DefaultQuotaTier:       domain.QuotaTierGuaranteed,
+		DefaultQuotaTier:       domain.QuotaTier(settings.DefaultQuotaTier),
 		MaxHosted:              launch.MaxHosted,
 		CreatedAt:              now,
 		UpdatedAt:              now,
@@ -124,12 +119,6 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	return pe, nil
 }
 
-// WithPlanning sets what a draft may spend and how many an org may have.
-func (h *PlatformExperimentsHandler) WithPlanning(planning Planning) *PlatformExperimentsHandler {
-	h.planning = planning
-	return h
-}
-
 // RegisterPlanningHuma registers the way from one sentence to a running platform experiment:
 // a draft, the planner's proposal, and the person's acceptance.
 func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
@@ -149,7 +138,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
 			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and 422, 409 or 502 repository_not_created as on POST /platform-experiments. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"503 launcher_not_registered when the deployment has no launcher to run the planner. " +
+			"422 invalid_goal for a goal that is empty or over the length. 503 launcher_not_registered when the deployment has no launcher to run the planner. " +
 			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
@@ -171,9 +160,6 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		}
 		caller, _ := auth.FromContext(ctx)
 		pe, err := h.svc.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, caller.Actor(), h.planning, h.launch, h.provideRepository(named, in.Body.RepositoryAccount))
-		if errors.Is(err, ErrInvalidPlatformExperiment) {
-			return nil, huma.Error422UnprocessableEntity(err.Error())
-		}
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
 			return nil, err

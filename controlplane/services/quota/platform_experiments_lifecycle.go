@@ -15,14 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// ErrInvalidPlatformExperiment wraps every Create rejection of the request itself.
-var ErrInvalidPlatformExperiment = errors.New("invalid platform experiment")
-
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
-
-func invalidPlatformExperiment(err error) error {
-	return fmt.Errorf("platform_experiments.Create: %w: %w", ErrInvalidPlatformExperiment, err)
-}
 
 // checkLength holds a create to stating how long it lasts in exactly one way.
 func (r CreatePlatformExperimentRequest) checkLength() error {
@@ -37,58 +30,85 @@ func (r CreatePlatformExperimentRequest) checkLength() error {
 	return nil
 }
 
-// Create creates a new platform experiment in open status (accepting signups immediately).
-func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
-	now := time.Now().UTC()
-	metrics := req.Metrics
-	if metrics == nil {
-		metrics = []domain.MetricDefinition{}
+// withSettings returns spec with the platform's settings in the fields a request may leave to
+// them: scheduler.default_report_interval_seconds, stages.default and quota.default_quota_tier.
+func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
+	if spec.ReportIntervalSeconds == 0 {
+		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
 	}
-	if err := domain.ValidateMetricDefinitions(metrics); err != nil {
-		return nil, invalidPlatformExperiment(err)
+	if len(spec.Stages) == 0 {
+		spec.Stages = s.cfg.DefaultStages
 	}
-	if err := domain.RequireRankingMetric(metrics); err != nil {
-		return nil, invalidPlatformExperiment(err)
+	if spec.DefaultQuotaTier == "" {
+		spec.DefaultQuotaTier = string(s.cfg.DefaultQuotaTier)
 	}
-	if req.ReportIntervalSeconds == 0 {
-		req.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
+	return spec
+}
+
+// checkRunLength holds a platform experiment to quota.max_platform_experiment_days from its
+// start, which is now for one that states no starts_at. Until its end it may rent machines.
+func (s *PlatformExperimentsService) checkRunLength(startsAt, endsAt, now time.Time) error {
+	if startsAt.IsZero() {
+		startsAt = now
 	}
-	if req.ReportIntervalSeconds <= 0 {
-		return nil, invalidPlatformExperiment(errors.New("report_interval_seconds must be positive"))
+	if length := endsAt.Sub(startsAt); length > s.cfg.MaxRunLength {
+		return refuseUpdate(422, "run_too_long", "it would run %.1f days to its ends_at, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state an earlier end",
+			length.Hours()/24, s.cfg.MaxRunLength.Hours()/24)
 	}
-	if req.MaxAgents == 0 {
-		req.MaxAgents = req.maxHosted
+	return nil
+}
+
+// validate is the one check of what a platform experiment is created as, whoever states it: a
+// create, a planner's proposal or the person accepting one. It returns spec as it is stored,
+// with the platform's settings where spec leaves a field to them and its length as ends_at.
+func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
+	spec = s.withSettings(spec)
+	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Description) == "" {
+		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
 	}
-	if req.MaxAgents <= 0 {
-		return nil, invalidPlatformExperiment(errors.New("max_agents must be positive, and this deployment hosts no agents to take it from: state it"))
+	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
+		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
 	}
-	stages := req.Stages
-	if len(stages) == 0 {
-		stages = s.cfg.DefaultStages
+	if err := domain.RequireRankingMetric(spec.Metrics); err != nil {
+		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
 	}
-	// Fixed at creation, so it is rejected here rather than defended against downstream.
-	if err := domain.ValidateStages(stages); err != nil {
-		return nil, invalidPlatformExperiment(err)
+	if spec.ReportIntervalSeconds <= 0 {
+		return spec, refuseUpdate(422, "invalid_experiment", "report_interval_seconds must be positive: how often a job really reports")
 	}
-	defaultQuotaTier := domain.QuotaTier(req.DefaultQuotaTier)
-	if defaultQuotaTier == "" {
-		defaultQuotaTier = domain.QuotaTierGuaranteed
+	if err := domain.ValidateStages(spec.Stages); err != nil {
+		return spec, refuseUpdate(422, "invalid_stages", "stages: %s", err)
 	}
-	if !domain.ValidQuotaTierOverride(string(defaultQuotaTier)) {
-		return nil, invalidPlatformExperiment(errors.New("default_quota_tier must be \"guaranteed\" or \"burst_only\""))
+	if tier := domain.QuotaTier(spec.DefaultQuotaTier); tier != domain.QuotaTierGuaranteed && tier != domain.QuotaTierBurstOnly {
+		return spec, refuseUpdate(422, "invalid_experiment", "default_quota_tier must be \"guaranteed\" or \"burst_only\"")
 	}
-	if req.MaxConcurrentAccelerators != nil && *req.MaxConcurrentAccelerators <= 0 {
-		return nil, invalidPlatformExperiment(errors.New("max_concurrent_accelerators must be positive"))
+	if spec.MaxConcurrentAccelerators != nil && *spec.MaxConcurrentAccelerators <= 0 {
+		return spec, refuseUpdate(422, "invalid_experiment", "max_concurrent_accelerators must be positive")
 	}
-	if err := req.checkLength(); err != nil {
-		return nil, err
+	if spec.BudgetAcceleratorHours <= 0 {
+		return spec, refuseUpdate(422, "invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends")
 	}
-	if req.DurationHours > 0 {
-		from := req.StartsAt
+	if spec.MaxAgents <= 0 {
+		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many agents may join")
+	}
+	if err := spec.checkLength(); err != nil {
+		return spec, err
+	}
+	if spec.DurationHours > 0 {
+		from := spec.StartsAt
 		if from.IsZero() {
 			from = now
 		}
-		req.EndsAt = from.Add(time.Duration(req.DurationHours * float64(time.Hour)))
+		spec.EndsAt = from.Add(time.Duration(spec.DurationHours * float64(time.Hour)))
+	}
+	return spec, s.checkRunLength(spec.StartsAt, spec.EndsAt, now)
+}
+
+// Create creates a new platform experiment in open status (accepting signups immediately).
+func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
+	now := time.Now().UTC()
+	req, err := s.validate(req, now)
+	if err != nil {
+		return nil, err
 	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
 		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its launcher and model are resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
@@ -100,14 +120,14 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Description:               req.Description,
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
 		MaxAgents:                 req.MaxAgents,
-		Metrics:                   metrics,
+		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  req.StartsAt,
 		EndsAt:                    req.EndsAt,
 		Status:                    domain.PlatformExpOpen,
-		Stages:                    stages,
+		Stages:                    req.Stages,
 		CurrentStage:              1,
-		DefaultQuotaTier:          defaultQuotaTier,
+		DefaultQuotaTier:          domain.QuotaTier(req.DefaultQuotaTier),
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
@@ -208,6 +228,11 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 			return nil, invalid("max_concurrent_accelerators must be positive")
 		}
 		pe.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
+	}
+	if patch.StartsAt != nil || patch.EndsAt != nil {
+		if err := s.checkRunLength(pe.StartsAt, pe.EndsAt, time.Now().UTC()); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)

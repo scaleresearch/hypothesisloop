@@ -26,7 +26,7 @@ import (
 // planningAPI is the planning routes and the ones a draft passes through, over store.
 func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Principal) (*PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
 	t.Helper()
-	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{"pe-draft": {PlatformExperimentID: "pe-draft", ProjectID: "prj-a", OrgID: "org-a"}},
@@ -34,7 +34,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
-	handler := NewPlatformExperimentsHandler(svc, planningRepositories, zap.NewNop()).
+	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
 		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: string(domain.CPUType), Kind: domain.TypeKindCPU, AccHRate: 1}}})
 	if drafts, ok := store.(*draftStore); ok {
@@ -82,10 +82,10 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if pe.Status != domain.PlatformExpDraft || pe.Goal != goal || out["status"] != "draft" || out["goal"] != goal {
 		t.Fatalf("created %+v", pe)
 	}
-	if pe.BudgetAcceleratorHours != DefaultPlanning.AllowanceAcceleratorHours || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
+	if pe.BudgetAcceleratorHours != testPlanning.AllowanceAcceleratorHours || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
 		t.Errorf("a draft holds %v AccH, %d metrics, %d places, coordinator %v: want the allowance and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.MaxAgents, pe.CoordinatorHosted)
 	}
-	if limit := pe.PlanningEndsAt.Sub(before); limit < DefaultPlanning.Limit-time.Minute || limit > DefaultPlanning.Limit+time.Minute {
+	if limit := pe.PlanningEndsAt.Sub(before); limit < testPlanning.Limit-time.Minute || limit > testPlanning.Limit+time.Minute {
 		t.Errorf("a draft ends %v after it was created, want the planning limit", limit)
 	}
 	if out["planning_ends_at"] != pe.PlanningEndsAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["proposal_expires_at"] != nil {
@@ -240,7 +240,7 @@ func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 }
 
 func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error {
-	if limits != (db.DraftLimits{Concurrent: DefaultPlanning.MaxConcurrentPerOrg, PerDay: DefaultPlanning.MaxPerDayPerOrg}) {
+	if limits != (db.DraftLimits{Concurrent: testPlanning.MaxConcurrentPerOrg, PerDay: testPlanning.MaxPerDayPerOrg}) {
 		return errors.New("a draft was created without the planning limits")
 	}
 	if s.over != nil {
@@ -284,8 +284,7 @@ func aProposal(more map[string]any) map[string]any {
 	body := map[string]any{
 		"experiment": map[string]any{
 			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE code_ref: git://seed@abc measured: job-1",
-			"metrics":                 []map[string]any{{"key": "val_loss", "direction": "minimize"}},
-			"report_interval_seconds": 30,
+			"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 		},
 		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
 		"baseline_job_id": "job-1",
@@ -334,8 +333,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		t.Errorf("the draft is not marked proposed: %+v", pe)
 	}
 	// From now on it waits for a person, far longer than the planner was given.
-	if wait := pe.ProposalExpiresAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
-		t.Errorf("a proposed draft ends in %v, want %v", wait, DefaultPlanning.ProposedFor)
+	if wait := pe.ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
+		t.Errorf("a proposed draft ends in %v, want %v", wait, testPlanning.ProposedFor)
 	}
 	if out["proposal_expires_at"] != pe.ProposalExpiresAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["planning_ends_at"] != nil {
 		t.Errorf("a proposed draft reads proposal_expires_at %v, ends_at %v, planning_ends_at %v: want how long the proposal waits under that name alone", out["proposal_expires_at"], out["ends_at"], out["planning_ends_at"])
@@ -361,6 +360,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"no ranked metric":                       {experiment(map[string]any{"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize", "role": "constraint", "bound": 1}}}), "invalid_metrics"},
 		"a ladder that is not one":               {experiment(map[string]any{"stages": []map[string]any{{"length_pct": 40, "evict_pct": 50}}}), "invalid_stages"},
 		"no cost":                                {map[string]any{"budget_accelerator_hours": 0}, "invalid_cost"},
+		"no length":                              {map[string]any{"duration_hours": 0}, "invalid_length"},
+		"longer than the platform runs one":      {map[string]any{"duration_hours": 31 * 24}, "run_too_long"},
 		"nobody to run it":                       {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
 		"more machines than it gets":             {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 		"a planner among the agents":             {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
@@ -474,6 +475,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		reason string
 	}{
 		"no budget":         {map[string]any{"budget_accelerator_hours": 0, "duration_hours": 2, "agents": []map[string]any{{}}}, "invalid_cost"},
+		"too long":          {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 31 * 24, "agents": []map[string]any{{}}}, "run_too_long"},
 		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{}}, "invalid_agents"},
 		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 	} {
@@ -630,7 +632,7 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].Actor.Kind != domain.ActorUser || pe.Revisions[0].Actor.ID != "u-1" {
 		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
 	}
-	if left := pe.PlanningEndsAt.Sub(before); left < DefaultPlanning.Limit-time.Minute || left > DefaultPlanning.Limit+time.Minute {
+	if left := pe.PlanningEndsAt.Sub(before); left < testPlanning.Limit-time.Minute || left > testPlanning.Limit+time.Minute {
 		t.Errorf("the planner has %v to propose again, want the planning limit", left)
 	}
 	// Read back, whoever asked is named.
@@ -695,7 +697,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	if code != http.StatusOK || out["declined_reason"] != why || out["proposed_at"] == nil || out["proposal"] != nil || out["status"] != "draft" {
 		t.Fatalf("decline: got = %d %v, want the reason, an answer time and no proposal", code, out)
 	}
-	if wait := store.created[0].ProposalExpiresAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
+	if wait := store.created[0].ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
 		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
 	}
 	// The earlier proposal no longer stands, so nothing is accepted.

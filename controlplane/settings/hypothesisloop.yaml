@@ -328,6 +328,16 @@ quota:
   # appear on demand, so this is the concurrency ceiling that live capacity used to provide.
   default_max_concurrent_accelerators: 64
 
+  # The tier of a signup that states no quota_tier, in a platform experiment that states no
+  # default_quota_tier of its own: guaranteed (a reserved share and burst on top) or burst_only.
+  default_quota_tier: guaranteed
+
+  # The longest a platform experiment may run, from its start (starts_at, or the moment it is
+  # created or accepted) to its ends_at. A longer one is refused with 422 run_too_long when it is
+  # created, proposed, accepted or patched. Until its end an experiment may rent machines, so
+  # this and its budget are what bound it.
+  max_platform_experiment_days: 30
+
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest

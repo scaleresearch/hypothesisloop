@@ -472,3 +472,11 @@ func TestACoreHourIsBuiltInAtOneAndPricedNowhereElse(t *testing.T) {
 		t.Errorf("a file that lists %s: Load = %v, want it refused as built in", domain.CPUType, err)
 	}
 }
+
+func TestLoadRejectsMissingPlatformExperimentSettings(t *testing.T) {
+	for _, line := range []string{"  default_quota_tier: guaranteed\n", "  max_platform_experiment_days: 30\n"} {
+		if err := loadText(t, strings.Replace(productionConfig(t), line, "", 1)); err == nil {
+			t.Errorf("Load accepted settings without %q", strings.TrimSpace(line))
+		}
+	}
+}

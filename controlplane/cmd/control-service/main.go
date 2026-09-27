@@ -108,6 +108,8 @@ func main() {
 		BurstFraction:                    pcfg.Quota.BurstFraction,
 		DefaultStages:                    pcfg.Stages.Default,
 		DefaultReportIntervalSeconds:     pcfg.Scheduler.DefaultReportIntervalSeconds,
+		DefaultQuotaTier:                 domain.QuotaTier(pcfg.Quota.DefaultQuotaTier),
+		MaxRunLength:                     time.Duration(pcfg.Quota.MaxPlatformExperimentDays) * 24 * time.Hour,
 		MaxSubmissionsPerHour:            pcfg.Quota.MaxSubmissionsPerHour,
 		MaxAcceleratorCountPerJob:        pcfg.Quota.MaxAcceleratorCountPerJob,
 		MaxCPUCoresPerJob:                pcfg.Quota.MaxCPUCoresPerJob,
@@ -208,19 +210,18 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		AcceleratorTypes: acceleratorTypeInfos,
 		JobImages:        pcfg.OfferedJobImages(),
 	}
-	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, logger).
+	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
+		AllowanceAcceleratorHours: pcfg.Planning.AllowanceAcceleratorHours,
+		Limit:                     time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
+		ProposedFor:               time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
+		MaxConcurrentPerOrg:       pcfg.Planning.MaxConcurrentPerOrg,
+		MaxPerDayPerOrg:           pcfg.Planning.MaxPerDayPerOrg,
+	}, logger).
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
-		}).
-		WithPlanning(quota.Planning{
-			AllowanceAcceleratorHours: pcfg.Planning.AllowanceAcceleratorHours,
-			Limit:                     time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
-			ProposedFor:               time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
-			MaxConcurrentPerOrg:       pcfg.Planning.MaxConcurrentPerOrg,
-			MaxPerDayPerOrg:           pcfg.Planning.MaxPerDayPerOrg,
 		})
 
 	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, gitHost, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)

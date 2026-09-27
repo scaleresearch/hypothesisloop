@@ -187,7 +187,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 	t.Helper()
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
+	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
 	RegisterAgentsHuma(doc, handler)
 	return r
 }
@@ -567,7 +567,7 @@ func TestTheAgentsAPICannotBeRegisteredWithoutALauncherAndASecret(t *testing.T) 
 	r := chi.NewRouter()
 	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	store := newRosterStore(domain.PlatformExpOpen, 1)
-	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, zap.NewNop()))
+	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 }
 
 // Hosting needed a repository to clone, and a person with an idea and no repository could not

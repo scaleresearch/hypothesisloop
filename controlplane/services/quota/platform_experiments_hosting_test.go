@@ -45,11 +45,11 @@ func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.
 func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &hostingStore{}
-	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", ownerOfA, auth.NewAccess(placement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(svc, repos, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "model-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
@@ -91,12 +91,12 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
 		t.Fatalf("without one: got = %d %v, created %+v", code, out, store.created[0])
 	}
-	// With no max_agents the field is as large as the platform runs machines for one experiment.
+	// How many may join is the creator's to say, and no setting stands in for it.
 	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	unbounded := run(nil)
 	delete(unbounded, "max_agents")
-	if code, out := create(unbounded); code != http.StatusCreated || store.created[0].MaxAgents != hostingMaxHosted {
-		t.Fatalf("without max_agents: got = %d %v, created %+v, want max_agents %d", code, out, store.created, hostingMaxHosted)
+	if code, out := create(unbounded); code != http.StatusUnprocessableEntity || len(store.created) != 0 {
+		t.Fatalf("without max_agents: got = %d %v, created %+v, want 422 and nothing", code, out, store.created)
 	}
 }
 
@@ -119,8 +119,8 @@ func TestCreateAddsNoAgent(t *testing.T) {
 
 func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	whole := map[string]any{
-		"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": "2027-01-01T00:00:00Z",
-		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}, "report_interval_seconds": 30, "starts_at": "2026-01-01T00:00:00Z",
+		"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 24,
+		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}, "report_interval_seconds": 30,
 	}
 	with := func(more map[string]any) map[string]any {
 		body := map[string]any{}
@@ -172,7 +172,7 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 // A coordinator's token is in the hands of a machine the platform rents. It keeps the brief, and
 // what the run may spend and how long it lasts stay with whoever created it.
 func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t *testing.T) {
-	starts, ends := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2030, 2, 1, 0, 0, 0, 0, time.UTC)
+	starts, ends := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2030, 1, 15, 0, 0, 0, 0, time.UTC)
 	live := func() *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "n", Description: "the brief", Status: domain.PlatformExpOpen,
@@ -184,14 +184,14 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store := &createdStore{created: []*domain.PlatformExperiment{live()}}
-		svc := NewPlatformExperimentsService(store, domain.QuotaConfig{DefaultStages: []domain.Stage{{LengthPct: 100}}}, zap.NewNop(), "", time.Minute)
+		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 		placement := authtest.Placement{
 			Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
 			PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},
 		}
 		router := chi.NewRouter()
 		doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "m", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)
@@ -215,7 +215,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	for field, more := range map[string]map[string]any{
 		"budget_accelerator_hours":    {"budget_accelerator_hours": 500},
 		"max_agents":                  {"max_agents": 30},
-		"ends_at":                     {"ends_at": "2031-01-01T00:00:00Z"},
+		"ends_at":                     {"ends_at": "2030-01-20T00:00:00Z"},
 		"starts_at":                   {"starts_at": "2030-01-02T00:00:00Z"},
 		"max_concurrent_accelerators": {"max_concurrent_accelerators": 8},
 		"report_interval_seconds":     {"report_interval_seconds": 60},

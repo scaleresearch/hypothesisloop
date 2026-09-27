@@ -26,7 +26,8 @@ import (
 type Proposal struct {
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
 	// brief every agent works from), metrics, report_interval_seconds, stages and the policies.
-	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, report_interval_seconds, and optionally stages, default_quota_tier, max_concurrent_accelerators."`
+	// It is checked by validate, as the body of a create is.
+	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, and optionally report_interval_seconds, stages and default_quota_tier, which left out are the platform's settings, and max_concurrent_accelerators."`
 
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, from its start."`
@@ -69,41 +70,22 @@ func refusedProposal(reason, format string, args ...any) error {
 }
 
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
-// proposal and the platform's config. It returns the experiment the proposal states, decoded.
-func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int) (CreatePlatformExperimentRequest, error) {
+// proposal and the platform's config. It returns the experiment the proposal states, as validate
+// answers it: with its cost, its length from now and one place for each researcher.
+func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int, now time.Time) (CreatePlatformExperimentRequest, error) {
 	experiment, err := decodeExperimentBase(p.Experiment)
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	if strings.TrimSpace(experiment.Name) == "" || strings.TrimSpace(experiment.Description) == "" {
-		return experiment, refusedProposal("invalid_experiment", "experiment: name and description are required: the description is the brief every researcher works from")
-	}
-	if err := domain.ValidateMetricDefinitions(experiment.Metrics); err != nil {
-		return experiment, refusedProposal("invalid_metrics", "experiment.metrics: %s", err)
-	}
-	if err := domain.RequireRankingMetric(experiment.Metrics); err != nil {
-		return experiment, refusedProposal("invalid_metrics", "experiment.metrics: %s", err)
-	}
-	if experiment.ReportIntervalSeconds <= 0 {
-		return experiment, refusedProposal("invalid_experiment", "experiment.report_interval_seconds must be positive: how often the harness really reports")
-	}
-	if len(experiment.Stages) > 0 {
-		if err := domain.ValidateStages(experiment.Stages); err != nil {
-			return experiment, refusedProposal("invalid_stages", "experiment.stages: %s", err)
-		}
-	}
-	if experiment.DefaultQuotaTier != "" && !domain.ValidQuotaTierOverride(experiment.DefaultQuotaTier) {
-		return experiment, refusedProposal("invalid_experiment", "experiment.default_quota_tier must be \"guaranteed\" or \"burst_only\"")
-	}
-	if experiment.MaxConcurrentAccelerators != nil && *experiment.MaxConcurrentAccelerators <= 0 {
-		return experiment, refusedProposal("invalid_experiment", "experiment.max_concurrent_accelerators must be positive")
-	}
-	if p.BudgetAcceleratorHours <= 0 || p.DurationHours <= 0 {
-		return experiment, refusedProposal("invalid_cost", "budget_accelerator_hours and duration_hours must both be positive: what the run you propose would spend and how long it would take")
-	}
 	// The coordinator the platform runs for an accepted draft is one of its machines.
 	if len(p.Agents) == 0 || len(p.Agents) > maxHosted-1 {
 		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers, got %d", maxHosted-1, len(p.Agents))
+	}
+	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
+	experiment.StartsAt = time.Time{}
+	experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
+	if experiment, err = h.svc.validate(experiment, now); err != nil {
+		return experiment, err
 	}
 	for i, agent := range p.Agents {
 		if _, _, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, h.launch.DefaultModel, agent.Hyperparameters); err != nil {
@@ -217,8 +199,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours and agents are proposed, and the person who accepts states them. " +
-			"The proposal is checked before it is stored and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
-			"invalid_cost, invalid_agents, missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
+			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
+			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
 			"no_baseline, baseline_not_completed, baseline_without_finding, brief_without_baseline, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
 			"The stored proposal also answers accelerator_type, the type the baseline job ran on: the platform reads it from that job and a body that states it is refused.",
@@ -243,7 +225,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		experiment, err := h.checkProposal(in.Body, pe.MaxHosted)
+		experiment, err := h.checkProposal(in.Body, pe.MaxHosted, time.Now().UTC())
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +302,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	}
 	// The check the proposal passed, again with the cost and the agents the person states.
 	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
-	experiment, err := h.checkProposal(proposal, pe.MaxHosted)
+	now := time.Now().UTC()
+	experiment, err := h.checkProposal(proposal, pe.MaxHosted, now)
 	if err != nil {
 		return nil, err
 	}
@@ -340,20 +323,10 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		return nil, h.refusal("accept", err)
 	}
 
-	now := time.Now().UTC()
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
-	pe.Stages = experiment.Stages
-	if len(pe.Stages) == 0 {
-		pe.Stages = h.svc.cfg.DefaultStages
-	}
-	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
-	if experiment.DefaultQuotaTier != "" {
-		pe.DefaultQuotaTier = domain.QuotaTier(experiment.DefaultQuotaTier)
-	}
+	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, domain.QuotaTier(experiment.DefaultQuotaTier)
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
-	pe.BudgetAcceleratorHours = req.BudgetAcceleratorHours
-	pe.MaxAgents = len(req.Agents)
-	pe.EndsAt = now.Add(time.Duration(req.DurationHours * float64(time.Hour)))
+	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.EndsAt = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.EndsAt
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
 
 	agents := make([]*domain.Agent, 0, len(req.Agents))
