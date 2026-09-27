@@ -123,13 +123,19 @@ func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
 	}))
 	var stdout, stderr bytes.Buffer
 	args := []string{"job", "submit", "job.yaml", "--agent", "jane", "--hypothesis", "hyp-9", "--theory", "wider wins",
-		"--env", "LR=0.1", "--env", "NOTE=a=b", "--platform-experiment", "pe-flag"}
+		"--env", "LR=0.1", "--env", "NOTE=a=b", "--platform-experiment", "pe-flag",
+		"--estimated-duration-hours", "0.05", "--capacity-tier", "burst"}
 	if code := run(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	metadata := sent["metadata"].(map[string]any)
 	if metadata["hypothesis_id"] != "hyp-9" || metadata["theory"] != "wider wins" || metadata["platform_experiment_id"] != "pe-flag" {
 		t.Fatalf("metadata = %+v", metadata)
+	}
+	// A researcher refused for quota wrote five copies of the spec, each committed and pushed,
+	// to change these two fields.
+	if metadata["estimated_duration_hours"] != 0.05 || metadata["capacity_tier"] != "burst" {
+		t.Fatalf("metadata = %+v, want the estimate and the tier of the flags", metadata)
 	}
 	if want := origin + "@" + mustGit(t, clone, "rev-parse", "HEAD"); metadata["code_ref"] != want {
 		t.Fatalf("code_ref = %v, want %s", metadata["code_ref"], want)
@@ -148,6 +154,9 @@ func TestJobSubmitRejectsMalformedEnv(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--env", "LR"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("exit code = %d, want 2, stderr = %s", code, stderr.String())
+	}
+	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--estimated-duration-hours", "0"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("an estimate of 0: exit code = %d, want 2, stderr = %s", code, stderr.String())
 	}
 }
 

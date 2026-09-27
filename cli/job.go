@@ -35,12 +35,17 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--env K=V ...] [--secret-env NAME ...] [--theory T]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...]
 
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
-one committed base spec serves every job that differs only in its hypothesis and env, with
-nothing to edit and nothing to commit. Prints the accepted job's id, status, code_ref,
-capacity_tier and estimated_cost_acch; hl job status ID has the rest.
+one committed base spec serves every job that differs only in its hypothesis, env, estimate and
+tier, with nothing to edit and nothing to commit. Prints the accepted job's id, status,
+code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
+A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
+was billed (hl job cost ID). A submit refused for quota fits once a job of yours ends or with a
+lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
+on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
+no extra hours (hl quota).
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
@@ -74,7 +79,9 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
 		"theory":                 fs.String("theory", "", "sets metadata.theory"),
 		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's or $PLATFORM_EXPERIMENT_ID)"),
+		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
+	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
 	var secretEnv stringList
@@ -105,6 +112,13 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 		if *value != "" {
 			metadata[key] = *value
 		}
+	}
+	if *estimate != "" {
+		hours, err := strconv.ParseFloat(*estimate, 64)
+		if err != nil || hours <= 0 {
+			return parseExit(misuse(fs, "--estimated-duration-hours wants a positive number of hours, got %q", *estimate))
+		}
+		metadata["estimated_duration_hours"] = hours
 	}
 	if err := setJobEnv(body, env); err != nil {
 		return parseExit(misuse(fs, "%s", err))
