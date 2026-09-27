@@ -43,6 +43,11 @@ class SystemPromptTest(unittest.TestCase):
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
 
+    # A job that asked for more cores than any node had waited to the run's end, its agent idle.
+    def test_a_held_job_is_cancelled_and_resubmitted_smaller_or_waited_for(self):
+        self.assertIn("A `job.held` update says why a job still waits: cancel and resubmit it smaller if no "
+                      "cluster can fit what it asks, else wait.", " ".join(self.render("generalist").split()))
+
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())

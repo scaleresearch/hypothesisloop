@@ -115,8 +115,8 @@ outranks this briefing:
      a turn that waits is cut off after ten minutes and keeps your session from being saved. A changed
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
      cut, wind up and stop.
-     While a job is QUEUED, cancel and resubmit it smaller if its `not_admitted_reason` stays
-     `capacity_unavailable` and no cluster can fit it. To put one of your own jobs first, cancel
+     A `job.held` update says why a job still waits: cancel and resubmit it smaller if no
+     cluster can fit what it asks, else wait. To put one of your own jobs first, cancel
      the one blocking it.
   7. File the summary on every COMPLETED job with `hl job summary`, written for the reader in
      step 3, and once the evidence lets you call it honestly set your hypothesis's status. Then
