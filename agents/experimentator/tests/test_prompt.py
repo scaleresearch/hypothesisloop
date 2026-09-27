@@ -65,6 +65,12 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Compare a trial only with a control that ran on the same host (`on host N` in its update)", prompt)
         self.assertIn("With none there, rerun the control alongside. A finding across hosts says so", prompt)
 
+    # In a platform outage one researcher ran `hl quota` in sleep loops and another pushed five
+    # times. An agent that ends its turn is sent the next update, or a nudge after 30 minutes.
+    def test_a_platform_that_fails_is_retried_once_and_then_waited_for(self):
+        self.assertIn("An HTTP 5xx or \"could not be reached\", from `git push` too, is the platform failing: retry once "
+                      "after a minute, then end your turn: the next message wakes you.", " ".join(self.render("generalist").split()))
+
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())
