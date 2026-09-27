@@ -116,7 +116,7 @@ class BriefingTest(unittest.TestCase):
 class WatchTest(unittest.IsolatedAsyncioTestCase):
     def test_the_token_says_whether_the_watch_is_a_coordinators_of_the_whole_experiment(self):
         env = updates.watch_env("http://api", COORDINATOR_TOKEN, "/tmp/w")
-        self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all", "--decisions", "--settle", "120"])
+        self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all", "--decisions"])
         own = updates.watch_env("http://api", AGENT_TOKEN, "/tmp/w")
         self.assertEqual((own["HL_TOKEN"], updates.watch_command(own)), (AGENT_TOKEN, ["hl", "watch"]))
 
