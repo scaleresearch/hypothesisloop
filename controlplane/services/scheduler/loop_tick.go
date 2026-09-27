@@ -843,7 +843,7 @@ func noClusterForImageReason(registered map[string]domain.Cluster, exp *domain.E
 	}
 	sort.Strings(fixed)
 	if exp.Job.Image == "" {
-		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs a job in the image it names: set job.image"
+		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)"
 	}
 	if len(fixed) == 0 {
 		return domain.NotAdmittedNoClusterForImage + ": no cluster that takes this org's jobs runs image " + exp.Job.Image

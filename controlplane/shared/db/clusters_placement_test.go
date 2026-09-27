@@ -406,7 +406,7 @@ func TestAClaimPlacesAJobOnlyWhereItsImageRuns(t *testing.T) {
 
 	// Its runtime reports one image for every job.
 	for range 2 {
-		if err := w.clusters.RecordJobImage(ctx, w.ofA, platformImage, false); err != nil {
+		if err := w.clusters.RecordJobImage(ctx, w.ofA, platformImage); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -426,38 +426,54 @@ func TestAClaimPlacesAJobOnlyWhereItsImageRuns(t *testing.T) {
 		if !w.claim(t, id, w.ofA) {
 			t.Fatalf("%s was refused on the cluster whose image it runs in", id)
 		}
+		if got := w.get(t, id); got.ResolvedJob.Image != platformImage || got.Job.Image != map[string]string{bare: "", platform: platformImage}[id] {
+			t.Fatalf("%s is to run in %q and names %q, want the cluster's image written at admission and the job as submitted", id, got.ResolvedJob.Image, got.Job.Image)
+		}
 	}
 
 	// The runtime is replaced by one that runs a job in the image it names.
-	if err := w.clusters.RecordJobImage(ctx, w.ofA, "", false); err != nil {
+	if err := w.clusters.RecordJobImage(ctx, w.ofA, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !w.claim(t, named, w.ofA) {
 		t.Fatal("a job naming an image was refused on a cluster that runs each job in its own")
 	}
+	if got := w.get(t, named); got.ResolvedJob.Image != got.Job.Image || got.Job.Image == "" {
+		t.Fatalf("named is to run in %q, want the %q it names", got.ResolvedJob.Image, got.Job.Image)
+	}
 }
 
-// A customer's own machine pulls any image. Its job image is where a job that names none runs,
-// and shuts out no job that names another, as the one fixed image of a rented cluster does.
-func TestAClusterWhoseJobImageIsOnlyADefaultTakesEveryJob(t *testing.T) {
+// A database from when a cluster that runs any image also kept where a job naming none ran:
+// the jobs placed then keep the image they run in, and the cluster is read as running any.
+func TestTheSchemaTurnsADefaultJobImageIntoAClusterThatRunsAnyImage(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	const platformImage = "registry.test/platform-job:7"
-	named, bare := w.queued(t, "named", w.peA), w.queued(t, "bare", w.peA)
-	if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET job_spec = job_spec - 'image' WHERE id = $1`, bare); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if err := w.clusters.RecordJobImage(ctx, w.ofA, platformImage, true); err != nil {
+	onAny, onOne := w.placed(t, "on-any", w.peA, w.ofA, domain.StatusRunning), w.placed(t, "on-one", w.peB, w.ofB, domain.StatusSubmitted)
+	for _, statement := range []string{
+		`ALTER TABLE clusters ADD COLUMN job_image_default BOOLEAN NOT NULL DEFAULT false`,
+		`UPDATE clusters SET job_image = '` + platformImage + `', job_image_default = (name = '` + w.ofA + `') WHERE name IN ('` + w.ofA + `', '` + w.ofB + `')`,
+		`UPDATE experiments SET resolved_job_spec = resolved_job_spec - 'image' WHERE id IN ('` + onAny + `', '` + onOne + `')`,
+	} {
+		if _, err := w.pool.pool.Exec(ctx, statement); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got, _ := w.clusters.GetCluster(ctx, w.ofA); got.JobImage != platformImage || !got.JobImageDefault {
-		t.Fatalf("cluster = %+v, want the image kept as a default", got)
-	}
-	for _, id := range []string{named, bare} {
-		if !w.claim(t, id, w.ofA) {
-			t.Fatalf("%s was refused on a cluster that runs any image and has one for a job that names none", id)
+	for range 2 {
+		if err := applySchemaAt(ctx, testDSN()); err != nil {
+			t.Fatal(err)
 		}
+	}
+	for _, id := range []string{onAny, onOne} {
+		if got := w.get(t, id); got.ResolvedJob.Image != platformImage {
+			t.Errorf("%s is to run in %q, want the %q it was started in", id, got.ResolvedJob.Image, platformImage)
+		}
+	}
+	registered, err := w.clusters.RegisteredClusters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered[w.ofA].JobImage != "" || registered[w.ofB].JobImage != platformImage {
+		t.Errorf("the clusters run %q and %q, want any image and %q", registered[w.ofA].JobImage, registered[w.ofB].JobImage, platformImage)
 	}
 }

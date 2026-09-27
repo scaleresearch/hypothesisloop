@@ -81,12 +81,9 @@ type ResourceCatalog struct {
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
 type ClusterCapacity struct {
 	ClusterName string `json:"cluster_name"`
-	// JobImage is the image a job that names none runs in on the cluster. Absent, the cluster
-	// takes only jobs that name their image.
+	// JobImage is the one image the cluster runs: a job placed there names none or it. Absent,
+	// the cluster takes only jobs that name their image.
 	JobImage string `json:"job_image,omitempty"`
-	// JobImageDefault says the cluster also runs a job in the image the job names. False with a
-	// JobImage is a cluster that runs that one image only: a job placed there names none or it.
-	JobImageDefault bool `json:"job_image_default,omitempty"`
 	// JobImageCarries is what is installed in JobImage, when it is an image the deployment offers.
 	JobImageCarries string `json:"job_image_carries,omitempty"`
 	// OnDemand says the cluster rents a machine when a job needs one and has none standing by.
@@ -219,7 +216,7 @@ func withOfferedImages(offered []domain.JobImage, clusters []ClusterCapacity) {
 				cluster.JobImageCarries = image.Carries
 			}
 		}
-		if cluster.JobImage != "" && !cluster.JobImageDefault {
+		if cluster.JobImage != "" {
 			continue
 		}
 		for a := range cluster.Accelerators {
@@ -232,13 +229,11 @@ func withOfferedImages(offered []domain.JobImage, clusters []ClusterCapacity) {
 	}
 }
 
-// withJobImages says of each cluster which image a job that names none runs in there and whether
-// it runs others, so that a submitter reads from the same answer what to ask for and whether to
-// name an image.
+// withJobImages says of each cluster the one image it runs, if it runs one only, so that a
+// submitter reads from the same answer what to ask for and whether to name an image.
 func withJobImages(registered map[string]domain.Cluster, clusters []ClusterCapacity) {
 	for i := range clusters {
 		clusters[i].JobImage = registered[clusters[i].ClusterName].JobImage
-		clusters[i].JobImageDefault = registered[clusters[i].ClusterName].JobImageDefault
 	}
 }
 

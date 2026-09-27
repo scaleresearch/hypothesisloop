@@ -3,7 +3,10 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -75,7 +78,8 @@ func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) er
 // holding that lock, and conditionally persists the desired-state claim. resolvedJob is the job
 // as the runtime must run it (any "max" sentinel and the grace periods resolved), written into
 // resolved_job_spec in the SAME transaction as the SUBMITTED status transition — see
-// domain.Experiment.ResolvedJob's doc comment.
+// domain.Experiment.ResolvedJob's doc comment. Its image is decided here and set on resolvedJob:
+// the one image the cluster runs, or on a cluster that runs any, the image the job names.
 func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	if resolvedJob == nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
@@ -121,17 +125,22 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 	// This statement is the one write that places a job, so the placement rule is part of it
 	// (clusterHostsJob). What admission filtered in memory only chose the candidate. Un-sharing,
 	// removing or turning off a cluster takes the admission lock held above, so it either finds
-	// this job already placed or is committed when this statement reads the cluster.
+	// this job already placed or is committed when this statement reads the cluster. The image
+	// is decided from the same read of the cluster as the rule that lets the job onto it.
 	const q = `UPDATE experiments e
-SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, not_admitted_reason = NULL, resolved_job_spec = $3, updated_at = NOW()
-WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob
-	tag, err := tx.Exec(ctx, q, id, clusterName, resolvedJobSpec)
-	if err != nil {
+SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, not_admitted_reason = NULL, updated_at = NOW(),
+	resolved_job_spec = $3::jsonb || jsonb_build_object('image', (
+		SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2))
+WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
+RETURNING e.resolved_job_spec ->> 'image'`
+	var image string
+	switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case err != nil:
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return false, nil
-	}
+	resolvedJob.Image = image
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: commit: %w", err)
 	}

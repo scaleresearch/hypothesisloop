@@ -941,12 +941,21 @@ ALTER TABLE clusters ADD COLUMN IF NOT EXISTS shared BOOLEAN NOT NULL DEFAULT fa
 -- reported_id is the identity the cluster's runtime states about itself, bound to the name on
 -- its first report. The scheduler knows a connected cluster by it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS reported_id TEXT UNIQUE;
--- job_image is the image a job that names none runs in on the cluster, as its runtime last
--- reported it. Empty for a cluster that runs only jobs that name their image. Placement reads it.
+-- job_image is the one image the cluster runs, as its runtime last reported it. Empty for a
+-- cluster that runs whatever image a job names. Placement reads it.
 ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image TEXT NOT NULL DEFAULT '';
--- job_image_default says the runtime runs a job in whatever image it names, so job_image is only
--- where a job that names none runs. False with a job_image is a runtime that can run no other.
-ALTER TABLE clusters ADD COLUMN IF NOT EXISTS job_image_default BOOLEAN NOT NULL DEFAULT false;
+-- job_image_default marked a job_image that was only where a job naming none ran. Such a cluster
+-- runs any image. A job placed before admission wrote the image keeps the one it runs in.
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'clusters' AND column_name = 'job_image_default') THEN
+        UPDATE experiments e SET resolved_job_spec = e.resolved_job_spec || jsonb_build_object('image', c.job_image)
+        FROM clusters c
+        WHERE c.name = e.cluster_name AND c.job_image <> '' AND e.status IN ('SUBMITTED', 'RUNNING')
+          AND COALESCE(e.resolved_job_spec ->> 'image', '') = '';
+        UPDATE clusters SET job_image = '' WHERE job_image_default;
+        ALTER TABLE clusters DROP COLUMN job_image_default;
+    END IF;
+END $$;
 -- priority orders the clusters a job may be placed on, higher first. The org that registered a
 -- cluster sets 1 to 1000 on it. A shared cluster is the platform's and holds 0, so every org's
 -- own compute is tried before it.

@@ -43,10 +43,7 @@ func (s *reconcileStore) ListRecentlyUndesiredWorkloads(_ context.Context, clust
 	return s.undesired[cluster], nil
 }
 
-func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string, isDefault bool) error {
-	if isDefault {
-		image += " (default)"
-	}
+func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string) error {
 	s.jobImages = append(s.jobImages, name+"="+image)
 	return nil
 }
@@ -252,8 +249,8 @@ func TestReconcileHandsARuntimeTheSecretEnvOfItsJobs(t *testing.T) {
 	}
 }
 
-// The image a runtime runs every job in is kept on each report, and a runtime that reports none
-// clears it: placement reads the cluster as it last described itself.
+// The one image a runtime runs is kept on each report, and a runtime that reports none clears
+// it: placement reads the cluster as it last described itself.
 func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
 	w := newReconcileWorld(t, "of-a")
 	report := idleReport("id-of-a")
@@ -264,12 +261,12 @@ func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
 	if rec := w.reconcile(t, "of-a", idleReport("id-of-a")); rec.Code != http.StatusOK {
 		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
 	}
-	// A runtime that runs any image says its job image is only a default.
+	// An older runtime that runs any image says its job image is only a default.
 	report["job_image_default"] = true
 	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusOK {
 		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
 	}
-	if want := []string{"of-a=registry.test/platform-job:7", "of-a=", "of-a=registry.test/platform-job:7 (default)"}; !slices.Equal(w.store.jobImages, want) {
+	if want := []string{"of-a=registry.test/platform-job:7", "of-a=", "of-a="}; !slices.Equal(w.store.jobImages, want) {
 		t.Fatalf("recorded %v, want %v", w.store.jobImages, want)
 	}
 	w.store.jobImages = w.store.jobImages[:2]

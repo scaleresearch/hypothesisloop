@@ -122,13 +122,9 @@ type Cluster struct {
 	Shared     bool   `json:"shared"`
 	Priority   int    `json:"priority"`
 	ReportedID string `json:"cluster_id,omitempty"`
-	// JobImage is the image a job that names none runs in on the cluster, as its runtime reports
-	// it. Empty for a cluster that runs only jobs that name their image.
+	// JobImage is the one image the cluster runs, as its runtime reports it. Empty for a cluster
+	// that runs whatever image a job names.
 	JobImage string `json:"job_image,omitempty"`
-	// JobImageDefault says the cluster's runtime runs a job in whatever image the job names, so
-	// JobImage is only where a job that names none runs. False with a JobImage is a runtime that
-	// boots one fixed image and can run no other, as one that rents machines does.
-	JobImageDefault bool `json:"job_image_default,omitempty"`
 	ClusterSettings
 	CreatedAt    time.Time `json:"created_at"`
 	DisabledOrgs []string  `json:"-"`
@@ -197,14 +193,14 @@ func (c Cluster) HostsJob(orgID, image string) bool {
 	return c.Hosts(orgID) && c.Runs(image)
 }
 
-// Runs reports whether a job naming image can run on the cluster. A job that names none runs
-// where the cluster has an image for it. A job that names one runs where the runtime starts the
-// image a job names: everywhere but on a cluster with one fixed image, which runs that image only.
+// Runs reports whether a job naming image can run on the cluster. A cluster with one image runs
+// a job that names it or names none. Any other cluster runs the image a job names, so a job that
+// names none has nothing to run in there.
 func (c Cluster) Runs(image string) bool {
-	if image == "" {
-		return c.JobImage != ""
+	if c.JobImage == "" {
+		return image != ""
 	}
-	return c.JobImage == "" || c.JobImageDefault || image == c.JobImage
+	return image == "" || image == c.JobImage
 }
 
 // OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform

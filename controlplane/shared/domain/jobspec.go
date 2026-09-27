@@ -15,8 +15,9 @@ import (
 const MaxResourceSentinel = "max"
 
 type JobSpec struct {
-	// Image is the container image to run. Left out, the job runs in the image of the cluster it
-	// is placed on, and is placed only on a cluster that has one (Cluster.Runs).
+	// Image is the container image to run. Left out, the job is placed only on a cluster that
+	// runs one image (Cluster.Runs), and admission writes that image into
+	// Experiment.ResolvedJob, which always carries the exact reference the runtime runs.
 	Image string `json:"image,omitempty" yaml:"image,omitempty"`
 	// Command overrides the image's entrypoint, if set.
 	Command []string `json:"command,omitempty" yaml:"command,omitempty"`

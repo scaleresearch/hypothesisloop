@@ -736,7 +736,7 @@ func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
 	}
 	onlyK8s := map[string]domain.Cluster{"k8s": registered["k8s"]}
 	candidates, ineligible = eligibleClusters(avail(), map[string]bool{}, onlyK8s, job(""))
-	if len(candidates) != 0 || !strings.HasPrefix(ineligible, domain.NotAdmittedNoClusterForImage+": the job names no image") || !strings.HasSuffix(ineligible, "set job.image") {
+	if len(candidates) != 0 || ineligible != "no_cluster_for_image: the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)" {
 		t.Errorf("no image and no cluster with one: offered %v, reason %q", candidates, ineligible)
 	}
 	// A cluster the org turned off is no place the reason sends the job to.
