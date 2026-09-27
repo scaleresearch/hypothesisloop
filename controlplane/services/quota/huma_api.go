@@ -376,6 +376,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not cover the job's cost once for each of max_agents). " +
 			"Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. " +
 			"An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its brief, metrics and budget cannot leave the baseline behind. " +
+			"A change of budget_accelerator_hours or max_agents writes the quota of every agent of role baseline again, as the first stage's share of the budget over max_agents. " +
 			"A coordinator's token changes `description` and `baseline_job_id` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {

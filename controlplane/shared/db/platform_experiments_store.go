@@ -422,24 +422,32 @@ func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Cont
 	return nil
 }
 
-// UpdatePlatformExperiment updates mutable fields of a platform experiment.
 // UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
 // expectedStatus — the service reads status, decides which fields are safe to change for that
 // status, then calls here; without this compare-and-swap, a concurrent Start() could flip the row
 // to running between that read and this write, and a since-locked field (budget, metrics, ...)
 // computed under the stale "open" decision would land after admission already used the old value.
 // A mismatch (0 rows affected) means status moved: fail fast rather than silently no-op.
+//
+// The quota of an agent of role baseline is a share of the budget over max_agents, so in an open
+// experiment, where both change, it is written again from the row as patched in the same
+// transaction (allocateBaselineQuota).
 func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
 	}
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Update: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
     max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13
 WHERE id=$1 AND status=$10`
-	tag, err := s.pool.pool.Exec(ctx, q,
+	tag, err := tx.Exec(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, pe.StartsAt, pe.EndsAt,
 		expectedStatus,
@@ -450,6 +458,42 @@ WHERE id=$1 AND status=$10`
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("platform_experiments_store.Update: status changed concurrently, retry")
+	}
+	if expectedStatus == domain.PlatformExpOpen {
+		if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
+			return fmt.Errorf("platform_experiments_store.Update: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.Update: commit: %w", err)
+	}
+	return nil
+}
+
+// reallocateBaselineQuotas writes the quota of every agent of role baseline of pe again, from
+// pe's budget and max_agents. A planner has the role and holds no quota.
+func reallocateBaselineQuotas(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
+	if len(pe.Stages) == 0 {
+		return fmt.Errorf("platform experiment %s has no stages to take the first one's share from", pe.ID)
+	}
+	rows, err := tx.Query(ctx, `
+SELECT agent_id, quota_tier FROM experiment_signups
+WHERE platform_experiment_id = $1 AND role = $2 AND flavor <> '`+domain.PlannerFlavor+`'`, pe.ID, string(domain.SignupRoleBaseline))
+	if err != nil {
+		return fmt.Errorf("list baseline agents: %w", err)
+	}
+	type holder struct {
+		AgentID string
+		Tier    domain.QuotaTier
+	}
+	holders, err := pgx.CollectRows(rows, pgx.RowToStructByPos[holder])
+	if err != nil {
+		return fmt.Errorf("list baseline agents: %w", err)
+	}
+	for _, h := range holders {
+		if err := allocateBaselineQuota(ctx, tx, pe.ID, h.AgentID, h.Tier, pe.BudgetAcceleratorHours, pe.Stages[0], pe.MaxAgents, pe.DefaultQuotaTier); err != nil {
+			return err
+		}
 	}
 	return nil
 }

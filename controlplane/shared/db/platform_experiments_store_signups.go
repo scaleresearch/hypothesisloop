@@ -73,12 +73,26 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 	return inserted, nil
 }
 
+// allocateBaselineQuota writes what an agent of role baseline holds while its platform experiment
+// is open: what one researcher holds in the first stage, the first stage's share of the budget
+// over max_agents, in the column its tier names (domain.ApplyQuotaTier). It is written when the
+// agent joins and again whenever the budget or max_agents of the open experiment changes.
+func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64, firstStage domain.Stage, maxAgents int, defaultTier domain.QuotaTier) error {
+	share := domain.RoundHours(budget * firstStage.LengthPct / 100 / float64(maxAgents))
+	guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(tier, defaultTier), share, 0)
+	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+		ID: uuid.New().String(), AgentID: agentID, PlatformExperimentID: platformExpID,
+		GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
+	})...); err != nil {
+		return fmt.Errorf("allocate the quota of baseline agent %s: %w", agentID, err)
+	}
+	return nil
+}
+
 // enrolTx is enrol inside the caller's transaction.
 //
 // An agent of role baseline is given its quota here, with its place: its job runs while the
-// platform experiment is open, before the start divides the budget. It holds what one researcher
-// holds in the first stage, the first stage's share of the budget over max_agents, in the column
-// its tier names (domain.ApplyQuotaTier).
+// platform experiment is open, before the start divides the budget (allocateBaselineQuota).
 func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
 	var status, orgID string
 	var maxAgents, maxHosted int
@@ -147,13 +161,8 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if signup.Role != domain.SignupRoleBaseline {
 			continue
 		}
-		share := domain.RoundHours(budget * stages[0].LengthPct / 100 / float64(maxAgents))
-		guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(signup.QuotaTier, defaultTier), share, 0)
-		if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
-			ID: uuid.New().String(), AgentID: signup.AgentID, PlatformExperimentID: platformExpID,
-			GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
-		})...); err != nil {
-			return 0, fmt.Errorf("platform_experiments_store.Signup: allocate the quota of baseline agent %s: %w", signup.AgentID, err)
+		if err := allocateBaselineQuota(ctx, tx, platformExpID, signup.AgentID, signup.QuotaTier, budget, stages[0], maxAgents, defaultTier); err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
 	}
 	// max_hosted bounds the machines the platform rents for the experiment at once. An agent that

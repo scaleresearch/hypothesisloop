@@ -419,6 +419,62 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	}
 }
 
+// A baseline agent's quota is a share of the budget over max_agents, so it is the share of the
+// open experiment as it stands, whatever it was when the agent joined.
+func TestABaselineAgentsQuotaFollowsTheBudgetAndTheFieldOfAnOpenExperiment(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	agents := spawnTestAgents(t, pes, id,
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: "generalist"})
+	held := func(when string, want float64) {
+		t.Helper()
+		for i, columns := range [][2]float64{{want, 0}, {0, want}} {
+			if quota, err := pes.GetAgentQuota(ctx, agents[i], id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != columns[0] || quota.BurstAcceleratorHours != columns[1] {
+				t.Errorf("%s, baseline agent %d: quota = %+v, %v, want %v guaranteed and %v burst", when, i, quota, err, columns[0], columns[1])
+			}
+		}
+		if quota, err := pes.GetAgentQuota(ctx, agents[2], id); err != nil || quota != nil {
+			t.Errorf("%s, a researcher: quota = %+v, %v, want none before the start", when, quota, err)
+		}
+	}
+	// 40 percent of 10 over 10 places.
+	held("at signup", 0.4)
+	pe, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pe.BudgetAcceleratorHours = 50
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+		t.Fatal(err)
+	}
+	held("with the budget raised to 50", 2)
+	pe.MaxAgents = 4
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpOpen); err != nil {
+		t.Fatal(err)
+	}
+	held("with max_agents lowered to 4", 5)
+
+	// An update that is refused leaves the quota with the experiment it was refused for.
+	pe.BudgetAcceleratorHours = 1
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err == nil {
+		t.Fatal("an update checked for a running experiment was written to an open one")
+	}
+	held("after a refused update", 5)
+
+	// Running, the shares are what the start and the stage ladder made them.
+	setPEStatus(t, pool, id, domain.PlatformExpRunning, 0)
+	pe.Name = "renamed"
+	if err := pes.UpdatePlatformExperiment(ctx, pe, domain.PlatformExpRunning); err != nil {
+		t.Fatal(err)
+	}
+	held("renamed while running", 5)
+}
+
 // Without a baseline an open platform experiment never starts. One the platform closes before
 // its end time says why, and one that reached its end says that.
 func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *testing.T) {
