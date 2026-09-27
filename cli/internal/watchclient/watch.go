@@ -67,10 +67,7 @@ type Options struct {
 	Kinds              string
 	// Decisions asks for a whole platform experiment's stream without the job transitions that
 	// need no decision.
-	Decisions bool
-	// Settle is how long a watch without --until keeps collecting after its first event before
-	// it returns the batch. Zero is settleWindow.
-	Settle           time.Duration
+	Decisions        bool
 	ShowSubscription bool
 	Until            string
 	// Follow streams until the timeout instead of returning with the first batch.
@@ -278,11 +275,7 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 			}
 			w.printed = true
 			if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
-				settle := settleWindow
-				if w.opts.Settle > 0 {
-					settle = w.opts.Settle
-				}
-				w.settleBy = time.Now().Add(settle)
+				w.settleBy = time.Now().Add(settleWindow)
 			}
 		}
 		if w.satisfied != nil && w.satisfied(event) {

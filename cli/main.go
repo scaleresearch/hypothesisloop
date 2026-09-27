@@ -1036,7 +1036,7 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 // --- watch -----------------------------------------------------------------------------------------
 
 func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--settle SECONDS] [--follow | --no-wait]
+	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
@@ -1046,7 +1046,6 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
 	all := fs.Bool("all", false, "watch the whole platform experiment instead of one agent's resources")
 	decisions := fs.Bool("decisions", false, "with --all, leave out what needs no decision: a job being queued, admitted or started, and a queue reason that waiting clears")
-	settle := fs.Float64("settle", 0, "keep collecting for this many seconds after the first event before returning the batch (default 2); nothing is lost meanwhile, the cursor moves only when the batch is printed")
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'. A job ends COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
@@ -1091,7 +1090,6 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 		Agent:              *agent,
 		Kinds:              *kinds,
 		Decisions:          *decisions && *all,
-		Settle:             time.Duration(*settle * float64(time.Second)),
 		ShowSubscription:   *showSubscription,
 		Until:              *until,
 		Follow:             *follow,
