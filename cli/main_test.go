@@ -467,6 +467,36 @@ func TestJobMetricsSummarizesEachMetric(t *testing.T) {
 	}
 }
 
+// A researcher fed hl job metrics --points to a parser of one JSON document: the help says what
+// the output is, and the output is that.
+func TestJobMetricsPointsAreJSONLinesAndTheHelpSaysSo(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return []map[string]any{
+			{"experiment_id": "job-1", "metric_name": "loss", "metric_value": 0.5, "fraction_complete": 0.5},
+			{"experiment_id": "job-1", "metric_name": "loss", "metric_value": 0.25, "fraction_complete": 1},
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "metrics", "job-1", "--points"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stdout %q, want one line per point", stdout.String())
+	}
+	for _, line := range lines {
+		var point map[string]any
+		if err := json.Unmarshal([]byte(line), &point); err != nil || point["metric_name"] != "loss" {
+			t.Fatalf("line %q is not one point: %v", line, err)
+		}
+	}
+	var help bytes.Buffer
+	run([]string{"job", "metrics", "--help"}, &help, &help)
+	if !strings.Contains(help.String(), "JSON lines, one object per line and no enclosing array") {
+		t.Fatalf("help does not say what the output is:\n%s", help.String())
+	}
+}
+
 func TestJobStatusNotFound(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)

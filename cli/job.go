@@ -474,8 +474,9 @@ func jobMetrics(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("job metrics", `usage: hl job metrics ID [--points]
 
 One line per reported metric: points reported, the last value and the fraction_complete it was
-reported at, and the min and max over the run. --points prints every point instead.`, stderr)
-	points := fs.Bool("points", false, "print every reported point, oldest first")
+reported at, and the min and max over the run. --points prints every point instead. Either way
+the output is JSON lines, one object per line and no enclosing array: parse it line by line.`, stderr)
+	points := fs.Bool("points", false, "print every reported point, oldest first, one JSON object per line")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
