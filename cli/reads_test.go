@@ -54,6 +54,18 @@ func TestResultsFlattensStandings(t *testing.T) {
 	}
 }
 
+// A metric nobody has a result on yet is an answer: no line, a notice that is no error, exit 0.
+func TestResultsWithNoStandingYetIsAnAnswer(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "images_per_sec", "direction": "maximize", "standings": []any{}}}}
+	})
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"results"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.String() != "hl: no results yet on images_per_sec\n" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"clusters": []any{map[string]any{"cluster_name": "local", "accelerators": []any{

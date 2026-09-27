@@ -100,7 +100,9 @@ func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
-value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, stderr)
+value and the job that set it (experiment_id, code_ref, hypothesis_id, env). At most one line
+per agent of the platform experiment and metric, so there is nothing to page or limit. A metric
+nobody has a result on yet prints no line, says so on stderr, and exits 0.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -126,7 +128,7 @@ value and the job that set it (experiment_id, code_ref, hypothesis_id, env).`, s
 			}
 		}
 		if len(m.Standings) == 0 {
-			fmt.Fprintf(stderr, "hl: results: no standing on %s yet\n", m.Metric)
+			fmt.Fprintf(stderr, "hl: no results yet on %s\n", m.Metric)
 		}
 	}
 	return 0
