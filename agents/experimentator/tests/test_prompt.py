@@ -10,7 +10,7 @@ FLAVORS = sorted(p.stem for p in (Path(core.__file__).parent / "prompts" / "flav
 
 class SystemPromptTest(unittest.TestCase):
     def render(self, flavor: str) -> str:
-        cfg = SimpleNamespace(agent_id="agent-a", flavor=flavor, platform_experiment_id="pe-1", hyperparameters={"k": 1})
+        cfg = SimpleNamespace(agent_id="agent-a", flavor=flavor, role="competitor", platform_experiment_id="pe-1", hyperparameters={"k": 1})
         return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
 
     def test_every_flavor_renders_with_the_rules_and_the_hl_commands(self):

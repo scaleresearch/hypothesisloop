@@ -25,6 +25,7 @@ COORDINATOR_FLAVOR = "coordinator"
 # other, with its own token, and its briefing is its own: it plans the experiment
 # the others will later run in.
 PLANNER_FLAVOR = "planner"
+BASELINE_ROLE = "baseline"
 
 
 def token_scope(token: str) -> tuple[str, str, str]:
@@ -72,6 +73,8 @@ class Config:
     flavor: str = field(init=False, default="")
     model: str = field(init=False, default="")
     hyperparameters: dict = field(init=False, default_factory=dict)
+    # From the agent's signup: what it is in the roster. Empty for a coordinator, which has no place in it.
+    role: str = field(init=False, default="")
 
     def __post_init__(self):
         kind, self.platform_experiment_id, agent_id = token_scope(self.token)
@@ -80,13 +83,13 @@ class Config:
         else:
             self.agent_id = agent_id
 
-    def run_as(self, flavor, model, hyperparameters=None) -> None:
+    def run_as(self, flavor, model, hyperparameters=None, role="") -> None:
         """Takes what the platform says this one runs as. Neither flavor nor model has a default:
         the roster shows both, and a default here would run something the roster does not say."""
         if not flavor or not model:
             raise SystemExit(f"agent: the platform names no flavor or no model for {self.agent_id} "
                              f"(flavor {flavor!r}, model {model!r})")
-        self.flavor, self.model, self.hyperparameters = flavor, model, hyperparameters or {}
+        self.flavor, self.model, self.hyperparameters, self.role = flavor, model, hyperparameters or {}, role
 
 
 def coordinates(cfg) -> bool:
@@ -95,5 +98,11 @@ def coordinates(cfg) -> bool:
 
 def plans(cfg) -> bool:
     return cfg.flavor == PLANNER_FLAVOR
+
+
+def measures_baseline(cfg) -> bool:
+    """An agent of role baseline measures the control before the run starts. A planner has that
+    role in the roster and runs nothing."""
+    return cfg.role == BASELINE_ROLE and not plans(cfg)
 
 

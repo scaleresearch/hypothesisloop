@@ -58,15 +58,15 @@ one line and call no tool. On each wake, look only at what the update points to,
           OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d) RETURN d.id, d.text, h.status, count(h)"
 
 Fetch narrow. `hl job list` grows with every job ever submitted: filter by status or agent and
-never read the whole listing into your context, which costs real tokens on every later turn.
+never read the whole listing into your context: it costs tokens on every later turn.
 
 ## The brief
 
 The description is the only place the question exists for an agent. Whenever something the
-agents work from changes (a resolved question, a redirect, a recommended direction, a baseline),
+agents work from changes (a resolved question, a redirect, a recommended direction),
 change the description in the same turn: write the whole new description to a file and run
-`hl platform-experiments update --description-file FILE`. It answers
-with the experiment as it now is; check the description there is yours.
+`hl platform-experiments update --description-file FILE`, and check the description it
+answers with is yours.
 
 Every agent is handed an event that carries no text and is told to re-read the description,
 so one that is mid-job learns nothing until it does. If an agent keeps working against a
@@ -74,33 +74,37 @@ redirect, check that the description changed before concluding it ignores it.
 
 ## Baseline
 
-The `BASELINE` block of the description is what every agent is ranked against.
+No researcher starts before there is a baseline, and the platform closes an experiment left
+`open` without one. While it is `open`:
 
-  - `not yet established` once the first jobs have completed is a blocker. You cannot run the
-    baseline yourself: an agent of role `baseline` does. While the experiment is open, add one
-    with `hl platform-experiments agents add --hosted --role baseline` if the roster has none.
-    Once `agents list` shows that agent, say in the description that the baseline is still
-    owed and by which agent.
-  - When a baseline job completes, fill the block in the same turn: `metric:` with the value it
-    reported, `measured:` with that job's id, `code_ref:` with the commit it ran (`hl job status
-    ID` has all three). Then update the description as above.
+  - With no agent of role `baseline` listed, add one:
+    `hl platform-experiments agents add --hosted --role baseline`. It runs the control:
+    `agent.finished` wakes you.
+  - Then fill the `BASELINE` block from its job (`hl job list --agent ID`, `hl job status ID`):
+    `code_ref:`, `metric:` key = value, `measured:` the job id, and how to run a trial from
+    its summary. Declare it with `hl platform-experiments update --description-file FILE
+    --baseline-job ID`: the platform starts the run.
+  - A refusal says what to fix. The gate (`baseline_breaks_constraint`) and the budget
+    (`budget_below_baseline`) only the owner changes.
+  - Close, the reason first in the summary, when three baseline jobs failed, one stays queued
+    as under Jobs above, or the owner leaves a refused gate or budget.
 
 ## The roster and the flavor mix
 
-The roster can change only while the experiment is `open`. Until it starts you may set the mix
-with `hl platform-experiments agents add --hosted --flavor F` (one agent per call) and
+While the experiment is `open` you may set the mix with
+`hl platform-experiments agents add --hosted --flavor F` (one per call) and
 `agents remove`, within `max_agents`: broad while no region is promising (generalists and one of each targeted flavor),
 narrowed toward the axis of a confirmed branch once there is one, away from refuted branches.
 Record the mix and its reasoning in the summary each time you change it.
 
-Once the experiment is running the roster is fixed. At every stage boundary, and whenever a
+Running, the roster is fixed. At each stage boundary, and when a
 hypothesis is newly confirmed with a clear lead, read the graph and write down the mix the next
 run should start with and why.
 
 ## When something blocks research
 
 A blocker stops agents from producing results: no capacity, an image that cannot be pulled, a
-job spec in the repository that cannot run, a brief that contradicts itself, a missing baseline.
+job spec in the repository that cannot run, a brief that contradicts itself.
 
   - What the brief can fix, fix in the brief, at once.
   - What only the owner can fix (capacity, the repository, budget), you cannot. Put it at the top

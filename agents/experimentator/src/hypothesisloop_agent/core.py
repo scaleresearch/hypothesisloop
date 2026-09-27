@@ -21,16 +21,23 @@ log = logging.getLogger("llm_agent")
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
-# A planner writes the first job spec and proposes, which no other agent does.
-_HL_HELP_PLANNER = ([], ["job"], ["job", "submit"], ["hypothesis"], ["repo"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
+# A planner proposes or declines and runs nothing. A baseline agent writes the first job spec.
+_HL_HELP_PLANNER = ([], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
+_HL_HELP_BASELINE = ([], ["job"], ["job", "submit"], ["hypothesis"], ["repo"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
 
 
-def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
+def hl_commands(cfg: config.Config) -> str:
     """hl's own listing of its commands and of the subcommands the briefing leans on."""
-    groups = _HL_HELP_COORDINATOR if coordinates else _HL_HELP_PLANNER if plans else _HL_HELP
+    groups = _HL_HELP
+    if config.coordinates(cfg):
+        groups = _HL_HELP_COORDINATOR
+    elif config.plans(cfg):
+        groups = _HL_HELP_PLANNER
+    elif config.measures_baseline(cfg):
+        groups = _HL_HELP_BASELINE
     # hl prints the help of a group on stdout and the help of one command on stderr.
     return "\n\n".join(
         subprocess.run(["hl", *group, "--help"], check=True, text=True,
@@ -39,8 +46,8 @@ def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
 
 
 def _code_sections() -> dict[str, str]:
-    """The paragraphs of a briefing about the experiment's repository. A planner starts the code
-    and a researcher starts from the planner's, so how the workspace begins is a section per role."""
+    """The paragraphs of a briefing about the experiment's repository. A baseline agent starts
+    the code and a researcher starts from it, so how the workspace begins is a section per role."""
     text = (_PROMPTS_DIR / "code.md").read_text()
     sections = {}
     for section in text.split("\n==== ")[1:]:
@@ -55,9 +62,12 @@ def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url:
     code = _code_sections()
     template, sections = "coordinator.md", ("repository_line", "start_code")
     if config.plans(cfg):
-        template, sections = "planner.md", ("workspace", "code_submit", "code_access")
+        template, sections = "planner.md", ()
         values.update(agent_id=cfg.agent_id)
-        values.update(start=code["start_planner"].format(**values))
+    elif config.measures_baseline(cfg):
+        template, sections = "baseline.md", ("workspace", "code_submit", "code_access")
+        values.update(agent_id=cfg.agent_id)
+        values.update(start=code["start_baseline"].format(**values))
     elif not config.coordinates(cfg):
         template, sections = "system_prompt.md", ("workspace", "code_submit", "code_access")
         values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
@@ -112,7 +122,7 @@ def prepare() -> RunSetup:
         cfg.run_as(config.COORDINATOR_FLAVOR, (platform_experiment.get("coordinator") or {}).get("model"))
     else:
         signup = client.require_joined(cfg.agent_id, cfg.platform_experiment_id)
-        cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"))
+        cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"), signup.get("role"))
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
     # Per-agent by default: two agents launched from the same cwd (the natural way to run a
@@ -128,7 +138,7 @@ def prepare() -> RunSetup:
     if not repository_url:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
 
-    commands = hl_commands(plans=True) if config.plans(cfg) else hl_commands(config.coordinates(cfg))
+    commands = hl_commands(cfg)
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, os.path.abspath(workdir))
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
 
@@ -171,6 +181,8 @@ def _closed_because(setup: RunSetup) -> str | None:
         return f"You are being stopped because the platform experiment reached its end time, {pe['ends_at']}, and the platform closed it."
     if pe.get("close_reason") == "planning_limit_reached":
         return f"You are being stopped because the planning limit, {pe['planning_ends_at']}, passed with nothing proposed, and the platform closed the draft."
+    if pe.get("close_reason") == "baseline_limit_reached":
+        return "You are being stopped because no baseline was declared inside the baseline limit, and the platform closed the platform experiment before it started."
     if pe.get("close_reason") == "proposal_expired":
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
     if pe.get("close_reason") == "closed_by_request":

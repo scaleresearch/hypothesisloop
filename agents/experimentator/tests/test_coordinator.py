@@ -39,7 +39,7 @@ class StartupTest(PlatformCase):
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(core, "hl_commands", return_value="usage: hl") as commands:
             setup = core.prepare()
-        commands.assert_called_once_with(True)
+        commands.assert_called_once_with(setup.cfg)
         return setup
 
     def test_a_coordinator_starts_on_its_token_alone_and_never_asks_for_a_signup(self):
@@ -100,13 +100,13 @@ class BriefingTest(unittest.TestCase):
             return mock.Mock(stdout="usage\n")
 
         with mock.patch.object(core.subprocess, "run", fake_run):
-            core.hl_commands(True)
+            core.hl_commands(SimpleNamespace(flavor="coordinator", role=""))
             self.assertIn(["platform-experiments", "agents", "add"], asked)
             self.assertIn(["platform-experiments", "update"], asked)
             self.assertIn(["platform-experiments", "summary"], asked)
             self.assertIn(["platform-experiments", "close"], asked)
             asked.clear()
-            core.hl_commands()
+            core.hl_commands(SimpleNamespace(flavor="generalist", role="competitor"))
         self.assertEqual(asked, [[], ["job"], ["hypothesis"]])
 
     def test_the_prompt_file_ships_beside_the_agents_briefing(self):
@@ -143,6 +143,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({"status": "closed", "planning_ends_at": "2026-01-01T02:48:00Z", "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
+            ({"status": "closed", "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "generalist", "no baseline was declared inside the baseline limit"),
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
             ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
         ):
