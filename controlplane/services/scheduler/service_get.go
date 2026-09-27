@@ -3,14 +3,15 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// GetExperiment returns one experiment with its filed summary and the runtime's latest phase
-// detail (why a non-running job's container hasn't started) merged in live from the metrics
-// store — never persisted to PostgreSQL, so a stale explanation can never outlive what actually
+// GetExperiment returns one experiment with its filed summary, the runtime's latest phase
+// detail (why a non-running job's container hasn't started) and where its workload ran merged in
+// live from the metrics store — never persisted to PostgreSQL, so a stale explanation can never outlive what actually
 // happened. Returns nil when no such experiment exists.
 func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
 	exp, err := s.store.GetExperiment(ctx, id)
@@ -32,6 +33,9 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	}
 	if found {
 		exp.PhaseDetail = &domain.PhaseDetail{Reason: reason, Message: message, RestartCount: restartCount}
+	}
+	if exp.RanOn, err = metricsdb.LatestRanOn(ctx, s.metricsDBURL, id, exp.CreatedAt, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: ran on: %w", err)
 	}
 	if err := s.mergeMetrics(ctx, []*domain.Experiment{exp}); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)

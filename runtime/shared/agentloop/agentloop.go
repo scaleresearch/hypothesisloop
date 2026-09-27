@@ -380,14 +380,16 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 }
 
 type statusReportWire struct {
-	ExperimentID            string   `json:"experiment_id"`
-	Phase                   string   `json:"phase"`
-	AdmittedAcceleratorType string   `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string   `json:"admitted_node,omitempty"`
-	LogTail                 []string `json:"log_tail,omitempty"`
-	Reason                  string   `json:"reason,omitempty"`
-	Message                 string   `json:"message,omitempty"`
-	RestartCount            int32    `json:"restart_count,omitempty"`
+	ExperimentID            string `json:"experiment_id"`
+	Phase                   string `json:"phase"`
+	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
+	AdmittedNode            string `json:"admitted_node,omitempty"`
+	// AdmittedMachine is what stands behind AdmittedNode, and goes only with it.
+	AdmittedMachine *domain.JobMachine `json:"admitted_machine,omitempty"`
+	LogTail         []string           `json:"log_tail,omitempty"`
+	Reason          string             `json:"reason,omitempty"`
+	Message         string             `json:"message,omitempty"`
+	RestartCount    int32              `json:"restart_count,omitempty"`
 	// ScheduledNodes/SchedulingReason carry the gang-readiness facts PollPhaseDetail computes —
 	// see agentexec.Executor.PollPhaseDetail.
 	ScheduledNodes   int32  `json:"scheduled_nodes,omitempty"`
@@ -501,6 +503,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	// The control plane bounds an unattributable job on its own (see job_watcher's
 	// runningTypeUnobservable), which it can only do if it keeps hearing the phase.
 	var admittedAcceleratorType, admittedNode string
+	var admittedMachine *domain.JobMachine
 	if phase != workload.JobPhaseGone {
 		t, node, consistent, err := exec.ResolveAdmittedAcceleratorType(ctx, id)
 		switch {
@@ -511,6 +514,9 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		default:
 			admittedAcceleratorType = string(t)
 			admittedNode = node
+			if node != "" {
+				admittedMachine = observed.Machine
+			}
 		}
 	}
 
@@ -547,6 +553,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		Phase:                   phase.String(),
 		AdmittedAcceleratorType: admittedAcceleratorType,
 		AdmittedNode:            admittedNode,
+		AdmittedMachine:         admittedMachine,
 		LogTail:                 logTail,
 		Reason:                  reason,
 		Message:                 message,

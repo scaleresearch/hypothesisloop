@@ -141,4 +141,7 @@ type JobStatus struct {
 	// plane numbered it. workload.AttemptUnknown when the workload carries no attempt at all —
 	// one created by a runtime build that predates it, or one that is already gone.
 	Attempt int
+	// Machine is what the workload runs on, from an executor that knows more of it than the node
+	// ResolveAdmittedAcceleratorType names. Nil from every other.
+	Machine *domain.JobMachine
 }

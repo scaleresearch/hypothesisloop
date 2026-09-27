@@ -262,7 +262,9 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 	if !ok {
 		return agentexec.JobStatus{Phase: workload.JobPhaseGone, Attempt: workload.AttemptUnknown}, nil
 	}
-	observed := agentexec.JobStatus{Phase: workload.JobPhasePending, UID: i.Name, Attempt: i.attempt}
+	observed := agentexec.JobStatus{Phase: workload.JobPhasePending, UID: i.Name, Attempt: i.attempt, Machine: &domain.JobMachine{
+		InstanceID: i.ID, HostID: i.Host, AcceleratorModel: i.AcceleratorModel, CPUModel: i.CPUModel, PricePerHourUSD: i.PricePerHour,
+	}}
 	switch i.State {
 	case provider.StateRunning:
 		observed.Phase = workload.JobPhaseRunning

@@ -3,8 +3,11 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // experimentNodeMetric marks "experimentID's job is running on physical node X" — written once
@@ -16,6 +19,75 @@ import (
 // exactly the kind of fact (observed at runtime, needed for post-hoc traceability, never used for
 // an admission/billing decision) the metrics store already owns for accelerator type.
 const experimentNodeMetric = "experiment_node_active"
+
+// The labels a node sample carries beside the node when the runtime reported the machine behind
+// it. A label is written only for what the runtime said, so a sample from a runtime that names
+// the node alone has none of them.
+const (
+	machineInstanceLabel    = "machine_instance_id"
+	machineHostLabel        = "machine_host_id"
+	machineAcceleratorLabel = "machine_accelerator_model"
+	machineCPULabel         = "machine_cpu_model"
+	machinePriceLabel       = "machine_price_per_hour_usd"
+)
+
+func nodeLabels(status JobStatusSample) map[string]string {
+	labels := map[string]string{"experiment_id": status.ExperimentID, "node": status.AdmittedNode}
+	machine := status.AdmittedMachine
+	if machine == nil {
+		return labels
+	}
+	said := map[string]string{
+		machineInstanceLabel: machine.InstanceID, machineHostLabel: machine.HostID,
+		machineAcceleratorLabel: machine.AcceleratorModel, machineCPULabel: machine.CPUModel,
+	}
+	if machine.PricePerHourUSD > 0 {
+		said[machinePriceLabel] = strconv.FormatFloat(machine.PricePerHourUSD, 'f', -1, 64)
+	}
+	for label, value := range said {
+		if value != "" {
+			labels[label] = value
+		}
+	}
+	return labels
+}
+
+// LatestRanOn returns where experimentID's workload was last observed since its row was created:
+// the newest node sample, with the machine behind the node when the runtime reported one. nil
+// when no node was ever recorded.
+func LatestRanOn(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (*domain.RanOn, error) {
+	since := ObservationWindowStart(createdAt)
+	if !now.After(since) {
+		return nil, fmt.Errorf("metricsdb.LatestRanOn: %s was created after now", experimentID)
+	}
+	// Every column, since the machine's are there only once a runtime has reported one.
+	query := fmt.Sprintf(
+		`SELECT * FROM %s WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
+			`ORDER BY greptime_timestamp DESC LIMIT 1`,
+		experimentNodeMetric, sqlQuote(experimentID), since.UnixMilli(), now.UnixMilli())
+	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	if err != nil {
+		return nil, fmt.Errorf("metricsdb.LatestRanOn: %w", err)
+	}
+	if len(samples) == 0 || samples[0].Labels["node"] == "" {
+		return nil, nil
+	}
+	labels := samples[0].Labels
+	ranOn := &domain.RanOn{Node: labels["node"]}
+	machine := domain.JobMachine{
+		InstanceID: labels[machineInstanceLabel], HostID: labels[machineHostLabel],
+		AcceleratorModel: labels[machineAcceleratorLabel], CPUModel: labels[machineCPULabel],
+	}
+	if price := labels[machinePriceLabel]; price != "" {
+		if machine.PricePerHourUSD, err = strconv.ParseFloat(price, 64); err != nil {
+			return nil, fmt.Errorf("metricsdb.LatestRanOn: price of %s: %w", experimentID, err)
+		}
+	}
+	if machine != (domain.JobMachine{}) {
+		ranOn.Machine = &machine
+	}
+	return ranOn, nil
+}
 
 // LatestExperimentNode returns the most recently recorded node for experimentID since its row was
 // created, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far enough

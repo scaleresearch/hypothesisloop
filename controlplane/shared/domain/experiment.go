@@ -87,6 +87,10 @@ type Experiment struct {
 	// the first ranking metric, nil until the job reports it.
 	Metrics []JobMetric `json:"metrics,omitempty"`
 	Metric  *JobMetric  `json:"metric,omitempty"`
+	// RanOn is where the job's workload was last observed, merged in live from the metrics store
+	// like PhaseDetail. Set on a read of one job only, and nil until its runtime has reported a
+	// node for it.
+	RanOn *RanOn `json:"ran_on,omitempty"`
 	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
 	Summary string `json:"summary,omitempty"`
 	// SummaryDue says the job completed and no summary was filed for it: the jobs
@@ -378,4 +382,27 @@ type Placement struct {
 	AttemptCount int
 	// Slot is the slot the job was admitted to (NodeSlotLabel), "" on a cluster without slots.
 	Slot string
+}
+
+// RanOn is where a job's workload ran, as its cluster's runtime reported it. Two jobs of one spec
+// that ran on different machines are not the same measurement, and this is what tells them apart.
+type RanOn struct {
+	// Node is the cluster's own name for where the job landed: a Kubernetes node, a bare-metal
+	// host, a slot of a cluster that rents its machines.
+	Node string `json:"node"`
+	// Machine is what stands behind the node, from a runtime that knows it.
+	Machine *JobMachine `json:"machine,omitempty"`
+}
+
+// JobMachine is the machine a job's workload runs on, in terms no vendor owns. A runtime reports
+// it beside the node, each field as far as it knows it.
+type JobMachine struct {
+	// InstanceID is the rented instance, which is the job's alone.
+	InstanceID string `json:"instance_id,omitempty"`
+	// HostID is the physical machine, the same for every instance rented on it.
+	HostID           string `json:"host_id,omitempty"`
+	AcceleratorModel string `json:"accelerator_model,omitempty"`
+	CPUModel         string `json:"cpu_model,omitempty"`
+	// PricePerHourUSD is what the whole instance is rented for.
+	PricePerHourUSD float64 `json:"price_per_hour_usd,omitempty" minimum:"0"`
 }

@@ -106,6 +106,14 @@ type Instance struct {
 	Name      string
 	State     State
 	StartedAt time.Time
+	// What the instance runs on, each as far as the vendor says and empty or zero otherwise.
+	// Host is the vendor's id of the physical machine, the same for every instance rented on
+	// it. The models are the vendor's own names for them. PricePerHour is in US dollars, for
+	// the whole instance.
+	Host             string
+	AcceleratorModel string
+	CPUModel         string
+	PricePerHour     float64
 }
 
 // Provider rents and returns instances. Offer search, bidding, region choice and every other

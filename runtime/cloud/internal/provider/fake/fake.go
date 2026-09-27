@@ -166,6 +166,13 @@ func (p *Provider) Start(name string) {
 	})
 }
 
+// RunsOn sets what every instance of the name runs on, as a vendor that says so lists it.
+func (p *Provider) RunsOn(name, host, acceleratorModel, cpuModel string, pricePerHour float64) {
+	p.each(name, func(i *instance) {
+		i.Host, i.AcceleratorModel, i.CPUModel, i.PricePerHour = host, acceleratorModel, cpuModel, pricePerHour
+	})
+}
+
 // Print appends lines to the output of every instance of the name.
 func (p *Provider) Print(name string, lines ...string) {
 	p.each(name, func(i *instance) { i.logs = append(i.logs, lines...) })

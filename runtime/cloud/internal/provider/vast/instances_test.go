@@ -94,6 +94,28 @@ func TestListReturnsAMarkedInstanceUnderItsOwnName(t *testing.T) {
 	}
 }
 
+// What an instance runs on is the vendor's machine id, its names for the GPU and the CPU, and
+// the hourly price of the whole instance. One that says none of it yet lists without them.
+func TestListSaysWhatAnInstanceRunsOn(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
+		`{"id":9001,"label":"hl-exp1-a0","actual_status":"running","start_date":`+fixtureStart+`,"machine_id":11230,"gpu_name":"RTX 4090","cpu_name":"AMD EPYC 7B13 64-Core Processor","dph_total":0.4544}`,
+		instanceJSON(9002, "hl-exp2-a0", ""))))
+	p := newTestProvider(t, api, Settings{})
+
+	listed, err := p.List(context.Background(), "hl-")
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("List = %+v, %v", listed, err)
+	}
+	on := listed[0]
+	if on.Host != "11230" || on.AcceleratorModel != "RTX 4090" || on.CPUModel != "AMD EPYC 7B13 64-Core Processor" || on.PricePerHour != 0.4544 {
+		t.Errorf("instance 9001 runs on %+v, want its machine, models and price", on)
+	}
+	if bare := listed[1]; bare.Host != "" || bare.AcceleratorModel != "" || bare.CPUModel != "" || bare.PricePerHour != 0 {
+		t.Errorf("instance 9002 runs on %+v, want nothing said", bare)
+	}
+}
+
 func TestListOfAnEmptyAccountIsEmpty(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("")))

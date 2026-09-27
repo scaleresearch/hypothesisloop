@@ -23,6 +23,24 @@ type instance struct {
 	StatusMsg    *string `json:"status_msg"`
 	MachineID    int64   `json:"machine_id"`
 	StartDate    float64 `json:"start_date"`
+	GPUName      *string `json:"gpu_name"`
+	CPUName      *string `json:"cpu_name"`
+	PricePerHour float64 `json:"dph_total"`
+}
+
+// host is the machine an instance is on, empty until the vendor names one.
+func (i instance) host() string {
+	if i.MachineID == 0 {
+		return ""
+	}
+	return strconv.FormatInt(i.MachineID, 10)
+}
+
+func text(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 const (
@@ -71,6 +89,8 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 				Name:      name,
 				State:     state,
 				StartedAt: startedAt,
+				Host:      found.host(), AcceleratorModel: text(found.GPUName), CPUModel: text(found.CPUName),
+				PricePerHour: found.PricePerHour,
 			})
 		}
 		if page.NextToken == nil || *page.NextToken == "" {

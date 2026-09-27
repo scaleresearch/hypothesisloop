@@ -455,6 +455,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if rep.ExperimentID == "" || rep.Phase == "" {
 				return nil, huma.Error400BadRequest("every status report requires experiment_id and phase")
 			}
+			if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
+				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " names an admitted_machine and no admitted_node")
+			}
 			ids = append(ids, rep.ExperimentID)
 		}
 		placementByID, err := h.store.PlacementByID(ctx, ids)
@@ -476,7 +479,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
-				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, At: now,
+				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: rep.AdmittedMachine, At: now,
 			})
 			if rep.Phase == metricsdb.PhaseRunning {
 				labels := map[string]string{"cluster_name": clusterName}
@@ -635,14 +638,18 @@ type clusterInfo struct {
 // domain.PhaseDetail. Runtime-agnostic strings: each runtime (k8s, bare-metal) translates its
 // own native vocabulary into domain.PhaseReason* before this ever leaves the agent process.
 type statusReport struct {
-	ExperimentID            string   `json:"experiment_id"`
-	Phase                   string   `json:"phase"` // pending | running | succeeded | failed | gone
-	AdmittedAcceleratorType string   `json:"admitted_accelerator_type,omitempty"`
-	AdmittedNode            string   `json:"admitted_node,omitempty"`
-	LogTail                 []string `json:"log_tail,omitempty"`
-	Reason                  string   `json:"reason,omitempty"`
-	Message                 string   `json:"message,omitempty"`
-	RestartCount            int32    `json:"restart_count,omitempty"`
+	ExperimentID            string `json:"experiment_id"`
+	Phase                   string `json:"phase"` // pending | running | succeeded | failed | gone
+	AdmittedAcceleratorType string `json:"admitted_accelerator_type,omitempty"`
+	AdmittedNode            string `json:"admitted_node,omitempty"`
+	// AdmittedMachine is what stands behind AdmittedNode, from a runtime that knows it. It goes
+	// only with a node. Absent from a runtime built before it, and from one that knows no more
+	// than the node.
+	AdmittedMachine *domain.JobMachine `json:"admitted_machine,omitempty"`
+	LogTail         []string           `json:"log_tail,omitempty"`
+	Reason          string             `json:"reason,omitempty"`
+	Message         string             `json:"message,omitempty"`
+	RestartCount    int32              `json:"restart_count,omitempty"`
 	// ScheduledNodes is the count of this report's pods with condition PodScheduled=True — see
 	// PhaseDetailRow.ScheduledNodes. Absent (0) on runtimes that don't yet compute it or for a
 	// report where nothing has bound.

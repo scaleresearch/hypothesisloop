@@ -44,7 +44,10 @@ type JobStatusSample struct {
 	Phase                   string
 	AdmittedAcceleratorType string
 	AdmittedNode            string
-	At                      time.Time
+	// AdmittedMachine is what stands behind AdmittedNode. It is recorded with the node and not
+	// without one.
+	AdmittedMachine *domain.JobMachine
+	At              time.Time
 }
 
 func RecordJobStatuses(ctx context.Context, dbURL, clusterName string, at time.Time, statuses []JobStatusSample) error {
@@ -78,9 +81,7 @@ func RecordJobStatuses(ctx context.Context, dbURL, clusterName string, at time.T
 			"experiment_id": status.ExperimentID, "cluster_name": status.ClusterName, "sample_kind": "observed_at",
 		}, Value: observedAt, At: status.At})
 		if status.AdmittedNode != "" {
-			samples = append(samples, GaugeSample{MetricName: experimentNodeMetric, Labels: map[string]string{
-				"experiment_id": status.ExperimentID, "node": status.AdmittedNode,
-			}, Value: 1, At: status.At})
+			samples = append(samples, GaugeSample{MetricName: experimentNodeMetric, Labels: nodeLabels(status), Value: 1, At: status.At})
 		}
 		if status.AdmittedAcceleratorType != "" {
 			samples = append(samples, GaugeSample{MetricName: acceleratorTypeMetric, Labels: map[string]string{

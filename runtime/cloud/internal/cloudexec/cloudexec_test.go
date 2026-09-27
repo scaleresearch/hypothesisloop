@@ -358,6 +358,25 @@ func TestARunningJobReportsTheSlotItOccupies(t *testing.T) {
 	}
 }
 
+// Two jobs of one spec land on different rented machines, so a job says which one it has: the
+// instance always, and of the machine behind it what the provider tells.
+func TestAJobReportsTheMachineItsInstanceIsOn(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, job(t, "exp-1", 0, 1))
+
+	observed, err := e.PollJobStatus(ctx, "exp-1")
+	if want := (domain.JobMachine{InstanceID: "fake-0001"}); err != nil || observed.Machine == nil || *observed.Machine != want {
+		t.Fatalf("a provider that says nothing of the machine: %+v, %v, want %+v", observed.Machine, err, want)
+	}
+	p.RunsOn("hl-job-t1-exp-1-a0-h100-0", "machine-11230", "H100", "AMD EPYC 7B13", 2.25)
+	observed, err = e.PollJobStatus(ctx, "exp-1")
+	want := domain.JobMachine{InstanceID: "fake-0001", HostID: "machine-11230", AcceleratorModel: "H100", CPUModel: "AMD EPYC 7B13", PricePerHourUSD: 2.25}
+	if err != nil || observed.Machine == nil || *observed.Machine != want {
+		t.Fatalf("machine = %+v, %v, want %+v", observed.Machine, err, want)
+	}
+}
+
 func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 	for name, tc := range map[string]struct {
 		lines       []string
