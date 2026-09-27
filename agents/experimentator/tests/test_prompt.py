@@ -68,10 +68,10 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("With none there, rerun the control alongside. A finding across hosts says so", prompt)
 
     # In a platform outage one researcher ran `hl quota` in sleep loops and another pushed five
-    # times. An agent that ends its turn is sent the next update, or a nudge after 30 minutes.
-    def test_a_platform_that_fails_is_retried_once_and_then_waited_for(self):
-        self.assertIn("\"the platform could not be reached\", or a failed `git push`, is the platform failing: retry once "
-                      "after a minute, then end your turn: the next message wakes you.", " ".join(self.render("generalist").split()))
+    # times. The harness wakes an agent that ended its turn once its polls are answered again.
+    def test_a_platform_that_fails_is_waited_for_with_the_turn_ended(self):
+        self.assertIn("\"the platform could not be reached\", from `hl` or in a failed `git push`, is the platform failing: "
+                      "end your turn, and an update wakes you to retry once it is back.", " ".join(self.render("generalist").split()))
 
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
