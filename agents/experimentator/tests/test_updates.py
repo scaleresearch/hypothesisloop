@@ -67,6 +67,10 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked[0], "watch --wake " + ",".join(updates.WAKES["agent"]))
         self.assertEqual(asked[-1], "watch --no-wait --timeout 5")
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
+        # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
+        for role in ("agent", "coordinator"):
+            self.assertIn("job.held", updates.WAKES[role])
+            self.assertIn("experiment.blocked", updates.WAKES[role])
         self.assertNotIn("experiment.status", updates.WAKES["coordinator"])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
 
@@ -222,6 +226,17 @@ class FormatTest(unittest.TestCase):
                    "agent_id": "agent-b", "position": 6, "cursor": 6}]
         self.assertEqual(updates.message(events, "agent-a"),
                          "Platform updates:\nexperiment.status exp-1 COMPLETED\nhypothesis.link hyp-2 builds_on hyp-1 by agent-b")
+
+    def test_a_held_or_blocked_job_is_one_line_with_the_job_the_code_and_the_sentence(self):
+        sentence = "cluster k3s-1 is short of 8 cores, held by 2 jobs of this platform experiment and 1 of others"
+        held = {"kind": "job.held", "subject": "exp-1", "value": "capacity_unavailable", "detail": sentence,
+                "agent_id": "agent-a", "position": 7, "cursor": 7}
+        blocked = {"kind": "experiment.blocked", "subject": "exp-2", "value": "no_cluster_for_image",
+                   "detail": "no cluster runs image torch", "agent_id": "agent-a", "position": 8, "cursor": 8}
+        self.assertEqual(updates.message([held, blocked], "agent-a"), "Platform updates:\n"
+                         f"job.held exp-1 capacity_unavailable {sentence}\n"
+                         "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
+        self.assertEqual(updates.event_line(held, ""), f"job.held exp-1 capacity_unavailable {sentence} by agent-a")
 
     def test_a_repeated_event_is_delivered_once(self):
         event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}

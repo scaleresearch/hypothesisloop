@@ -29,14 +29,15 @@ _DRAIN_S = 5
 # The kinds that wake whoever ended its turn, per role, and the one place that says so. An event
 # of another kind stays on the platform (hl watch --wake) and is handed over with the next that
 # wakes, after the next tool call, or once IDLE_NUDGE_S has passed. A coordinator has to learn
-# within seconds that an agent finished, that a job is held by what waiting will not clear, that
-# a stage advanced, that someone wrote a comment, that the brief changed or the run closed. An
-# agent has to learn the same of its own jobs ending. Everything else is read when next acting.
+# within seconds that an agent finished, that a job is held by what waiting will not clear or has
+# waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
+# advanced, that someone wrote a comment, that the brief changed or the run closed. An agent has
+# to learn the same of its own jobs ending. Everything else is read when next acting.
 WAKES = {
-    "coordinator": ("agent.finished", "experiment.blocked", "stage.boundary", "comment.new",
+    "coordinator": ("agent.finished", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description"),
-    "agent": ("experiment.status", "experiment.blocked", "job.underperforming", "agent.cut", "stage.boundary",
-              "comment.new", "platform_experiment.status", "platform_experiment.description"),
+    "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut",
+              "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description"),
 }
 # What wakes a coordinator besides, while its platform experiment is open: every job that ends
 # then is a baseline agent's, and one that failed for what the brief says is the coordinator's to
@@ -206,7 +207,7 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
 
 def event_line(event: dict, agent_id: str) -> str:
     """One compact line per event: kind, subject, value, detail, the machine an ended job ran on,
-    and who did it when not the agent."""
+    and who did it when not the agent. The detail of a queue reason is its sentence."""
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")
