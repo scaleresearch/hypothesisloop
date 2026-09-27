@@ -96,7 +96,8 @@ class PlannerPromptTest(unittest.TestCase):
         flat = render(planner())[1]
         self.assertIn("`hl` checks the YAML and names the line: install no parser", flat)
         self.assertIn("A refused propose stores nothing: fix what it names and send it again", flat)
-        self.assertIn("a colon in unquoted text is not valid YAML", flat)
+        # A list item that opened with a quoted phrase was refused: `did not find expected '-'`.
+        self.assertIn("Every free-text value is a `|` block, a list item too (`- |`): unquoted text breaks on a colon or a leading quote", flat)
 
     # A goal the planner could not plan left a draft that closed with nothing said. And work for
     # a CPU has a budget that reads as CPU core-hours.
