@@ -571,8 +571,8 @@ func TestAFailedPullIsRetriedByTheNextPass(t *testing.T) {
 		t.Fatalf("status = %+v (err %v), want pending", status, err)
 	}
 	reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "retried", 0)
-	if err != nil || reason != "" || !strings.Contains(message, "registry unreachable") {
-		t.Fatalf("phase detail = %q %q (err %v), want the engine's error as the message and no reason that ends the job", reason, message, err)
+	if err != nil || reason != "" || message != "pull image flaky: registry unreachable" {
+		t.Fatalf("phase detail = %q %q (err %v), want the image and the engine's whole error as the message and no reason that ends the job", reason, message, err)
 	}
 	pass(t, ctx, e, job)
 	eventually(t, "the retry runs the job", func() bool { return f.state("retried") == "running" })
