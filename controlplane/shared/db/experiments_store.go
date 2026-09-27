@@ -36,7 +36,7 @@ const experimentColumns = experimentStoredColumns + `,
 
 const experimentStoredColumns = `
 	id, parent_id, agent_id, actor_kind, actor_id, platform_experiment_id, cluster_name,
-	code_ref, config_hash, data_ref, job_spec, resolved_job_spec,
+	code_ref, branch, config_hash, data_ref, job_spec, resolved_job_spec,
 	hypothesis_id, hypothesis, theory,
 	accelerator_type, accelerator_count,
 	estimated_duration_hours, estimated_cost_acch,
@@ -77,7 +77,7 @@ INSERT INTO experiments (
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, not_admitted_reason,
 	data_access_key_id, data_secret_access_key, secret_env,
-	created_at, updated_at, actor_kind, actor_id
+	created_at, updated_at, actor_kind, actor_id, branch
 ) VALUES (
 	$1, $2, $3, $4, $5,
 	$6, $7, $8, $9,
@@ -87,7 +87,7 @@ INSERT INTO experiments (
 	$17, $18, $19, $20,
 	$21, NULLIF($22, ''),
 	$23, $24, $25,
-	$26, $27, $28, $29
+	$26, $27, $28, $29, $30
 )`
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
@@ -116,7 +116,7 @@ INSERT INTO experiments (
 		exp.PriorityScore, exp.NoveltyScore, string(exp.CapacityTier), string(exp.Status),
 		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey, secretEnv,
-		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID,
+		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID, exp.Branch,
 	)
 	if err != nil {
 		// The primary key is the only unique constraint here, so a unique violation means this

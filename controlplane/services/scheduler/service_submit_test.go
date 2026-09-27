@@ -118,7 +118,7 @@ func humanIdeaSubmission() *domain.Experiment {
 	return &domain.Experiment{
 		ID: "human-idea-job", AgentID: "agent-1", PlatformExperimentID: "pe-1",
 		HypothesisID: "h-human", Theory: "t", EstimatedDurationHours: 1, AcceleratorCount: 1,
-		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
+		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40), Branch: "hl/pe-1/researcher-1/warmup-helps-abc123",
 		Job: domain.JobSpec{
 			Image: "registry.test/job:1", AcceleratorType: h100, AcceleratorCount: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
 		},
@@ -718,5 +718,19 @@ func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
 	var answer struct{ Reason, Message string }
 	if json.Unmarshal(body, &answer) != nil || answer.Reason != ReasonSummaryExists || answer.Message == "" || strings.Contains(string(body), "hypotheses_store") {
 		t.Fatalf("a second summary: body = %s, want reason %s, a message and no store text", body, ReasonSummaryExists)
+	}
+}
+
+// A job says which branch its commit was pushed on, and that branch is one of its platform
+// experiment's: a commit of the default branch, or of another experiment's branch, is refused.
+func TestSubmitRefusesABranchThatIsNotThePlatformExperiments(t *testing.T) {
+	for _, branch := range []string{"", "main", "hl/pe-1/", "hl/pe-other/researcher-1/warmup-abc123", "hl/pe-1/two words"} {
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+		exp := humanIdeaSubmission()
+		exp.Branch = branch
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment || !strings.Contains(refused.Message, "hl hypothesis checkout") {
+			t.Errorf("branch %q: got = %v, want %s naming hl hypothesis checkout", branch, err, ReasonBranchNotOfExperiment)
+		}
 	}
 }

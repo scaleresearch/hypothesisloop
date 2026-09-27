@@ -30,7 +30,7 @@ func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.E
 	now := time.Now().UTC()
 	exp := &domain.Experiment{
 		ID: "datakey-exp-" + suffix, AgentID: agent, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agent}, PlatformExperimentID: pe,
-		CodeRef: "repo@" + fortyHexChars(), ConfigHash: "cfg", DataRef: "none",
+		CodeRef: "repo@" + fortyHexChars(), Branch: "hl/pe/researcher-1/idea-abc123", ConfigHash: "cfg", DataRef: "none",
 		HypothesisID: "h", Hypothesis: "h", AcceleratorType: "cpu",
 		EstimatedDurationHours: 1, Status: domain.StatusQueued, CreatedAt: now, UpdatedAt: now,
 		Job:     domain.JobSpec{Image: "img", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries},
@@ -58,6 +58,9 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	}
 	if got.DataKey != exp.DataKey {
 		t.Fatalf("stored key %+v, want %+v", got.DataKey, exp.DataKey)
+	}
+	if got.Branch != exp.Branch {
+		t.Fatalf("stored branch %q, want %q", got.Branch, exp.Branch)
 	}
 
 	// A re-submission of the queued job keeps the first key and creates none in the store.

@@ -455,6 +455,7 @@ type ExperimentMeta struct {
 	Theory     string `json:"theory,omitempty" yaml:"theory,omitempty"`
 
 	CodeRef string `json:"code_ref" yaml:"code_ref"`
+	Branch  string `json:"branch" yaml:"branch" doc:"The git branch code_ref was pushed on, under hl/<platform_experiment_id>/."`
 	// ConfigHash/DataRef are optional reproducibility pointers (a hash of the resolved
 	// hyperparameter config, where the input dataset lives) — pure bookkeeping, stored and
 	// returned verbatim, never validated or required by admission. Leave empty if you have

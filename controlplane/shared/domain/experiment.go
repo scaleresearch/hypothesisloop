@@ -40,8 +40,11 @@ type Experiment struct {
 	// assigned" or "default" for old rows / single-cluster deployments.
 	ClusterName string `json:"cluster_name,omitempty"`
 	CodeRef     string `json:"code_ref"`
-	ConfigHash  string `json:"config_hash"`
-	DataRef     string `json:"data_ref"`
+	// Branch is the git branch CodeRef was pushed on: one agent's implementation of the job's
+	// hypothesis. What ran is CodeRef. Empty on a job from before branches were kept.
+	Branch     string `json:"branch"`
+	ConfigHash string `json:"config_hash"`
+	DataRef    string `json:"data_ref"`
 	// Job is the agent's execution definition in the platform's own DSL — never a raw
 	// execution-engine manifest (see JobSpec doc). AcceleratorType/AcceleratorCount below are the
 	// billing/admission-facing canonical values derived from it once at submission time.

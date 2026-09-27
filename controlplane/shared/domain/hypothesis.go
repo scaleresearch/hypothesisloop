@@ -33,6 +33,15 @@ type Hypothesis struct {
 	StatusActor *Actor `json:"status_actor"`
 }
 
+// BranchPrefix is what the name of every git branch of a platform experiment starts with. An
+// agent's implementation of a hypothesis is one branch under it, and BaselineBranch another.
+func BranchPrefix(platformExperimentID string) string { return "hl/" + platformExperimentID + "/" }
+
+// BaselineBranch is the branch the baseline of a platform experiment is measured on.
+func BaselineBranch(platformExperimentID string) string {
+	return BranchPrefix(platformExperimentID) + "baseline"
+}
+
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
 // wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
 // filterable field instead. Only the agent named in Hypothesis.AgentID may change it (see

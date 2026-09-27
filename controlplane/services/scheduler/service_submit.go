@@ -32,6 +32,19 @@ func (s *Service) codeInRepository(pe *domain.PlatformExperiment, codeRef string
 	return &AdmissionError{Reason: ReasonCodeRefNotInRepository, Message: fmt.Sprintf("code_ref must be a commit of the platform experiment's repository, %s@<commit-sha>, and it names another address: push your commit there and submit from your clone with code_ref left empty, which fills it in", pe.RepositoryURL)}
 }
 
+// ReasonBranchNotOfExperiment refuses a job whose branch is none of its platform experiment's.
+const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
+
+// branchOfExperiment checks that a job names the branch its commit was pushed on, and that the
+// branch is one of its platform experiment's: the default branch is nobody's implementation.
+func branchOfExperiment(exp *domain.Experiment) error {
+	prefix := domain.BranchPrefix(exp.PlatformExperimentID)
+	if len(exp.Branch) > len(prefix) && strings.HasPrefix(exp.Branch, prefix) && !strings.ContainsAny(exp.Branch, " \t\n") {
+		return nil
+	}
+	return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("branch %q is no branch of platform experiment %s: a job runs a commit pushed on a branch under %s, which hl hypothesis checkout HYPOTHESIS_ID makes and hl job submit pushes and states", exp.Branch, exp.PlatformExperimentID, prefix)}
+}
+
 // ReasonUnknownJobImage refuses a job whose image is neither a job image the platform offers
 // nor a whole registry address.
 const ReasonUnknownJobImage = "unknown_job_image"
@@ -233,6 +246,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
+		return err
+	}
+	if err := branchOfExperiment(exp); err != nil {
 		return err
 	}
 	if err := s.resolveImage(&exp.Job); err != nil {

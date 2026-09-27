@@ -20,7 +20,7 @@ func (r fakeExperimentRow) Scan(dest ...any) error {
 	now := time.Now()
 	values := []any{
 		"exp-1", (*string)(nil), "agent-1", "agent", "agent-1", "pe-1", "cluster-a",
-		"repo@" + fortyHexChars(), "cfg", "s3://data", r.jobSpec, r.resolvedJobSpec,
+		"repo@" + fortyHexChars(), "hl/pe-1/researcher-1/idea-abc123", "cfg", "s3://data", r.jobSpec, r.resolvedJobSpec,
 		"hyp-1", "hypothesis text", "theory",
 		"example.com/product=test-accelerator", 2,
 		1.0, 0.0,

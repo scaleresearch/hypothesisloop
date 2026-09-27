@@ -447,6 +447,8 @@ ALTER TABLE hypothesis_comments ADD COLUMN IF NOT EXISTS platform_experiment_id 
 -- and finding they are. A row from before the credential was kept is 'unverified' with no id.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
+-- The git branch the job's commit was pushed on. A job from before branches were kept has none.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS branch     TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ALTER COLUMN actor_kind DROP DEFAULT;
 ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
 ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
