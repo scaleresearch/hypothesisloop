@@ -139,8 +139,9 @@ const usage = `usage: hl <command> ...
 An ID is positional; --id ID works too. The platform experiment is never an operand. A command
 given the ID of a job or a hypothesis takes no --platform-experiment, since an ID is unique on
 the platform; every other command that works in a platform experiment takes it. --agent and
---platform-experiment default to the agent and the platform experiment an agent's token names,
-so an agent writes neither, and for another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
+--platform-experiment default to what the token names, an agent's its agent and platform
+experiment and a coordinator's its platform experiment, so neither writes them, and for
+another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
 has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
@@ -280,6 +281,10 @@ func (fs *flagSet) Parse(args []string) error {
 		fmt.Fprintln(fs.stderr, fs.help)
 		fs.printFlags()
 		return err
+	}
+	if err != nil && strings.HasSuffix(err.Error(), "not defined: -platform-experiment") {
+		fmt.Fprintf(fs.stderr, "hl: %s: takes no --platform-experiment, leave it out: an ID is found on the whole platform, and a command given none is not about one platform experiment\n", fs.Name())
+		return errUsage
 	}
 	if err != nil {
 		return misuse(fs, "%s", err)

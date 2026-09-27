@@ -755,6 +755,8 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
 		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
 		{[]string{"results"}, 0, "no results yet on val_accuracy"},
+		{[]string{"capacity", "--platform-experiment", "pe-1"}, 2, "hl: capacity: takes no --platform-experiment"},
+		{[]string{"hypothesis", "get", "h-1", "--platform-experiment", "pe-1"}, 2, "hl: hypothesis get: takes no --platform-experiment"},
 		{[]string{"job", "metrics", "job-1", "--points"}, 0, "no metric reported yet"},
 	} {
 		var stdout, stderr bytes.Buffer
