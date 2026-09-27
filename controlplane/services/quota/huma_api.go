@@ -148,16 +148,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours and max_agents are required, and so is how long it lasts: " +
+		Description: "Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours, max_agents and duration_hours are required. " +
 			"max_agents is how many researchers (agents of role competitor, whatever their flavor) may join over its whole life, and counts nobody else: no agent of role baseline, no reviewer, no coordinator. " +
-			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither), and at most the platform's quota.max_platform_experiment_days from starts_at, or from this create without one (422 run_too_long). " +
+			"duration_hours is how long the run lasts from the moment it starts, at most the platform's quota.max_platform_experiment_days (422 invalid_length without it, run_too_long over that). The answer carries no ends_at: the run ends duration_hours after it starts. " +
+			"Created, it is open until its baseline is declared and the platform starts the run, and baseline_due_at in the answer is until when: planning.baseline_limit_minutes after starts_at, or after this create without one. One not running by then is closed with close_reason baseline_limit_reached. " +
 			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, and " +
 			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. " +
 			"The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. " +
 			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, " +
 			"and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. " +
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
-			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents, duration_hours and ends_at " +
+			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and duration_hours " +
 			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 invalid_experiment_file and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
@@ -201,7 +202,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		in.Body.Repository = named
 		// Never the experiment file's to state, so it is held before the repository is read.
-		if err := in.Body.checkLength(); err != nil {
+		if err := peh.svc.checkLength(in.Body.DurationHours); err != nil {
 			return nil, err
 		}
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
@@ -376,7 +377,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
 			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) that already joined, " +
-			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
+			"run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and the platform starts the run once it is declared: within a minute, or at a starts_at still ahead. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +
 			"brief_without_baseline (the description, as patched, names neither the job nor its code_ref: its BASELINE block does), baseline_missing_metric (a declared metric the job never reported), " +
@@ -443,7 +444,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
 			"no further submission is accepted. Optional top_results records the final standings; " +
 			"omitted, standings are derived from observed metrics. The experiment then reads close_reason closed_by_request with closed_by, " +
-			"where one the platform closed at ends_at reads end_time_reached. Safe to call twice -- a second " +
+			"where a run the platform closed at its ends_at reads end_time_reached and an open one it closed at its baseline_due_at baseline_limit_reached. Safe to call twice -- a second " +
 			"call reports invalid_transition rather than changing anything.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -645,7 +646,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}) (*struct {
 		Body struct {
 			Clusters  []ClusterCapacity `json:"clusters"`
-			JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job may name any other image."`
+			JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
 		}
 	}, error) {
 		orgID, every, err := access.PlacementOrg(ctx, in.OrgID)
@@ -659,7 +660,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		out := &struct {
 			Body struct {
 				Clusters  []ClusterCapacity `json:"clusters"`
-				JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job may name any other image."`
+				JobImages []domain.JobImage `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
 			}
 		}{}
 		out.Body.Clusters = clusters

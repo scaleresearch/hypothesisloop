@@ -132,7 +132,7 @@ func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExper
 		consumed += observedAcceleratorCost(exp, hours) - settled[exp.ID]
 	}
 
-	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, now), nil
+	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartedAt, pe.EndsAt, now), nil
 }
 
 // reconcileCuts retries job-stopping for every agent already cut in this platform experiment.

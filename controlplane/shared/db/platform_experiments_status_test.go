@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -46,5 +48,53 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	closed, err := store.GetPlatformExperiment(ctx, id)
 	if err != nil || closed.Status != domain.PlatformExpClosed || closed.CloseReason != domain.CloseByRequest || closed.ClosedAt == nil || closed.ClosedBy == nil || closed.ClosedBy.ID != owner.ID {
 		t.Fatalf("closed experiment: got = (%+v, %v), want it closed by request of %s", closed, err, owner.ID)
+	}
+}
+
+// A run of one hour once closed end_time_reached while its baseline was still being prepared:
+// its hour counted from the moment it was accepted. The hour counts from the start of the run.
+func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	created := time.Now().UTC().Add(-3 * time.Hour)
+	due := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
+	pe := &domain.PlatformExperiment{
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
+		DurationHours: 1, BaselineDueAt: due, Status: domain.PlatformExpOpen,
+		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
+		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
+	}
+	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+		t.Fatal(err)
+	}
+	open, err := pes.GetPlatformExperiment(ctx, pe.ID)
+	if err != nil || !open.EndsAt.IsZero() || !open.StartedAt.IsZero() || !open.BaselineDueAt.Equal(due) || open.DurationHours != 1 {
+		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v hours, %v, want no end, no start, its baseline deadline and one hour", open.EndsAt, open.StartedAt, open.BaselineDueAt, open.DurationHours, err)
+	}
+
+	before := time.Now().Add(-time.Second)
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, func([]StartParticipant) ([]*domain.AgentQuota, error) { return nil, nil })
+	if err != nil || !started {
+		t.Fatalf("start: got = %v, %v, want started", started, err)
+	}
+	running, err := pes.GetPlatformExperiment(ctx, pe.ID)
+	if err != nil || running.StartedAt.Before(before) || !running.EndsAt.Equal(running.StartedAt.Add(time.Hour)) || !running.BaselineDueAt.IsZero() {
+		t.Fatalf("running: got = started %v, ends %v, baseline due %v, %v, want it started now and ending one hour later", running.StartedAt, running.EndsAt, running.BaselineDueAt, err)
+	}
+	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, one := range listed {
+		if one.ID == pe.ID && !one.ClosesAt().Equal(running.EndsAt) {
+			t.Fatalf("listed: closes at %v, want the run's end %v", one.ClosesAt(), running.EndsAt)
+		}
+	}
+	if err := pes.ClosePlatformExperiment(ctx, pe.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if closed, err := pes.GetPlatformExperiment(ctx, pe.ID); err != nil || !closed.EndsAt.Equal(running.EndsAt) || closed.CloseReason != domain.CloseEndTimeReached {
+		t.Fatalf("closed: got = ends %v, %s, %v, want the run's end kept and end_time_reached", closed.EndsAt, closed.CloseReason, err)
 	}
 }

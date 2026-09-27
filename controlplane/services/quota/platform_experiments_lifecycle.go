@@ -18,15 +18,15 @@ import (
 
 var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 
-// checkLength holds a create to stating how long it lasts in exactly one way.
-func (r CreatePlatformExperimentRequest) checkLength() error {
-	switch {
-	case r.DurationHours < 0:
-		return refuseUpdate(422, "invalid_length", "duration_hours must be positive")
-	case r.DurationHours > 0 && !r.EndsAt.IsZero():
-		return refuseUpdate(422, "invalid_length", "the body states both duration_hours and ends_at: state one")
-	case r.DurationHours == 0 && r.EndsAt.IsZero():
-		return refuseUpdate(422, "invalid_length", "state how long it lasts: duration_hours or ends_at")
+// checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
+// Until its end it may rent machines.
+func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
+	if durationHours <= 0 {
+		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
+	}
+	if length := time.Duration(durationHours * float64(time.Hour)); length > s.cfg.MaxRunLength {
+		return refuseUpdate(422, "run_too_long", "it would run %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state a shorter duration_hours",
+			length.Hours()/24, s.cfg.MaxRunLength.Hours()/24)
 	}
 	return nil
 }
@@ -46,23 +46,10 @@ func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentR
 	return spec
 }
 
-// checkRunLength holds a platform experiment to quota.max_platform_experiment_days from its
-// start, which is now for one that states no starts_at. Until its end it may rent machines.
-func (s *PlatformExperimentsService) checkRunLength(startsAt, endsAt, now time.Time) error {
-	if startsAt.IsZero() {
-		startsAt = now
-	}
-	if length := endsAt.Sub(startsAt); length > s.cfg.MaxRunLength {
-		return refuseUpdate(422, "run_too_long", "it would run %.1f days to its ends_at, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state an earlier end",
-			length.Hours()/24, s.cfg.MaxRunLength.Hours()/24)
-	}
-	return nil
-}
-
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
-// with the platform's settings where spec leaves a field to them and its length as ends_at.
-func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
+// with the platform's settings where spec leaves a field to them.
+func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	spec = s.withSettings(spec)
 	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Description) == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
@@ -91,17 +78,7 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 	if spec.MaxAgents <= 0 {
 		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
 	}
-	if err := spec.checkLength(); err != nil {
-		return spec, err
-	}
-	if spec.DurationHours > 0 {
-		from := spec.StartsAt
-		if from.IsZero() {
-			from = now
-		}
-		spec.EndsAt = from.Add(time.Duration(spec.DurationHours * float64(time.Hour)))
-	}
-	return spec, s.checkRunLength(spec.StartsAt, spec.EndsAt, now)
+	return spec, s.checkLength(spec.DurationHours)
 }
 
 // requireReachable refuses a platform experiment coming into being where nothing could run it:
@@ -126,7 +103,7 @@ func (s *PlatformExperimentsService) requireReachable(ctx context.Context, proje
 // Create creates a new platform experiment in open status (accepting signups immediately).
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	req, err := s.validate(req, now)
+	req, err := s.validate(req)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +123,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  req.StartsAt,
-		EndsAt:                    req.EndsAt,
+		DurationHours:             req.DurationHours,
 		Status:                    domain.PlatformExpOpen,
 		Stages:                    req.Stages,
 		CurrentStage:              1,
@@ -161,6 +138,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
 	}
+	pe.BaselineDueAt = pe.OpenUntil(now, s.cfg.BaselineLimit)
 	if req.prepare != nil {
 		if err := req.prepare(ctx, pe); err != nil {
 			return nil, err
@@ -233,9 +211,10 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	}
 	if patch.StartsAt != nil {
 		patched.StartsAt = *patch.StartsAt
+		patched.BaselineDueAt = patched.OpenUntil(time.Now().UTC(), s.cfg.BaselineLimit)
 	}
-	if patch.EndsAt != nil {
-		patched.EndsAt = *patch.EndsAt
+	if patch.DurationHours != nil {
+		patched.DurationHours = *patch.DurationHours
 	}
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
@@ -247,9 +226,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		Name: patched.Name, Description: patched.Description,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
-		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, EndsAt: patched.EndsAt,
+		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
-	}, time.Now().UTC()); err != nil {
+	}); err != nil {
 		return nil, err
 	}
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
@@ -529,15 +508,11 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	return s.store.ClosePlatformExperiment(ctx, id, by)
 }
 
-// SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, and
-// a draft whose planning limit passed or whose answer no person took up, which releases its
-// machine. One with no such moment is skipped and runs until someone calls Close. An open one
-// that has no baseline is closed once its BaselineDue has passed: without a baseline it never
-// starts, and the machines that were to measure one would be rented for nothing.
+// SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, a
+// draft whose planning limit passed or whose answer no person took up, which releases its
+// machine, and an open one that is not running by its BaselineDueAt: the machines that were to
+// measure its baseline would be rented for nothing.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
-	if s.cfg.BaselineLimit <= 0 {
-		return errors.New("sweep_expired: no baseline limit is set (planning.baseline_limit_minutes)")
-	}
 	now := time.Now()
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
@@ -546,9 +521,6 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 		}
 		for _, pe := range pes {
 			closesAt := pe.ClosesAt()
-			if due := pe.BaselineDue(s.cfg.BaselineLimit); status == domain.PlatformExpOpen && pe.BaselineJobID == "" && (closesAt.IsZero() || due.Before(closesAt)) {
-				closesAt = due
-			}
 			if closesAt.IsZero() || closesAt.After(now) {
 				continue
 			}
@@ -591,12 +563,6 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 }
 
 // StartExpirySweep runs SweepAutoStart and SweepExpired on a ticker until ctx is cancelled.
-// Mirrors the idiomatic ticker-loop pattern used elsewhere in this codebase (see
-// scheduler.JobWatcher.Start). Auto-start runs before auto-close so a platform experiment whose
-// starts_at and ends_at are both already in the past (e.g. after a control-service restart) is
-// briefly started and then immediately closed, rather than closed while still "open" — closing
-// requires status running-or-open already, so this ordering isn't strictly required for
-// correctness, but it keeps the transition history sane (open -> running -> closed).
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

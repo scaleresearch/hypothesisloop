@@ -205,12 +205,19 @@ type PlatformExperiment struct {
 	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
 	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	StartsAt                  time.Time          `json:"starts_at"`
-	// EndsAt is when the run ends and the platform closes it. A draft has no run yet and so
-	// none: the platform closes it at PlanningEndsAt while its planner has answered nothing,
-	// and at ProposalExpiresAt once it has and the answer waits for a person. A draft has
-	// exactly one of the two, and one closed as a draft keeps it. See ClosesAt.
-	EndsAt            time.Time                `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it. Absent on a draft, which has no run yet."`
+	// StartsAt is the earliest moment the platform starts the run, zero for as soon as the
+	// baseline is declared. StartedAt is when the run did start, and the run lasts DurationHours
+	// from then: EndsAt is the two added, written at the start. Preparing the baseline takes
+	// nothing from the run.
+	StartsAt      time.Time `json:"starts_at" doc:"The earliest moment the platform starts the run. The zero time when none was stated: it starts once its baseline is declared."`
+	StartedAt     time.Time `json:"started_at,omitzero" doc:"When the run started: the moment it became running. Absent before."`
+	DurationHours float64   `json:"duration_hours,omitzero" doc:"How long the run lasts, counted from started_at. Absent on a draft."`
+	// A platform experiment has exactly one moment at which the platform closes it if nobody
+	// does, under the name of what ends then: PlanningEndsAt or ProposalExpiresAt on a draft,
+	// BaselineDueAt while it is open, EndsAt once it runs. One that closed keeps the one it had.
+	// See ClosesAt.
+	EndsAt            time.Time                `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it: started_at plus duration_hours. Absent until the run starts."`
+	BaselineDueAt     time.Time                `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. planning.baseline_limit_minutes after its starts_at, or after it was created or accepted when that is later."`
 	PlanningEndsAt    time.Time                `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time                `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
 	Status            PlatformExperimentStatus `json:"status"`
@@ -275,7 +282,7 @@ type PlatformExperiment struct {
 	// ProposedAt, or with ProposedAt absent, is not answered by a proposal yet.
 	Revisions []PlanningRequest `json:"revisions,omitempty"`
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
-	// absent when the platform did at EndsAt. Carried by a read of one platform experiment.
+	// absent when the platform did at ClosesAt. Carried by a read of one platform experiment.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
 	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
@@ -284,41 +291,46 @@ type PlatformExperiment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ClosesAt is when the platform closes it if nobody does: EndsAt, PlanningEndsAt or
-// ProposalExpiresAt, whichever it has. It is the one moment stored. An open one without a
-// baseline is closed earlier, at BaselineDue.
+// ClosesAt is when the platform closes it if nobody does: EndsAt, BaselineDueAt, PlanningEndsAt
+// or ProposalExpiresAt, whichever it has. It is the one moment stored.
 func (p *PlatformExperiment) ClosesAt() time.Time {
 	switch {
 	case !p.PlanningEndsAt.IsZero():
 		return p.PlanningEndsAt
 	case !p.ProposalExpiresAt.IsZero():
 		return p.ProposalExpiresAt
+	case !p.BaselineDueAt.IsZero():
+		return p.BaselineDueAt
 	}
 	return p.EndsAt
 }
 
-// BaselineDue is when an open platform experiment that has no baseline by then is closed: limit
-// after its start time, or after its creation when it states no start or one already past then.
-func (p *PlatformExperiment) BaselineDue(limit time.Duration) time.Time {
-	if p.StartsAt.After(p.CreatedAt) {
-		return p.StartsAt.Add(limit)
-	}
-	return p.CreatedAt.Add(limit)
-}
-
-// SetClosesAt records at under the name of what ends then, which Status, Goal, StartsAt and
-// ProposedAt decide: a draft, or one closed as a draft, which was planned from a goal and never
-// got a start, is being planned until it is proposed and waits for a person from then.
+// SetClosesAt records at under the name of what ends then, which Status, StartedAt, Goal,
+// StartsAt and ProposedAt decide. One that ran ends its run then. A draft, or one closed as a
+// draft, which was planned from a goal and never got a start, is being planned until its planner
+// answers and waits for a person from then. Any other is open, or closed before it ran, and
+// has until then to be running.
 func (p *PlatformExperiment) SetClosesAt(at time.Time) {
-	p.EndsAt, p.PlanningEndsAt, p.ProposalExpiresAt = time.Time{}, time.Time{}, time.Time{}
+	p.EndsAt, p.BaselineDueAt, p.PlanningEndsAt, p.ProposalExpiresAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 	switch {
-	case p.Status != PlatformExpDraft && (p.Goal == "" || !p.StartsAt.IsZero()):
+	case !p.StartedAt.IsZero():
 		p.EndsAt = at
+	case p.Status != PlatformExpDraft && (p.Goal == "" || !p.StartsAt.IsZero()):
+		p.BaselineDueAt = at
 	case p.ProposedAt != nil:
 		p.ProposalExpiresAt = at
 	default:
 		p.PlanningEndsAt = at
 	}
+}
+
+// OpenUntil is the BaselineDueAt of a platform experiment that becomes open, or whose start is
+// set, at now: limit after its start, or after now when it states no start or one already past.
+func (p *PlatformExperiment) OpenUntil(now time.Time, limit time.Duration) time.Time {
+	if p.StartsAt.After(now) {
+		return p.StartsAt.Add(limit)
+	}
+	return now.Add(limit)
 }
 
 // StatusReason says why a platform experiment is in its status: a stable code and a sentence for
@@ -333,14 +345,15 @@ type StatusReason struct {
 type CloseReason string
 
 const (
+	// CloseEndTimeReached is a run at its EndsAt.
 	CloseEndTimeReached CloseReason = "end_time_reached"
 	CloseByRequest      CloseReason = "closed_by_request"
 	// ClosePlanningLimitReached is a draft whose planner answered nothing inside the planning
 	// limit, and CloseProposalExpired one whose proposal or decline no person took up in time.
 	ClosePlanningLimitReached CloseReason = "planning_limit_reached"
 	CloseProposalExpired      CloseReason = "proposal_expired"
-	// CloseBaselineLimitReached is an open platform experiment nobody declared a baseline for
-	// inside the baseline limit.
+	// CloseBaselineLimitReached is an open platform experiment that was not running by its
+	// BaselineDueAt: nobody declared a baseline for it, or it could not start with one.
 	CloseBaselineLimitReached CloseReason = "baseline_limit_reached"
 )
 

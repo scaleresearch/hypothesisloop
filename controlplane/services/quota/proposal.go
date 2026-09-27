@@ -61,8 +61,8 @@ func refusedProposal(reason, format string, args ...any) error {
 
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It returns the experiment the proposal states, as validate
-// answers it: with its cost, its length from now and one place for each researcher.
-func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Proposal, projectID string, maxHosted int, now time.Time) (CreatePlatformExperimentRequest, error) {
+// answers it: with its cost, its length and one place for each researcher.
+func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Proposal, projectID string, maxHosted int) (CreatePlatformExperimentRequest, error) {
 	experiment, err := decodeExperimentBase(p.Experiment)
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
@@ -75,7 +75,7 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Propos
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}
 	experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
-	if experiment, err = h.svc.validate(experiment, now); err != nil {
+	if experiment, err = h.svc.validate(experiment); err != nil {
 		return experiment, err
 	}
 	if err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType); err != nil {
@@ -170,7 +170,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
-			"The platform hosts its coordinator and each researcher, and starts_at is now. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
+			"The platform hosts its coordinator and each researcher, and starts_at is now. Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
 			"no researcher's machine is started before, and the platform starts the run once the baseline is declared. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; " +
@@ -219,7 +219,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		if _, err := h.checkProposal(ctx, in.Body, pe.ProjectID, pe.MaxHosted, time.Now().UTC()); err != nil {
+		if _, err := h.checkProposal(ctx, in.Body, pe.ProjectID, pe.MaxHosted); err != nil {
 			return nil, h.refusal("check proposal", err)
 		}
 		stored, err := json.Marshal(in.Body)
@@ -249,7 +249,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 // how long it lasts and who runs it. The proposal only proposed them, since an agent wrote it.
 type AcceptRequest struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
-	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from now."`
+	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, which is once its baseline is declared."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
 }
 
@@ -283,7 +283,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	// The check the proposal passed, again with the cost and the agents the person states.
 	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
 	now := time.Now().UTC()
-	experiment, err := h.checkProposal(ctx, proposal, pe.ProjectID, pe.MaxHosted, now)
+	experiment, err := h.checkProposal(ctx, proposal, pe.ProjectID, pe.MaxHosted)
 	if err != nil {
 		return nil, h.refusal("check proposal", err)
 	}
@@ -297,7 +297,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
 	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, domain.QuotaTier(experiment.DefaultQuotaTier)
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
-	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.EndsAt = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.EndsAt
+	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.DurationHours
+	pe.BaselineDueAt = pe.OpenUntil(now, h.svc.cfg.BaselineLimit)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
 
 	agents := make([]*domain.Agent, 0, len(req.Agents))

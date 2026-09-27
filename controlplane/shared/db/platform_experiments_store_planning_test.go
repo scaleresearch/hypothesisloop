@@ -527,11 +527,11 @@ func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *te
 		by      *domain.Actor
 		want    domain.CloseReason
 	}{
-		"open, no baseline, before its end": {"", nil, domain.CloseBaselineLimitReached},
-		"open, no baseline, at its end":     {"ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
-		"open with a baseline":              {"baseline_job_id = 'job-1', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
-		"running":                           {"status = 'running', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
-		"closed by a person":                {"", &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, domain.CloseByRequest},
+		"open, no baseline, before its end":  {"", nil, domain.CloseBaselineLimitReached},
+		"open, no baseline, at its deadline": {"ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
+		"open with a baseline":               {"baseline_job_id = 'job-1', ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
+		"running":                            {"status = 'running', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
+		"closed by a person":                 {"", &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, domain.CloseByRequest},
 	} {
 		if got := closed(c.prepare, c.by); got != c.want {
 			t.Errorf("%s: close_reason = %q, want %q", name, got, c.want)

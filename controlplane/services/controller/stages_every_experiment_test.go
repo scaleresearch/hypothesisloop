@@ -100,8 +100,8 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 			CurrentStage: 1,
 			CreatedAt:    now.Add(-2 * time.Hour),
 			// The window has fully elapsed, so every one of these is past its first boundary.
-			StartsAt: now.Add(-2 * time.Hour),
-			EndsAt:   now.Add(-time.Hour),
+			StartedAt: now.Add(-2 * time.Hour),
+			EndsAt:    now.Add(-time.Hour),
 		})
 	}
 

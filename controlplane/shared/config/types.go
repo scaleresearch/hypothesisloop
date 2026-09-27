@@ -46,8 +46,8 @@ type QuotaConfig struct {
 	// DefaultQuotaTier is the tier of a signup that states none, in a platform experiment that
 	// states no default_quota_tier: guaranteed or burst_only.
 	DefaultQuotaTier string `yaml:"default_quota_tier"`
-	// MaxPlatformExperimentDays is the longest a platform experiment may run, from its start
-	// to its ends_at. Required and positive: until its end an experiment may rent machines.
+	// MaxPlatformExperimentDays is the longest a platform experiment may run, from the start of
+	// its run to its end. Required and positive: until its end an experiment may rent machines.
 	MaxPlatformExperimentDays int `yaml:"max_platform_experiment_days"`
 
 	MaxAcceleratorCountPerJob int     `yaml:"max_accelerator_count_per_job"`
@@ -269,7 +269,8 @@ type PlanningConfig struct {
 	// LimitMinutes is how long a planner has to propose, from the goal or from a revision.
 	LimitMinutes int `yaml:"limit_minutes"`
 	// BaselineLimitMinutes is how long a platform experiment, accepted from a draft or created
-	// whole, may stay open without a declared baseline before the platform closes it.
+	// whole, may stay open: one not running by then is closed. The run's length counts from its
+	// start, so this alone bounds the time before.
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`

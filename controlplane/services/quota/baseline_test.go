@@ -27,7 +27,7 @@ func openExperiment() *domain.PlatformExperiment {
 	return &domain.PlatformExperiment{
 		ID: "pe-1", ProjectID: "prj-a", Name: "n", Description: "Train train.py and report val_loss.\nBASELINE\n  config: lr 0.1\n  measured: not yet established",
 		Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 6, MaxAgents: 2, ReportIntervalSeconds: 30,
-		StartsAt: time.Now().UTC(), EndsAt: time.Now().UTC().Add(4 * time.Hour), Stages: []domain.Stage{{LengthPct: 100}},
+		StartsAt: time.Now().UTC(), DurationHours: 4, BaselineDueAt: time.Now().UTC().Add(time.Hour), Stages: []domain.Stage{{LengthPct: 100}},
 		Metrics: []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}, {Key: "exact_match", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound}},
 	}
 }

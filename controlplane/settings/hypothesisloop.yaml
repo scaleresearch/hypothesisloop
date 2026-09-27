@@ -95,12 +95,13 @@ agents:
 #              revision. A draft with no proposal by then is closed and its machine released.
 #   proposed_for_days     how long a proposal waits for a person before the draft is closed. No
 #              machine runs while it waits.
-#   baseline_limit_minutes  how long a platform experiment may stay open without a declared
-#              baseline, counted from its starts_at, or from its creation when it states no
-#              later start. It does not start without one (PATCH baseline_job_id), so one that
-#              has none by then is closed with close_reason baseline_limit_reached and its
-#              machines are released. This holds for an accepted draft and for a platform
-#              experiment created whole alike.
+#   baseline_limit_minutes  how long a platform experiment may stay open, counted from its
+#              starts_at, or from its creation or acceptance when that is later. The platform
+#              starts the run once a baseline is declared (PATCH baseline_job_id), and one
+#              not running by then (its baseline_due_at) is closed with close_reason
+#              baseline_limit_reached and its machines are released. A run's duration_hours
+#              count from its start, so this alone bounds the time before. This holds for an
+#              accepted draft and for a platform experiment created whole alike.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
@@ -331,8 +332,8 @@ quota:
   # default_quota_tier of its own: guaranteed (a reserved share and burst on top) or burst_only.
   default_quota_tier: guaranteed
 
-  # The longest a platform experiment may run, from its start (starts_at, or the moment it is
-  # created or accepted) to its ends_at. A longer one is refused with 422 run_too_long when it is
+  # The longest a platform experiment may run: the most its duration_hours may state, counted
+  # from the moment the run starts. A longer one is refused with 422 run_too_long when it is
   # created, proposed, accepted or patched. Until its end an experiment may rent machines, so
   # this and its budget are what bound it.
   max_platform_experiment_days: 30

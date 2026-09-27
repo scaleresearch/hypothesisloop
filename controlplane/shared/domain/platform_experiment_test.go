@@ -42,7 +42,7 @@ func TestValidateMetricDefinitions(t *testing.T) {
 }
 
 // A proposed draft read `ends_at` a week out: the moment its proposal lapses, under the name of
-// a run's end.
+// a run's end. An open one read the end of a run that had not started.
 func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
 	at, proposed := time.Now(), time.Now()
 	cases := []struct {
@@ -50,8 +50,12 @@ func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
 		pe   PlatformExperiment
 		got  func(PlatformExperiment) time.Time
 	}{
-		{"a run", PlatformExperiment{Status: PlatformExpOpen}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
-		{"an accepted draft", PlatformExperiment{Status: PlatformExpRunning, Goal: "g", StartsAt: at, ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"an open one", PlatformExperiment{Status: PlatformExpOpen}, func(p PlatformExperiment) time.Time { return p.BaselineDueAt }},
+		{"an accepted draft waiting for its baseline", PlatformExperiment{Status: PlatformExpOpen, Goal: "g", StartsAt: at, ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.BaselineDueAt }},
+		{"a run", PlatformExperiment{Status: PlatformExpRunning, StartedAt: at}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"an accepted draft that runs", PlatformExperiment{Status: PlatformExpRunning, Goal: "g", StartsAt: at, StartedAt: at, ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"a run that closed", PlatformExperiment{Status: PlatformExpClosed, StartedAt: at}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"one closed before it ran", PlatformExperiment{Status: PlatformExpClosed}, func(p PlatformExperiment) time.Time { return p.BaselineDueAt }},
 		{"a draft being planned", PlatformExperiment{Status: PlatformExpDraft, Goal: "g"}, func(p PlatformExperiment) time.Time { return p.PlanningEndsAt }},
 		{"a proposed draft", PlatformExperiment{Status: PlatformExpDraft, Goal: "g", ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.ProposalExpiresAt }},
 		{"a draft closed with its proposal", PlatformExperiment{Status: PlatformExpClosed, Goal: "g", ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.ProposalExpiresAt }},
@@ -59,13 +63,13 @@ func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
 	for _, c := range cases {
 		c.pe.SetClosesAt(at)
 		named := 0
-		for _, moment := range []time.Time{c.pe.EndsAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt} {
+		for _, moment := range []time.Time{c.pe.EndsAt, c.pe.BaselineDueAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt} {
 			if !moment.IsZero() {
 				named++
 			}
 		}
 		if !c.got(c.pe).Equal(at) || named != 1 || !c.pe.ClosesAt().Equal(at) {
-			t.Errorf("%s: got = ends %v, planning ends %v, proposal expires %v, want the moment under one name", c.name, c.pe.EndsAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt)
+			t.Errorf("%s: got = ends %v, baseline due %v, planning ends %v, proposal expires %v, want the moment under one name", c.name, c.pe.EndsAt, c.pe.BaselineDueAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt)
 		}
 	}
 }

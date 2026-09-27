@@ -36,7 +36,6 @@ func reaching(svc *PlatformExperimentsService, types ...domain.AcceleratorType) 
 // One check stands behind a create, a proposal and an accept, so what it refuses and what it
 // takes from the settings is the same for all three.
 func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
-	now := time.Now().UTC()
 	valid := func() CreatePlatformExperimentRequest {
 		return CreatePlatformExperimentRequest{
 			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
@@ -44,12 +43,12 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		}
 	}
 	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
-	spec, err := svc.validate(valid(), now)
+	spec, err := svc.validate(valid())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if spec.ReportIntervalSeconds != 30 || len(spec.Stages) != 1 || spec.DefaultQuotaTier != "guaranteed" || !spec.EndsAt.Equal(now.Add(24*time.Hour)) {
-		t.Errorf("settings applied: report interval %d, stages %v, tier %q, ends_at %v", spec.ReportIntervalSeconds, spec.Stages, spec.DefaultQuotaTier, spec.EndsAt)
+	if spec.ReportIntervalSeconds != 30 || len(spec.Stages) != 1 || spec.DefaultQuotaTier != "guaranteed" || spec.DurationHours != 24 {
+		t.Errorf("settings applied: report interval %d, stages %v, tier %q, duration %v", spec.ReportIntervalSeconds, spec.Stages, spec.DefaultQuotaTier, spec.DurationHours)
 	}
 	for name, c := range map[string]struct {
 		mutate func(*CreatePlatformExperimentRequest)
@@ -65,13 +64,11 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		"no max_agents":     {func(r *CreatePlatformExperimentRequest) { r.MaxAgents = 0 }, "invalid_agents"},
 		"no length":         {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 0 }, "invalid_length"},
 		"longer than a run": {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 31 * 24 }, "run_too_long"},
-		"an end decades out": {func(r *CreatePlatformExperimentRequest) {
-			r.DurationHours, r.EndsAt = 0, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
-		}, "run_too_long"},
+		"a negative length": {func(r *CreatePlatformExperimentRequest) { r.DurationHours = -1 }, "invalid_length"},
 	} {
 		req := valid()
 		c.mutate(&req)
-		_, err := svc.validate(req, now)
+		_, err := svc.validate(req)
 		var refused *api.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
@@ -124,7 +121,7 @@ func TestAPatchPassesWithNoCapacityReported(t *testing.T) {
 		store := &createdStore{created: []*domain.PlatformExperiment{{
 			ID: "pe-1", ProjectID: "prj-a", Name: "exp", Description: "the brief", Status: status,
 			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
-			StartsAt: time.Now().UTC(), EndsAt: time.Now().UTC().Add(24 * time.Hour),
+			StartsAt: time.Now().UTC(), DurationHours: 24,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}}}
 		svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute))

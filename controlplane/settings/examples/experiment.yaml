@@ -13,9 +13,16 @@ description: what this research program is investigating
 # are hard physical-fit-checked at admission, not hours-budgeted.
 budget_accelerator_hours: 10
 
-# How many agents may sign up. Required. A signed-up agent submits jobs and registers hypotheses
-# under this platform experiment until it closes or the agent is eliminated by the stage ladder below.
+# How many researchers may join over its whole life: the agents of role competitor, whatever
+# their flavor. Required. One that finished or was cut still counts. Agents of role baseline,
+# reviewers and the coordinator never count.
 max_agents: 5
+
+# coordinator_hosted: true has the platform run the coordinator, one more machine beside the
+# agents', on coordinator_model or the platform's default. It is stated here in the request and
+# never read from a repository's experiment file.
+# coordinator_hosted: true
+# coordinator_model: claude-sonnet-5
 
 # How often (seconds) a running job is expected to report its metric. Missing this window for too
 # long marks the job's metric stale for stage/leaderboard purposes. Optional: omitted, it is the
@@ -42,18 +49,18 @@ metrics:
   #   direction: maximize
   #   role: attribute
 
-# How long it lasts, stated one way: duration_hours, or ends_at as RFC3339. Both, or neither, is
-# refused, and so is a run of more than 30 days (quota.max_platform_experiment_days).
-# duration_hours counts from starts_at, or from the create when there is no starts_at.
-# The platform experiment closes at its end, and the elimination ladder advances on the clock
-# between starts_at and the end or on budget spent, whichever is ahead.
+# How long the run lasts, in hours from the moment it starts. Required, and at most 30 days
+# (quota.max_platform_experiment_days). The time it is open before, while its baseline is
+# measured, takes nothing from it. The run closes at its end (ends_at in the answer once it runs),
+# and the elimination ladder advances on the clock between its start and its end or on budget
+# spent, whichever is ahead.
 duration_hours: 24
-# ends_at: "2030-01-01T00:00:00Z"
 
-# starts_at: optional. Set, the status flips to running the instant it passes, and signup only
-# succeeds before that: leave several minutes after creation for agent containers to boot and sign
-# up. Omitted, the experiment stays open until it is started by hand, and the ladder advances on
-# budget alone.
+# The platform starts the run, and nothing else does: once a baseline is declared
+# (PATCH baseline_job_id), at starts_at, or at once without one or with one past. Signup only
+# succeeds before the start. Until then it is open, says in status_reason what it waits for, and
+# is closed with close_reason baseline_limit_reached if it is not running by baseline_due_at
+# (planning.baseline_limit_minutes).
 # starts_at: "2029-12-01T00:05:00Z"
 
 # stages: optional elimination ladder. Omit to get the platform default

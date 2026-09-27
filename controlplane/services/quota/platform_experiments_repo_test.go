@@ -29,7 +29,7 @@ description: beat the baseline in the README
 budget_accelerator_hours: 40
 max_agents: 6
 report_interval_seconds: 30
-ends_at: 2026-12-01T00:00:00Z
+duration_hours: 400
 metrics:
   - key: val_accuracy
     direction: maximize
@@ -48,8 +48,8 @@ func TestTheExperimentFileIsShapedLikeTheCreateBody(t *testing.T) {
 		t.Fatalf("base = %+v", base)
 	}
 	// What a run costs and how long it lasts is never the file's to say.
-	if base.BudgetAcceleratorHours != 0 || base.MaxAgents != 0 || !base.EndsAt.IsZero() {
-		t.Fatalf("base = %+v, want no budget, no agent count and no end taken from the file", base)
+	if base.BudgetAcceleratorHours != 0 || base.MaxAgents != 0 || base.DurationHours != 0 {
+		t.Fatalf("base = %+v, want no budget, no agent count and no length taken from the file", base)
 	}
 	for name, file := range map[string]string{
 		"a project of its own choosing": experimentBase + "project_id: prj_other\n",
@@ -205,12 +205,9 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 
 var ownerOfA = authtest.As{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
 
-// runEndsAt is an end within the platform's longest run.
-var runEndsAt = time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
-
 // run is what a request with from_repo must always state itself.
 func run(more map[string]any) map[string]any {
-	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "ends_at": runEndsAt.Format(time.RFC3339)}
+	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 48}
 	for key, value := range more {
 		body[key] = value
 	}
@@ -231,9 +228,9 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	if pe.ProjectID != "prj-a" || pe.Name != "tune the model" || pe.ReportIntervalSeconds != 30 || len(pe.Metrics) != 1 {
 		t.Fatalf("created = %+v, want the file's name, cadence and metrics", pe)
 	}
-	// The file says 40 hours, 6 agents and an end in 2026. None of it is read.
-	if pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || !pe.EndsAt.Equal(runEndsAt) {
-		t.Fatalf("created = %+v, want the request's budget, agent count and end", pe)
+	// The file says 40 hours, 6 agents and a run of 400 hours. None of it is read.
+	if pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || pe.DurationHours != 48 {
+		t.Fatalf("created = %+v, want the request's budget, agent count and length", pe)
 	}
 	// A field the body carries wins over the file.
 	if pe.Description != "the request's brief" {
@@ -251,7 +248,7 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 // Any agent's token can push to the branch the file is read from, so the file cannot raise what
 // a run costs: without them in the body the request is refused before the repository is read.
 func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
-	for _, field := range []string{"budget_accelerator_hours", "ends_at"} {
+	for _, field := range []string{"budget_accelerator_hours", "duration_hours"} {
 		repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 		store, call := repoAPI(t, ownerOfA, repos)
 		body := run(nil)
@@ -285,8 +282,11 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		t.Fatalf("a body with a duration and no report interval or start: got = %d %s, want 201", rec.Code, rec.Body)
 	}
 	pe := store.created[0]
-	if pe.ReportIntervalSeconds != 30 || !pe.StartsAt.IsZero() || pe.EndsAt.Before(before.Add(2*time.Hour)) || pe.EndsAt.After(time.Now().Add(2*time.Hour)) {
-		t.Fatalf("created = %+v, want the platform's report interval, no start and an end two hours on", pe)
+	// The run's two hours count from its start, so until then it has no end: it has until the
+	// baseline limit to be running.
+	if pe.ReportIntervalSeconds != 30 || !pe.StartsAt.IsZero() || pe.DurationHours != 2 || !pe.EndsAt.IsZero() ||
+		pe.BaselineDueAt.Before(before.Add(testSettings.BaselineLimit)) || pe.BaselineDueAt.After(time.Now().Add(testSettings.BaselineLimit)) {
+		t.Fatalf("created = %+v, want the platform's report interval, no start, a run of two hours with no end yet and the baseline limit to be running", pe)
 	}
 	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "max_agents", "duration_hours"} {
 		body := whole()
@@ -297,9 +297,9 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		}
 	}
 	both := whole()
-	both["ends_at"] = runEndsAt.Format(time.RFC3339)
-	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_length") {
-		t.Errorf("a duration and an end: got = %d %s, want 422 invalid_length", rec.Code, rec.Body)
+	both["ends_at"] = "2030-01-01T00:00:00Z"
+	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "ends_at") {
+		t.Errorf("an end stated beside the duration: got = %d %s, want 422 naming ends_at, which is no field of a create", rec.Code, rec.Body)
 	}
 	if len(store.created) != 1 || len(repos.asked) != 0 || len(repos.created) != 1 {
 		t.Fatalf("created %d, repository read %v, made %v, want only the whole body created with its one repository and no read", len(store.created), repos.asked, repos.created)
@@ -400,7 +400,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "kept", Description: "the brief agents work from", Status: status,
 			Repository: testRepository, AgentImage: "image:1", BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
-			StartsAt: starts, EndsAt: ends, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
+			StartsAt: starts, DurationHours: 24, BaselineDueAt: ends, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}
 	}
 	repos := &fakeRepositories{}
@@ -425,11 +425,11 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 	}
 	// While it is open, what a run costs and how it is judged can still change.
 	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
-		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "ends_at": "2026-06-25T00:00:00Z",
+		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "duration_hours": 36,
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
 	})
 	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || stored.MaxAgents != 6 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
-		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.Description != "the brief agents work from" {
+		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.DurationHours != 36 || !stored.BaselineDueAt.Equal(ends) || stored.Description != "the brief agents work from" {
 		t.Errorf("an open experiment's fields: got = %d %v, stored %+v", code, out, stored)
 	}
 
@@ -440,12 +440,13 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		reason, says string
 	}{
 		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
-		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "ends_at": "2028-01-01T00:00:00Z"}, 409, "experiment_running", "budget_accelerator_hours, ends_at"},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "duration_hours": 9}, 409, "experiment_running", "budget_accelerator_hours, duration_hours"},
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
 		"no brief":                      {domain.PlatformExpRunning, map[string]any{"description": " "}, 422, "invalid_experiment", "description"},
-		"an end decades out":            {domain.PlatformExpOpen, map[string]any{"ends_at": "2099-01-01T00:00:00Z"}, 422, "run_too_long", "30 days"},
+		"a run of years":                {domain.PlatformExpOpen, map[string]any{"duration_hours": 99999}, 422, "run_too_long", "30 days"},
+		"an end, which is no field":     {domain.PlatformExpOpen, map[string]any{"ends_at": "2099-01-01T00:00:00Z"}, 422, "", ""},
 		"no ranked metric":              {domain.PlatformExpOpen, map[string]any{"metrics": []map[string]any{}}, 422, "invalid_metrics", "metrics"},
 		"a concurrency cap of zero":     {domain.PlatformExpOpen, map[string]any{"max_concurrent_accelerators": 0}, 422, "invalid_experiment", "max_concurrent_accelerators"},
 		"the repository, fixed":         {domain.PlatformExpOpen, map[string]any{"description": "d", "repository": "other/one"}, 422, "", ""},

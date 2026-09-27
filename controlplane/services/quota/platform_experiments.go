@@ -170,8 +170,7 @@ type CreatePlatformExperimentRequest struct {
 	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"` // metric keys jobs must emit
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
 	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"The earliest moment the platform starts the run. Left out, or past, it starts once the baseline is declared."`
-	EndsAt                    time.Time                 `json:"ends_at" required:"false" doc:"When it closes, at most quota.max_platform_experiment_days after it starts. State this or duration_hours, one of the two: both, or neither, answers 422."`
-	DurationHours             float64                   `json:"duration_hours,omitempty" doc:"How long it lasts, in place of ends_at: it closes this many hours after starts_at, or after this create when starts_at is left out."`
+	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
 	// (config stages.default).
 	Stages []domain.Stage `json:"stages,omitempty"`
@@ -229,8 +228,8 @@ type PlatformExperimentPatch struct {
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
-	StartsAt                  *time.Time                 `json:"starts_at,omitempty"`
-	EndsAt                    *time.Time                 `json:"ends_at,omitempty"`
+	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"The earliest moment the platform starts the run. Stated, baseline_due_at moves with it."`
+	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
 	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"Declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. Taken while the platform experiment is open."`
 }
 
@@ -249,7 +248,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"metrics", p.Metrics != nil},
 		{"report_interval_seconds", p.ReportIntervalSeconds != nil},
 		{"starts_at", p.StartsAt != nil},
-		{"ends_at", p.EndsAt != nil},
+		{"duration_hours", p.DurationHours != nil},
 		{"baseline_job_id", p.BaselineJobID != nil},
 	} {
 		if field.set && !slices.Contains(except, field.name) {
@@ -273,5 +272,5 @@ func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *doma
 	if err != nil {
 		return 0, fmt.Errorf("stages: observed usage for %s: %w", pe.ID, err)
 	}
-	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartsAt, pe.EndsAt, time.Now().UTC()), nil
+	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartedAt, pe.EndsAt, time.Now().UTC()), nil
 }

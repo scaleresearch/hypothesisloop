@@ -1186,5 +1186,24 @@ UPDATE experiment_signups SET role = 'planner' WHERE flavor = 'planner' AND role
 -- before this was kept.
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_id   TEXT NOT NULL DEFAULT '';
+-- The run's clock. duration_hours is how long the run lasts and started_at when it started: the
+-- start writes started_at and moves ends_at to duration_hours later. Until then ends_at holds
+-- what closes it before it runs, a draft's planning or proposal limit or an open one's baseline
+-- deadline. A row from before the two columns counted its length from its start time or its
+-- creation: it keeps that length and that end, and one that ran started then.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS duration_hours DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS started_at     TIMESTAMPTZ;
+UPDATE platform_experiments
+SET duration_hours = EXTRACT(EPOCH FROM ends_at - GREATEST(starts_at, created_at)) / 3600
+WHERE duration_hours = 0 AND ends_at > GREATEST(starts_at, created_at)
+  AND (status IN ('open', 'running') OR status = 'closed' AND (goal = '' OR starts_at > '0001-01-02'));
+UPDATE platform_experiments pe
+SET started_at = GREATEST(pe.starts_at, pe.created_at)
+WHERE pe.started_at IS NULL
+  AND (pe.status = 'running'
+       OR pe.status = 'closed' AND EXISTS (
+           SELECT 1 FROM agent_quotas q JOIN experiment_signups s
+             ON s.platform_experiment_id = q.platform_experiment_id AND s.agent_id = q.agent_id
+           WHERE q.platform_experiment_id = pe.id AND s.role NOT IN ('baseline', 'planner')));
 
 COMMIT;

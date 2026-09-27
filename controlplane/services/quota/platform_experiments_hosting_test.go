@@ -176,7 +176,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	live := func() *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{
 			ID: "pe-1", ProjectID: "prj-a", Name: "n", Description: "the brief", Status: domain.PlatformExpOpen,
-			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 30, StartsAt: starts, EndsAt: ends,
+			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 30, StartsAt: starts, DurationHours: 24, BaselineDueAt: ends,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize", Role: "ranking"}},
 			Stages:  []domain.Stage{{LengthPct: 100}},
 		}
@@ -215,7 +215,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	for field, more := range map[string]map[string]any{
 		"budget_accelerator_hours":    {"budget_accelerator_hours": 500},
 		"max_agents":                  {"max_agents": 30},
-		"ends_at":                     {"ends_at": "2030-01-20T00:00:00Z"},
+		"duration_hours":              {"duration_hours": 48},
 		"starts_at":                   {"starts_at": "2030-01-02T00:00:00Z"},
 		"max_concurrent_accelerators": {"max_concurrent_accelerators": 8},
 		"report_interval_seconds":     {"report_interval_seconds": 60},

@@ -179,22 +179,20 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 }
 
 // An accepted draft waited for a baseline nobody could measure, with its coordinator's machine
-// rented until the run's end time. An open experiment that has no baseline when the baseline
-// limit passes is closed, whoever created it, and one that has a baseline is left to its start.
-func TestAnOpenExperimentWithoutABaselineIsClosedAtTheBaselineLimit(t *testing.T) {
+// rented until the run's end time, and a run of one hour closed end_time_reached while its
+// baseline was still being prepared. An open experiment has until its baseline_due_at to be
+// running and is closed then, with a baseline or without. The run's length is no part of it.
+func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 	now := time.Now().UTC()
-	open := func(id string, created, starts time.Time, baseline string) *domain.PlatformExperiment {
-		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: created, StartsAt: starts,
-			EndsAt: now.Add(24 * time.Hour), BaselineJobID: baseline, Stages: []domain.Stage{{LengthPct: 100}}}
+	open := func(id string, due time.Time, baseline string) *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-48 * time.Hour),
+			DurationHours: 1, BaselineDueAt: due, BaselineJobID: baseline, Stages: []domain.Stage{{LengthPct: 100}}}
 	}
-	limit := testSettings.BaselineLimit
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
-		open("pe-late", now.Add(-limit-time.Minute), time.Time{}, ""),
-		open("pe-accepted-late", now.Add(-48*time.Hour), now.Add(-limit-time.Minute), ""),
-		open("pe-in-time", now.Add(-limit+time.Minute), time.Time{}, ""),
-		open("pe-accepted-in-time", now.Add(-48*time.Hour), now.Add(-limit+time.Minute), ""),
-		open("pe-starts-later", now.Add(-48*time.Hour), now.Add(time.Hour), ""),
-		open("pe-declared", now.Add(-48*time.Hour), now.Add(-47*time.Hour), "job-1"),
+		open("pe-late", now.Add(-time.Minute), ""),
+		open("pe-declared-late", now.Add(-time.Minute), "job-1"),
+		open("pe-in-time", now.Add(time.Minute), ""),
+		open("pe-declared-in-time", now.Add(time.Minute), "job-1"),
 	}}}
 	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
@@ -208,12 +206,6 @@ func TestAnOpenExperimentWithoutABaselineIsClosedAtTheBaselineLimit(t *testing.T
 		if pe.Status != want || (want == domain.PlatformExpClosed && pe.ClosedBy != nil) {
 			t.Errorf("%s: status %s closed by %v, want %s by the platform", pe.ID, pe.Status, pe.ClosedBy, want)
 		}
-	}
-	// A deployment that states no limit closes nothing by guessing one.
-	unset := testSettings
-	unset.BaselineLimit = 0
-	if err := NewPlatformExperimentsService(store, unset, zap.NewNop(), "", time.Minute).SweepExpired(context.Background()); err == nil {
-		t.Error("a sweep with no baseline limit ran")
 	}
 }
 
@@ -457,8 +449,9 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.BudgetAcceleratorHours != 3 || pe.MaxAgents != 3 {
 		t.Errorf("budget %v for %d agents, want what the person stated (3 and 3), not the proposal's 6 and 2", pe.BudgetAcceleratorHours, pe.MaxAgents)
 	}
-	if length := pe.EndsAt.Sub(before); length < 2*time.Hour-time.Minute || length > 2*time.Hour+time.Minute {
-		t.Errorf("the run lasts %v, want 2h", length)
+	// Its two hours count from the start of the run. Until then it has the baseline limit.
+	if open := pe.BaselineDueAt.Sub(before); pe.DurationHours != 2 || !pe.EndsAt.IsZero() || open < testSettings.BaselineLimit || open > testSettings.BaselineLimit+time.Minute {
+		t.Errorf("a run of %v hours ending %v, open for %v: want 2 hours with no end yet and the baseline limit to be running", pe.DurationHours, pe.EndsAt, open)
 	}
 	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)

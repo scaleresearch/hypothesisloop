@@ -122,8 +122,8 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
 // researchers up, or does neither. pe carries what the proposal stated and what the person who
-// accepts stated; its start is now, on the database's clock, so the auto-start sweep starts it
-// if nobody does. The limits a signup holds are held here too (ErrMaxAgentsReached,
+// accepts stated; its start is now, on the database's clock, and it is open until its
+// BaselineDueAt. The limits a signup holds are held here too (ErrMaxAgentsReached,
 // ErrMaxHostedReached).
 func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if pe.Coordinator == nil || !pe.CoordinatorHosted {
@@ -159,10 +159,10 @@ UPDATE platform_experiments
 SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = now(), ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
-    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, updated_at = now()
+    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now()
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
-		pe.ReportIntervalSeconds, pe.EndsAt, stages,
-		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model); err != nil {
+		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
+		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {

@@ -68,20 +68,18 @@ func ValidateStages(stages []Stage) error {
 	return nil
 }
 
-// StageProgress is max(budget consumed, time elapsed) as a fraction, at most 1 — the single monotonic
+// StageProgress is max(budget consumed, time elapsed of the run) as a fraction, at most 1 — the single monotonic
 // clock driving every boundary, so whichever runs out first advances the ladder. consumedAccH
 // must exclude reservations, or a large queued job could trip a boundary.
-func StageProgress(consumedAccH, budgetAccH float64, startsAt, endsAt, now time.Time) float64 {
+func StageProgress(consumedAccH, budgetAccH float64, startedAt, endsAt, now time.Time) float64 {
 	var budgetProgress float64
 	if budgetAccH > 0 {
 		budgetProgress = consumedAccH / budgetAccH
 	}
-	// Both ends must be real for the clock to mean anything. A platform experiment created with
-	// the zero starts_at ("start immediately") and a real ends_at would otherwise measure elapsed
-	// time from year 1 and read as ~100% done on its first tick.
+	// Both ends must be real for the clock to mean anything: one that has not started has neither.
 	var timeProgress float64
-	if window := endsAt.Sub(startsAt); window > 0 && !startsAt.IsZero() && !endsAt.IsZero() {
-		timeProgress = now.Sub(startsAt).Seconds() / window.Seconds()
+	if window := endsAt.Sub(startedAt); window > 0 && !startedAt.IsZero() && !endsAt.IsZero() {
+		timeProgress = now.Sub(startedAt).Seconds() / window.Seconds()
 	}
 	return min(1, max(timeProgress, budgetProgress))
 }
