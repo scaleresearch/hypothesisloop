@@ -23,7 +23,7 @@ func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *te
 	// A baseline agent told that a job without an image runs in the platform's own left it out
 	// on a cluster that runs the image a job names: the template names one on every cluster.
 	image, _ := spec.Job["image"].(string)
-	for _, said := range []string{"REQUIRED on every cluster", "job image exactly as `hl capacity` shows it", "full registry\n  # address", "uv pip install --system"} {
+	for _, said := range []string{"REQUIRED on every cluster", "job image exactly as `hl capacity` shows it", "full registry\n  # address", "uv pip install PACKAGE"} {
 		if !strings.HasPrefix(image, Placeholder) || !strings.Contains(files[JobSpec], said) || strings.Contains(files[JobSpec], "Delete this line") {
 			t.Fatalf("the job spec's image is %q and its comments lack %q or tell to leave the image out", image, said)
 		}

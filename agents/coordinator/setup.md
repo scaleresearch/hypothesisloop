@@ -133,10 +133,9 @@ silently improvise.
    (`job_images`), and marks a cluster that runs one image and no other with `only_job_image`:
    a job meant for that cluster names that image, and one that names another is never placed
    there. A job that no cluster could run with the image it names, or with none, is refused at
-   submit with 422 `no_cluster_for_image`. The platform's job
-   images come without a virtualenv, so a plain `uv pip install` stops with no environment to
-   install into: a job installs with `uv pip install --system PACKAGE`, which works in each of
-   them. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
+   submit with 422 `no_cluster_for_image`. In each of the platform's job
+   images a job installs with `uv pip install PACKAGE` or `pip install PACKAGE`, into the Python
+   its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
    `python` image and hides the framework a framework image carries. `make images` builds and
    pushes the offered image with no framework, `make job-images` the others. An experiment
    whose job spec runs in an offered image states its name (`dummy-data-search-demo` states

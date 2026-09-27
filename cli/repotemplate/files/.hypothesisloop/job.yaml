@@ -21,7 +21,7 @@ job:
   image: REPLACE-WITH-A-JOB-IMAGE-NAME-HL-CAPACITY-LISTS
   # hl-clone checks out the commit the job was submitted from and prints its directory. The
   # platform's job images have no virtualenv: install what a trial needs ahead of its command
-  # with `uv pip install --system PACKAGE`.
+  # with `uv pip install PACKAGE`.
   command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
   # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines and
   # states `cpu: N`, whole cores.

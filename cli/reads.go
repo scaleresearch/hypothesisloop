@@ -130,7 +130,7 @@ else is refused at submit (unknown_job_image), as is a job no cluster could run 
 (no_cluster_for_image). Every job names one: a line without only_job_image is of a cluster that runs the
 image a job names, and a line with it is of a cluster that runs that image and no other, so a
 job meant for it names that image; job_image_carries says what is installed in it. The offered
-images have no virtualenv: a job adds a package with uv pip install --system. A line with
+images have no virtualenv: a job adds a package with uv pip install. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented.

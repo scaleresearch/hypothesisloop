@@ -390,9 +390,8 @@ at submit with 422 `unknown_job_image`. Every job names one, on CPU, GPU and chi
 alike; where `hl capacity` shows a cluster with `only_job_image`, that cluster runs that image
 and no other, so a job meant for it names that one. A job that no cluster could run with the
 image it names, or with none, is refused at submit with 422 `no_cluster_for_image`, and a
-submit after the experiment's end with `experiment_closed`. The platform's job images come without a virtualenv, so a plain `uv pip install` stops
-with no environment to install into: a job installs with `uv pip install --system PACKAGE`,
-which works in each of them. `uv run --with PACKAGE script.py` runs in a fresh environment,
+submit after the experiment's end with `experiment_closed`. In each of the platform's job images a job installs with
+`uv pip install PACKAGE` or `pip install PACKAGE`, into the Python its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment,
 which suits the `python` image and hides the framework a framework image carries.
 
 A job is read by one value per declared metric (`metrics` in `hl job list` and

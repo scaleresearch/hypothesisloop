@@ -33,6 +33,13 @@ RUN if [ -n "$TORCH_CPU" ]; then \
         --index-url https://download.pytorch.org/whl/cpu "torch==$TORCH_CPU"; \
     fi
 COPY --from=uv /uv /uvx /usr/local/bin/
+# A job adds a package with plain `uv pip install X` or `pip install X`, into the python3 on PATH
+# whether that is a system Python, conda or a virtualenv. uv is told which Python that is, since
+# without a virtualenv it refuses and with UV_SYSTEM_PYTHON it skips one; pip is added beside that
+# Python where the pip on PATH belongs to another.
+RUN py="$(command -v python3)" \
+ && mkdir -p /etc/uv && printf '[pip]\npython = "%s"\n' "$py" > /etc/uv/uv.toml \
+ && if [ "$(dirname "$(command -v pip)")" != "${py%/*}" ]; then uv pip install --no-cache pip; fi
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 COPY agents/coordinator/experiments/hl-clone /usr/local/bin/hl-clone
 # hl-clone fetches the job's commit from the platform experiment's repository. git asks hl for the
