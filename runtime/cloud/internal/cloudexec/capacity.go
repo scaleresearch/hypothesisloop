@@ -19,7 +19,8 @@ type slot struct {
 	taken bool
 }
 
-// slots lays every shape's slots against what the account holds.
+// slots lays every shape's slots against what the account holds. An instance of a shape or an
+// index that is no longer configured is in no slot: it is still managed, and counted nowhere.
 func (e *Executor) slots(ctx context.Context) ([]slot, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -53,22 +54,6 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 		}
 	}
 	return Shape{}, 0, false
-}
-
-// RequireSlots reads the account once and fails for an instance the configuration has no slot
-// for, as a renamed shape or a lowered max_instances leaves one. Such an instance takes no slot,
-// so every slot would be reported free and filled while it is still billed.
-func (e *Executor) RequireSlots(ctx context.Context) error {
-	v, err := e.read(ctx)
-	if err != nil {
-		return err
-	}
-	for _, i := range v.instances {
-		if _, _, ok := e.configured(i.slot()); !ok {
-			return fmt.Errorf("cloudexec: instance %s is in slot %s, which no configured shape has: restore the shape or its max_instances, or destroy the instance", i.Name, i.slot())
-		}
-	}
-	return nil
 }
 
 // labels are the node labels of a slot: the one that makes it a slot and names it, so admission

@@ -3,7 +3,6 @@ package cloudexec
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,8 +71,13 @@ func (i instance) live() bool { return i.State != provider.StateExited }
 // view is one read of the account: the instances of this namespace, lowest id first, and what
 // was read of their output since. A pass that creates or destroys an instance keeps the view in
 // step, so a later decision in the same pass sees it.
+//
+// unnamed are the instances under this namespace's prefix whose names read as no job's. The
+// prefix makes them this runtime's and no job can be desired for them, so ReapTerminal destroys
+// them.
 type view struct {
 	instances []instance
+	unnamed   []instance
 	outputs   map[string]output
 }
 
@@ -101,12 +105,11 @@ func (e *Executor) read(ctx context.Context) (*view, error) {
 	v := &view{outputs: map[string]output{}}
 	for _, l := range listed {
 		parsed, ok := e.parseInstanceName(l.Name)
+		parsed.Instance = l
 		if !ok {
-			// One name that does not read as a job's must not stop the pass for every job.
-			log.Printf("cloudexec: leaving instance %q alone, its name is not one of this namespace's jobs", l.Name)
+			v.unnamed = append(v.unnamed, parsed)
 			continue
 		}
-		parsed.Instance = l
 		v.instances = append(v.instances, parsed)
 	}
 	sort.SliceStable(v.instances, func(a, b int) bool { return v.instances[a].ID < v.instances[b].ID })
@@ -148,13 +151,19 @@ func (v *view) add(i instance) {
 }
 
 func (v *view) remove(id string) {
-	kept := v.instances[:0]
-	for _, i := range v.instances {
-		if i.ID != id {
+	differs := func(i instance) bool { return i.ID != id }
+	v.instances = keep(v.instances, differs)
+	v.unnamed = keep(v.unnamed, differs)
+}
+
+func keep(instances []instance, include func(instance) bool) []instance {
+	kept := instances[:0]
+	for _, i := range instances {
+		if include(i) {
 			kept = append(kept, i)
 		}
 	}
-	v.instances = kept
+	return kept
 }
 
 // output reads the end of i's output, once per view however many questions are answered from it.

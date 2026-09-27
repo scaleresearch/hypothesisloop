@@ -470,11 +470,10 @@ func TestInstancesOutsideTheNamespaceAreNeverListedCountedOrDestroyed(t *testing
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	foreign := []string{
-		"hl-agent-t1-pe-bot",          // the launcher's, same namespace
-		"hl-job-t2-exp-1-a0-cpu-0",    // another namespace's job of the same id in the same slot
-		"hl-job-t10-exp-1-a0-h100-0",  // a namespace this one is a prefix of
-		"hl-exp-1-a0-h100-1",          // not the platform's naming at all
-		"hl-job-t1-something-unknown", // under the prefix and not a job's name
+		"hl-agent-t1-pe-bot",         // the launcher's, same namespace
+		"hl-job-t2-exp-1-a0-cpu-0",   // another namespace's job of the same id in the same slot
+		"hl-job-t10-exp-1-a0-h100-0", // a namespace this one is a prefix of
+		"hl-exp-1-a0-h100-1",         // not the platform's naming at all
 	}
 	for _, name := range foreign {
 		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {

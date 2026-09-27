@@ -334,22 +334,69 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 }
 
 // Instances outlive a config edit: a shape can be renamed or its max_instances lowered while
-// instances of it run. Such an instance takes no slot, so an agent that started would report
-// every slot free and rent past what the account is meant to hold.
-func TestAnInstanceInNoConfiguredSlotRefusesTheStart(t *testing.T) {
+// instances of it run. One whose job is no longer desired is this runtime's to list and delete
+// like any other, so it never needs an operator. One whose job is still desired is in no slot and
+// billed beside a full account: the pass says so for that job and leaves it running.
+func TestAnInstanceInNoConfiguredSlotIsDeletedUnlessItsJobIsDesired(t *testing.T) {
 	ctx := context.Background()
-	for _, name := range []string{"hl-job-t1-exp-old-a0-a100-0", "hl-job-t1-exp-over-a2-h100-5"} {
+	for name, slot := range map[string]string{"hl-job-t1-exp-old-a0-a100-0": "a100-0", "hl-job-t1-exp-old-a0-h100-5": "h100-5"} {
 		e, p := newTestExecutor(t)
-		mustCreate(t, e, job(t, "exp-1", 0, 1))
-		if err := e.RequireSlots(ctx); err != nil {
-			t.Fatalf("an instance in a configured slot: %v", err)
-		}
 		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
 			t.Fatal(err)
 		}
-		if err := e.RequireSlots(ctx); err == nil || !strings.Contains(err.Error(), name) {
-			t.Fatalf("err = %v, want one naming %s", err, name)
+		p.Start(name)
+
+		if matches, err := e.WorkloadMatchesDesired(ctx, on(job(t, "exp-old", 0, 0), slot)); err == nil || matches || !strings.Contains(err.Error(), name) {
+			t.Fatalf("%s while desired: matches %v, err = %v, want an error naming it", name, matches, err)
 		}
+		if names := p.Names(); !reflect.DeepEqual(names, []string{name}) {
+			t.Fatalf("%s while desired: rented %v, want it left running", name, names)
+		}
+
+		ids, err := e.ListManagedJobs(ctx)
+		if err != nil || !reflect.DeepEqual(ids, []string{"exp-old"}) {
+			t.Fatalf("managed = %v, %v", ids, err)
+		}
+		if err := e.DeleteWorkload(ctx, "exp-old", false); err != nil {
+			t.Fatal(err)
+		}
+		if names := p.Names(); len(names) != 0 {
+			t.Fatalf("%s when no longer desired: still rented %v", name, names)
+		}
+	}
+}
+
+// The prefix is this runtime's own, so an instance under it is its to pay for whatever the rest
+// of the name says. One that reads as no job can be desired by nobody: it is destroyed by the
+// pass, and takes no slot until then.
+func TestAnInstanceUnderThePrefixThatNamesNoJobIsDestroyed(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	exp := job(t, "exp-1", 0, 0)
+	mustCreate(t, e, exp)
+	for _, name := range []string{"hl-job-t1-something-unknown", "hl-job-t1-exp-1-ax-cpu-0", "hl-job-t1-"} {
+		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		p.Start(name)
+	}
+	if ids, err := e.ListManagedJobs(ctx); err != nil || !reflect.DeepEqual(ids, []string{"exp-1"}) {
+		t.Fatalf("managed = %v, %v", ids, err)
+	}
+
+	p.Fail = failing("Destroy", "hl-job-t1-something-unknown")
+	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err == nil {
+		t.Fatal("a destroy that failed was not reported")
+	}
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0", "hl-job-t1-something-unknown"}) {
+		t.Fatalf("rented %v, want the job and the one instance whose destroy failed", names)
+	}
+	p.Fail = nil
+	if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil {
+		t.Fatal(err)
+	}
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0"}) {
+		t.Fatalf("rented %v, want the job alone", names)
 	}
 }
 

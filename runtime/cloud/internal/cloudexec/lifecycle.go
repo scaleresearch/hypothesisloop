@@ -218,6 +218,11 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 // An instance that has not started within Startup does not match either: the pass destroys it
 // and the next rents another, until the control plane's own deadline for a job that is not
 // running requeues or ends the job.
+//
+// The workload of a desired job in a slot the configuration no longer has, as a renamed shape or
+// a lowered max_instances leaves one, is an error and is left running: it takes no slot, so it is
+// billed beside a full account, and destroying it would end a job the control plane still wants.
+// The same instance of a job that is no longer desired is deleted like any other.
 func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Experiment) (bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -230,6 +235,9 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 		}
 		if !workloadOf(exp, i) {
 			return false, nil
+		}
+		if _, _, ok := e.configured(i.slot()); !ok {
+			return false, fmt.Errorf("cloudexec: instance %s runs experiment %s in slot %s, which no configured shape has, so it is billed beside every slot: restore the shape or its max_instances, or end the job", i.Name, exp.ID, i.slot())
 		}
 		if e.overdue(i) {
 			log.Printf("cloudexec: instance %s has not started in %s and is replaced", i.Name, e.startup)
@@ -298,9 +306,10 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 }
 
 // ReapTerminal destroys what no pass has a use for any more: every instance of one name beyond
-// the first, and every exited instance that is not the workload of a desired experiment, which
-// is a job the control plane has finished with, or what a requeue or a readmission to another
-// slot left behind. One failed destroy does not keep the rest rented.
+// the first, every exited instance that is not the workload of a desired experiment, which is a
+// job the control plane has finished with, or what a requeue or a readmission to another slot
+// left behind, and every instance under this namespace's prefix whose name is no job's. One
+// failed destroy does not keep the rest rented.
 //
 // A second instance of one name is a create the vendor carried out and reported failed, or a
 // list that lagged behind a create. The lowest id is kept, which is also the one every status
@@ -319,6 +328,12 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 			kept[i.Name] = true
 			continue
 		}
+		if err := e.destroy(ctx, v, i); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, i := range append([]instance(nil), v.unnamed...) {
+		log.Printf("cloudexec: destroying instance %s (%s): it is under this namespace's prefix and its name is no job's", i.Name, i.ID)
 		if err := e.destroy(ctx, v, i); err != nil {
 			errs = append(errs, err)
 		}
