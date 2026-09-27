@@ -33,6 +33,9 @@ type AgentSignup struct {
 	Hyperparameters map[string]any `json:"hyperparameters"`
 	Model           string         `json:"model"`
 	SignedUpAt      time.Time      `json:"signed_up_at"`
+	// Actor is whose credential added the agent, unverified with no id on a signup from before
+	// this was kept. A coordinator removes only the agents its own token added.
+	Actor *Actor `json:"actor,omitempty"`
 	// FinishedAt is when the agent said it has nothing left to do, and FinishedReason what it
 	// gave as why. From then its machine is no longer wanted.
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`

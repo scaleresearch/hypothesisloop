@@ -302,6 +302,8 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 
 	agents := make([]*domain.Agent, 0, len(req.Agents))
 	signups := make([]domain.AgentSignup, 0, len(req.Agents))
+	caller, _ := auth.FromContext(ctx)
+	by := caller.Actor()
 	for i, asked := range req.Agents {
 		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
 		if err != nil {
@@ -314,7 +316,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		agents = append(agents, &domain.Agent{ID: agentID, Name: fmt.Sprintf("Researcher %d", i+1), PerformanceScore: 0.5, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
 			AgentID: agentID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher,
-			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters,
+			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters, Actor: &by,
 		})
 	}
 	switch err := h.svc.store.AcceptDraft(ctx, pe, agents, signups); {

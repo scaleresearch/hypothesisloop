@@ -56,8 +56,9 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 }
 
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
-// one created in the experiment's org. The answer holds that one agent.
-func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, launch AgentLaunch) ([]domain.AgentSignup, error) {
+// one created in the experiment's org. by is whose credential asked. The answer holds that one
+// agent.
+func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
@@ -71,7 +72,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
-		Hosted: req.Hosted, Flavor: flavor, Hyperparameters: req.Hyperparameters, Model: model,
+		Hosted: req.Hosted, Flavor: flavor, Hyperparameters: req.Hyperparameters, Model: model, Actor: &by,
 	}
 	if req.Hosted {
 		signup.Launcher = launch.Launcher
@@ -203,13 +204,27 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. Once it has, the
 // roster is what quota was divided over: an agent leaves by being cut or by the experiment closing.
-func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformExpID, agentID string) error {
+// by is whose credential asked: a coordinator's token removes only an agent a coordinator's token
+// of this platform experiment added, and never one a person or an API key did.
+func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformExpID, agentID string, by domain.Actor) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
 	}
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+	}
+	if by.Kind == domain.ActorCoordinator {
+		signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
+		if err != nil {
+			return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
+		}
+		if signup == nil {
+			return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
+		}
+		if signup.Actor == nil || signup.Actor.Kind != domain.ActorCoordinator || signup.Actor.ID != by.ID {
+			return refuseSignup(403, "agent_not_added_by_coordinator", "agent %s was not added by this platform experiment's coordinator, and a coordinator's token removes only the agents it added itself: its owner removes this one", agentID)
+		}
 	}
 	err = s.store.RemoveAgent(ctx, platformExpID, agentID, s.dataStore.DeleteDataKey)
 	switch {
@@ -258,6 +273,20 @@ func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
 	return auth.Internal(h.logger, op+" failed", err)
 }
 
+// nameAddedBy names whoever added each agent.
+func (h *PlatformExperimentsHandler) nameAddedBy(ctx context.Context, signups []domain.AgentSignup) error {
+	actors := make([]*domain.Actor, 0, len(signups))
+	for i := range signups {
+		if signups[i].Actor != nil {
+			actors = append(actors, signups[i].Actor)
+		}
+	}
+	if len(actors) == 0 {
+		return nil
+	}
+	return h.svc.store.NameActors(ctx, actors)
+}
+
 type joinedAgentsBody struct {
 	Agents []JoinedAgent `json:"agents"`
 }
@@ -298,8 +327,12 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 				return nil, err
 			}
 		}
-		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, h.launch)
+		caller, _ := auth.FromContext(ctx)
+		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, caller.Actor(), h.launch)
 		if err != nil {
+			return nil, h.refusal("add agent", err)
+		}
+		if err := h.nameAddedBy(ctx, signups); err != nil {
 			return nil, h.refusal("add agent", err)
 		}
 		out := &struct{ Body joinedAgentsBody }{}
@@ -321,7 +354,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "list-platform-experiment-agents", Method: "GET", Path: "/platform-experiments/{id}/agents",
 		Summary: "List the agents of a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Every agent that joined, in the order they did, with its role and what it was launched with. No token is listed. " +
+		Description: "Every agent that joined, in the order they did, with its role, what it was launched with and actor, whose credential added it. No token is listed. " +
 			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote.",
 	}, func(ctx context.Context, in *struct {
@@ -341,6 +374,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, h.refusal("list agents", err)
 		}
+		if err := h.nameAddedBy(ctx, signups); err != nil {
+			return nil, h.refusal("list agents", err)
+		}
 		out := &struct{ Body joinedAgentsBody }{}
 		out.Body.Agents = make([]JoinedAgent, len(signups))
 		for i, signup := range signups {
@@ -355,7 +391,8 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 200,
 		Description: "Takes the agent out while the experiment is open: its token stops working and, if the platform runs it, its machine is taken down. " +
 			"Only its place goes: the agent stays in the org and joins again with agent_id. " +
-			"409 once the experiment has started, when the roster is what quota was divided over: from then on an agent leaves by being cut or by the experiment closing.",
+			"409 once the experiment has started, when the roster is what quota was divided over: from then on an agent leaves by being cut or by the experiment closing. " +
+			"A coordinator's token removes only an agent it added itself (actor.kind coordinator in the roster): 403 agent_not_added_by_coordinator for one a person or an API key added, which its owner removes.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
@@ -367,7 +404,8 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if err := h.svc.RemoveAgent(ctx, in.ID, in.AgentID); err != nil {
+		caller, _ := auth.FromContext(ctx)
+		if err := h.svc.RemoveAgent(ctx, in.ID, in.AgentID, caller.Actor()); err != nil {
 			return nil, h.refusal("remove agent", err)
 		}
 		out := &struct {

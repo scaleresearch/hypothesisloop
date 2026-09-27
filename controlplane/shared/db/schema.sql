@@ -1182,5 +1182,9 @@ WHERE repository <> '' AND repository_url = '';
 
 -- A draft's planner once had role baseline and was told apart by its flavor. It has its own role.
 UPDATE experiment_signups SET role = 'planner' WHERE flavor = 'planner' AND role <> 'planner';
+-- Whose credential added the agent (domain.Actor: kind and id). Both empty on a signup from
+-- before this was kept.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS added_by_id   TEXT NOT NULL DEFAULT '';
 
 COMMIT;

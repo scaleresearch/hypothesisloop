@@ -180,6 +180,8 @@ func (f *rosterStore) GetAgentSignup(_ context.Context, _, agentID string) (*dom
 	return nil, nil
 }
 
+func (f *rosterStore) NameActors(context.Context, []*domain.Actor) error { return nil }
+
 func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(context.Context, string) error) error {
 	if f.pe.Status != domain.PlatformExpOpen {
 		return db.ErrSignupClosed
@@ -540,6 +542,32 @@ func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	}
 }
 
+// A coordinator once removed the researcher its owner had added, to make the roster match what
+// it thought max_agents meant.
+func TestACoordinatorRemovesOnlyTheAgentsItAddedItself(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	owner := agentsRouter(t, store, auth.Principal{Kind: auth.KindUser, UserID: "user-1", OrgIDs: []string{"org-a"}})
+	coordinator := agentsRouter(t, store, auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"})
+	owners := addEach(t, owner, 1, `{}`)[0]["agent_id"].(string)
+	added := addEach(t, coordinator, 1, `{"role":"baseline"}`)[0]
+
+	if actor, _ := added["actor"].(map[string]any); actor["kind"] != "coordinator" || actor["id"] != "pe-1" {
+		t.Fatalf("the agent a coordinator added: actor = %v, want the coordinator of pe-1", added["actor"])
+	}
+	if code, out := call(t, coordinator, "DELETE", "/platform-experiments/pe-1/agents/"+owners, ""); code != http.StatusForbidden || out["reason"] != "agent_not_added_by_coordinator" {
+		t.Fatalf("a coordinator removing its owner's agent: got = %d %v, want 403 agent_not_added_by_coordinator", code, out)
+	}
+	if code, out := call(t, coordinator, "DELETE", "/platform-experiments/pe-1/agents/"+added["agent_id"].(string), ""); code != http.StatusOK {
+		t.Fatalf("a coordinator removing the agent it added: got = %d %v, want 200", code, out)
+	}
+	if code, out := call(t, owner, "DELETE", "/platform-experiments/pe-1/agents/"+owners, ""); code != http.StatusOK {
+		t.Fatalf("the owner removing its own agent: got = %d %v, want 200", code, out)
+	}
+	if len(store.signups) != 0 {
+		t.Fatalf("signups left = %+v, want none", store.signups)
+	}
+}
+
 func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 	inOrg := []string{"org-a"}
 	for name, tc := range map[string]struct {
@@ -572,7 +600,8 @@ func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 			}
 
 			// What a refused caller is refused on, it is refused on for reading and removing too.
-			store.signups = []domain.AgentSignup{{AgentID: "ag-seeded", PlatformExperimentID: "pe-1"}}
+			by := tc.caller.Actor()
+			store.signups = []domain.AgentSignup{{AgentID: "ag-seeded", PlatformExperimentID: "pe-1", Actor: &by}}
 			wantRead, wantRemove := http.StatusOK, http.StatusOK
 			if !admitted {
 				wantRead, wantRemove = tc.want, tc.want

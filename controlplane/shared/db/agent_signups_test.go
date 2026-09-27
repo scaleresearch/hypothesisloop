@@ -463,3 +463,22 @@ func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
 		t.Fatalf("join again: got = %v, %v, want = true, nil", inserted, err)
 	}
 }
+
+func TestASignupKeepsWhoseCredentialAddedTheAgent(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	pes := NewPlatformExperimentsStore(pool)
+	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: pe}
+	ids := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Actor: &coordinator}, domain.AgentSignup{})
+
+	added, err := pes.GetAgentSignup(ctx, pe, ids[0])
+	if err != nil || added == nil || added.Actor == nil || *added.Actor != coordinator {
+		t.Fatalf("the agent a coordinator added: got = %+v, %v, want actor %+v", added, err, coordinator)
+	}
+	before, err := pes.GetAgentSignup(ctx, pe, ids[1])
+	if err != nil || before == nil || before.Actor == nil || before.Actor.Kind != domain.ActorUnverified || before.Actor.ID != "" {
+		t.Fatalf("a signup that names nobody: got = %+v, %v, want an unverified actor", before, err)
+	}
+}

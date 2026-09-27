@@ -144,11 +144,15 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: encode hyperparameters: %w", err)
 		}
+		var addedBy domain.Actor
+		if signup.Actor != nil {
+			addedBy = *signup.Actor
+		}
 		tag, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, launcher, flavor, hyperparameters, model, added_by_kind, added_by_id)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model)
+			signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model, string(addedBy.Kind), addedBy.ID)
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
@@ -348,7 +352,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_launch,
        s.instance_state, s.instance_progress_at, s.instance_end_reason,
-       s.finished_at, s.finished_reason,
+       s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id,
        ` + domain.InstanceReleasedSQL(`LEAST(
            s.finished_at,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
@@ -365,13 +369,18 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var signup domain.AgentSignup
 	var hyperparameters []byte
 	var instance domain.AgentInstance
+	addedBy := domain.Actor{}
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason,
-		&signup.FinishedAt, &signup.FinishedReason, &instance.Released, &signup.Ended}, more...)...); err != nil {
+		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &instance.Released, &signup.Ended}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
+	if addedBy.Kind == "" {
+		addedBy.Kind = domain.ActorUnverified
+	}
+	signup.Actor = &addedBy
 	if signup.Hosted {
 		signup.Instance = &instance
 	}

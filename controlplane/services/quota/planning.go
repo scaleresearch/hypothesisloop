@@ -87,6 +87,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	signup := domain.AgentSignup{
 		AgentID: plannerID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
+		Actor: &by,
 	}
 	err = s.store.CreateDraft(ctx, pe, planner, signup, prepare)
 	var answered huma.StatusError
