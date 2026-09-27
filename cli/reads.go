@@ -72,7 +72,8 @@ func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
-value and the job that set it (experiment_id, code_ref, hypothesis_id, env). At most one line
+value and the job that set it (experiment_id, code_ref, hypothesis_id, env). Only COMPLETED jobs
+that hold every constraint metric rank (rankable in hl job status). At most one line
 per agent of the platform experiment and metric, so there is nothing to page or limit. A metric
 nobody has a result on yet prints no line, says so on stderr, and exits 0.`, stderr)
 	named := experimentFlag(fs)

@@ -132,7 +132,7 @@ const usage = `usage: hl <command> ...
   org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID
-  cluster               add NAME | list
+  cluster               add NAME | list | token | order | settings | disable | enable | forget-identity | remove
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
@@ -606,14 +606,15 @@ Minimal shape:
   name: my-platform-experiment
   description: what this research program is testing
   budget_accelerator_hours: 10
+  max_agents: 4
   duration_hours: 24
   metrics:
     - key: val_accuracy
       direction: maximize
 
-How long it lasts is duration_hours or ends_at, one of the two. max_agents,
-report_interval_seconds and starts_at may be left out: the platform's limits and defaults
-apply, and without starts_at it starts when you start it.
+Every field shown is required. How long it lasts is duration_hours or ends_at, one of the two.
+report_interval_seconds and starts_at may be left out: the platform's default applies, and
+without starts_at it starts when you start it.
 
 The experiment keeps its code in a repository on the deployment's git host. On GitHub,
 repository: owner/name names one a GitHub account connected to the org covers. Left out, the
@@ -683,6 +684,7 @@ Changes the fields you name and leaves every other as it is. The brief is one co
 FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
 budget_accelerator_hours, max_agents, ends_at, metrics, report_interval_seconds. While the
 platform experiment is open any of them can change; once it runs only name and description do.
+The experiment as changed is checked like a create, so neither name nor description is emptied.
 A coordinator's token changes the description only.`, stderr)
 	pe := experimentFlag(fs)
 	name := fs.String("name", "", "the new name")
@@ -836,7 +838,9 @@ before no longer stands. The person may answer with a revision, which starts you
 func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
 
-The platform experiment: its status, description, metrics, stages and current_stage.`, stderr)
+The platform experiment: its status, description, metrics, stages and current_stage. A draft
+has no ends_at: it carries planning_ends_at while it is planned and proposal_expires_at once
+its planner answered, when the platform closes it if nothing happened by then.`, stderr)
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

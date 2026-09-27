@@ -30,7 +30,7 @@ var jobCommands = []subcommand{
 	{"cost", "what it cost so far, against the estimate", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", args, stdout, stderr)
 	}},
-	{"cancel", "cancel a queued or running job, refunding its credits", jobCancel},
+	{"cancel", "cancel a job that has not ended, releasing what it holds of your quota", jobCancel},
 	{"stats", "job counts by status, capacity tier and eviction reason", jobStats},
 }
 
@@ -398,10 +398,18 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
-One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED,
-REJECTED or CANCELLED), metrics, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
-what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
-for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
+One line per job, its whole record: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
+EVICTED, REJECTED or CANCELLED), metrics, finished_at, summary, phase_detail and the spec.
+eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
+how its process ended (container_failed, oom_killed), when its runtime reported that.
+ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id,
+accelerator_model, cpu_model and price_per_hour_usd. Two jobs of one spec on different machines
+are not the same measurement.
+A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
+in no standing: not_rankable_reason names the constraint it broke or did not report.
+While QUEUED, not_admitted_reason says what the job waits for: awaiting_admission for the
+scheduler's first look at it, summary_gate for a summary on each of your COMPLETED jobs (hl job
+list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
 		return parseExit(err)
@@ -567,7 +575,7 @@ func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdo
 }
 
 func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a QUEUED or RUNNING job and prints it, CANCELLED; its credits are refunded.", stderr)
+	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a job that has not ended and prints it, CANCELLED. What it held of your quota is released, down to what it spent running.", stderr)
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
