@@ -423,6 +423,10 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 			t.Fatalf("%s, the description alone: got = %d %v, stored %+v", status, code, out, stored)
 		}
 	}
+	// A name and a brief are stored without the whitespace around them, as a create stores them.
+	if code, out, stored := patch(domain.PlatformExpRunning, map[string]any{"name": " renamed\n", "description": "a new brief\n"}); code != http.StatusOK || stored.Name != "renamed" || stored.Description != "a new brief" {
+		t.Errorf("a name and a brief written as blocks: got = %d %v, stored %q and %q", code, out, stored.Name, stored.Description)
+	}
 	// While it is open, what a run costs and how it is judged can still change.
 	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
 		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "duration_hours": 36,
@@ -444,6 +448,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
+		"a name of two lines":           {domain.PlatformExpRunning, map[string]any{"name": "one\ntwo"}, 422, "invalid_experiment", "name is one line"},
 		"no brief":                      {domain.PlatformExpRunning, map[string]any{"description": " "}, 422, "invalid_experiment", "description"},
 		"a run of years":                {domain.PlatformExpOpen, map[string]any{"duration_hours": 99999}, 422, "run_too_long", "30 days"},
 		"an end, which is no field":     {domain.PlatformExpOpen, map[string]any{"ends_at": "2099-01-01T00:00:00Z"}, 422, "", ""},

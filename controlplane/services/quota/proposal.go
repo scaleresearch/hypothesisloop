@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,8 +69,9 @@ func maxProposedResearchers(maxHosted int) int {
 
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It returns the experiment the proposal states, as validate
-// answers it: with its cost, its length and one place for each researcher.
-func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Proposal, projectID string, maxHosted int) (CreatePlatformExperimentRequest, error) {
+// answers it: with its cost, its length and one place for each researcher. It leaves p as it is
+// stored: every text of it without the whitespace around it.
+func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Proposal, projectID string, maxHosted int) (CreatePlatformExperimentRequest, error) {
 	experiment, err := decodeExperimentBase(p.Experiment)
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
@@ -83,6 +85,9 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Propos
 	if experiment, err = h.svc.validate(experiment); err != nil {
 		return experiment, err
 	}
+	if p.Experiment, err = withNameAndDescription(p.Experiment, experiment.Name, experiment.Description); err != nil {
+		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
+	}
 	if err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType); err != nil {
 		return experiment, err
 	}
@@ -91,22 +96,37 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Propos
 			return experiment, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}
-	for name, text := range map[string]string{"metric_reason": p.MetricReason, "measurement": p.Measurement, "sizing_reason": p.SizingReason} {
-		if strings.TrimSpace(text) == "" {
+	for name, text := range map[string]*string{"metric_reason": &p.MetricReason, "measurement": &p.Measurement, "sizing_reason": &p.SizingReason} {
+		*text = strings.TrimSpace(*text)
+		if *text == "" {
 			return experiment, refusedProposal("missing_explanation", "%s is required: the person who confirms reads it in place of the code", name)
 		}
-		if len(text) > maxProposalTextBytes {
-			return experiment, refusedProposal("too_long", "%s is %d bytes and at most %d", name, len(text), maxProposalTextBytes)
+		if len(*text) > maxProposalTextBytes {
+			return experiment, refusedProposal("too_long", "%s is %d bytes and at most %d", name, len(*text), maxProposalTextBytes)
 		}
 	}
 	for name, list := range map[string][]string{"out_of_scope": p.OutOfScope, "risks": p.Risks, "questions": p.Questions} {
-		for _, entry := range list {
-			if strings.TrimSpace(entry) == "" || len(entry) > maxProposalTextBytes {
+		for i, entry := range list {
+			list[i] = strings.TrimSpace(entry)
+			if list[i] == "" || len(list[i]) > maxProposalTextBytes {
 				return experiment, refusedProposal("too_long", "%s: each entry is a sentence of at most %d bytes", name, maxProposalTextBytes)
 			}
 		}
 	}
 	return experiment, nil
+}
+
+// withNameAndDescription is the experiment of a proposal with the name and the description
+// validate answered, so that the proposal a person reads states what accepting it stores.
+func withNameAndDescription(experiment json.RawMessage, name, description string) (json.RawMessage, error) {
+	var fields map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(experiment))
+	decoder.UseNumber()
+	if err := decoder.Decode(&fields); err != nil {
+		return nil, fmt.Errorf("it is not a JSON object: %w", err)
+	}
+	fields["name"], fields["description"] = name, description
+	return json.Marshal(fields)
 }
 
 // requirePlanner admits only the planner of the draft id: the agent the platform signed up to
@@ -224,7 +244,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		if _, err := h.checkProposal(ctx, in.Body, pe.ProjectID, pe.MaxHosted); err != nil {
+		if _, err := h.checkProposal(ctx, &in.Body, pe.ProjectID, pe.MaxHosted); err != nil {
 			return nil, h.refusal("check proposal", err)
 		}
 		stored, err := json.Marshal(in.Body)
@@ -288,7 +308,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	// The check the proposal passed, again with the cost and the agents the person states.
 	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
 	now := time.Now().UTC()
-	experiment, err := h.checkProposal(ctx, proposal, pe.ProjectID, pe.MaxHosted)
+	experiment, err := h.checkProposal(ctx, &proposal, pe.ProjectID, pe.MaxHosted)
 	if err != nil {
 		return nil, h.refusal("check proposal", err)
 	}

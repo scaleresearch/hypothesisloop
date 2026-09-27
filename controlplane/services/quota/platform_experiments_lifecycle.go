@@ -53,8 +53,12 @@ func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentR
 // with the platform's settings where spec leaves a field to them.
 func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	spec = s.withSettings(spec)
-	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Description) == "" {
+	spec.Name, spec.Description = strings.TrimSpace(spec.Name), strings.TrimSpace(spec.Description)
+	if spec.Name == "" || spec.Description == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
+	}
+	if strings.ContainsAny(spec.Name, "\r\n") {
+		return spec, refuseUpdate(422, "invalid_experiment", "name is one line and holds a line break: state it on a single line")
 	}
 	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
 		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
@@ -224,15 +228,17 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.BaselineJobID != nil {
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
-	if _, err := s.validate(CreatePlatformExperimentRequest{
+	checked, err := s.validate(CreatePlatformExperimentRequest{
 		Name: patched.Name, Description: patched.Description,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
+	patched.Name, patched.Description = checked.Name, checked.Description
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
 		baseline, err := s.baseline(ctx, &patched, patched.BaselineJobID)
 		if err != nil {

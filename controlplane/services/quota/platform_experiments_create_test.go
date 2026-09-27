@@ -50,21 +50,27 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	if spec.ReportIntervalSeconds != 30 || len(spec.Stages) != 1 || spec.DefaultQuotaTier != "guaranteed" || spec.DurationHours != 24 {
 		t.Errorf("settings applied: report interval %d, stages %v, tier %q, duration %v", spec.ReportIntervalSeconds, spec.Stages, spec.DefaultQuotaTier, spec.DurationHours)
 	}
+	block := valid()
+	block.Name, block.Description = " exp\n", "\nthe brief\nof two lines\n"
+	if spec, err := svc.validate(block); err != nil || spec.Name != "exp" || spec.Description != "the brief\nof two lines" {
+		t.Errorf("a name and a description written as blocks: got %q and %q, %v, want both without the whitespace around them", spec.Name, spec.Description, err)
+	}
 	for name, c := range map[string]struct {
 		mutate func(*CreatePlatformExperimentRequest)
 		reason string
 	}{
-		"no name":           {func(r *CreatePlatformExperimentRequest) { r.Name = " " }, "invalid_experiment"},
-		"no description":    {func(r *CreatePlatformExperimentRequest) { r.Description = "" }, "invalid_experiment"},
-		"no ranking metric": {func(r *CreatePlatformExperimentRequest) { r.Metrics = nil }, "invalid_metrics"},
-		"negative interval": {func(r *CreatePlatformExperimentRequest) { r.ReportIntervalSeconds = -1 }, "invalid_experiment"},
-		"bad stages":        {func(r *CreatePlatformExperimentRequest) { r.Stages = []domain.Stage{{LengthPct: 50}} }, "invalid_stages"},
-		"bad quota tier":    {func(r *CreatePlatformExperimentRequest) { r.DefaultQuotaTier = "gold" }, "invalid_experiment"},
-		"no budget":         {func(r *CreatePlatformExperimentRequest) { r.BudgetAcceleratorHours = 0 }, "invalid_cost"},
-		"no max_agents":     {func(r *CreatePlatformExperimentRequest) { r.MaxAgents = 0 }, "invalid_agents"},
-		"no length":         {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 0 }, "invalid_length"},
-		"longer than a run": {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 31 * 24 }, "run_too_long"},
-		"a negative length": {func(r *CreatePlatformExperimentRequest) { r.DurationHours = -1 }, "invalid_length"},
+		"no name":             {func(r *CreatePlatformExperimentRequest) { r.Name = " " }, "invalid_experiment"},
+		"a name of two lines": {func(r *CreatePlatformExperimentRequest) { r.Name = "exp\nand more" }, "invalid_experiment"},
+		"no description":      {func(r *CreatePlatformExperimentRequest) { r.Description = "" }, "invalid_experiment"},
+		"no ranking metric":   {func(r *CreatePlatformExperimentRequest) { r.Metrics = nil }, "invalid_metrics"},
+		"negative interval":   {func(r *CreatePlatformExperimentRequest) { r.ReportIntervalSeconds = -1 }, "invalid_experiment"},
+		"bad stages":          {func(r *CreatePlatformExperimentRequest) { r.Stages = []domain.Stage{{LengthPct: 50}} }, "invalid_stages"},
+		"bad quota tier":      {func(r *CreatePlatformExperimentRequest) { r.DefaultQuotaTier = "gold" }, "invalid_experiment"},
+		"no budget":           {func(r *CreatePlatformExperimentRequest) { r.BudgetAcceleratorHours = 0 }, "invalid_cost"},
+		"no max_agents":       {func(r *CreatePlatformExperimentRequest) { r.MaxAgents = 0 }, "invalid_agents"},
+		"no length":           {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 0 }, "invalid_length"},
+		"longer than a run":   {func(r *CreatePlatformExperimentRequest) { r.DurationHours = 31 * 24 }, "run_too_long"},
+		"a negative length":   {func(r *CreatePlatformExperimentRequest) { r.DurationHours = -1 }, "invalid_length"},
 	} {
 		req := valid()
 		c.mutate(&req)

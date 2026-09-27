@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -446,6 +448,47 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	_, call = planningAPI(t, accepted, thePlanner)
 	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "not_a_draft" {
 		t.Errorf("proposing what is no draft: got = %d %v, want 409 not_a_draft", code, out)
+	}
+}
+
+// A planner writes every free text of a proposal as a YAML block, which ends in a newline: the
+// proposal is stored without the whitespace around its texts, and a name stays one line.
+func TestAProposalIsStoredWithoutTheWhitespaceAroundItsTexts(t *testing.T) {
+	blocks := func(name string) map[string]any {
+		body := aProposal(map[string]any{
+			"metric_reason": "The goal itself.\n", "measurement": "\n bench.py scores a held-out split.\n", "sizing_reason": "An estimate.\n\n",
+			"out_of_scope": []string{"Other models.\n"}, "risks": []string{" Noise.\n"}, "questions": []string{"Is 4 hours enough?\n"},
+		})
+		experiment := body["experiment"].(map[string]any)
+		experiment["name"], experiment["description"] = name, "Train it.\nBASELINE config: constant lr\n"
+		return body
+	}
+	store := draftWithPlanner()
+	_, call := planningAPI(t, store, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", blocks("Cosine or constant\n")); code != http.StatusOK {
+		t.Fatalf("got = %d %v, want 200", code, out)
+	}
+	var stored Proposal
+	var experiment struct {
+		Name, Description string
+		Metrics           []domain.MetricDefinition
+	}
+	if err := errors.Join(json.Unmarshal(store.created[0].Proposal, &stored), json.Unmarshal(stored.Experiment, &experiment)); err != nil {
+		t.Fatalf("stored %s: %v", store.created[0].Proposal, err)
+	}
+	if experiment.Name != "Cosine or constant" || experiment.Description != "Train it.\nBASELINE config: constant lr" || len(experiment.Metrics) != 1 {
+		t.Errorf("stored experiment %s, want its name and description trimmed and the rest kept", stored.Experiment)
+	}
+	if stored.MetricReason != "The goal itself." || stored.Measurement != "bench.py scores a held-out split." || stored.SizingReason != "An estimate." ||
+		stored.OutOfScope[0] != "Other models." || stored.Risks[0] != "Noise." || stored.Questions[0] != "Is 4 hours enough?" {
+		t.Errorf("stored texts keep whitespace around them: %+v", stored)
+	}
+
+	store = draftWithPlanner()
+	_, call = planningAPI(t, store, thePlanner)
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", blocks("Cosine\nor constant\n"))
+	if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_experiment" || !strings.Contains(fmt.Sprint(out["message"]), "name is one line") || store.created[0].ProposedAt != nil {
+		t.Errorf("a name of two lines: got = %d %v, want 422 invalid_experiment naming name and nothing stored", code, out)
 	}
 }
 
