@@ -239,7 +239,6 @@ var routes = []route{
 	{method: "GET", path: "/experiments/{id}", request: "/experiments/<job>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/experiments/{id}/cancel", request: "/experiments/<job>/cancel", rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/experiments/{id}/summary", request: "/experiments/<job>/summary", body: `{"summary":"s"}`, rule: owned(agentAudience, reached)},
-	{method: "GET", path: "/experiments/{id}/lineage", request: "/experiments/<job>/lineage", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/experiments/{id}/data", request: "/experiments/<job>/data", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/experiments/{id}/metrics", request: "/experiments/<job>/metrics", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/experiments/{id}/metrics", request: "/experiments/<job>/metrics", body: `{"metric_name":"loss","fraction_complete":0.5,"metric_value":1}`, rule: ownedOrTheJob(reached)},

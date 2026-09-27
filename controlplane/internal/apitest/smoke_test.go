@@ -56,7 +56,6 @@ func TestSmoke(t *testing.T) {
 			"POST /agents",
 			"POST /experiments",
 			"GET /experiments/{id}/metrics",
-			"GET /experiments/{id}/lineage",
 			"GET /experiments/{id}/data",
 			"GET /platform-experiments/{id}/data-usage",
 			"POST /platform-experiments/{id}/data-key",

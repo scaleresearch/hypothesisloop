@@ -90,7 +90,6 @@ def _reads_of_one_resource(t: Tenant) -> list[str]:
         f"/platform-experiments/{t.pe_id}/data-usage",
         f"/platform-experiments/{t.pe_id}/metrics-timeseries?metric_name=val_accuracy",
         f"/experiments/{t.job_id}",
-        f"/experiments/{t.job_id}/lineage",
         f"/experiments/{t.job_id}/data",
         f"/experiments/{t.job_id}/metrics",
         f"/experiments/{t.job_id}/logs",

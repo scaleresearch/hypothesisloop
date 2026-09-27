@@ -54,24 +54,6 @@ func TestExperimentOrderByDescending(t *testing.T) {
 	}
 }
 
-// The lineage CTE joins experiments against itself, where a bare column name is ambiguous.
-func TestQualifyColumnsPrefixesEveryColumn(t *testing.T) {
-	got := qualifyColumns("\n\tid, parent_id,\n\tcreated_at\n", "e")
-	want := "\n\te.id, e.parent_id, e.created_at"
-	if got != want {
-		t.Fatalf("qualifyColumns = %q, want %q", got, want)
-	}
-	stored, project, _ := strings.Cut(experimentColumnsQualified, ",\n\t(SELECT")
-	for _, c := range strings.Split(stored, ",") {
-		if !strings.HasPrefix(strings.TrimSpace(c), "e.") {
-			t.Errorf("column %q is not alias-qualified", strings.TrimSpace(c))
-		}
-	}
-	if !strings.Contains(project, "tpe.id = e.platform_experiment_id") {
-		t.Errorf("the project column %q does not read through the aliased job", project)
-	}
-}
-
 func TestACancelledJobIsCountedAndFilteredAsCancelled(t *testing.T) {
 	stats := newExperimentStats()
 	for _, row := range [][2]string{{"EVICTED", "cancelled"}, {"REJECTED", "cancelled"}, {"EVICTED", "silent"}, {"REJECTED", ""}} {

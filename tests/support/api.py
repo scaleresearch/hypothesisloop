@@ -553,11 +553,6 @@ class API:
         assertions 1:1, including the ones that check this distinction)."""
         return self.get(f"/experiments/{job_id}/data")
 
-    def lineage(self, job_id: str) -> list[dict]:
-        """GET /experiments/{id}/lineage: the chain this experiment was derived from, oldest
-        first. A job with no parent is a chain of one (itself), not an empty list."""
-        return self.get_json(f"/experiments/{job_id}/lineage")
-
     def file_finding(self, job_id: str, summary: str | None = None) -> None:
         self.post(
             f"/experiments/{job_id}/summary", {"summary": summary or f"e2e pytest finding for {job_id}"}

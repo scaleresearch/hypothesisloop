@@ -133,8 +133,8 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
 	"GET /hypotheses/{id} returns them."
 
-// RegisterHuma registers the registry's operations: what hangs off an experiment (lineage,
-// metrics, logs) and the hypothesis notebook. Paths sit under the resource they belong to —
+// RegisterHuma registers the registry's operations: what hangs off an experiment (metrics,
+// logs) and the hypothesis notebook. Paths sit under the resource they belong to —
 // /experiments/{id}/... and /hypotheses/... — so a caller never has to know which service
 // implements them; they are all registered on the one API doc alongside scheduler and quota.
 // Each of the three sub-lists GET /hypotheses/{id} returns is bounded like every other list read
@@ -179,33 +179,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		return nil
 	}
 	// ---- what hangs off an experiment ----
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-lineage", Method: "GET", Path: "/experiments/{id}/lineage",
-		Summary: "Get an experiment's lineage chain", Tags: []string{"experiments"},
-		Description: "What a result was derived from.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body []*domain.Experiment }, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		chain, err := h.svc.GetLineage(ctx, in.ID)
-		if err != nil {
-			if errors.Is(err, ErrExperimentNotFound) {
-				return nil, huma.Error404NotFound(err.Error())
-			}
-			return nil, auth.Internal(h.logger, "get lineage", err, zap.String("id", in.ID))
-		}
-		// Nothing checks a parent at submission, so an ancestor can sit in another org.
-		visible := make([]*domain.Experiment, 0, len(chain))
-		for _, exp := range chain {
-			if access.Experiment(ctx, exp.ID) == nil {
-				visible = append(visible, exp)
-			}
-		}
-		return &struct{ Body []*domain.Experiment }{Body: visible}, nil
-	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiment-data", Method: "GET", Path: "/experiments/{id}/data",

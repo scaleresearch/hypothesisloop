@@ -37,26 +37,6 @@ func (s *Service) Count(ctx context.Context, filter domain.ExperimentFilter) (in
 	return n, nil
 }
 
-// GetLineage returns the ancestor chain of an experiment (oldest first).
-func (s *Service) GetLineage(ctx context.Context, id string) ([]*domain.Experiment, error) {
-	lineage, err := s.store.GetLineage(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("registry.GetLineage: %w", err)
-	}
-	// The walk starts at the experiment itself, so an empty chain means there is no such row —
-	// a caller's typo, not a server fault.
-	if len(lineage) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, id)
-	}
-	if err := s.store.NameActors(ctx, jobActors(lineage)); err != nil {
-		return nil, fmt.Errorf("registry.GetLineage: %w", err)
-	}
-	if err := s.store.DescribeJobs(ctx, lineage); err != nil {
-		return nil, fmt.Errorf("registry.GetLineage: %w", err)
-	}
-	return lineage, nil
-}
-
 func jobActors(jobs []*domain.Experiment) []*domain.Actor {
 	actors := make([]*domain.Actor, len(jobs))
 	for i, job := range jobs {

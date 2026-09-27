@@ -29,29 +29,10 @@ func NewExperimentsStore(pool *Pool) *ExperimentsStore {
 
 // experimentColumns is the canonical column list for SELECT queries: the stored columns, then
 // the job's project and org, which are read off its platform experiment where they are stored.
-// experimentColumnsQualified is the same with every name prefixed by an "e." alias, for queries
-// where a second relation is in scope and a bare column name would be ambiguous.
 const experimentColumns = experimentStoredColumns + `,
 	(SELECT tpe.project_id FROM platform_experiments tpe WHERE tpe.id = platform_experiment_id) AS project_id,
 	(SELECT tp.org_id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE tpe.id = platform_experiment_id) AS org_id
 `
-
-var experimentColumnsQualified = qualifyColumns(experimentStoredColumns, "e") + `,
-	(SELECT tpe.project_id FROM platform_experiments tpe WHERE tpe.id = e.platform_experiment_id) AS project_id,
-	(SELECT tp.org_id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE tpe.id = e.platform_experiment_id) AS org_id
-`
-
-func qualifyColumns(cols, alias string) string {
-	var b strings.Builder
-	b.WriteString("\n\t")
-	for i, c := range strings.Split(cols, ",") {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(alias + "." + strings.TrimSpace(c))
-	}
-	return b.String()
-}
 
 const experimentStoredColumns = `
 	id, parent_id, agent_id, actor_kind, actor_id, platform_experiment_id, cluster_name,

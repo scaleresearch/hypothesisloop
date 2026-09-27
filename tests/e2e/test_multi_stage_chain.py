@@ -9,7 +9,7 @@ nothing else covers parent_id plus data handed from one stage to the next. What 
      proving each alone would not say that the pair works.
   2. stage B, single-node, parent_id A, finds that checkpoint under $HYPOTHESISLOOP_DATA_SHARED and
      reports its contents as a metric -- data crossing a job boundary, end to end.
-  3. GET /experiments/{id}/lineage returns the chain.
+  3. stage B answers its parent_id, and stage A none.
   4. a write by B into A's prefix is REFUSED by the store, while the very same client, holding the
      very same credentials, reads A's object and writes its own prefix successfully.
   5. GET /experiments/{id}/data lists what A wrote, and returns an empty array -- not an error --
@@ -19,7 +19,7 @@ Nothing here asserts where either stage ran, on purpose. Data is addressed, not 
 later stage had to land where an earlier one did, adding a cluster would make the platform worse
 rather than bigger. A scenario that pinned placement would encode the opposite design.
 
-Split in two: the chain itself (A -> B, lineage) is one test function because a chain is serial by
+Split in two: the chain itself (A -> B) is one test function because a chain is serial by
 construction -- stage B cannot be submitted until stage A has completed and left its checkpoint
 behind, so splitting it would mean paying for two admit-run-settle cycles twice, not once each.
 "A completed job that wrote nothing lists as an empty array, not an error" is independently
@@ -240,11 +240,7 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
     )
 
     # ------------------------------------------------------------------------------------------
-    # Lineage: what this result was derived from
+    # What this result was derived from
     # ------------------------------------------------------------------------------------------
-    chain = [e["id"] for e in api.lineage(job_b)]
-    assert chain == [job_a, job_b], f"lineage of stage B is {chain}, want [{job_a}, {job_b}]"
-    # A job with no parent is a chain of one -- the chain endpoint always starts at the row itself,
-    # so an empty answer here would mean the row is missing rather than that it has no ancestry.
-    root_chain = [e["id"] for e in api.lineage(job_a)]
-    assert root_chain == [job_a], f"lineage of stage A is {root_chain}, want [{job_a}]"
+    assert api.experiment(job_b).get("parent_id") == job_a, "stage B does not say it was derived from stage A"
+    assert "parent_id" not in api.experiment(job_a), "stage A, which has no parent, names one"

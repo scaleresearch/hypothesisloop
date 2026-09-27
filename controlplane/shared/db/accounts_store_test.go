@@ -520,8 +520,7 @@ func assertSameSet(t *testing.T, what string, got, want []string) {
 	}
 }
 
-// A job's project is its platform experiment's, wherever the job is read: one row, a list, and
-// the lineage walk, which reads through an aliased self-join.
+// A job's project is its platform experiment's, wherever the job is read: one row or a list.
 func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -558,11 +557,7 @@ func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	if err != nil || len(listed) != 2 {
 		t.Fatalf("list by project: got = %d jobs, %v, want = 2", len(listed), err)
 	}
-	lineage, err := store.GetLineage(ctx, childID)
-	if err != nil || len(lineage) != 2 {
-		t.Fatalf("lineage: got = %d jobs, %v, want = 2", len(lineage), err)
-	}
-	for _, exp := range append(listed, lineage...) {
+	for _, exp := range listed {
 		if exp.ProjectID != projectID || exp.OrgID != orgID {
 			t.Errorf("job %s: project = %q, org = %q, want = %q, %q", exp.ID, exp.ProjectID, exp.OrgID, projectID, orgID)
 		}
