@@ -54,7 +54,7 @@ type PlatformExperimentsStore interface {
 	// a person; db.ErrNotDraft for anything but a draft.
 	Decline(ctx context.Context, id, reason string, waitUntil time.Time) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error

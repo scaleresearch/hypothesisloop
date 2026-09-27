@@ -183,7 +183,7 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
     assert api.get_json(f"/platform-experiments/{pe_id}")["status"] == "closed"
 
 
-def test_a_draft_nobody_wants_is_closed_and_frees_its_place(api: API):
+def test_a_draft_nobody_wants_is_closed(api: API):
     created = api.post("/platform-experiments/drafts", {"project_id": api.project_id, "goal": GOAL})
     assert created.status_code == 201, created.text
     pe_id = created.json()["id"]

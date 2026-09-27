@@ -268,9 +268,6 @@ func (c *Config) build() error {
 	if c.Planning.ProposedForDays <= 0 {
 		return fmt.Errorf("planning proposed_for_days is required and positive: how long a proposal waits for a person")
 	}
-	if c.Planning.MaxConcurrentPerOrg <= 0 || c.Planning.MaxPerDayPerOrg <= 0 {
-		return fmt.Errorf("planning max_concurrent_per_org and max_per_day_per_org are required and positive: how many drafts an org may have open and may create in a day")
-	}
 	if c.Accounts.MaxOrgsPerUser <= 0 {
 		return fmt.Errorf("accounts max_orgs_per_user is required and positive: how many orgs a person may own when they create one")
 	}

@@ -204,10 +204,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
-		Limit:               time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
-		ProposedFor:         time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
-		MaxConcurrentPerOrg: pcfg.Planning.MaxConcurrentPerOrg,
-		MaxPerDayPerOrg:     pcfg.Planning.MaxPerDayPerOrg,
+		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
+		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
 	}, logger).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).

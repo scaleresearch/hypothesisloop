@@ -14,21 +14,15 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Planning bounds a draft, which the platform pays for: how long it is planned and waits, and
-// how many drafts an org may have.
+// Planning bounds a draft, which the platform pays for: how long it is planned and waits.
 type Planning struct {
 	// Limit is how long a planner has to propose, from the goal or from a revision.
 	Limit time.Duration
 	// ProposedFor is how long a proposal waits for the person before the draft is closed.
 	ProposedFor time.Duration
-	// MaxConcurrentPerOrg and MaxPerDayPerOrg bound an org's drafts being planned and the
-	// drafts it creates in a day.
-	MaxConcurrentPerOrg int
-	MaxPerDayPerOrg     int
 }
 
 // draftNameLength bounds the name a draft takes from its goal until the proposal names it.
@@ -95,14 +89,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
 	}
-	err = s.store.CreateDraft(ctx, pe, planner, signup, db.DraftLimits{Concurrent: planning.MaxConcurrentPerOrg, PerDay: planning.MaxPerDayPerOrg}, prepare)
-	var over *db.PlanningLimitError
-	if errors.As(err, &over) {
-		if over.PerDay {
-			return nil, refuseSignup(429, "planning_limit", "this org created %d drafts in the last 24 hours, which is the most the platform plans for one org in a day: accept or use the ones it has, or create the experiment yourself with POST /platform-experiments", over.Limit)
-		}
-		return nil, refuseSignup(429, "planning_limit", "this org has %d drafts open, which is the most the platform plans for one org at once: accept one, or close one with POST /platform-experiments/{id}/close", over.Limit)
-	}
+	err = s.store.CreateDraft(ctx, pe, planner, signup, prepare)
 	var answered huma.StatusError
 	if errors.As(err, &answered) {
 		return nil, err
@@ -134,8 +121,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
 			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required, repository_account_personal, repository_creation_not_permitted, 409 repository_exists and 502 repository_not_created as on POST /platform-experiments. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"422 invalid_goal for a goal that is empty or over the length. 503 launcher_not_registered when the deployment has no launcher to run the planner. " +
-			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
+			"422 invalid_goal for a goal that is empty or over the length. 503 launcher_not_registered when the deployment has no launcher to run the planner.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ProjectID         string `json:"project_id"`

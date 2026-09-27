@@ -273,10 +273,6 @@ type PlanningConfig struct {
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
-	// MaxConcurrentPerOrg is how many drafts of one org may be open at once.
-	MaxConcurrentPerOrg int `yaml:"max_concurrent_per_org"`
-	// MaxPerDayPerOrg is how many drafts one org may create in 24 hours.
-	MaxPerDayPerOrg int `yaml:"max_per_day_per_org"`
 }
 
 // AccountsConfig bounds what one account creates. Staff are held to neither bound.

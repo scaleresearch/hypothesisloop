@@ -101,15 +101,10 @@ agents:
 #              has none by then is closed with close_reason baseline_limit_reached and its
 #              machines are released. This holds for an accepted draft and for a platform
 #              experiment created whole alike.
-#   max_concurrent_per_org  how many drafts one org may have open at once, proposed ones included.
-#   max_per_day_per_org   how many drafts one org may create in 24 hours. Over either bound a new
-#              draft is refused with 429 planning_limit.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
   baseline_limit_minutes: 90
-  max_concurrent_per_org: 2
-  max_per_day_per_org: 10
 
 # What one account may create. Staff, the platform's operators, are held to neither.
 #

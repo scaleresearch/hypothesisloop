@@ -316,9 +316,7 @@ func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
 		"no limit":          {"  limit_minutes: 30\n", ""},
 		"no baseline limit": {"  baseline_limit_minutes: 90\n", ""},
 		"no wait":           {"  proposed_for_days: 7\n", ""},
-		"no concurrent":     {"  max_concurrent_per_org: 2\n", ""},
-		"zero per day":      {"  max_per_day_per_org: 10", "  max_per_day_per_org: 0"},
-		"misspelled bound":  {"  max_per_day_per_org: 10", "  max_per_day: 10"},
+		"misspelled wait":   {"  proposed_for_days: 7", "  proposed_for_day: 7"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {

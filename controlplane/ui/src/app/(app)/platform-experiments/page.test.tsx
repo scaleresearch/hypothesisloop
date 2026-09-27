@@ -84,12 +84,12 @@ describe('the experiments page', () => {
   })
 
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
-    vi.mocked(apiSend).mockRejectedValue(new Error('this org has 2 drafts open, which is the most the platform plans for one org at once'))
+    vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
     show()
     expect(await screen.findByText(/No cluster this org can use is online/)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
     await userEvent.click(screen.getByRole('button', { name: 'Plan this experiment' }))
-    expect(await screen.findByText(/2 drafts open/)).toBeTruthy()
+    expect(await screen.findByText(/no launcher is registered/)).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
   })
 

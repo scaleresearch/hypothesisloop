@@ -21,7 +21,7 @@ var testSettings = domain.QuotaConfig{
 	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour, BaselineLimit: 90 * time.Minute,
 }
 
-var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10}
+var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour}
 
 // reaching has the org of every project reach the given accelerator types and no other.
 func reaching(svc *PlatformExperimentsService, types ...domain.AcceleratorType) *PlatformExperimentsService {

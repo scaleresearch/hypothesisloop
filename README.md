@@ -249,8 +249,7 @@ then accepts it, stating the budget, the duration and the researchers themselves
 declines with a reason (`hl platform-experiments decline --reason`), which the draft's page
 shows in place of a proposal and which a revision answers.
 
-The platform pays for planning, within the `planning` section of the settings: a time limit and
-how many drafts an org may have.
+The platform pays for planning, within the time limits of the `planning` section of the settings.
 
 ### A baseline before anyone competes
 

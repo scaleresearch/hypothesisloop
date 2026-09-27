@@ -16,12 +16,9 @@ import (
 // signed up as the platform runs it, or creates neither. A draft takes no other signup: joining
 // is for an open platform experiment (enrolTx), which a draft becomes when it is accepted.
 //
-// limits bound the org's drafts, counted under a lock on the org so that two drafts created at
-// once cannot both be the last one allowed: *PlanningLimitError when one is reached.
-//
-// prepare, when set, runs once the limits allow the draft and before it is stored, and may still
+// prepare, when set, runs once the project is found and before the draft is stored, and may still
 // change pe: it is where something is made for a draft that will exist, and for no other.
-func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error {
+func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error {
 	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Flavor != domain.PlannerFlavor || !signup.Hosted {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
 	}
@@ -35,22 +32,6 @@ func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.P
 			return ErrProjectNotFound
 		}
 		return fmt.Errorf("platform_experiments_store.CreateDraft: read project: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM orgs WHERE id = $1 FOR UPDATE`, planner.OrgID); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: lock org: %w", err)
-	}
-	var open, today int
-	if err := tx.QueryRow(ctx, `
-SELECT COUNT(*) FILTER (WHERE pe.status = 'draft'), COUNT(*) FILTER (WHERE pe.created_at > now() - interval '24 hours')
-FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE p.org_id = $1 AND pe.goal <> ''`, planner.OrgID).Scan(&open, &today); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: count drafts: %w", err)
-	}
-	if open >= limits.Concurrent {
-		return &PlanningLimitError{Limit: limits.Concurrent}
-	}
-	if today >= limits.PerDay {
-		return &PlanningLimitError{Limit: limits.PerDay, PerDay: true}
 	}
 	if prepare != nil {
 		if err := prepare(ctx, pe); err != nil {
@@ -79,27 +60,6 @@ VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)`, pe.ID, signup.AgentID, stri
 		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
 	}
 	return nil
-}
-
-// DraftLimits bound the drafts of one org: how many may be open at once and how many it may
-// create in 24 hours.
-type DraftLimits struct {
-	Concurrent int
-	PerDay     int
-}
-
-// PlanningLimitError is a draft refused because its org reached Limit drafts, open at once or,
-// with PerDay, created in the last 24 hours.
-type PlanningLimitError struct {
-	Limit  int
-	PerDay bool
-}
-
-func (e *PlanningLimitError) Error() string {
-	if e.PerDay {
-		return fmt.Sprintf("the org created %d drafts in the last 24 hours", e.Limit)
-	}
-	return fmt.Sprintf("the org has %d drafts open", e.Limit)
 }
 
 // ErrNotDraft is returned for a write that only a draft takes.
