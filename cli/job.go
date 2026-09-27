@@ -250,19 +250,20 @@ var jobDrop = []string{"hypothesis", "resolved_job", "metric"}
 
 // jobBrief is what a listing prints of a job; hl job status ID prints the whole record.
 type jobBrief struct {
-	ID                string          `json:"id"`
-	ParentID          string          `json:"parent_id"`
-	AgentID           string          `json:"agent_id"`
-	HypothesisID      string          `json:"hypothesis_id"`
-	Status            string          `json:"status"`
-	Metrics           briefMetrics    `json:"metrics"`
-	Machine           machineTag      `json:"ran_on"`
-	NotAdmittedReason string          `json:"not_admitted_reason"`
-	EvictionReason    string          `json:"eviction_reason"`
-	PhaseDetail       json.RawMessage `json:"phase_detail"`
-	Theory            string          `json:"theory"`
-	EstimatedCost     float64         `json:"estimated_cost_acch"`
-	CreatedAt         string          `json:"created_at"`
+	ID                 string          `json:"id"`
+	ParentID           string          `json:"parent_id"`
+	AgentID            string          `json:"agent_id"`
+	HypothesisID       string          `json:"hypothesis_id"`
+	Status             string          `json:"status"`
+	Metrics            briefMetrics    `json:"metrics"`
+	Machine            machineTag      `json:"ran_on"`
+	NotAdmittedReason  string          `json:"not_admitted_reason"`
+	NotAdmittedMessage string          `json:"not_admitted_message"`
+	EvictionReason     string          `json:"eviction_reason"`
+	PhaseDetail        json.RawMessage `json:"phase_detail"`
+	Theory             string          `json:"theory"`
+	EstimatedCost      float64         `json:"estimated_cost_acch"`
+	CreatedAt          string          `json:"created_at"`
 }
 
 // briefMetrics prints a job's metrics as name: value, at six significant digits, with the basis
@@ -363,7 +364,9 @@ func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 One job per line, newest first: ids, status, metrics (one value per declared metric: on a
 ranking metric the job's best in its direction, on a constraint or an attribute its last, so
 report a ranking metric as a result, never as a running timer),
-ran_on (the machine: numbers compare only between jobs that share it), reasons, theory, cost
+ran_on (the machine: numbers compare only between jobs that share it), reasons (for a QUEUED
+job not_admitted_reason, the code of what it waits for, and not_admitted_message, its
+sentence), theory, cost
 and env, the settings that differ between the listed jobs (all of them for a job listed
 alone). hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
@@ -432,9 +435,11 @@ physical machine, stable across rentals), accelerator_model, cpu_model and price
 Two jobs of one spec on different machines are not the same measurement.
 A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
 in no standing: not_rankable_reason names the constraint it broke or did not report.
-While QUEUED, not_admitted_reason says what the job waits for: awaiting_admission for the
-scheduler's first look at it, summary_gate for a summary on each of your COMPLETED jobs (hl job
-list --needs-summary).`, stderr)
+While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
+the scheduler's first look at it, summary_gate for a summary on each of your COMPLETED jobs (hl
+job list --needs-summary), capacity_unavailable for room on a cluster. not_admitted_message is
+its sentence: for capacity_unavailable the cluster, what it is short of and how many jobs hold
+that, of your platform experiment and of others.`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
 	if err != nil {
 		return parseExit(err)

@@ -570,6 +570,20 @@ func TestJobListNeedsSummary(t *testing.T) {
 	}
 }
 
+func TestJobListPrintsWhyAJobWaitsAsItsCodeAndItsSentence(t *testing.T) {
+	const message = "cluster main is short of 2 devices, held by 3 jobs of this platform experiment"
+	recordingServer(t, func(int, recorded) any {
+		return []map[string]any{{"id": "job-1", "status": "QUEUED", "not_admitted_reason": "capacity_unavailable", "not_admitted_message": message}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "list", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if want := `"not_admitted_reason":"capacity_unavailable","not_admitted_message":"` + message + `"`; !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %s, want %s in it", stdout.String(), want)
+	}
+}
+
 func TestJobListWithoutAgentListsWholePlatformExperiment(t *testing.T) {
 	var gotQuery string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {

@@ -1116,7 +1116,10 @@ func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
-or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.`, stderr)
+or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.
+A job that waits is told as experiment.blocked, and once as job.held when it has waited longer
+than its estimate: value is the code of what it waits for (not_admitted_reason), detail the
+sentence (not_admitted_message).`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
