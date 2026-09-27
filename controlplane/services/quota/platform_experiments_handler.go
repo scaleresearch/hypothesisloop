@@ -16,9 +16,10 @@ import (
 // PlatformExperimentsHandler exposes the Platform Experiment lifecycle over
 // HTTP. Routes are registered via RegisterHuma (see huma_api.go).
 type PlatformExperimentsHandler struct {
-	svc     *PlatformExperimentsService
-	logger  *zap.Logger
-	catalog ResourceCatalog
+	svc    *PlatformExperimentsService
+	logger *zap.Logger
+	// jobImages is the images the deployment offers a job to run in.
+	jobImages []domain.JobImage
 
 	// Live-capacity lookup (GET /resource-catalog/capacity) — set via WithLiveCapacity.
 	metricsDBURL      string
@@ -46,9 +47,9 @@ func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githos
 	return h
 }
 
-// WithCatalog attaches the resource catalog served by GET /resource-catalog.
-func (h *PlatformExperimentsHandler) WithCatalog(catalog ResourceCatalog) *PlatformExperimentsHandler {
-	h.catalog = catalog
+// WithJobImages attaches the images the deployment offers a job to run in.
+func (h *PlatformExperimentsHandler) WithJobImages(images []domain.JobImage) *PlatformExperimentsHandler {
+	h.jobImages = images
 	return h
 }
 
@@ -66,20 +67,6 @@ func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, fresh
 	h.capacityFreshness = freshness
 	h.clusters = clusters
 	return h
-}
-
-// AcceleratorTypeInfo is the agent/UI-facing view of one catalog accelerator type — pricing only.
-type AcceleratorTypeInfo struct {
-	Name     string          `json:"name"`
-	Kind     domain.TypeKind `json:"kind" doc:"What one unit of the type is: accelerator for a device, cpu for one CPU core, of the one type hypothesisloop.dev/cpu=core. A job that states cpu and no accelerator holds that many units of it."`
-	AccHRate float64         `json:"acch_rate"`
-}
-
-// ResourceCatalog is the full set of resource-pricing reference data served by GET /resource-catalog.
-type ResourceCatalog struct {
-	AcceleratorTypes []AcceleratorTypeInfo `json:"accelerator_types"`
-	// JobImages is the images the deployment offers a job to run in.
-	JobImages []domain.JobImage `json:"job_images"`
 }
 
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
@@ -169,7 +156,7 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 		return nil, err
 	}
 	withJobImages(registered, clusters)
-	withOfferedImages(h.catalog.JobImages, clusters)
+	withOfferedImages(h.jobImages, clusters)
 	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, h.metricsDBURL, h.capacityFreshness)
 	if err != nil {
 		return nil, err

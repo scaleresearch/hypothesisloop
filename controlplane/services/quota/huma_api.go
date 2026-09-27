@@ -671,7 +671,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			}
 		}{}
 		out.Body.Clusters = clusters
-		out.Body.JobImages = peh.catalog.JobImages
+		out.Body.JobImages = peh.jobImages
 		if out.Body.JobImages == nil {
 			out.Body.JobImages = []domain.JobImage{}
 		}

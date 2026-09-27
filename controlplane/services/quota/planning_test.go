@@ -35,8 +35,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
-		WithCatalog(ResourceCatalog{AcceleratorTypes: []AcceleratorTypeInfo{{Name: "rtx-4090", AccHRate: 1}, {Name: string(domain.CPUType), Kind: domain.TypeKindCPU, AccHRate: 1}}})
+		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
 	if drafts, ok := store.(*draftStore); ok {
 		handler.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return drafts.baseline, nil

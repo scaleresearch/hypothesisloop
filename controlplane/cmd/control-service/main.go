@@ -202,14 +202,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore)
-	acceleratorTypeInfos := make([]quota.AcceleratorTypeInfo, 0, len(pcfg.AcceleratorTypes))
-	for _, g := range pcfg.AcceleratorTypes {
-		acceleratorTypeInfos = append(acceleratorTypeInfos, quota.AcceleratorTypeInfo{Name: g.Name, Kind: domain.AcceleratorType(g.Name).Kind(), AccHRate: g.AccHRate})
-	}
-	resourceCatalog := quota.ResourceCatalog{
-		AcceleratorTypes: acceleratorTypeInfos,
-		JobImages:        pcfg.OfferedJobImages(),
-	}
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		AllowanceAcceleratorHours: pcfg.Planning.AllowanceAcceleratorHours,
 		Limit:                     time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
@@ -217,7 +209,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		MaxConcurrentPerOrg:       pcfg.Planning.MaxConcurrentPerOrg,
 		MaxPerDayPerOrg:           pcfg.Planning.MaxPerDayPerOrg,
 	}, logger).
-		WithCatalog(resourceCatalog).
+		WithJobImages(pcfg.OfferedJobImages()).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{
 			Launcher: pcfg.Agents.Launcher, DefaultModel: pcfg.Agents.DefaultModel,
