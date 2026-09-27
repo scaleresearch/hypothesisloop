@@ -71,6 +71,22 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Never repeat it as a comment", prompt)
         self.assertIn("a *comment* on a hypothesis: only what has no job behind it", prompt)
 
+    # Every graph of the audited runs was flat: three root hypotheses, two of them varying the
+    # same knobs, one holding a sweep of seven jobs whose winner was only a finding, and some
+    # left open at the close.
+    def test_the_graph_reads_from_distinct_approaches_down_to_the_best_result(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("Every *hypothesis* is one falsifiable claim", prompt)
+        self.assertIn("the root's children are the distinct approaches to the objective, each a different mechanism", prompt)
+        self.assertIn("Before adding a root child, read the existing ones: take a mechanism none of them has, or go under one", prompt)
+        self.assertIn("with `--related` for a combination's second parent", prompt)
+        self.assertIn("a sweep is one hypothesis only while it tests one claim, and its winning configuration, once more work "
+                      "builds on it, is registered as a child, so the best result is a node", prompt)
+        self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
+        self.assertIn("no job in flight or owing its summary and no hypothesis of yours left open", prompt)
+        # A researcher ran a job on another researcher's hypothesis.
+        self.assertIn("test under its id if it is yours, else under a child of it: a job on another agent's hypothesis is refused", prompt)
+
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
