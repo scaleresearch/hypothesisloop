@@ -35,8 +35,8 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if found {
 		exp.PhaseDetail = &domain.PhaseDetail{Reason: reason, Message: message, RestartCount: restartCount}
 	}
-	if exp.RanOn, err = metricsdb.LatestRanOn(ctx, s.metricsDBURL, id, exp.CreatedAt, time.Now().UTC()); err != nil {
-		return nil, fmt.Errorf("scheduler.GetExperiment: ran on: %w", err)
+	if err := s.mergeRanOn(ctx, []*domain.Experiment{exp}); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
 	if err := s.mergeMetrics(ctx, []*domain.Experiment{exp}); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
@@ -101,6 +101,19 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 		if d, found := details[exp.ID]; found {
 			exp.PhaseDetail = &domain.PhaseDetail{Reason: d.Reason, Message: d.Message, RestartCount: d.RestartCount}
 		}
+	}
+	return nil
+}
+
+// mergeRanOn attaches where each experiment's workload ran, in one metrics-store query for all
+// of them: the read of one job and the read of a page say it the same way.
+func (s *Service) mergeRanOn(ctx context.Context, exps []*domain.Experiment) error {
+	ranOn, err := metricsdb.LatestRanOn(ctx, s.metricsDBURL, exps, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("scheduler.mergeRanOn: %w", err)
+	}
+	for _, exp := range exps {
+		exp.RanOn = ranOn[exp.ID]
 	}
 	return nil
 }

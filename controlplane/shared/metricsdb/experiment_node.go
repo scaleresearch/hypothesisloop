@@ -52,39 +52,61 @@ func nodeLabels(status JobStatusSample) map[string]string {
 	return labels
 }
 
-// LatestRanOn returns where experimentID's workload was last observed since its row was created:
-// the newest node sample, with the machine behind the node when the runtime reported one. nil
-// when no node was ever recorded.
-func LatestRanOn(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (*domain.RanOn, error) {
-	since := ObservationWindowStart(createdAt)
-	if !now.After(since) {
-		return nil, fmt.Errorf("metricsdb.LatestRanOn: %s was created after now", experimentID)
+// LatestRanOn returns, by job id, where each job's workload was last observed since its row was
+// created: the newest node sample, with the machine behind the node when the runtime reported
+// one. A job no node was ever recorded for has no entry. It is one query however many jobs are
+// asked about.
+func LatestRanOn(ctx context.Context, dbURL string, jobs []*domain.Experiment, now time.Time) (map[string]*domain.RanOn, error) {
+	ranOn := make(map[string]*domain.RanOn, len(jobs))
+	if len(jobs) == 0 {
+		return ranOn, nil
 	}
-	// Every column, since the machine's are there only once a runtime has reported one.
+	since := now
+	ids := make([]string, len(jobs))
+	for i, job := range jobs {
+		start := ObservationWindowStart(job.CreatedAt)
+		if !now.After(start) {
+			return nil, fmt.Errorf("metricsdb.LatestRanOn: %s was created after now", job.ID)
+		}
+		if start.Before(since) {
+			since = start
+		}
+		ids[i] = sqlQuote(job.ID)
+	}
+	// Every column of the newest sample, since the machine's are there only once a runtime has
+	// reported one. The newest is found by a join on each job's latest timestamp: a window
+	// function's row number would be one more column, which is no label.
 	query := fmt.Sprintf(
-		`SELECT * FROM %s WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
-			`ORDER BY greptime_timestamp DESC LIMIT 1`,
-		experimentNodeMetric, sqlQuote(experimentID), since.UnixMilli(), now.UnixMilli())
+		`SELECT observed.* FROM %[1]s observed JOIN (`+
+			`SELECT experiment_id AS id, MAX(greptime_timestamp) AS latest FROM %[1]s `+
+			`WHERE experiment_id IN (%[2]s) AND greptime_timestamp >= %[3]d::TimestampMillisecond AND greptime_timestamp < %[4]d::TimestampMillisecond `+
+			`GROUP BY experiment_id) newest ON observed.experiment_id = newest.id AND observed.greptime_timestamp = newest.latest `+
+			`ORDER BY observed.node`,
+		experimentNodeMetric, strings.Join(ids, ", "), since.UnixMilli(), now.UnixMilli())
 	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LatestRanOn: %w", err)
 	}
-	if len(samples) == 0 || samples[0].Labels["node"] == "" {
-		return nil, nil
-	}
-	labels := samples[0].Labels
-	ranOn := &domain.RanOn{Node: labels["node"]}
-	machine := domain.JobMachine{
-		InstanceID: labels[machineInstanceLabel], HostID: labels[machineHostLabel],
-		AcceleratorModel: labels[machineAcceleratorLabel], CPUModel: labels[machineCPULabel],
-	}
-	if price := labels[machinePriceLabel]; price != "" {
-		if machine.PricePerHourUSD, err = strconv.ParseFloat(price, 64); err != nil {
-			return nil, fmt.Errorf("metricsdb.LatestRanOn: price of %s: %w", experimentID, err)
+	for _, sample := range samples {
+		labels := sample.Labels
+		id := labels["experiment_id"]
+		if _, seen := ranOn[id]; seen || labels["node"] == "" {
+			continue
 		}
-	}
-	if machine != (domain.JobMachine{}) {
-		ranOn.Machine = &machine
+		where := &domain.RanOn{Node: labels["node"]}
+		machine := domain.JobMachine{
+			InstanceID: labels[machineInstanceLabel], HostID: labels[machineHostLabel],
+			AcceleratorModel: labels[machineAcceleratorLabel], CPUModel: labels[machineCPULabel],
+		}
+		if price := labels[machinePriceLabel]; price != "" {
+			if machine.PricePerHourUSD, err = strconv.ParseFloat(price, 64); err != nil {
+				return nil, fmt.Errorf("metricsdb.LatestRanOn: price of %s: %w", id, err)
+			}
+		}
+		if machine != (domain.JobMachine{}) {
+			where.Machine = &machine
+		}
+		ranOn[id] = where
 	}
 	return ranOn, nil
 }

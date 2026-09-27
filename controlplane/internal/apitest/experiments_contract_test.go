@@ -61,10 +61,14 @@ func (s *filterSpyStore) ExperimentStats(_ context.Context, f domain.ExperimentF
 
 func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	t.Helper()
-	// Phase detail is merged into every list/read from the metrics store, so these contract
-	// tests need one that answers.
-	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	// Phase detail and where a job ran are merged into every list/read from the metrics store,
+	// so these contract tests need one that answers: no rows to SQL, no series to PromQL.
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/sql" {
+			_, _ = w.Write([]byte(`{"output":[{"records":{"schema":{"column_schemas":[{"name":"greptime_timestamp"},{"name":"greptime_value"}]},"rows":[]}}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	t.Cleanup(metrics.Close)

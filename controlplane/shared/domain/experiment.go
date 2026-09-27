@@ -89,8 +89,7 @@ type Experiment struct {
 	Metrics []JobMetric `json:"metrics,omitempty"`
 	Metric  *JobMetric  `json:"metric,omitempty"`
 	// RanOn is where the job's workload was last observed, merged in live from the metrics store
-	// like PhaseDetail. Set on a read of one job only, and nil until its runtime has reported a
-	// node for it.
+	// like PhaseDetail. Nil until its runtime has reported a node for it.
 	RanOn *RanOn `json:"ran_on,omitempty"`
 	// Rankable says whether the job's values rank, and NotRankableReason names the constraint
 	// that keeps them out and how. Set on a read of one COMPLETED job whose platform experiment

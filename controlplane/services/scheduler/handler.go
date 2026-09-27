@@ -210,6 +210,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.svc.mergePhaseDetails(ctx, exps); err != nil {
 			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
+		if err := h.svc.mergeRanOn(ctx, exps); err != nil {
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
+		}
 		if err := h.svc.mergeMetrics(ctx, exps); err != nil {
 			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
