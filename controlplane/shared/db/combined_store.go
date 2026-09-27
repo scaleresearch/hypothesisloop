@@ -212,8 +212,8 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
 	allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
 	if remaining := allocation.Remaining(exp.CapacityTier); exp.EstimatedCostAccH > remaining {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s",
-			exp.CapacityTier, exp.EstimatedCostAccH, remaining, heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours (%d of %s for the job's estimated_duration_hours of %g), have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s",
+			exp.CapacityTier, exp.EstimatedCostAccH, exp.AcceleratorCount, exp.AcceleratorType, exp.EstimatedDurationHours, remaining, heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -221,6 +222,17 @@ func (e *Experiment) NodeShapes() []NodeShape {
 // write cannot disagree.
 func (e *Experiment) RetriesUsed() int {
 	return e.AttemptCount - e.InfraRequeueCount
+}
+
+// EstimateHeld is the accelerator-hours a job holds of its agent's quota until it ends: the rate
+// of its type times its units times its estimated hours. The submit, a flavor substitution and
+// the stored row all take the figure from here, so a refusal states the hold the job would have.
+func (e *Experiment) EstimateHeld() (float64, error) {
+	rate, ok := e.AcceleratorType.LookupCost()
+	if !ok {
+		return 0, fmt.Errorf("accelerator type %q of job %s has no configured acch_rate", e.AcceleratorType, e.ID)
+	}
+	return rate * float64(e.AcceleratorCount) * e.EstimatedDurationHours, nil
 }
 
 // RatedCost is the single formula settlement and live running-cost accounting both use to bill

@@ -112,7 +112,11 @@ func mixedLoop(store LoopStore, workload LoopWorkloadClient, observed ObservedSt
 // priced is a job as submission leaves it: its cost is rate x count x hours of its own type.
 func priced(exp *domain.Experiment, hours float64) *domain.Experiment {
 	exp.EstimatedDurationHours = hours
-	exp.EstimatedCostAccH = estimatedAcceleratorCost(exp)
+	held, err := exp.EstimateHeld()
+	if err != nil {
+		panic(err)
+	}
+	exp.EstimatedCostAccH = held
 	return exp
 }
 

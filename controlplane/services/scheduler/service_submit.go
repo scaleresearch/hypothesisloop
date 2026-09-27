@@ -194,18 +194,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	exp.Hypothesis = hyp.Text
 
-	// 4. Compute estimated cost if not already set. Accelerator-hours is the primary/always-populated
-	// dimension. CPU/Memory/Storage are always set on JobSpec now (see ValidateExperiment's
-	// "explicit resource requests" cross-cutting fix), so there is no more "left unset,
-	// resolved later by a cluster-side default" case to work around here.
-	//
-	// RAM/storage are hard physical-fit-checked at admission (see
-	// domain.Experiment.Footprint()/domain.Fits, wired into loop_tick.go), never hours-estimated
-	// or hours-debited: the RAM/storage hours-quota machinery (PlatformExperiment budget fields,
-	// AgentQuota guaranteed/burst columns, domain.ResourceType entries) has been removed entirely.
-	if exp.EstimatedCostAccH == 0 && exp.AcceleratorCount > 0 {
-		exp.EstimatedCostAccH = estimatedAcceleratorCost(exp)
+	// 4. What the job holds of its agent's quota until it ends.
+	held, err := exp.EstimateHeld()
+	if err != nil {
+		return fmt.Errorf("scheduler: %w", err)
 	}
+	exp.EstimatedCostAccH = held
 
 	// 5. Novelty detection: compare against running and queued experiments.
 	// This is advisory — low novelty is NOT a hard rejection. The score is stored on the
@@ -299,13 +293,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// 8. Wake the scheduler loop.
 	s.loop.Trigger()
 	return nil
-}
-
-func estimatedAcceleratorCost(exp *domain.Experiment) float64 {
-	if exp.AcceleratorCount == 0 {
-		return 0
-	}
-	return exp.AcceleratorType.Cost() * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 }
 
 // enforceDataCeiling refuses a submission from an agent already at or over its durable-data

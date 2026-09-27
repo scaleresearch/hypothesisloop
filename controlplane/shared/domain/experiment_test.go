@@ -337,3 +337,24 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 		t.Errorf("answered as %s, %v, want cpu as the string", out, err)
 	}
 }
+
+// A run's researcher was refused for 0.08 and then admitted with 0.052 on the same 8 cores: the
+// first submit stated 0.01 h and the second the measured 0.0065 h. The hold is the stated hours
+// times the units at the type's rate, with no minimum, and an unpriced type has none.
+func TestEstimateHeldIsRateTimesUnitsTimesHours(t *testing.T) {
+	before := acceleratorRateRegistry
+	t.Cleanup(func() { acceleratorRateRegistry = before })
+	SetAcceleratorRates(map[string]float64{string(CPUType): 1})
+
+	job := &Experiment{ID: "job-a", AcceleratorType: CPUType, AcceleratorCount: 8}
+	for hours, want := range map[float64]float64{0.01: 0.08, 0.0065: 0.052} {
+		job.EstimatedDurationHours = hours
+		if got, err := job.EstimateHeld(); err != nil || got != want {
+			t.Errorf("EstimateHeld() at %g h = %v %v, want %v", hours, got, err, want)
+		}
+	}
+	job.AcceleratorType = "vendor.example/unpriced=x"
+	if _, err := job.EstimateHeld(); err == nil || !strings.Contains(err.Error(), "no configured acch_rate") {
+		t.Errorf("EstimateHeld() of an unpriced type = %v, want it refused for the missing rate", err)
+	}
+}

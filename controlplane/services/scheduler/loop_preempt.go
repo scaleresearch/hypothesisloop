@@ -376,11 +376,11 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		newEstCost := exp.EstimatedCostAccH
 		flavor := persistedFlavor
 		if exp.AcceleratorType != persistedFlavor {
-			rate, ok := exp.AcceleratorType.LookupCost()
-			if !ok {
-				return fmt.Errorf("submitJob: unknown accelerator flavor %q for experiment %s", exp.AcceleratorType, exp.ID)
+			held, err := exp.EstimateHeld()
+			if err != nil {
+				return fmt.Errorf("submitJob: %w", err)
 			}
-			newEstCost = rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
+			newEstCost = held
 			flavor = exp.AcceleratorType
 		}
 		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, flavor, newEstCost, exp.AcceleratorCount); err != nil {

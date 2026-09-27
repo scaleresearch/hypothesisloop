@@ -886,11 +886,10 @@ func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool 
 	if quota == nil || exp.AcceleratorCount <= 0 {
 		return false
 	}
-	rate, ok := exp.AcceleratorType.LookupCost()
-	if !ok {
+	newCost, err := exp.EstimateHeld()
+	if err != nil {
 		return false
 	}
-	newCost := rate * float64(exp.AcceleratorCount) * exp.EstimatedDurationHours
 	used, limit := quota.UsedBurstAccH, quota.BurstAcceleratorHours
 	if exp.CapacityTier == domain.CapacityGuaranteed {
 		used, limit = quota.UsedGuaranteedAccH, quota.GuaranteedAcceleratorHours

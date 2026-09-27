@@ -16,13 +16,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
-func TestEstimatedAcceleratorCostIsZeroForCPUOnlyJob(t *testing.T) {
-	exp := &domain.Experiment{AcceleratorCount: 0, EstimatedDurationHours: 2}
-	if got := estimatedAcceleratorCost(exp); got != 0 {
-		t.Fatalf("estimatedAcceleratorCost() = %v, want 0", got)
-	}
-}
-
 // listingBytes serves one ListObjectsV2 page holding a single object of the given size — enough
 // for the ceiling arithmetic, which only ever asks the store for a total.
 func listingBytes(t *testing.T, size int64) *objectstore.Client {
