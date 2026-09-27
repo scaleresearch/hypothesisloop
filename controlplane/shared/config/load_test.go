@@ -374,6 +374,46 @@ func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET", "client-secret")
+	t.Setenv("HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY", "pem")
+	t.Setenv("HL_TEST_GIT_USERNAME", "platform")
+	t.Setenv("HL_TEST_GIT_PASSWORD", "secret")
+	const plain = "\ngit:\n  provider: plain\n  base_url: https://git.example/experiments\n"
+	const credential = "  username: ${HL_TEST_GIT_USERNAME}\n  password: ${HL_TEST_GIT_PASSWORD}\n"
+	for name, section := range map[string]string{
+		"a plain host that asks for no credential": plain,
+		"a plain host with the credential":         plain + credential,
+		"github with its App":                      githubSection + "git:\n  provider: github\n",
+	} {
+		if err := loadText(t, productionConfig(t)+section); err != nil {
+			t.Errorf("%s: got = %v, want it loaded", name, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)+plain+credential), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Load(path); err != nil || cfg.Git != (GitConfig{Provider: GitProviderPlain, BaseURL: "https://git.example/experiments", Username: "platform", Password: "secret"}) {
+		t.Fatalf("Load: %v, want the plain host with the credential as the environment holds it", err)
+	}
+	for name, section := range map[string]string{
+		"no provider":                      "\ngit:\n  base_url: https://git.example\n",
+		"a provider nobody wrote":          "\ngit:\n  provider: gitlab\n",
+		"github with no App":               "\ngit:\n  provider: github\n",
+		"github with a base_url":           githubSection + "git:\n  provider: github\n  base_url: https://git.example\n",
+		"plain beside a GitHub App":        githubSection + strings.TrimPrefix(plain, "\n"),
+		"plain with no base_url":           "\ngit:\n  provider: plain\n",
+		"plain over http":                  "\ngit:\n  provider: plain\n  base_url: http://git.example\n",
+		"plain with a username alone":      plain + "  username: ${HL_TEST_GIT_USERNAME}\n",
+		"plain with a variable nobody set": plain + "  username: platform\n  password: ${HL_TEST_GIT_UNSET}\n",
+	} {
+		if err := loadText(t, productionConfig(t)+section); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
 func TestTheCommittedConfigHasNoGitHubApp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {

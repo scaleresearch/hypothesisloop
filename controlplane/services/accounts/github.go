@@ -459,7 +459,9 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"owner/name.git/info/lfs. 403 run_over once the platform experiment is closed or the agent, for a job the agent it belongs to, was cut, and " +
 			"403 forbidden for any other kind of token. 404 no_repository when the platform experiment names none, 404 not_found for another address. " +
 			"409 installation_not_connected when the org disconnected the installation, repository_not_reachable when the repository left it, " +
-			"installation_gone when the App was removed on GitHub, permission_not_granted when its owner has yet to accept the App's permissions.",
+			"installation_gone when the App was removed on GitHub, permission_not_granted when its owner has yet to accept the App's permissions. " +
+			"On a deployment whose git host is plain the credential is the deployment's one, the same for every caller and with no expires_at, " +
+			"and 404 not_found when that host takes none.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			Protocol string `json:"protocol" doc:"The protocol git asked for. Only https is served."`

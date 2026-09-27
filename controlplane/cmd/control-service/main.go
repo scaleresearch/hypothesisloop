@@ -142,7 +142,13 @@ func main() {
 		githubApp = client
 	}
 	accountsStore := db.NewAccountsStore(pool)
-	gitHost := accounts.NewGitHubHost(accountsStore, githubApp, logger)
+	var gitHost githost.Provider = accounts.NewGitHubHost(accountsStore, githubApp, logger)
+	if pcfg.Git.Provider == hypothesisloopcfg.GitProviderPlain {
+		gitHost, err = githost.NewPlain(pcfg.Git.BaseURL, pcfg.Git.Username, pcfg.Git.Password)
+		if err != nil {
+			logger.Fatal("control-service: configure the git host", zap.Error(err))
+		}
+	}
 	repos := accounts.NewRepositories(accountsStore, db.NewPlatformExperimentsStore(pool), githubApp, gitHost, gate.access, logger)
 
 	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)

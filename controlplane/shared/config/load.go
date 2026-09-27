@@ -319,5 +319,27 @@ func (c *Config) build() error {
 	if g := c.GitHub; g.Configured() && (g.AppID <= 0 || g.AppSlug == "" || g.ClientID == "" || g.ClientSecret == "" || g.PrivateKey == "") {
 		return fmt.Errorf("github app_id, app_slug, client_id, client_secret and private_key are all required once any of them is set")
 	}
+	switch g := c.Git; g.Provider {
+	case "":
+		if g != (GitConfig{}) {
+			return fmt.Errorf("git provider is required once the section is set: %s or %s", GitProviderGitHub, GitProviderPlain)
+		}
+	case GitProviderGitHub:
+		if !c.GitHub.Configured() || g != (GitConfig{Provider: GitProviderGitHub}) {
+			return fmt.Errorf("git provider github is the GitHub App of the github section: that section is required, and base_url, username and password are for provider plain")
+		}
+	case GitProviderPlain:
+		if c.GitHub.Configured() {
+			return fmt.Errorf("git provider plain and a github section are set together: a deployment keeps its code on one git host")
+		}
+		if !strings.HasPrefix(g.BaseURL, "https://") {
+			return fmt.Errorf("git base_url %q must be the https root the repositories of the deployment are cloned from", g.BaseURL)
+		}
+		if (g.Username == "") != (g.Password == "") {
+			return fmt.Errorf("git username and password are set together or not at all")
+		}
+	default:
+		return fmt.Errorf("git provider %q is neither %s nor %s", g.Provider, GitProviderGitHub, GitProviderPlain)
+	}
 	return nil
 }

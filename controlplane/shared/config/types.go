@@ -330,6 +330,24 @@ type GitHubConfig struct {
 // Configured reports whether the deployment has a GitHub App.
 func (c GitHubConfig) Configured() bool { return c != GitHubConfig{} }
 
+// The git hosts a deployment can keep its platform experiments' code on.
+const (
+	GitProviderGitHub = "github"
+	GitProviderPlain  = "plain"
+)
+
+// GitConfig says which git host platform experiments keep their code on. github is the GitHub
+// App of the github section. plain is any host that serves repositories under BaseURL over
+// https, reached with Username and Password, or with neither when it asks for none.
+type GitConfig struct {
+	Provider string `yaml:"provider"`
+	BaseURL  string `yaml:"base_url"`
+	// Username and Password are the deployment's one credential on a plain host. The settings
+	// file names the environment variables that hold them.
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.
 const MinSigningSecretLength = 32
 
@@ -348,6 +366,7 @@ type Config struct {
 	Runtimes         RuntimesConfig          `yaml:"runtimes"`
 	JobImages        []JobImageConfig        `yaml:"job_images"`
 	GitHub           GitHubConfig            `yaml:"github"`
+	Git              GitConfig               `yaml:"git"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName map[string]float64 // accelerator name → AccH rate
