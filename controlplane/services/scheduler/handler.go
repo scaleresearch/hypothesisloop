@@ -312,7 +312,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
-		Description: "Credits are refunded. Answers the job, whose status is CANCELLED from then on.",
+		Description: "Credits are refunded. Answers the job, whose status is CANCELLED from then on. 409 invalid_transition for a job that has ended, with the status it ended in: a cancelled one is CANCELLED there as everywhere.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {
@@ -377,23 +377,20 @@ func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 // ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
 const ReasonSummaryExists = "summary_exists"
 
-// admissionStatusError maps an AdmissionError to a huma error with the historical
-// status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
+// admissionStatusError is the refusal a cancel or a summary answers an AdmissionError with.
 func admissionStatusError(err error) huma.StatusError {
 	var admErr *AdmissionError
 	if !errors.As(err, &admErr) {
 		return nil
 	}
+	status := http.StatusUnprocessableEntity
 	switch admErr.Reason {
 	case "not_found":
-		return huma.Error404NotFound(admErr.Message)
-	case "invalid_state":
-		return huma.Error409Conflict(admErr.Message)
-	case ReasonSummaryExists:
-		return api.Refuse(http.StatusConflict, admErr.Reason, admErr.Message)
-	default:
-		return huma.Error422UnprocessableEntity(admErr.Message)
+		status = http.StatusNotFound
+	case ReasonInvalidTransition, ReasonSummaryExists:
+		status = http.StatusConflict
 	}
+	return api.Refuse(status, admErr.Reason, admErr.Message)
 }
 
 // admissionHTTPStatus maps an admission reason to the appropriate HTTP status code.

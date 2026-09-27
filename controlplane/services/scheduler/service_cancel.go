@@ -11,11 +11,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// CancelExperiment cancels a QUEUED or RUNNING experiment.
-//   - QUEUED/SUBMITTED: marks as REJECTED.
-//   - RUNNING: marks as EVICTED (which is itself the deletion signal — the
-//     cluster-agent reconciles its Jobs to the set of SUBMITTED/RUNNING
-//     experiments, so moving out of that set is what makes the Job go away).
+// ReasonInvalidTransition refuses an act the job's status does not allow.
+const ReasonInvalidTransition = "invalid_transition"
+
+// CancelExperiment cancels a QUEUED, SUBMITTED or RUNNING job. It is stored REJECTED when it
+// never ran and EVICTED when it did, the deletion signal its cluster reconciles to, with
+// EvictionCancelled as the reason, and answered CANCELLED either way (domain.AnsweredStatus).
+// A job that has ended is refused in the status it is answered with.
 //
 // Every path then uses the canonical settlement service; there is no cancellation-specific
 // accounting implementation.
@@ -69,8 +71,8 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 
 		default:
 			return &AdmissionError{
-				Reason:  "invalid_state",
-				Message: fmt.Sprintf("cannot cancel experiment in status %s", exp.Status),
+				Reason:  ReasonInvalidTransition,
+				Message: fmt.Sprintf("job %s is %s: only a QUEUED, SUBMITTED or RUNNING job is cancelled", id, domain.AnsweredStatus(exp.Status, exp.EvictionReason)),
 			}
 		}
 	}
@@ -153,8 +155,8 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 		// ok
 	default:
 		return nil, &AdmissionError{
-			Reason:  "invalid_state",
-			Message: fmt.Sprintf("summary can only be written on terminal experiments (got %s)", exp.Status),
+			Reason:  ReasonInvalidTransition,
+			Message: fmt.Sprintf("job %s is %s: a summary is filed on a job that has ended", id, exp.Status),
 		}
 	}
 	h, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
