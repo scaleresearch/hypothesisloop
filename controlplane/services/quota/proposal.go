@@ -313,7 +313,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		if err != nil {
 			return nil, h.refusal("accept", err)
 		}
-		agents = append(agents, &domain.Agent{ID: agentID, Name: fmt.Sprintf("Researcher %d", i+1), PerformanceScore: 0.5, CreatedAt: now})
+		agents = append(agents, &domain.Agent{ID: agentID, PerformanceScore: 0.5, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
 			AgentID: agentID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher,
 			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters, Actor: &by,

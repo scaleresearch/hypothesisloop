@@ -22,6 +22,10 @@ var ErrMaxAgentsReached = errors.New("max_agents reached")
 // machines than its max_hosted, or leave none of them to measure its baseline.
 var ErrMaxHostedReached = errors.New("max_hosted reached")
 
+// ErrAgentNameTaken is an agent refused a place because another agent of the platform experiment
+// carries its name.
+var ErrAgentNameTaken = errors.New("another agent of the platform experiment has this name")
+
 // ErrSignupClosed is a signup or a removal refused because the platform experiment is no longer
 // open, or does not exist: the roster is fixed when the experiment starts.
 var ErrSignupClosed = errors.New("platform experiment is not open")
@@ -48,7 +52,8 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID str
 }
 
 // SpawnAgent creates an agent in the platform experiment's org and signs it up, both or neither.
-// ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
+// An agent without a name is given one (domain.AgentName), which agent then carries.
+// ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
 // with no place left, ErrMaxHostedReached when it is one machine too many.
 func (s *PlatformExperimentsStore) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
 	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup})
@@ -116,8 +121,31 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxH
 	if status != string(domain.PlatformExpOpen) {
 		return 0, ErrSignupClosed
 	}
+	// Names are unique in a platform experiment, among the agents in it and those that left a
+	// job in it. The experiment row is locked, so two agents added at once cannot share one.
+	names, err := agentNamesTx(ctx, tx, platformExpID)
+	if err != nil {
+		return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
+	}
+	claim := func(agentID, name string) error {
+		if holder, taken := names[name]; taken && holder != agentID {
+			return ErrAgentNameTaken
+		}
+		names[name] = agentID
+		return nil
+	}
+	roles := make(map[string]domain.SignupRole, len(signups))
+	for _, signup := range signups {
+		roles[signup.AgentID] = signup.Role
+	}
 	for _, agent := range create {
 		agent.OrgID = orgID
+		if agent.Name == "" {
+			agent.Name = domain.AgentName(roles[agent.ID], func(name string) bool { _, taken := names[name]; return taken })
+		}
+		if err := claim(agent.ID, agent.Name); err != nil {
+			return 0, err
+		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO agents (id, name, org_id, performance_score, created_at)
 VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt); err != nil {
@@ -131,13 +159,16 @@ VALUES ($1, $2, $3, $4, $5)`, agent.ID, agent.Name, agent.OrgID, agent.Performan
 	inserted, competitors, hosted := 0, false, false
 	for _, signup := range signups {
 		if !created[signup.AgentID] {
-			var agentOrg string
-			err := tx.QueryRow(ctx, `SELECT org_id FROM agents WHERE id=$1`, signup.AgentID).Scan(&agentOrg)
+			var agentOrg, agentName string
+			err := tx.QueryRow(ctx, `SELECT org_id, name FROM agents WHERE id=$1`, signup.AgentID).Scan(&agentOrg, &agentName)
 			if errors.Is(err, pgx.ErrNoRows) || (err == nil && agentOrg != orgID) {
 				return 0, ErrAgentOutsideOrg
 			}
 			if err != nil {
 				return 0, fmt.Errorf("platform_experiments_store.Signup: read agent %s: %w", signup.AgentID, err)
+			}
+			if err := claim(signup.AgentID, agentName); err != nil {
+				return 0, err
 			}
 		}
 		hyperparameters, err := json.Marshal(nonNilObject(signup.Hyperparameters))
@@ -205,6 +236,28 @@ WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND role <>
 		}
 	}
 	return inserted, nil
+}
+
+// agentNamesTx returns the names carried in a platform experiment, each with its agent: of the
+// agents signed up to it and of those that have a job in it.
+func agentNamesTx(ctx context.Context, tx pgx.Tx, platformExpID string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+SELECT a.name, a.id FROM agents a
+WHERE a.id IN (SELECT agent_id FROM experiment_signups WHERE platform_experiment_id = $1)
+   OR a.id IN (SELECT agent_id FROM experiments WHERE platform_experiment_id = $1)`, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("list agent names: %w", err)
+	}
+	defer rows.Close()
+	names := map[string]string{}
+	for rows.Next() {
+		var name, id string
+		if err := rows.Scan(&name, &id); err != nil {
+			return nil, fmt.Errorf("list agent names: %w", err)
+		}
+		names[name] = id
+	}
+	return names, rows.Err()
 }
 
 func nonNilObject(m map[string]any) map[string]any {

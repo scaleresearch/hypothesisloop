@@ -160,6 +160,19 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 	if f.full(signup) {
 		return db.ErrMaxHostedReached
 	}
+	taken := func(name string) bool {
+		for _, s := range f.signups {
+			if s.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if agent.Name == "" {
+		agent.Name = domain.AgentName(signup.Role, taken)
+	} else if taken(agent.Name) {
+		return db.ErrAgentNameTaken
+	}
 	agent.OrgID = "org-a"
 	f.agents[agent.ID] = agent
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, agent.Name
@@ -272,7 +285,7 @@ var staff = auth.Principal{Kind: auth.KindStaff}
 func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	agents := addEach(t, r, 3, `{"hosted":true,"name":"sweep","flavor":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
+	agents := addEach(t, r, 3, `{"hosted":true,"flavor":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
 	if len(agents) != 3 || len(store.signups) != 3 {
 		t.Fatalf("agents = %d, signups = %d, want 3 and 3", len(agents), len(store.signups))
 	}
@@ -300,7 +313,7 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 		}
 	}
 	names := []string{agents[0]["name"].(string), agents[1]["name"].(string), agents[2]["name"].(string)}
-	if !reflect.DeepEqual(names, []string{"sweep", "sweep", "sweep"}) {
+	if !reflect.DeepEqual(names, []string{"Researcher 1", "Researcher 2", "Researcher 3"}) {
 		t.Errorf("names = %v", names)
 	}
 }
@@ -737,5 +750,13 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 	}
 	if got := joined(t, named)[0]["name"]; got != "ablation" {
 		t.Errorf("a stated name became %v", got)
+	}
+	// A baseline agent and a researcher were both "Researcher 2".
+	_, baseline := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"role":"baseline"}`)
+	if got := joined(t, baseline)[0]["name"]; got != "Baseline 1" {
+		t.Errorf("the baseline agent is named %v, want Baseline 1", got)
+	}
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`); code != http.StatusConflict || out["reason"] != "agent_name_taken" {
+		t.Errorf("a second agent named ablation: got = %d %v, want 409 agent_name_taken", code, out)
 	}
 }

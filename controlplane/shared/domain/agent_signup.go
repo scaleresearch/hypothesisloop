@@ -222,6 +222,20 @@ func ResolveAgentLaunch(flavor, model, defaultModel string, hyperparameters map[
 	return flavor, model, nil
 }
 
+// AgentName is what an agent created without a name is called in a platform experiment: its
+// role and the first number no agent of that experiment carries yet, "Baseline 1" or
+// "Researcher 2". taken says whether the experiment already has an agent of that name.
+func AgentName(role SignupRole, taken func(name string) bool) string {
+	label := map[SignupRole]string{
+		SignupRoleCompetitor: "Researcher", SignupRoleBaseline: "Baseline", SignupRoleReviewer: "Reviewer", SignupRolePlanner: "Planner",
+	}[role]
+	for n := 1; ; n++ {
+		if name := fmt.Sprintf("%s %d", label, n); !taken(name) {
+			return name
+		}
+	}
+}
+
 // NewAgentID returns the id of an agent the platform creates: time-ordered, and within the
 // identifier rule every agent id meets.
 func NewAgentID() (string, error) {

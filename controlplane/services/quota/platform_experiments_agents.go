@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -20,7 +21,7 @@ import (
 // joins a platform experiment.
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent. Omitted, it is named by its place in the platform experiment, \"Researcher 2\"."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 agent_name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Researcher 2\", \"Baseline 1\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
@@ -86,6 +87,11 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 	return s.spawn(ctx, platformExpID, req, signup)
 }
 
+// agentNameTaken refuses an agent whose name another agent of the platform experiment carries.
+func agentNameTaken(name string) error {
+	return refuseSignup(409, "agent_name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
+}
+
 // requireLauncher refuses to host anything while the launcher config gives new machines to is
 // not registered: its token would be refused, and nothing would ever start.
 func (s *PlatformExperimentsService) requireLauncher(ctx context.Context, launcher string) error {
@@ -147,18 +153,6 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, platfor
 	return []domain.AgentSignup{*joined}, nil
 }
 
-// nextAgentName is what a created agent is called when the caller named none: "Researcher 3"
-// for the third agent of the experiment, which is what a person reads in every list in place of
-// a generated id. Two agents added at the same
-// moment, or one added after another left, may share a name; the id is what tells them apart.
-func (s *PlatformExperimentsService) nextAgentName(ctx context.Context, platformExpID string) (string, error) {
-	joined, err := s.store.ListSignups(ctx, platformExpID)
-	if err != nil {
-		return "", fmt.Errorf("platform_experiments.AddAgent: %w", err)
-	}
-	return fmt.Sprintf("Researcher %d", len(joined)+1), nil
-}
-
 func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID string, req AddAgentRequest, signup domain.AgentSignup) ([]domain.AgentSignup, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -171,18 +165,14 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	name := req.Name
-	if name == "" {
-		if name, err = s.nextAgentName(ctx, platformExpID); err != nil {
-			return nil, err
-		}
-	}
 	signup.AgentID = id
-	agent := &domain.Agent{ID: id, Name: name, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	agent := &domain.Agent{ID: id, Name: strings.TrimSpace(req.Name), PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 	err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
 	switch {
 	case errors.Is(err, db.ErrSignupClosed):
 		return nil, refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
+	case errors.Is(err, db.ErrAgentNameTaken):
+		return nil, agentNameTaken(agent.Name)
 	case errors.Is(err, db.ErrMaxAgentsReached):
 		return nil, maxAgentsReached(pe.MaxAgents)
 	case errors.Is(err, db.ErrMaxHostedReached):
@@ -304,6 +294,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present, those of role baseline apart. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
+			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
 			"hosted=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
 			"400 max_hosted_reached beyond max_hosted machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, the next is added in its place. " +

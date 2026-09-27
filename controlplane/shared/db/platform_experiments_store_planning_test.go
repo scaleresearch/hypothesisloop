@@ -228,7 +228,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
 		for i := 0; i < researchers; i++ {
-			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Researcher", PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
 			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
 		}

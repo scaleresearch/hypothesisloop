@@ -468,7 +468,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "Researcher "+string(rune('1'+i)) || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" {
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" {
 			t.Errorf("researcher %d: %+v signed up as %+v", i, agent, signup)
 		}
 	}

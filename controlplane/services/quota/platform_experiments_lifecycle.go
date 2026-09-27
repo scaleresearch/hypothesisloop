@@ -302,6 +302,13 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 	}
 
 	inserted, err := s.store.Signup(ctx, platformExpID, signup)
+	if errors.Is(err, db.ErrAgentNameTaken) {
+		agent, err := s.store.GetAgent(ctx, agentID)
+		if err != nil || agent == nil {
+			return fmt.Errorf("platform_experiments.Signup: read agent %s: %v", agentID, err)
+		}
+		return agentNameTaken(agent.Name)
+	}
 	if errors.Is(err, db.ErrMaxAgentsReached) {
 		return maxAgentsReached(pe.MaxAgents)
 	}

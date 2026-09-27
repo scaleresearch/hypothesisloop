@@ -482,3 +482,48 @@ func TestASignupKeepsWhoseCredentialAddedTheAgent(t *testing.T) {
 		t.Fatalf("a signup that names nobody: got = %+v, %v, want an unverified actor", before, err)
 	}
 }
+
+// A baseline agent and a researcher added after another left were both named "Researcher 2".
+func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	pes := NewPlatformExperimentsStore(pool)
+	add := func(role domain.SignupRole, name string) (*domain.Agent, error) {
+		t.Helper()
+		id, err := domain.NewAgentID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := &domain.Agent{ID: id, Name: name, PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+		return agent, pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{AgentID: id, Role: role, Flavor: "generalist", Model: "model-1"})
+	}
+	want := func(role domain.SignupRole, name string) *domain.Agent {
+		t.Helper()
+		agent, err := add(role, "")
+		if err != nil || agent.Name != name {
+			t.Fatalf("an agent of role %s: got = %q, %v, want %q", role, agent.Name, err, name)
+		}
+		return agent
+	}
+	first := want(domain.SignupRoleCompetitor, "Researcher 1")
+	want(domain.SignupRoleBaseline, "Baseline 1")
+	want(domain.SignupRoleCompetitor, "Researcher 2")
+	want(domain.SignupRoleReviewer, "Reviewer 1")
+
+	if err := pes.RemoveAgent(ctx, pe, first.ID, nil); err != nil {
+		t.Fatalf("remove: got = %v, want = nil", err)
+	}
+	want(domain.SignupRoleCompetitor, "Researcher 1")
+	want(domain.SignupRoleCompetitor, "Researcher 3")
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: first.ID, Role: domain.SignupRoleCompetitor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
+		t.Fatalf("the removed Researcher 1 joining beside the new one: got = %v, %v, want ErrAgentNameTaken", inserted, err)
+	}
+	if _, err := add(domain.SignupRoleCompetitor, "Baseline 1"); !errors.Is(err, ErrAgentNameTaken) {
+		t.Fatalf("a stated name another agent carries: got = %v, want ErrAgentNameTaken", err)
+	}
+	if agent, err := add(domain.SignupRoleCompetitor, "ablation"); err != nil || agent.Name != "ablation" {
+		t.Fatalf("a stated name nobody carries: got = %q, %v, want it kept", agent.Name, err)
+	}
+}
