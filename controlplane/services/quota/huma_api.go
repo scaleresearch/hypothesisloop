@@ -165,7 +165,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
 			"422 github_not_connected when the org has connected no GitHub account, 422 repository_not_created when the installation has not granted the App the creation of repositories " +
 			"(its owner grants it, or the request names a repository), 409 repository_not_created when the name is taken. Nothing is created without its repository. " +
-			"Only a deployment with no GitHub App has platform experiments without one: there agents start in an empty directory and the platform keeps the code each pushes, one git bundle per commit, which is what a job's code_ref then names. With repository, " +
+			"On a deployment whose git host is plain the platform creates none and reads no experiment file: repository is a name under the host's root, created there beforehand, " +
+			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. With repository on GitHub, " +
 			"and repository_url in the answer is where from. An installation of the platform's GitHub App that the org connected must cover it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +

@@ -119,31 +119,3 @@ func TestAStoreThatRefusesASessionIsAnError(t *testing.T) {
 		t.Fatalf("get with a key the store refuses: %v", err)
 	}
 }
-
-func TestCodeIsKeptUnderItsAgentsOwnPrefixByCommit(t *testing.T) {
-	client, objects := bucketServer(t)
-	ctx := context.Background()
-	sha := strings.Repeat("ab", 20)
-	if err := client.PutCode(ctx, "pe-1", "ag-1", sha, []byte("a bundle")); err != nil {
-		t.Fatal(err)
-	}
-	// Under the agent's prefix, which the per-agent ceiling measures and the experiment's
-	// deletion takes with it.
-	if _, stored := objects["/bucket/"+AgentPrefix("pe-1", "ag-1")+"code/"+sha+".bundle"]; !stored {
-		t.Fatalf("stored under %v", objects)
-	}
-	if got, err := client.GetCode(ctx, "pe-1", "ag-1", sha, 1<<20); err != nil || string(got) != "a bundle" {
-		t.Fatalf("read back %q, %v", got, err)
-	}
-	if _, err := client.GetCode(ctx, "pe-1", "ag-2", sha, 1<<20); !errors.Is(err, ErrNoCode) {
-		t.Fatalf("another agent's place: %v, want ErrNoCode", err)
-	}
-	for _, bad := range []string{"", "main", strings.Repeat("AB", 20), sha + "/../x", sha[:39]} {
-		if err := client.PutCode(ctx, "pe-1", "ag-1", bad, []byte("x")); err == nil {
-			t.Errorf("a commit id of %q was accepted", bad)
-		}
-	}
-	if err := client.PutCode(ctx, "pe-1", "../ag-2", sha, []byte("x")); err == nil {
-		t.Error("an agent id that is a path was accepted")
-	}
-}

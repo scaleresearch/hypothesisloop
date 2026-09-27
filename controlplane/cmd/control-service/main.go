@@ -278,7 +278,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	quota.RegisterShareHuma(doc, db.NewPlatformExperimentsStore(pool), logger)
 	quota.RegisterDataUsageHuma(doc, dataUsageHandler)
 	quota.RegisterSessionsHuma(doc, dataStore, logger)
-	quota.RegisterCodeHuma(doc, dataStore, peSvc, logger)
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
 	}

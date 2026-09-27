@@ -296,8 +296,6 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/data-key", request: "/platform-experiments/<pe>/data-key", body: `{"agent_id":"<agent>"}`, rule: spendsAs(owned(agentAudience, reached))},
 	{method: "PUT", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", body: `session`, rule: ownSession(agentAudience, "agent")},
 	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", rule: ownSession(agentAudience, "agent"), sharedRead: true},
-	{method: "PUT", path: "/platform-experiments/{id}/agents/{agent_id}/code/{sha}", request: "/platform-experiments/<pe>/agents/<agent>/code/0123456789abcdef0123456789abcdef01234567", body: `bundle`, rule: spendsAs(owned(agentAudience, reached))},
-	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/code/{sha}", request: "/platform-experiments/<pe>/agents/<agent>/code/0123456789abcdef0123456789abcdef01234567", rule: scoped(jobAudience, reached), sharedRead: true},
 	{method: "PUT", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", body: `session`, rule: ownSession(coordinatorAudience, "coordinator")},
 	{method: "GET", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", rule: ownSession(coordinatorAudience, "coordinator"), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", body: `{"agent_id":"<agent>"}`, rule: scoped(coordinatorAudience, reached)},

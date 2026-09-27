@@ -277,7 +277,6 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"The answer is agents, a list holding that one agent. " +
 			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut. " +
-			"In a platform experiment that names no repository it starts in an empty directory and the platform keeps the code it pushes (hl code push). " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
