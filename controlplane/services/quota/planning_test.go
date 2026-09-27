@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -461,6 +462,7 @@ func TestAProposalIsStoredWithoutTheWhitespaceAroundItsTexts(t *testing.T) {
 		})
 		experiment := body["experiment"].(map[string]any)
 		experiment["name"], experiment["description"] = name, "Train it.\nBASELINE config: constant lr\n"
+		experiment["metrics"] = []map[string]any{{"key": "val_loss\n", "direction": "minimize\n"}}
 		return body
 	}
 	store := draftWithPlanner()
@@ -476,8 +478,9 @@ func TestAProposalIsStoredWithoutTheWhitespaceAroundItsTexts(t *testing.T) {
 	if err := errors.Join(json.Unmarshal(store.created[0].Proposal, &stored), json.Unmarshal(stored.Experiment, &experiment)); err != nil {
 		t.Fatalf("stored %s: %v", store.created[0].Proposal, err)
 	}
-	if experiment.Name != "Cosine or constant" || experiment.Description != "Train it.\nBASELINE config: constant lr" || len(experiment.Metrics) != 1 {
-		t.Errorf("stored experiment %s, want its name and description trimmed and the rest kept", stored.Experiment)
+	if experiment.Name != "Cosine or constant" || experiment.Description != "Train it.\nBASELINE config: constant lr" ||
+		!reflect.DeepEqual(experiment.Metrics, []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}) {
+		t.Errorf("stored experiment %s, want every text of it trimmed", stored.Experiment)
 	}
 	if stored.MetricReason != "The goal itself." || stored.Measurement != "bench.py scores a held-out split." || stored.SizingReason != "An estimate." ||
 		stored.OutOfScope[0] != "Other models." || stored.Risks[0] != "Noise." || stored.Questions[0] != "Is 4 hours enough?" {

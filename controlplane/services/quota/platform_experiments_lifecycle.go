@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -48,17 +49,38 @@ func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentR
 	return spec
 }
 
+// trimTexts returns spec with every text of it without the whitespace around it, which a value
+// written as a YAML block ends in. The description alone is more than one line: any other text
+// still holding a line break is refused, by its field.
+func trimTexts(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+	spec.Metrics = slices.Clone(spec.Metrics)
+	spec.Description = strings.TrimSpace(spec.Description)
+	lines := map[string]*string{"name": &spec.Name, "default_quota_tier": &spec.DefaultQuotaTier}
+	for i := range spec.Metrics {
+		metric := &spec.Metrics[i]
+		lines[fmt.Sprintf("metrics[%d].key", i)] = &metric.Key
+		lines[fmt.Sprintf("metrics[%d].direction", i)] = &metric.Direction
+		lines[fmt.Sprintf("metrics[%d].role", i)] = (*string)(&metric.Role)
+	}
+	for _, field := range slices.Sorted(maps.Keys(lines)) {
+		*lines[field] = strings.TrimSpace(*lines[field])
+		if strings.ContainsAny(*lines[field], "\r\n") {
+			return spec, refuseUpdate(422, "invalid_experiment", "%s is one line and holds a line break: state it on a single line", field)
+		}
+	}
+	return spec, nil
+}
+
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them.
 func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	spec = s.withSettings(spec)
-	spec.Name, spec.Description = strings.TrimSpace(spec.Name), strings.TrimSpace(spec.Description)
+	spec, err := trimTexts(s.withSettings(spec))
+	if err != nil {
+		return spec, err
+	}
 	if spec.Name == "" || spec.Description == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
-	}
-	if strings.ContainsAny(spec.Name, "\r\n") {
-		return spec, refuseUpdate(422, "invalid_experiment", "name is one line and holds a line break: state it on a single line")
 	}
 	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
 		return spec, refuseUpdate(422, "invalid_metrics", "metrics: %s", err)
@@ -238,7 +260,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if err != nil {
 		return nil, err
 	}
-	patched.Name, patched.Description = checked.Name, checked.Description
+	patched.Name, patched.Description, patched.Metrics = checked.Name, checked.Description, checked.Metrics
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
 		baseline, err := s.baseline(ctx, &patched, patched.BaselineJobID)
 		if err != nil {

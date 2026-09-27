@@ -85,7 +85,7 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	if experiment, err = h.svc.validate(experiment); err != nil {
 		return experiment, err
 	}
-	if p.Experiment, err = withNameAndDescription(p.Experiment, experiment.Name, experiment.Description); err != nil {
+	if p.Experiment, err = withTexts(p.Experiment, experiment); err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
 	if err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType); err != nil {
@@ -116,16 +116,19 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	return experiment, nil
 }
 
-// withNameAndDescription is the experiment of a proposal with the name and the description
-// validate answered, so that the proposal a person reads states what accepting it stores.
-func withNameAndDescription(experiment json.RawMessage, name, description string) (json.RawMessage, error) {
+// withTexts is the experiment of a proposal with its texts as validate answered them, so that
+// the proposal a person reads states what accepting it stores.
+func withTexts(experiment json.RawMessage, checked CreatePlatformExperimentRequest) (json.RawMessage, error) {
 	var fields map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(experiment))
 	decoder.UseNumber()
 	if err := decoder.Decode(&fields); err != nil {
 		return nil, fmt.Errorf("it is not a JSON object: %w", err)
 	}
-	fields["name"], fields["description"] = name, description
+	fields["name"], fields["description"], fields["metrics"] = checked.Name, checked.Description, checked.Metrics
+	if _, stated := fields["default_quota_tier"]; stated {
+		fields["default_quota_tier"] = checked.DefaultQuotaTier
+	}
 	return json.Marshal(fields)
 }
 

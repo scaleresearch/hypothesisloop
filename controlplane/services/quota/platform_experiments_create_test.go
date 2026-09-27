@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,9 +53,21 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		t.Errorf("settings applied: report interval %d, stages %v, tier %q, duration %v", spec.ReportIntervalSeconds, spec.Stages, spec.DefaultQuotaTier, spec.DurationHours)
 	}
 	block := valid()
-	block.Name, block.Description = " exp\n", "\nthe brief\nof two lines\n"
-	if spec, err := svc.validate(block); err != nil || spec.Name != "exp" || spec.Description != "the brief\nof two lines" {
-		t.Errorf("a name and a description written as blocks: got %q and %q, %v, want both without the whitespace around them", spec.Name, spec.Description, err)
+	block.Name, block.Description, block.DefaultQuotaTier = " exp\n", "\nthe brief\nof two lines\n", "burst_only\n"
+	block.Metrics = []domain.MetricDefinition{{Key: " loss\n", Direction: "minimize\n", Role: "ranking\n"}}
+	spec, err = svc.validate(block)
+	if err != nil || spec.Name != "exp" || spec.Description != "the brief\nof two lines" || spec.DefaultQuotaTier != "burst_only" ||
+		!reflect.DeepEqual(spec.Metrics, []domain.MetricDefinition{{Key: "loss", Direction: "minimize", Role: "ranking"}}) {
+		t.Errorf("texts written as blocks: got %+v, %v, want each without the whitespace around it", spec, err)
+	}
+	if block.Metrics[0].Key != " loss\n" {
+		t.Errorf("validate changed the metrics it was handed: %+v", block.Metrics)
+	}
+	twoLines := valid()
+	twoLines.Metrics[0].Key = "loss\nval"
+	var refused *api.Refusal
+	if _, err := svc.validate(twoLines); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
+		t.Errorf("a metric key of two lines: got %v, want 422 naming metrics[0].key", err)
 	}
 	for name, c := range map[string]struct {
 		mutate func(*CreatePlatformExperimentRequest)
