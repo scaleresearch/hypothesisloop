@@ -351,7 +351,6 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 		{[]string{"platform-experiments", "propose", "--pe", "pe-1"}, "usage: hl platform-experiments propose [--platform-experiment PE]"},
 		{[]string{"hypothesis", "get", "--bogus", "h-1"}, "usage: hl hypothesis get ID"},
 		{[]string{"hypothesis", "status", "h-1", "h-2", "--status", "open"}, "usage: hl hypothesis status ID"},
-		{[]string{"job", "summary", "job-1"}, "usage: hl job summary ID --text T"},
 		{[]string{"quota", "--bogus"}, "usage: hl quota"},
 		{[]string{"job", "list", "--platform-experiment-id", "pe-1"}, "usage: hl job list [--agent A]"},
 	} {
@@ -729,6 +728,7 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 		{[]string{"hypothesis", "comments", "--help"}, 2, "hl hypothesis get ID"},
 		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
 		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
+		{[]string{"job", "summary", "job-1"}, 2, "hl job status job-1 prints it as summary"},
 		{[]string{"results"}, 0, "no results yet on val_accuracy"},
 		{[]string{"capacity", "--platform-experiment", "pe-1"}, 2, "hl: capacity: takes no --platform-experiment"},
 		{[]string{"hypothesis", "get", "h-1", "--platform-experiment", "pe-1"}, 2, "hl: hypothesis get: takes no --platform-experiment"},

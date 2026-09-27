@@ -22,7 +22,7 @@ var jobCommands = []subcommand{
 	{"list", "jobs, newest first, one brief line each with its metrics", jobList},
 	{"status", "a job's whole record", jobStatus},
 	{"metrics", "per metric: last value, min, max and points reported", jobMetrics},
-	{"summary", "file the write-up of a finished job", jobSummary},
+	{"summary", "file the write-up of a finished job; hl job status shows it", jobSummary},
 	{"logs", "the last log lines its cluster reported", jobLogs},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", args, stdout, stderr)
@@ -499,7 +499,8 @@ comment that repeats it. While a COMPLETED job of yours has none, your queued jo
 		return parseExit(err)
 	}
 	if text == "" {
-		return parseExit(misuse(fs, "--text is required"))
+		fmt.Fprintf(stderr, "hl: job summary: --text T files a summary; to read one, hl job status %s prints it as summary\n", id)
+		return 2
 	}
 	var out struct {
 		Status     string `json:"status"`
