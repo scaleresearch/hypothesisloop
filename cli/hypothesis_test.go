@@ -480,6 +480,27 @@ func TestHypothesisQueryErrorSurfacesServerMessage(t *testing.T) {
 	}
 }
 
+// MATCH (n) RETURN n was refused for reading other experiments' nodes, and the retry that passed
+// --param pe= for $pe being bound already: six refusals before one query ran. The refusal and
+// the help both carry one query that works as it stands.
+func TestARefusedHypothesisQueryPrintsAQueryThatWorks(t *testing.T) {
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"registry.QueryGraph: invalid query: $pe is already bound to the platform experiment"}`))
+	}))
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"hypothesis", "query", "MATCH (n) WHERE n.platform_experiment_id = $pe RETURN n", "--param", "pe=pe-1", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "already bound") || !strings.Contains(stderr.String(), "pass no --param for it") || !strings.Contains(stderr.String(), queryExample) {
+		t.Errorf("a refused query: exit code = %d, stderr = %s, want the platform's reason and the working example", code, stderr.String())
+	}
+
+	stderr.Reset()
+	run([]string{"hypothesis", "query", "--help"}, &stdout, &stderr)
+	if !strings.Contains(stderr.String(), "$pe is bound for you") || !strings.Contains(stderr.String(), queryExample) {
+		t.Errorf("hl hypothesis query --help lacks the working example:\n%s", stderr.String())
+	}
+}
+
 func TestHypothesisExampleFileSubmits(t *testing.T) {
 	got := recordingServer(t, func(n int, r recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
 	var stdout, stderr bytes.Buffer

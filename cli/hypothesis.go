@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -676,6 +677,8 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	return 0
 }
 
+const queryExample = `hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.status, h.text'`
+
 func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis query", `usage: hl hypothesis query 'CYPHER' [--param k=v ...]
    or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
@@ -701,6 +704,10 @@ $evidence[h.id]: counts {jobs, each lowercase job status, findings, comments} an
 last_finding_at, or null. Text: hl hypothesis get ID.
 
 Examples:
+
+  every hypothesis of the platform experiment. $pe is bound for you: use it in the query and
+  pass no --param for it:
+  `+queryExample+`
 
   text search on plain words, best matches first:
   hl hypothesis query 'CALL text_search.search_all("hypothesis_text", "learning rate warmup")
@@ -761,7 +768,12 @@ Examples:
 		Truncated bool                `json:"truncated"`
 	}
 	if err := c.Do("POST", "/hypotheses/query", map[string]any{"platform_experiment_id": *pe, "cypher": cypher, "params": bound}, &out); err != nil {
-		return fail(stderr, err)
+		code := fail(stderr, err)
+		var refused *apiclient.HTTPError
+		if errors.As(err, &refused) && refused.Status == http.StatusBadRequest {
+			fmt.Fprintf(stderr, "hl: hypothesis query: $pe is bound for you to platform experiment %s: use it in the query and pass no --param for it. A query that works:\n  %s\n", *pe, queryExample)
+		}
+		return code
 	}
 	for i, row := range out.Rows {
 		if len(row) != len(out.Columns) {
