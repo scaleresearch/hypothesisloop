@@ -383,6 +383,7 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 
 // ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
 // asked, nil when the platform closes it at its end time. One already closed keeps what it has.
+// A draft's planner loses its planning allowance in the same transaction.
 func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor) error {
 	reason, actor := "", domain.Actor{}
 	if by != nil {
@@ -399,8 +400,19 @@ SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
                         ELSE '` + string(domain.CloseEndTimeReached) + `' END,
     closed_by_kind = $3, closed_by_id = $4
 WHERE id = $1 AND status <> 'closed'`
-	if _, err := s.pool.pool.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID); err != nil {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Close: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID); err != nil {
 		return fmt.Errorf("platform_experiments_store.Close: %w", err)
+	}
+	if err := endPlannerAllowance(ctx, tx, id); err != nil {
+		return fmt.Errorf("platform_experiments_store.Close: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.Close: commit: %w", err)
 	}
 	return nil
 }

@@ -213,15 +213,23 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
 		return err
 	}
-	// The planner's work ended here, and with it its planning allowance.
-	if _, err := tx.Exec(ctx, `
-DELETE FROM agent_quotas q USING experiment_signups s
-WHERE q.platform_experiment_id = $1 AND s.platform_experiment_id = q.platform_experiment_id
-  AND s.agent_id = q.agent_id AND s.flavor = '`+domain.PlannerFlavor+`'`, pe.ID); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: end the planner's allowance: %w", err)
+	if err := endPlannerAllowance(ctx, tx, pe.ID); err != nil {
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: commit: %w", err)
+	}
+	return nil
+}
+
+// endPlannerAllowance deletes the quota a draft's planner held, the planning allowance. A
+// planner's work ends when its draft is accepted or closed, and its allowance with it.
+func endPlannerAllowance(ctx context.Context, tx pgx.Tx, platformExpID string) error {
+	if _, err := tx.Exec(ctx, `
+DELETE FROM agent_quotas q USING experiment_signups s
+WHERE q.platform_experiment_id = $1 AND s.platform_experiment_id = q.platform_experiment_id
+  AND s.agent_id = q.agent_id AND s.flavor = '`+domain.PlannerFlavor+`'`, platformExpID); err != nil {
+		return fmt.Errorf("end the planner's allowance: %w", err)
 	}
 	return nil
 }

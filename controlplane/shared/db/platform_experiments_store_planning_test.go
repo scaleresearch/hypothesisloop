@@ -396,3 +396,20 @@ func TestAnOrgsDraftsAreBoundedAtOnceAndPerDay(t *testing.T) {
 		t.Fatalf("a draft once one of the day's is no draft: %v", err)
 	}
 }
+
+// A draft that is never accepted ends by being closed, whoever closes it, and its planner's
+// allowance ends there as it does on accept.
+func TestClosingADraftEndsItsPlannersAllowance(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	for name, by := range map[string]*domain.Actor{"at its end time": nil, "by request": {Kind: domain.ActorUser, ID: "u-planning"}} {
+		pe, planner := createTestDraft(t, pool, "launcher-"+uuid.New().String()[:8])
+		if err := pes.ClosePlatformExperiment(ctx, pe, by); err != nil {
+			t.Fatalf("%s: close: %v", name, err)
+		}
+		if quota, err := pes.GetAgentQuota(ctx, planner, pe); err != nil || quota != nil {
+			t.Errorf("%s: the planner's quota after the close = %+v, %v, want none", name, quota, err)
+		}
+	}
+}
