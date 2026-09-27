@@ -384,13 +384,21 @@ node within its cores and memory. A rented cluster takes jobs on its accelerator
 
 `job.image` is one of two things: the name of a job image exactly as `hl capacity` shows it
 (`job_image`, with what it carries; a type's line lists the ones that suit it as `job_images`),
-or the full registry address of an image of your own. Anything else is refused at submit. Every
-job names one, on CPU, GPU and chip clusters alike; where `hl capacity` shows a cluster with
-`only_job_image`, that cluster runs that image and no other, so a job meant for it names that
-one. The platform's job images come without a virtualenv, so a plain `uv pip install` stops
+or the full registry address of an image of your own, host first
+(`docker.io/library/python:3.13-slim`). Anything else, a bare `python:3.13` included, is refused
+at submit with 422 `unknown_job_image`. Every job names one, on CPU, GPU and chip clusters
+alike; where `hl capacity` shows a cluster with `only_job_image`, that cluster runs that image
+and no other, so a job meant for it names that one. A job that no cluster could run with the
+image it names, or with none, is refused at submit with 422 `no_cluster_for_image`, and a
+submit after the experiment's end with `experiment_closed`. The platform's job images come without a virtualenv, so a plain `uv pip install` stops
 with no environment to install into: a job installs with `uv pip install --system PACKAGE`,
 which works in each of them. `uv run --with PACKAGE script.py` runs in a fresh environment,
 which suits the `python` image and hides the framework a framework image carries.
+
+A job is read by one value per declared metric (`metrics` in `hl job list` and
+`hl job status`): a ranking metric counts at its best value in its direction across what the job
+reported, a constraint and an attribute at their last. So a ranking metric is reported as a
+result, never as a running timer.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 

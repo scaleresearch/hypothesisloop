@@ -14,8 +14,10 @@ job:
   # REQUIRED on every cluster, CPU, GPU or chip. The name
   # of a job image exactly as `hl capacity` shows it (job_image; the line of the type below
   # lists the ones that suit it as job_images, `python` for work on cores), or the full registry
-  # address of an image of your own. Anything else is refused at submit. Where `hl capacity`
-  # shows the cluster with only_job_image, name that image.
+  # address of an image of your own, host first (docker.io/library/python:3.13-slim). Anything
+  # else is refused at submit (unknown_job_image), and so is a job no cluster could run with
+  # its image (no_cluster_for_image). Where `hl capacity` shows the cluster with
+  # only_job_image, name that image.
   image: REPLACE-WITH-A-JOB-IMAGE-NAME-HL-CAPACITY-LISTS
   # hl-clone checks out the commit the job was submitted from and prints its directory. The
   # platform's job images have no virtualenv: install what a trial needs ahead of its command

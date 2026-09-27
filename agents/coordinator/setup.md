@@ -126,12 +126,14 @@ silently improvise.
    control-plane containers as well, so one value serves both.
 4. **Job image.** Every job names its image, on CPU, GPU and chip clusters alike, and
    `job.image` is one of two things: the name of a job image exactly as `hl capacity` shows it,
-   or the full registry address of an image of the experiment's own. Anything else is refused
-   at submit. `hl capacity` ends with the job images the deployment offers (`job_image` the
+   or the full registry address of an image of the experiment's own, host first
+   (`docker.io/library/python:3.13-slim`). Anything else is refused at submit with 422
+   `unknown_job_image`. `hl capacity` ends with the job images the deployment offers (`job_image` the
    name, `carries` what is installed), names on each type's line the ones that suit it
    (`job_images`), and marks a cluster that runs one image and no other with `only_job_image`:
    a job meant for that cluster names that image, and one that names another is never placed
-   there and stays QUEUED with `not_admitted_reason: no_cluster_for_image`. The platform's job
+   there. A job that no cluster could run with the image it names, or with none, is refused at
+   submit with 422 `no_cluster_for_image`. The platform's job
    images come without a virtualenv, so a plain `uv pip install` stops with no environment to
    install into: a job installs with `uv pip install --system PACKAGE`, which works in each of
    them. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
@@ -230,6 +232,9 @@ agent and declare its job, as the baseline item below says, and supervise with `
   different reference), the job must set a non-`"raw"` `metric_basis` on that value — never
   leave it as `"raw"` and rely on someone noticing the number looks off. A wrongly-"raw" value is
   how a rescaled metric quietly wins a ranking it actually lost.
+- A job is read by one value per metric: a ranking metric counts at its best value in its
+  direction across what the job reported, a constraint and an attribute at their last. So the
+  harness reports a ranking metric as a result, never as a running timer.
 - `report_interval_seconds` = the cadence the harness actually reports at.
 - `stages` (optional; omit = the control plane config's `stages.default`, 40%/75%-cut then 60%/0%): `length_pct` sums
   to 100, last stage's `evict_pct` = 0, `max_job_hours` caps a stage's job length (0/absent =
