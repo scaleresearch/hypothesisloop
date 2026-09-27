@@ -133,6 +133,15 @@ class BriefingTest(unittest.TestCase):
         flat = " ".join(self.render().split())
         self.assertIn("One hypothesis with its findings and comments: `hl hypothesis get ID`. A job's summary is in `hl job status ID`", flat)
 
+    # Every graph of the audited runs was three root hypotheses with nothing below them, two
+    # of them varying the same knobs, and no summary said how the best result was reached.
+    def test_it_checks_the_shape_of_the_graph_and_its_last_summary_names_the_path_to_the_best_finding(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("the objective's children are distinct approaches, each one claim, a refinement or a combination "
+                      "sits under what it refines, and the best result is a node", flat)
+        self.assertIn("Roots that overlap, or stay flat while one holds a whole sweep, you name in the brief", flat)
+        self.assertIn("and the path from the objective to the best finding, hypothesis by hypothesis", flat)
+
     def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
         prompt = self.render()
         self.assertIn("hl platform-experiments summary --file", prompt)
