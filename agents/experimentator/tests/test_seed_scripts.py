@@ -145,6 +145,9 @@ class SampleJobFilesTest(unittest.TestCase):
         dockerfile = (REPO / "agents/experimentator/Dockerfile.base").read_text()
         shipped = "controlplane/settings/examples/experiment-submission.yaml"
         self.assertIn(f"COPY {shipped} $WORKLOAD_SAMPLES/", dockerfile)
+        self.assertIn("! -name seed ! -name .hypothesisloop -exec rm -rf {} +", dockerfile)
+        self.assertIn("-path '*/.hypothesisloop/*' ! -name job.yaml -delete", dockerfile)
+        self.assertTrue((EXPERIMENTS / "template/seed/metrics.py").is_file())
         self.assertTrue((REPO / shipped).is_file())
         for path in samples:
             with self.subTest(path=path.name):

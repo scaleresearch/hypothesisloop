@@ -24,12 +24,14 @@ COPY cli/ cli/
 COPY runtime/shared/exitline/ runtime/shared/exitline/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
-# Only each experiment's seed/ and hl-clone reach the agent: experiment.md carries coordinator
-# notes agents must not read.
+# Only each experiment's seed/, its job spec and hl-clone reach the agent: experiment.md carries
+# coordinator notes agents must not read. An experiment that holds neither leaves no directory.
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS samples
 COPY agents/coordinator/experiments /samples
-RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed -exec rm -rf {} + \
-	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete
+RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed ! -name .hypothesisloop -exec rm -rf {} + \
+	&& find /samples -mindepth 3 -maxdepth 3 -path '*/.hypothesisloop/*' ! -name job.yaml -delete \
+	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete \
+	&& find /samples -type d -empty -delete
 
 FROM python:3.13-slim
 
@@ -64,8 +66,9 @@ RUN git config --system credential.helper '!hl git-credential' \
 RUN useradd --home-dir /agent --shell /bin/bash agent
 
 # WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every
-# experiment's seed/ (not tests/workloads/, which is test-only fixture code) plus hl-clone. Read,
-# copy, adapt into its own repo. Deliberately not experiment-specific.
+# experiment's seed/ (not tests/workloads/, which is test-only fixture code) with the
+# .hypothesisloop/job.yaml that runs it, plus hl-clone. Read, copy, adapt into its own repo.
+# Deliberately not experiment-specific.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
 COPY --from=samples /samples $WORKLOAD_SAMPLES
 # The job DSL reference the samples and hl job submit --help name.
