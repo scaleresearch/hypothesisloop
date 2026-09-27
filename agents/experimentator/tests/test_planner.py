@@ -47,7 +47,7 @@ class PlannerPromptTest(unittest.TestCase):
     # nothing, so its briefing is half of what it was and lists no command that runs something.
     def test_the_planner_defines_the_experiment_and_runs_nothing(self):
         prompt, flat = render(planner())
-        self.assertIn("You define the experiment and run nothing: no trial, no measurement, no install, no clone, no job, no hypothesis", flat)
+        self.assertIn("You define the experiment and run nothing: no trial, no measurement, no install, no job, no hypothesis", flat)
         # One measured scikit-learn on its own machine for 17 minutes, through three command
         # timeouts, to learn whether the person's gate could be reached, and declined on that.
         self.assertIn("Whether a gate can be reached is its to measure: state a doubt in `risks` and plan what the person asked", flat)
@@ -57,17 +57,27 @@ class PlannerPromptTest(unittest.TestCase):
         # the job: three baseline jobs went to those two lines.
         self.assertIn("a name the type's line in `hl capacity` lists in `job_images`, spelled as there", flat)
         self.assertIn("prescribe no install command: you have run none", flat)
-        for absent in ("git clone", "hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
+        for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
         self.assertLess(len(prompt.encode()), 5_500)
         self.assertEqual(listed(planner()), [[], ["platform-experiments", "propose"], ["platform-experiments", "decline"]])
+
+    # Told not to clone, a planner invented override flags and a gate for a harness the
+    # repository held, and asked for 32 core-hours where its README said a trial takes 90 s.
+    def test_the_planner_reads_the_repository_and_sizes_from_what_it_holds(self):
+        flat = render(planner())[1]
+        self.assertIn("Read the repository too: `git clone --depth 1 https://github.com/acme/model.git .` (`--branch B` when the goal names one), "
+                      "its README and `.hypothesisloop/`", flat)
+        self.assertIn("A harness it holds for the goal is the experiment: state its files, levers, metric keys, gate, control and job spec as they are, "
+                      "and invent none", flat)
+        self.assertIn("Budget = the trial length the repository states, else one you assume, x", flat)
 
     # Nothing has run when a planner proposes, so what it states of the baseline and of the cost
     # is what is not known yet, said as such.
     def test_the_proposal_states_an_unmeasured_baseline_and_an_estimated_size(self):
         flat = render(planner())[1]
         self.assertIn("`config:` the exact control configuration, and `measured: not yet established`", flat)
-        self.assertIn("`sizing_reason`, worded as the estimate it is: nothing has run; the trial length is assumed", flat)
+        self.assertIn("`sizing_reason`, worded as the estimate it is: nothing has run; the trial length is read or assumed", flat)
         self.assertIn("the budget is a cap", flat)
         self.assertIn("the run does not start if the budget cannot cover one trial for each researcher", flat)
         self.assertIn("`accelerator_type`: one line of `hl capacity` with available > 0, copied verbatim", flat)
