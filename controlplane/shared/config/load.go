@@ -321,9 +321,7 @@ func (c *Config) build() error {
 	}
 	switch g := c.Git; g.Provider {
 	case "":
-		if g != (GitConfig{}) {
-			return fmt.Errorf("git provider is required once the section is set: %s or %s", GitProviderGitHub, GitProviderPlain)
-		}
+		return fmt.Errorf("git provider is required, the git host platform experiments keep their code on: %s or %s", GitProviderGitHub, GitProviderPlain)
 	case GitProviderGitHub:
 		if !c.GitHub.Configured() || g != (GitConfig{Provider: GitProviderGitHub}) {
 			return fmt.Errorf("git provider github is the GitHub App of the github section: that section is required, and base_url, allow_http, username and password are for provider plain")

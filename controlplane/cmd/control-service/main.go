@@ -131,23 +131,25 @@ func main() {
 	}
 	gate := apiGate{authenticator: authenticator, access: auth.NewAccess(directory)}
 
-	// A deployment with no GitHub App runs with no client for it: connecting GitHub and minting a
-	// git credential answer that there is none.
+	// The git host is one of two. On a plain one there is no GitHub App and no client for it:
+	// connecting GitHub answers that there is none.
+	accountsStore := db.NewAccountsStore(pool)
 	var githubApp accounts.GitHubApp
-	if pcfg.GitHub.Configured() {
+	var gitHost githost.Provider
+	switch pcfg.Git.Provider {
+	case hypothesisloopcfg.GitProviderGitHub:
 		client, err := github.New(pcfg.GitHub)
 		if err != nil {
 			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
 		}
-		githubApp = client
-	}
-	accountsStore := db.NewAccountsStore(pool)
-	var gitHost githost.Provider = accounts.NewGitHubHost(accountsStore, githubApp, logger)
-	if pcfg.Git.Provider == hypothesisloopcfg.GitProviderPlain {
+		githubApp, gitHost = client, accounts.NewGitHubHost(accountsStore, client, logger)
+	case hypothesisloopcfg.GitProviderPlain:
 		gitHost, err = githost.NewPlain(pcfg.Git.BaseURL, pcfg.Git.Username, pcfg.Git.Password)
 		if err != nil {
 			logger.Fatal("control-service: configure the git host", zap.Error(err))
 		}
+	default:
+		logger.Fatal("control-service: the settings name no git host", zap.String("provider", pcfg.Git.Provider))
 	}
 	repos := accounts.NewRepositories(accountsStore, db.NewPlatformExperimentsStore(pool), githubApp, gitHost, gate.access, logger)
 

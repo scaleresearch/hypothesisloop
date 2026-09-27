@@ -17,8 +17,14 @@ const signingSecretEnv = "HYPOTHESISLOOP_SIGNING_SECRET"
 // environment as every deployment supplies it.
 var committedConfig = filepath.Join("..", "..", "settings", "hypothesisloop.yaml")
 
-// productionConfig is the committed settings file as a deployment renders it.
+// productionConfig is the committed settings file as a deployment renders it: with its git host.
 func productionConfig(t *testing.T) string {
+	t.Helper()
+	return withoutGitHost(t) + "\ngit:\n  provider: plain\n  base_url: https://git.example.invalid\n"
+}
+
+// withoutGitHost is the rendered settings file before the deployment's git host is added.
+func withoutGitHost(t *testing.T) string {
 	t.Helper()
 	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
 	b, err := os.ReadFile(committedConfig)
@@ -354,7 +360,7 @@ github:
 `
 
 func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
-	text := productionConfig(t) + githubSection
+	text := withoutGitHost(t) + githubSection + "git:\n  provider: github\n"
 	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "HYPOTHESISLOOP_GITHUB_APP_") {
 		t.Fatalf("Load with the App's secrets unset: got = %v, want it to name the missing variable", err)
 	}
@@ -387,18 +393,20 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		"a plain host over http that says so":      "\ngit:\n  provider: plain\n  base_url: http://git.example\n  allow_http: true\n",
 		"github with its App":                      githubSection + "git:\n  provider: github\n",
 	} {
-		if err := loadText(t, productionConfig(t)+section); err != nil {
+		if err := loadText(t, withoutGitHost(t)+section); err != nil {
 			t.Errorf("%s: got = %v, want it loaded", name, err)
 		}
 	}
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(productionConfig(t)+plain+credential), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(withoutGitHost(t)+plain+credential), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if cfg, err := Load(path); err != nil || cfg.Git != (GitConfig{Provider: GitProviderPlain, BaseURL: "https://git.example/experiments", Username: "platform", Password: "secret"}) {
 		t.Fatalf("Load: %v, want the plain host with the credential as the environment holds it", err)
 	}
 	for name, section := range map[string]string{
+		"no git section":                   "",
+		"a GitHub App and no git section":  githubSection,
 		"no provider":                      "\ngit:\n  base_url: https://git.example\n",
 		"a provider nobody wrote":          "\ngit:\n  provider: gitlab\n",
 		"github with no App":               "\ngit:\n  provider: github\n",
@@ -410,7 +418,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		"plain with a username alone":      plain + "  username: ${HL_TEST_GIT_USERNAME}\n",
 		"plain with a variable nobody set": plain + "  username: platform\n  password: ${HL_TEST_GIT_UNSET}\n",
 	} {
-		if err := loadText(t, productionConfig(t)+section); err == nil {
+		if err := loadText(t, withoutGitHost(t)+section); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
@@ -439,7 +447,7 @@ func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
 		if section == githubSection {
 			t.Fatalf("the test section has no line %q", line)
 		}
-		if err := loadText(t, productionConfig(t)+section); err == nil || !strings.Contains(err.Error(), "github") {
+		if err := loadText(t, withoutGitHost(t)+section+"git:\n  provider: github\n"); err == nil || !strings.Contains(err.Error(), "github") {
 			t.Errorf("Load without %q: got = %v, want a refusal naming github", strings.TrimSpace(line), err)
 		}
 	}

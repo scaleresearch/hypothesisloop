@@ -313,8 +313,8 @@ func (c *Config) OfferedJobImages() []domain.JobImage {
 	return images
 }
 
-// GitHubConfig is the GitHub App a project's repository is reached through. Left empty, the
-// deployment has no App and no repository can be attached. Set, all of it is required.
+// GitHubConfig is the GitHub App a project's repository is reached through, on a deployment whose
+// git host is GitHub. Set, all of it is required.
 type GitHubConfig struct {
 	AppID   int64  `yaml:"app_id"`
 	AppSlug string `yaml:"app_slug"`

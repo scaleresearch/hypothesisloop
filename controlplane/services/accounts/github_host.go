@@ -22,10 +22,9 @@ type GitHubHost struct {
 
 var _ githost.Provider = (*GitHubHost)(nil)
 
-// NewGitHubHost takes the App's client, or nil for a deployment that has no GitHub App.
 func NewGitHubHost(store InstallationStore, app GitHubApp, logger *zap.Logger) *GitHubHost {
-	if store == nil || logger == nil {
-		panic("accounts.NewGitHubHost: the store and a logger are required")
+	if store == nil || app == nil || logger == nil {
+		panic("accounts.NewGitHubHost: the store, the App's client and a logger are required")
 	}
 	return &GitHubHost{store: store, github: app, logger: logger}
 }
@@ -41,9 +40,6 @@ func (h *GitHubHost) token(ctx context.Context, projectID, repository string, ac
 	}
 	if project == nil {
 		return nil, notFound("project")
-	}
-	if h.github == nil {
-		return nil, errNoApp
 	}
 	if err := github.ValidRepository(repository); err != nil {
 		return nil, err
@@ -71,13 +67,9 @@ func (h *GitHubHost) Reachable(ctx context.Context, projectID, repository string
 
 // Create makes a private repository on the GitHub account named, one the org of the project
 // connected, or with none named on the only one it connected: with several, which one is the
-// request's to say. On a deployment that has no GitHub App it makes none and returns nothing:
-// there a platform experiment needs no repository.
+// request's to say.
 func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, description string) (string, error) {
 	const op = "create-repository"
-	if h.github == nil {
-		return "", nil
-	}
 	project, err := h.store.GetProject(ctx, projectID)
 	if err != nil {
 		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)

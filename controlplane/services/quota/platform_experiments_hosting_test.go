@@ -162,20 +162,6 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		t.Fatalf("nothing hosted and no launcher registered: got = %d %v, want 201", code, out)
 	}
 
-	// Without hosting, an experiment that names no repository is created.
-	store, create = hostingAPI(t, &fakeRepositories{})
-	if code, out := create(with(nil)); code != http.StatusCreated || len(store.created) != 1 {
-		t.Fatalf("nothing hosted and no repository: got = %d %v, want 201", code, out)
-	}
-
-	// A hosted coordinator needed a repository to clone. With none it starts in an empty
-	// directory, and the platform keeps the code the agents push.
-	store, create = hostingAPI(t, &fakeRepositories{})
-	if code, out := create(with(map[string]any{"coordinator_hosted": true})); code != http.StatusCreated || len(store.created) != 1 ||
-		store.created[0].Repository != "" || !store.created[0].CoordinatorHosted || out["repository_url"] != nil {
-		t.Fatalf("a hosted coordinator and no repository: got = %d %v, want it created with no repository", code, out)
-	}
-
 	store, create = hostingAPI(t, attached)
 	store.createErr = errors.New("the database is away")
 	if code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {

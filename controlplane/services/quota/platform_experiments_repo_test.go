@@ -78,9 +78,7 @@ type fakeRepositories struct {
 	refusal error
 	checked []string
 	asked   []string
-	// org is the GitHub account a repository is created on for an experiment that names none,
-	// empty for a deployment with no GitHub App. created holds each as "project name".
-	org        string
+	// created holds each repository made for an experiment that names none, as "project name".
 	created    []string
 	notCreated error
 }
@@ -89,14 +87,11 @@ func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _
 	if account != "" {
 		return account + "/" + name, nil
 	}
-	if f.org == "" {
-		return "", nil
-	}
 	if f.notCreated != nil {
 		return "", f.notCreated
 	}
 	f.created = append(f.created, projectID+" "+name)
-	return f.org + "/" + name, nil
+	return "acme/" + name, nil
 }
 
 const testRepository = "Acme/Model"
@@ -283,13 +278,12 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", both); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_length") {
 		t.Errorf("a duration and an end: got = %d %s, want 422 invalid_length", rec.Code, rec.Body)
 	}
-	if len(store.created) != 1 || len(repos.asked) != 0 || pe.Repository != "" || len(repos.created) != 0 {
-		t.Fatalf("created %d, repository read %v, want only the whole body created, no read and no repository", len(store.created), repos.asked)
+	if len(store.created) != 1 || len(repos.asked) != 0 || len(repos.created) != 1 {
+		t.Fatalf("created %d, repository read %v, made %v, want only the whole body created with its one repository and no read", len(store.created), repos.asked, repos.created)
 	}
 
-	// On a deployment with a GitHub App, one that names none gets its own on the org's account,
-	// and none is made for a body that is refused or stored when it cannot be made.
-	repos.org = "acme"
+	// One that names no repository gets its own on the org's account, and none is made for a
+	// body that is refused or stored when it cannot be made.
 	named := whole()
 	named["name"] = "LR warm-up: a sweep!"
 	rec := call("POST", "/platform-experiments", named)
@@ -297,7 +291,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	want := "acme/lr-warm-up-a-sweep-" + strings.TrimPrefix(out.ID, "pe-")
 	if rec.Code != http.StatusCreated || out.Repository != want || out.RepositoryURL != "https://github.com/"+want+".git" ||
-		store.created[1].Repository != want || len(repos.created) != 1 || !strings.HasPrefix(repos.created[0], "prj-a ") {
+		store.created[1].Repository != want || len(repos.created) != 2 || !strings.HasPrefix(repos.created[1], "prj-a ") {
 		t.Fatalf("with no repository: got = %d %s (created %v), want %s made for the project's org and stored", rec.Code, rec.Body, repos.created, want)
 	}
 	invalid := whole()
@@ -309,7 +303,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
 		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
 	}
-	if len(store.created) != 2 || len(repos.created) != 1 {
+	if len(store.created) != 2 || len(repos.created) != 2 {
 		t.Fatalf("created %d with %d repositories, want nothing more stored or made", len(store.created), len(repos.created))
 	}
 	// The account a new repository goes to is the request's to say, and never beside a repository.

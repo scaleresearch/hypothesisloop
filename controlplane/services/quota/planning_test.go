@@ -64,8 +64,7 @@ var planner = auth.Principal{Kind: auth.KindUser, UserID: "u-1", Name: "Ada", Or
 
 // A person with an idea had to state metrics, a budget, a ladder and dates before anything
 // existed. A draft is the experiment made from the idea alone.
-// planningRepositories is GitHub as the last planningAPI sees it: a deployment with no GitHub
-// App until a test gives it an account to create on.
+// planningRepositories is the git host as the last planningAPI sees it.
 var planningRepositories *fakeRepositories
 
 func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t *testing.T) {
@@ -99,19 +98,17 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
-	if pe.Repository != "" {
-		t.Errorf("repository = %q on a deployment with no GitHub App, want none", pe.Repository)
+	// A draft has a repository: the one named, or a new one.
+	if pe.Repository != "acme/"+RepositoryName(pe) || len(planningRepositories.created) != 1 {
+		t.Errorf("repository = %q (created %v), want one made for the draft", pe.Repository, planningRepositories.created)
 	}
-	// On a deployment with a GitHub App a draft has a repository: the one named, or a new one.
-	planningRepositories.org = "acme"
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 0 {
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 1 {
 		t.Errorf("naming a repository: got = %d %v, want it as GitHub spells it and none created", code, out["repository"])
 	}
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated || len(planningRepositories.created) != 1 ||
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusCreated || len(planningRepositories.created) != 2 ||
 		out["repository"] != "acme/"+RepositoryName(store.created[2]) {
 		t.Errorf("naming none: got = %d %v (created %v), want a repository made for the draft", code, out["repository"], planningRepositories.created)
 	}
-	planningRepositories.org = ""
 	store.created = store.created[:1]
 
 	for name, body := range map[string]map[string]any{

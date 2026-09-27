@@ -47,10 +47,6 @@ func (h *PlatformExperimentsHandler) provideRepository(named, account string) fu
 			}
 			named = created
 		}
-		// A deployment with no GitHub App creates none, and the experiment has no repository.
-		if named == "" {
-			return nil
-		}
 		pe.Repository, pe.RepositoryURL = named, h.repos.URL(named)
 		return nil
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 )
 
@@ -216,19 +217,23 @@ type githubWorld struct {
 
 // newGitHubWorld is the accounts world with the GitHub routes on it. Platform experiment pe-a,
 // which the world's agent, coordinator and job belong to, names Acme/Model. withApp false is a
-// deployment that has no GitHub App.
+// deployment whose git host is a plain one and that has no GitHub App.
 func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}}
 	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}}
-	var app GitHubApp
-	if withApp {
-		app = w.app
-	}
 	access := auth.NewAccess(placement{memStore: w.store})
-	w.host = NewGitHubHost(w.installations, app, zap.NewNop())
-	w.svc = NewRepositories(w.installations, w.experiments, app, w.host, access, zap.NewNop())
+	if withApp {
+		w.host = NewGitHubHost(w.installations, w.app, zap.NewNop())
+		w.svc = NewRepositories(w.installations, w.experiments, w.app, w.host, access, zap.NewNop())
+	} else {
+		plain, err := githost.NewPlain("https://git.example.invalid", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.svc = NewRepositories(w.installations, w.experiments, nil, plain, access, zap.NewNop())
+	}
 	w.callers["agent-bare"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgA}, ProjectID: w.projectA, PlatformExperimentID: "pe-bare", AgentID: "agent-2"}
 	w.callers["agent-other-org"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgB}, ProjectID: w.projectB, PlatformExperimentID: "pe-b", AgentID: "agent-b"}
 	for _, kind := range []string{"agent", "coordinator", "job"} {
@@ -560,7 +565,7 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		{"the app", "owner", "GET", "/github/app", nil, 503, ReasonGitHubNotConfigured},
 		{"connect", "owner", "POST", org + "/github-installations", connectBody("code-acme", 100), 503, ReasonGitHubNotConfigured},
 		{"repositories", "member", "GET", org + "/github-repositories", nil, 503, ReasonGitHubNotConfigured},
-		{"a credential", "agent", "POST", "/git-credentials", modelCredential, 503, ReasonGitHubNotConfigured},
+		{"a credential for a GitHub address", "agent", "POST", "/git-credentials", modelCredential, 404, ReasonNotFound},
 		{"a credential of an experiment with no repository", "agent-bare", "POST", "/git-credentials", modelCredential, 404, ReasonNoRepository},
 	} {
 		message := w.refused(tc.caller, tc.method, tc.path, tc.body, tc.status, tc.reason)
@@ -582,9 +587,6 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		if rec := w.call(tc.caller, tc.method, tc.path, tc.body); rec.Code != tc.want {
 			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
 		}
-	}
-	if _, err := w.host.Reachable(context.Background(), w.projectA, "acme/model"); statusOf(err) != 503 {
-		t.Errorf("Reachable with no App: %v, want 503", err)
 	}
 }
 
@@ -790,10 +792,6 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
-	bare := newGitHubWorld(t, false)
-	if named, err := bare.host.Create(ctx, bare.projectA, "", "sweep-1a2b3c4d", ""); named != "" || err != nil {
-		t.Fatalf("on a deployment with no GitHub App: Create = %q, %v, want none made and no refusal", named, err)
-	}
 	w := newGitHubWorld(t, true)
 	if named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
 		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)

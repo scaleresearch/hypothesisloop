@@ -57,8 +57,8 @@ type Repositories struct {
 	access      *auth.Access
 }
 
-// NewRepositories takes the App's client, or nil for a deployment that has no GitHub App, and
-// the git host credentials are minted on.
+// NewRepositories takes the App's client, or nil for a deployment whose git host is not GitHub,
+// and the git host credentials are minted on.
 func NewRepositories(store InstallationStore, experiments ExperimentRepositories, app GitHubApp, host githost.Provider, access *auth.Access, logger *zap.Logger) *Repositories {
 	if store == nil || experiments == nil || host == nil || access == nil || logger == nil {
 		panic("accounts.NewRepositories: the stores, a git host, an access check and a logger are required")
