@@ -18,6 +18,8 @@ var (
 	// ErrHypothesisNotFound and ErrHypothesisNotOwner let the HTTP layer answer 404 and 403.
 	ErrHypothesisNotFound = graphdb.ErrNotFound
 	ErrHypothesisNotOwner = graphdb.ErrNotOwner
+	// ErrBaselineRegistersNoHypothesis is a registration for an agent that measures the baseline.
+	ErrBaselineRegistersNoHypothesis = errors.New("an agent of role baseline registers no hypothesis: the baseline is the objective's own measurement and no claim, and its job is submitted without one")
 	// ErrUnknownPlatformExperiment is a registration naming a platform experiment that does not exist.
 	ErrUnknownPlatformExperiment = errors.New("unknown platform_experiment_id")
 )
@@ -42,6 +44,13 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
 			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+		}
+		signup, err := s.store.GetAgentSignup(ctx, platformExperimentID, agentID)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
+		}
+		if signup != nil && signup.Role == domain.SignupRoleBaseline {
+			return nil, nil, false, ErrBaselineRegistersNoHypothesis
 		}
 	}
 
@@ -242,26 +251,40 @@ type GraphNode struct {
 	Evidence
 }
 
+// HypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
+type HypothesisGraph struct {
+	Root string `json:"root"`
+	// Objective is what the baseline's jobs found: they test no hypothesis and hang on the root.
+	Objective Evidence           `json:"objective"`
+	Nodes     []*GraphNode       `json:"nodes"`
+	Edges     []domain.GraphEdge `json:"edges"`
+}
+
 // HypothesisGraph returns the whole hypothesis graph of one platform experiment, each node with
-// its newest finding and its best job.
-func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID string) ([]*GraphNode, []domain.GraphEdge, error) {
+// its newest finding and its best job, and the same of the objective, whose jobs are the
+// baseline's.
+func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID string) (*HypothesisGraph, error) {
 	metrics, found, err := s.store.GetPlatformExperimentMetrics(ctx, platformExperimentID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	if !found {
-		return nil, nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
 	items, edges, err := s.graph.ExperimentGraph(ctx, platformExperimentID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	if err := s.addActivity(ctx, items); err != nil {
-		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
-	evidence, err := s.evidence(ctx, metrics, items)
+	ids := make([]string, len(items), len(items)+1)
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	evidence, err := s.evidence(ctx, metrics, append(ids, platformExperimentID))
 	if err != nil {
-		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
 	nodes := make([]*GraphNode, len(items))
 	actors := itemActors(items)
@@ -271,13 +294,17 @@ func (s *Service) HypothesisGraph(ctx context.Context, platformExperimentID stri
 			actors = append(actors, &f.Actor)
 		}
 	}
+	objective := evidence[platformExperimentID]
+	if objective.Finding != nil {
+		actors = append(actors, &objective.Finding.Actor)
+	}
 	for i := range edges {
 		actors = append(actors, &edges[i].Actor)
 	}
 	if err := s.store.NameActors(ctx, actors); err != nil {
-		return nil, nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
+		return nil, fmt.Errorf("registry.HypothesisGraph: %w", err)
 	}
-	return nodes, edges, nil
+	return &HypothesisGraph{Root: platformExperimentID, Objective: objective, Nodes: nodes, Edges: edges}, nil
 }
 
 // QueryGraph runs one read-only Cypher query against one platform experiment's hypothesis graph.
@@ -343,7 +370,11 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
 	}
-	evidence, err := s.evidence(ctx, metrics, hypotheses)
+	ids := make([]string, len(hypotheses))
+	for i, h := range hypotheses {
+		ids[i] = h.ID
+	}
+	evidence, err := s.evidence(ctx, metrics, ids)
 	if err != nil {
 		return nil, fmt.Errorf("registry.Findings: %w", err)
 	}
@@ -366,14 +397,11 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	return out, nil
 }
 
-// evidence returns, by hypothesis id, the newest finding of each of the hypotheses and the job
+// evidence returns, by id, the newest finding of each of the hypotheses ids names and the job
 // testing it that did best on the first ranking metric of metrics, with that job's own summary.
-// It is a fixed number of reads however many hypotheses are given.
-func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinition, hypotheses []*domain.HypothesisListItem) (map[string]Evidence, error) {
-	ids := make([]string, len(hypotheses))
-	for i, h := range hypotheses {
-		ids[i] = h.ID
-	}
+// A platform experiment's id names its objective, whose jobs are the baseline's. It is a fixed
+// number of reads however many ids are given.
+func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinition, ids []string) (map[string]Evidence, error) {
 	newest, err := s.store.NewestFindings(ctx, ids)
 	if err != nil {
 		return nil, err

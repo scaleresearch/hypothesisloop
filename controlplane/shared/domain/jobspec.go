@@ -444,9 +444,9 @@ type ExperimentMeta struct {
 	PlatformExperimentID string  `json:"platform_experiment_id" yaml:"platform_experiment_id"`
 	ParentID             *string `json:"parent_id,omitempty" yaml:"parent_id,omitempty"`
 
-	// HypothesisID is required: the ID of a hypothesis previously registered (or retrieved,
-	// if equivalent text already existed) via POST /hypotheses.
-	HypothesisID string `json:"hypothesis_id" yaml:"hypothesis_id"`
+	// HypothesisID is the hypothesis the job tests, registered before it via POST /hypotheses.
+	// The job of a baseline agent states none.
+	HypothesisID string `json:"hypothesis_id" yaml:"hypothesis_id" required:"false" doc:"The hypothesis the job tests. Required of every job but a baseline agent's, which states none."`
 	// Hypothesis is populated by the server (scheduler.Service.Submit denormalizes it from the
 	// registered hypothesis's own Text, looked up by HypothesisID) and is never read from the
 	// request — optional and ignored if a caller sends one. Kept only so an already-persisted

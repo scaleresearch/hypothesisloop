@@ -73,6 +73,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. " +
 			"job.storage, or each group's, is the scratch space one node of the job writes, stated as a quantity (4Gi): 422 storage_required where it is left out or is max. job.cpu and job.memory left out are the job's share of the node it lands on. " +
 			"422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up, or that has not reported what it has, is not judged. " +
+			"metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with hypothesis_id = the platform_experiment_id, which stands for the objective as it does in a builds_on link. " +
+			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
@@ -347,7 +349,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
 			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
-			"The job of an agent of role baseline is the control that verdicts are given against: its hypothesis takes none and the answer names neither. " +
+			"The job of an agent of role baseline tests no hypothesis: its finding is kept on the objective and the answer names neither. " +
 			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`

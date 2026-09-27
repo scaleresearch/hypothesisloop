@@ -179,9 +179,10 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "agent_id is required"}
 	}
 	if exp.HypothesisID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required"}
+		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required: every job but a baseline agent's tests a hypothesis registered with POST /hypotheses"}
 	}
-	if exp.Theory == "" {
+	// A job on the objective is the baseline's: it measures and predicts nothing.
+	if exp.Theory == "" && exp.HypothesisID != exp.PlatformExperimentID {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "theory is required"}
 	}
 	if exp.CodeRef == "" {

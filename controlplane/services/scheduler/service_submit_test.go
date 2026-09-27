@@ -81,6 +81,9 @@ func (poolOnlyStore) GetRunningAndQueued(_ context.Context) ([]*domain.Experimen
 func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
 }
+func (poolOnlyStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor, Flavor: domain.DefaultAgentFlavor}, nil
+}
 func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
@@ -280,9 +283,59 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 		}
 	}
 
-	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: humanHypothesis("pe-1")}
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: oneHypothesis{}}
+	if err := s.Submit(context.Background(), baselineSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)
+	}
+}
+
+// baselineSubmission is the job of a baseline agent as it is sent: no hypothesis, no theory, on
+// the baseline's branch.
+func baselineSubmission() *domain.Experiment {
+	exp := humanIdeaSubmission()
+	exp.HypothesisID, exp.Theory, exp.Branch = "", "", "hl/pe-1/baseline"
+	return exp
+}
+
+// The baseline is the objective's own measurement and no claim. Its job states no hypothesis and
+// no theory and is kept on the objective, so no hypothesis stays open under it for the run.
+func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: status, signup: baseline}, hypotheses: oneHypothesis{}}
+		exp := baselineSubmission()
+		if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+			t.Fatalf("%s: got = %v, want the job taken", status, err)
+		}
+		if exp.HypothesisID != "pe-1" || exp.Hypothesis != "" {
+			t.Errorf("%s: the job is on %q with text %q, want the objective pe-1 and no text", status, exp.HypothesisID, exp.Hypothesis)
+		}
+
+		var refused *AdmissionError
+		named := baselineSubmission()
+		named.HypothesisID = "h-human"
+		if err := s.Submit(context.Background(), named); !errors.As(err, &refused) || refused.Reason != ReasonBaselineTestsNoHypothesis {
+			t.Errorf("%s, a baseline job naming a hypothesis: got = %v, want %s", status, err, ReasonBaselineTestsNoHypothesis)
+		}
+		elsewhere := baselineSubmission()
+		elsewhere.Branch = "hl/pe-1/baseline-1/control-abc123"
+		if err := s.Submit(context.Background(), elsewhere); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment || !strings.Contains(refused.Message, "hl/pe-1/baseline") {
+			t.Errorf("%s, a baseline job on another branch: got = %v, want %s naming hl/pe-1/baseline", status, err, ReasonBranchNotOfExperiment)
+		}
+	}
+
+	// Every other job tests a hypothesis and states what it predicts.
+	for name, spoil := range map[string]func(*domain.Experiment){
+		"no hypothesis": func(e *domain.Experiment) { e.HypothesisID = "" },
+		"no theory":     func(e *domain.Experiment) { e.Theory = "" },
+	} {
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+		exp := humanIdeaSubmission()
+		spoil(exp)
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonMalformed {
+			t.Errorf("a researcher's job with %s: got = %v, want %s", name, err, ReasonMalformed)
+		}
 	}
 }
 
@@ -296,23 +349,26 @@ func (waitingQuota) Describe(_ context.Context, pe *domain.PlatformExperiment, r
 
 type finishedJobStore struct {
 	poolOnlyStore
-	// role is what the job's agent was signed up as.
-	role  domain.SignupRole
-	filed int
+	// onObjective makes the job a baseline agent's, kept on the objective.
+	onObjective bool
+	filed       int
+	// filedOn is what the last finding was filed against.
+	filedOn string
 	// filedBy is whose credential filed each finding.
 	filedBy []domain.Actor
 }
 
-func (*finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
-	return &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}, nil
+func (s *finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
+	job := &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}
+	if s.onObjective {
+		job.HypothesisID = job.PlatformExperimentID
+	}
+	return job, nil
 }
 
-func (s *finishedJobStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
-	return &domain.AgentSignup{AgentID: agentID, Role: s.role, Flavor: domain.DefaultAgentFlavor}, nil
-}
-
-func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _ string, actor domain.Actor, _ string) (*domain.HypothesisFinding, error) {
+func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, hypothesisID, _, _, _ string, actor domain.Actor, _ string) (*domain.HypothesisFinding, error) {
 	s.filed++
+	s.filedOn = hypothesisID
 	s.filedBy = append(s.filedBy, actor)
 	return &domain.HypothesisFinding{}, nil
 }
@@ -325,16 +381,14 @@ func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _
 func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 	for _, tc := range []struct {
 		h    domain.Hypothesis
-		role domain.SignupRole
 		want bool
 	}{
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, domain.SignupRoleCompetitor, true},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, false},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.SignupRoleBaseline, false},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, true},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, false},
 	} {
-		store := &finishedJobStore{role: tc.role}
+		store := &finishedJobStore{}
 		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
 		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {
@@ -343,6 +397,14 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 		if err != nil || (got != nil) != tc.want || tc.want && *got != tc.h || store.filed != 1 {
 			t.Fatalf("%+v: got = (%+v, %v), filed %d, want it named: %v, filed 1", tc.h, got, err, store.filed, tc.want)
 		}
+	}
+
+	// The baseline's job is on the objective, which is no hypothesis: its finding is filed there
+	// and the reply names none.
+	store := &finishedJobStore{onObjective: true}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{}}
+	if got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, "measured"); err != nil || got != nil || store.filedOn != "pe-1" {
+		t.Fatalf("the baseline's summary: got = (%+v, %v), filed on %q, want no hypothesis named and the finding on the objective pe-1", got, err, store.filedOn)
 	}
 }
 
@@ -687,13 +749,13 @@ func (endingStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain
 // then. A job sent in between is refused as one sent after the close is.
 func TestSubmitPastTheEndOfThePlatformExperimentIsRefused(t *testing.T) {
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpOpen} {
-		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: endingStore{status: status, endsAt: time.Now().Add(-10 * time.Second)}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: endingStore{status: status, endsAt: time.Now().Add(-10 * time.Second)}, hypotheses: oneHypothesis{}}
 		var refused *AdmissionError
-		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != "experiment_closed" || !strings.Contains(refused.Message, "ended at") {
+		if err := s.Submit(context.Background(), baselineSubmission()); !errors.As(err, &refused) || refused.Reason != "experiment_closed" || !strings.Contains(refused.Message, "ended at") {
 			t.Errorf("%s, 10 s past its end: got = %v, want experiment_closed naming the end", status, err)
 		}
 		s.store = endingStore{status: status, endsAt: time.Now().Add(time.Hour)}
-		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+		if err := s.Submit(context.Background(), baselineSubmission()); !errors.Is(err, errReachedScoring) {
 			t.Errorf("%s, an hour before its end: got = %v, want the job taken through every check", status, err)
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -63,6 +64,32 @@ func (s *poolStore) PlatformExperimentExists(_ context.Context, _ string) (bool,
 
 func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
 	return &domain.Agent{ID: id}, nil
+}
+
+// GetAgentSignup signs every agent up as a researcher, but the one named baseline-agent.
+func (s *poolStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	role := domain.SignupRoleCompetitor
+	if agentID == "baseline-agent" {
+		role = domain.SignupRoleBaseline
+	}
+	return &domain.AgentSignup{AgentID: agentID, Role: role}, nil
+}
+
+// The baseline is the objective's own measurement, so the agent that measures it has no claim to
+// register: a hypothesis of its own would stay open under the objective for the whole run.
+func TestABaselineAgentRegistersNoHypothesis(t *testing.T) {
+	svc := poolService(newPoolStore())
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "baseline-agent", agentActor("baseline-agent"), "pe-1", "the control", buildOnRoot, nil)
+	if !errors.Is(err, ErrBaselineRegistersNoHypothesis) {
+		t.Fatalf("RegisterHypothesis for a baseline agent: got = %v, want %v", err, ErrBaselineRegistersNoHypothesis)
+	}
+	var refusal *api.Refusal
+	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refusal) || refusal.GetStatus() != http.StatusForbidden || refusal.Reason != "baseline_registers_no_hypothesis" {
+		t.Errorf("the refusal as answered: got = %#v, want 403 baseline_registers_no_hypothesis", answered)
+	}
+	if _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "the control", buildOnRoot, nil); err != nil {
+		t.Errorf("RegisterHypothesis for a researcher: got = %v, want nil", err)
+	}
 }
 
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
@@ -624,6 +651,7 @@ func (findingsStore) NewestFindings(_ context.Context, _ []string) (map[string]*
 	return map[string]*domain.HypothesisFinding{
 		"hyp-tested": {ExperimentID: "job-b", Summary: "the newest write-up"},
 		"hyp-open":   {ExperimentID: "job-c", Summary: "no verdict yet"},
+		"pe-1":       {ExperimentID: "job-baseline", Summary: "the baseline measured"},
 	}, nil
 }
 
@@ -635,7 +663,8 @@ func (findingsStore) FindingSummaries(_ context.Context, ids []string) (map[stri
 }
 
 func (findingsStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
-	if !reflect.DeepEqual(ids, []string{"hyp-tested", "hyp-untested", "hyp-open", "hyp-idle"}) {
+	// The graph asks for the objective's jobs too, under the platform experiment's id.
+	if hypotheses := []string{"hyp-tested", "hyp-untested", "hyp-open", "hyp-idle"}; !reflect.DeepEqual(ids, hypotheses) && !reflect.DeepEqual(ids, append(hypotheses, "pe-1")) {
 		return nil, errors.New("asked for the jobs of other hypotheses")
 	}
 	created := time.Now().Add(-time.Hour)
@@ -706,10 +735,15 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 	}
 
 	// The graph carries the same on its nodes, and keeps the hypothesis nothing was found for.
-	nodes, _, err := svc.HypothesisGraph(context.Background(), "pe-1")
-	if err != nil || len(nodes) != 4 {
-		t.Fatalf("HypothesisGraph: got = (%+v, %v), want 4 nodes", nodes, err)
+	graph, err := svc.HypothesisGraph(context.Background(), "pe-1")
+	if err != nil || len(graph.Nodes) != 4 || graph.Root != "pe-1" {
+		t.Fatalf("HypothesisGraph: got = (%+v, %v), want 4 nodes under pe-1", graph, err)
 	}
+	// The baseline's job tests no hypothesis: what it found hangs on the objective.
+	if graph.Objective.Finding == nil || graph.Objective.Finding.Summary != "the baseline measured" {
+		t.Errorf("objective: got = %+v, want the baseline's finding", graph.Objective)
+	}
+	nodes := graph.Nodes
 	if node := nodes[0]; node.ID != "hyp-tested" || node.Finding == nil || node.Finding.Summary != "the newest write-up" ||
 		node.BestJob == nil || node.BestJob.ID != "job-b" || node.BestJob.Summary != "the best job's write-up" {
 		t.Errorf("tested node: got = %+v, want the finding and best job the findings read answers", node)

@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -55,13 +56,6 @@ type hypothesisWithJobs struct {
 	CommentCount    int                         `json:"comment_count"`
 }
 
-// hypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
-type hypothesisGraph struct {
-	Root  string             `json:"root"`
-	Nodes []*GraphNode       `json:"nodes"`
-	Edges []domain.GraphEdge `json:"edges"`
-}
-
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
 // not been told apart from: the problem details plus the hypotheses themselves.
 type similarHypothesesError struct {
@@ -96,6 +90,8 @@ func (h *Handler) hypothesisWriteError(err error) error {
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
 		return huma.Error400BadRequest(err.Error())
+	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
+		return api.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
 		return huma.Error403Forbidden(err.Error())
 	case errors.Is(err, ErrHypothesisNotFound):
@@ -352,7 +348,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Who registered it is the caller, answered as actor, and no field of the body names it: author is refused. " +
 			"agent_id says whose hypothesis it is: an agent token's is its own agent's, named or not, and any other caller names an agent it " +
 			"reaches to register for it, or names none and the hypothesis has no owning agent. Both sit in the same graph under the same " +
-			"dedup, and any agent may submit a job against either. What one with no owning agent does not get is quota or a place in the " +
+			"dedup, and any agent may submit a job against either. 403 baseline_registers_no_hypothesis for an agent of role baseline: the baseline " +
+			"is the objective's own measurement and its job names no hypothesis. What one with no owning agent does not get is quota or a place in the " +
 			"standings — those key on agent_id.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
@@ -477,25 +474,26 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
 			"(edges, {from, to, type, agent_id, actor, created_at}); an edge to the objective has to = root = the platform_experiment_id. " +
 			"A node also carries finding, the newest one filed against it, and best_job {id, metric, summary, summary_due}, the completed job testing it with the " +
-			"best raw value on the first ranking metric and the summary filed for that job; each is absent when there is none. Unpaged, " +
+			"best raw value on the first ranking metric and the summary filed for that job; each is absent when there is none. " +
+			"objective carries the same two for the root: the jobs of the baseline agent test no hypothesis and hang on the objective. Unpaged, " +
 			"for drawing the graph.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Required."`
-	}) (*struct{ Body hypothesisGraph }, error) {
+	}) (*struct{ Body *HypothesisGraph }, error) {
 		if in.PlatformExperimentID == "" {
 			return nil, huma.Error400BadRequest("platform_experiment_id is required")
 		}
 		if err := access.PlatformExperiment(ctx, in.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		nodes, edges, err := h.svc.HypothesisGraph(ctx, in.PlatformExperimentID)
+		graph, err := h.svc.HypothesisGraph(ctx, in.PlatformExperimentID)
 		if errors.Is(err, ErrUnknownPlatformExperiment) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		if err != nil {
 			return nil, auth.Internal(h.logger, "get hypothesis graph", err)
 		}
-		return &struct{ Body hypothesisGraph }{Body: hypothesisGraph{Root: in.PlatformExperimentID, Nodes: nodes, Edges: edges}}, nil
+		return &struct{ Body *HypothesisGraph }{Body: graph}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

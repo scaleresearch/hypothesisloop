@@ -57,9 +57,10 @@ type Experiment struct {
 	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
 	// Job directly.
 	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
-	// HypothesisID references a row registered via POST /hypotheses. Required: every
-	// experiment must test a specific, previously-registered hypothesis, not free text ad hoc.
-	HypothesisID string `json:"hypothesis_id"`
+	// HypothesisID is the hypothesis the job tests, registered via POST /hypotheses. The job of a
+	// baseline agent tests none and is kept on the objective, which the platform experiment's id
+	// names here as it does in a builds_on link.
+	HypothesisID string `json:"hypothesis_id" doc:"The hypothesis the job tests. On a baseline agent's job, which tests none, the platform_experiment_id, standing for the objective."`
 	Hypothesis   string `json:"hypothesis"`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).

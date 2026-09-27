@@ -138,8 +138,8 @@ func (s *Service) settle(ctx context.Context, op string, exp *domain.Experiment)
 //
 // Returns the job's hypothesis when its verdict is the job's agent's to set (its own hypothesis,
 // or a human's), else nil: with the evidence in hand the agent sets an open verdict, or looks
-// again at one this finding may have changed. The job of an agent that measures the baseline is
-// the control later verdicts are given against, so its hypothesis states no effect to rule on.
+// again at one this finding may have changed. The job of an agent that measures the baseline
+// tests no hypothesis: its finding is kept on the objective, where there is no verdict to give.
 //
 // The finding is the job's agent's. actor is whose credential files it, kept with it.
 func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor domain.Actor, summary string) (*domain.Hypothesis, error) {
@@ -170,13 +170,6 @@ func (s *Service) WriteExperimentSummary(ctx context.Context, id string, actor d
 		return nil, fmt.Errorf("summary: create finding: %w", err)
 	}
 	if h == nil || (h.AgentID != exp.AgentID && h.AgentID != "") {
-		return nil, nil
-	}
-	signup, err := s.store.GetAgentSignup(ctx, exp.PlatformExperimentID, exp.AgentID)
-	if err != nil {
-		return nil, fmt.Errorf("summary: read signup: %w", err)
-	}
-	if signup != nil && signup.Role == domain.SignupRoleBaseline {
 		return nil, nil
 	}
 	return h, nil

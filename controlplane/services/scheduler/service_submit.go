@@ -32,6 +32,9 @@ func (s *Service) codeInRepository(pe *domain.PlatformExperiment, codeRef string
 	return &AdmissionError{Reason: ReasonCodeRefNotInRepository, Message: fmt.Sprintf("code_ref must be a commit of the platform experiment's repository, %s@<commit-sha>, and it names another address: push your commit there and submit from your clone with code_ref left empty, which fills it in", pe.RepositoryURL)}
 }
 
+// ReasonBaselineTestsNoHypothesis refuses the job of a baseline agent that names a hypothesis.
+const ReasonBaselineTestsNoHypothesis = "baseline_tests_no_hypothesis"
+
 // ReasonBranchNotOfExperiment refuses a job whose branch is none of its platform experiment's.
 const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 
@@ -186,16 +189,17 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Message: fmt.Sprintf("platform experiment %s not found", exp.PlatformExperimentID),
 		}
 	}
+	signup, err := s.store.GetAgentSignup(ctx, pe.ID, exp.AgentID)
+	if err != nil {
+		return fmt.Errorf("scheduler: read signup: %w", err)
+	}
+	measuresBaseline := signup != nil && signup.Role == domain.SignupRoleBaseline
 	switch pe.Status {
 	case domain.PlatformExpRunning:
 	// Before the start the one job there is to run is the baseline's, which every researcher
 	// starts from and is ranked against. Its agent holds a quota from the moment it joined.
 	case domain.PlatformExpOpen:
-		signup, err := s.store.GetAgentSignup(ctx, pe.ID, exp.AgentID)
-		if err != nil {
-			return fmt.Errorf("scheduler: read signup: %w", err)
-		}
-		if signup == nil || signup.Role != domain.SignupRoleBaseline {
+		if !measuresBaseline {
 			// What the caller does next is the platform experiment's status_reason, worded for
 			// whoever asks, and is said there alone.
 			reader, _ := auth.FromContext(ctx)
@@ -241,6 +245,15 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		exp.EstimatedDurationHours = pe.JobEstimatedDurationHours
 	}
 
+	// The baseline is the objective's own measurement and no claim: its job tests no hypothesis
+	// and is kept on the objective, which the platform experiment's id names.
+	if measuresBaseline {
+		if exp.HypothesisID != "" {
+			return &AdmissionError{Reason: ReasonBaselineTestsNoHypothesis, Message: fmt.Sprintf("agent %s measures the baseline, and the baseline is the objective's own: its job names no hypothesis. Submit it without one", exp.AgentID)}
+		}
+		exp.HypothesisID = pe.ID
+	}
+
 	// 2. Structural validation.
 	if err := ValidateExperiment(exp, s.credits); err != nil {
 		return err
@@ -250,6 +263,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	if err := branchOfExperiment(exp); err != nil {
 		return err
+	}
+	if baseline := domain.BaselineBranch(pe.ID); measuresBaseline && exp.Branch != baseline {
+		return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again", baseline, exp.Branch, baseline)}
 	}
 	if err := s.resolveImage(&exp.Job); err != nil {
 		return err
@@ -328,40 +344,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		exp.NotAdmittedReason = domain.NotAdmittedSummaryGate
 	}
 
-	// 2b. Validate hypothesis reference: every experiment must test a specific,
-	// previously-registered hypothesis (POST /hypotheses) rather than restating
-	// free text ad hoc. Denormalize its text onto the experiment for cheap reads.
-	if exp.HypothesisID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required — register or retrieve one via POST /hypotheses"}
-	}
-	hyp, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
-	if err != nil {
-		return fmt.Errorf("scheduler: get hypothesis: %w", err)
-	}
-	if hyp == nil {
-		return &AdmissionError{
-			Reason:  ReasonMalformed,
-			Message: hypothesisNotInExperiment(exp),
+	// 2b. Every job but the baseline's tests a hypothesis registered before it (POST /hypotheses),
+	// whose text is kept on the job for cheap reads.
+	if !measuresBaseline {
+		if err := s.bindHypothesis(ctx, exp); err != nil {
+			return err
 		}
 	}
-	// An idea no agent owns is testable like any other: any agent may bind a job to it. The
-	// hypothesis is the idea, the job is the agent's — exp.AgentID is the owner every accounting
-	// path keys on, so quota is debited from the running agent and its result lands in that
-	// agent's standings, exactly as for a hypothesis it registered itself. Nothing here has to
-	// know whose the row is. Refusing instead (the earlier rule) made a human idea inert and
-	// pushed agents into registering a near-duplicate claim to test one, which fights the pool's
-	// own dedup and splits one claim's evidence across two rows.
-	//
-	// The hypothesis must belong to the same platform experiment this job is submitted under.
-	// Without this check an agent could point a job at a hypothesis registered under a different
-	// program, contaminating cross-program scope/ranking (invariant #7).
-	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
-		return &AdmissionError{
-			Reason:  ReasonMalformed,
-			Message: hypothesisNotInExperiment(exp),
-		}
-	}
-	exp.Hypothesis = hyp.Text
 
 	// 4. What the job holds of its agent's quota until it ends.
 	held, err := exp.EstimateHeld()
@@ -461,6 +450,39 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 
 	// 8. Wake the scheduler loop.
 	s.loop.Trigger()
+	return nil
+}
+
+// bindHypothesis checks the hypothesis a job names and keeps its text on the job.
+func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) error {
+	hyp, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
+	if err != nil {
+		return fmt.Errorf("scheduler: get hypothesis: %w", err)
+	}
+	if hyp == nil {
+		return &AdmissionError{
+			Reason:  ReasonMalformed,
+			Message: hypothesisNotInExperiment(exp),
+		}
+	}
+	// An idea no agent owns is testable like any other: any agent may bind a job to it. The
+	// hypothesis is the idea, the job is the agent's — exp.AgentID is the owner every accounting
+	// path keys on, so quota is debited from the running agent and its result lands in that
+	// agent's standings, exactly as for a hypothesis it registered itself. Nothing here has to
+	// know whose the row is. Refusing instead (the earlier rule) made a human idea inert and
+	// pushed agents into registering a near-duplicate claim to test one, which fights the pool's
+	// own dedup and splits one claim's evidence across two rows.
+	//
+	// The hypothesis must belong to the same platform experiment this job is submitted under.
+	// Without this check an agent could point a job at a hypothesis registered under a different
+	// program, contaminating cross-program scope/ranking (invariant #7).
+	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
+		return &AdmissionError{
+			Reason:  ReasonMalformed,
+			Message: hypothesisNotInExperiment(exp),
+		}
+	}
+	exp.Hypothesis = hyp.Text
 	return nil
 }
 

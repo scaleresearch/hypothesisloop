@@ -20,6 +20,8 @@ type Store interface {
 	MarkUnderperforming(ctx context.Context, id, metricName string) error
 	// CompletedJobIDs is the jobs of a platform experiment that ran to a successful end.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
+	// GetAgentSignup is the agent's place in the platform experiment, nil when it has none.
+	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	// GetAgent resolves an agent id, nil when no such agent ever signed up.
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// PlatformExperimentExists says whether a hypothesis has a platform experiment to be in.
