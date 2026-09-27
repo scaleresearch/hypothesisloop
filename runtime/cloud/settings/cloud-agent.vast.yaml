@@ -28,6 +28,8 @@ log_tail_lines: 100
 # control plane bounds each wait on its own: it requeues a job whose stuck-pending timeout (300
 # seconds unless the cluster's settings give stuck_pending_timeout_seconds) has passed since
 # this runtime first reported the wait the job is in, so the two waits are never added up.
+# offer_wait_seconds is also how long one count of the provider's offers stands: a provider with
+# a market is searched once per shape in that time, and never once per pass.
 offer_wait_seconds: 180
 startup_seconds: 240
 
@@ -65,7 +67,8 @@ provider:
 # bounds the spend is each experiment's budget, each agent's quota, the experiment's concurrency
 # limit and max_price_per_hour. Every instance of the maximum is reported as a node on every
 # poll, which is the one reason the number is not larger. A node is reported free only while an
-# offer passes the filters above for it, at the cost of one offer search per shape and pass.
+# offer passes the filters above for it, at the cost of one offer search per shape and
+# offer_wait_seconds.
 shapes:
   - name: rtx4090
     accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
