@@ -74,9 +74,10 @@ silently improvise.
    used an ephemeral cloudflare tunnel URL, prefer a plain LAN URL instead since that survives
    reboots without needing a new tunnel).
 3. **Code repository**: a repository on the deployment's git host that the platform experiment
-   names, holding
-   `$EXPERIMENT`'s own `seed/` (never `tests/workloads/`). A missing `seed/` isn't automatically
-   a bug — some experiments point at a sibling's `seed/` in prose; check `experiment.md` first.
+   names. Its default branch starts as a copy of three things from
+   `agents/coordinator/experiments/$EXPERIMENT/`: `README.md`, `.hypothesisloop/` and `seed/`,
+   with any other source directory its `README.md` lists. An experiment whose `README.md` says
+   it runs on another experiment's repository has none of its own: it names that repository.
    The org connects GitHub once: an owner installs the platform's GitHub App on the GitHub
    account and connects that installation in the UI under Settings
    (`POST /orgs/{id}/github-installations`). An operator with the database can connect it with
@@ -87,13 +88,16 @@ silently improvise.
    On a deployment whose git host is not GitHub nothing is connected: the repository is created
    on the host beforehand and named as `repository` (locally, `make git-repository NAME=...`).
    A job's `code_ref` is that repository's address at a commit, and `hl-clone` checks it out.
-   **That repository is a separate repo, and no live mirror of this one** — after editing
-   `seed/`, push it to the repository's default branch too, and diff-check before spawning
-   agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
-   submit, and `.hypothesisloop/experiment.yaml`, the create body step 2 can read. `hl repo init`
-   in a clone adds the files it lacks and overwrites none. The platform checks no repository at
-   a direct create, so before agents start run `hl repo check` in a clone at the baseline
-   commit and fix what it names (`experiment-checklist.md`, "A ready repository").
+   **That repository is a separate repo, and no live mirror of this one** — after editing any
+   of those files here, push them to the repository's default branch too, and diff-check before
+   spawning agents. `.hypothesisloop/job.yaml` is the one job spec agents submit, and
+   `.hypothesisloop/experiment.yaml` states the name, the description and the metrics step 2
+   creates the experiment with. `hl repo init` in a clone adds the files it lacks and overwrites
+   none. The platform checks no repository at a direct create, so before agents start run
+   `hl repo check` in a clone at the baseline commit and fix what it names
+   (`experiment-checklist.md`, "A ready repository"). A job spec here whose `image` is still a
+   `REPLACE-WITH` names an address only a deployment knows: fill it in in the clone as step 4
+   says, commit and push.
    Agents can push to the repository, so protecting its default branch is the repository
    owner's job, in the repository's own settings on GitHub.
    Agents and jobs clone through `hl git-credential`, git's credential helper: it asks the
@@ -128,6 +132,9 @@ silently improvise.
    that names an image is never placed on a cluster whose `only_job_image` is another one:
    either stays QUEUED with `not_admitted_reason: no_cluster_for_image`. `make images`
    builds and pushes the offered image with no framework, `make job-images` the others.
+   An experiment whose job spec names an offered image (`dummy-data-search-demo` names
+   `python`) takes the `image` value of that entry from `hl capacity`, verbatim, into
+   `.hypothesisloop/job.yaml` in the clone of its repository.
    An experiment whose seed builds an image of its own names that one, so it needs a cluster
    without `only_job_image` that can pull it. Build it before agents start (e.g.
    `make sparse-sdpa-workload-image`) and smoke-test it
@@ -140,32 +147,41 @@ silently improvise.
    (`localdev/controlplane/docker-compose.yml`'s `registry` service) and pulled normally
    (`imagePullPolicy: IfNotPresent`) — a build that never made it past `podman build` (no
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
-   the per-experiment `seed/build_and_push.sh` where one exists (it takes the registry from `localdev/.host-address`, pushes and renders the
-   job.yaml's placeholder image ref into `job.rendered.yaml`; push that to the experiment's repository with
-   the rest of `seed/`, and run it again whenever the host address changes), or `make sparse-sdpa-workload-image` for
-   sparse-sdpa. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
+   the per-experiment `seed/build_and_push.sh` where one exists, run in the clone of the
+   experiment's repository with `REGISTRY` set to the host address in `localdev/.host-address`
+   plus `:5000`: it pushes the image and writes its address into `.hypothesisloop/job.yaml`.
+   Commit and push that file, and run the script again whenever the host address changes. Use
+   `make sparse-sdpa-workload-image` for sparse-sdpa. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
    `localdev/.host-address`) from any cluster node before spawning any agents.
 
 ## 2. Create the platform experiment
 
-`agents/coordinator/experiments/$EXPERIMENT/experiment.yaml` is the checked-in template for this
-(copied from `template/experiment.yaml` when the experiment was defined — see
-`experiment-checklist.md` item 1). Fill in its `REPLACE-WITH-...` placeholders
-(`budget_accelerator_hours`, `max_agents`, `starts_at` — these depend on `NUM_AGENTS`/
-`CHIPS_PER_AGENT`/`planned_run_hours`, decided now, not ahead of time) and confirm its
-`description` is still `experiment.md`'s current `EXPERIMENT DESCRIPTION` block verbatim (the only
-thing agents read about the objective — system prompt is experiment-agnostic), then:
-`hl platform-experiments create agents/coordinator/experiments/$EXPERIMENT/experiment.yaml` (see
-`controlplane/settings/examples/experiment.yaml` for the full DSL reference).
+The create body is two files laid end to end.
+`agents/coordinator/experiments/$EXPERIMENT/.hypothesisloop/experiment.yaml` states what the
+experiment is: `name`, `description`, `metrics`. Confirm its `description` is still
+`experiment.md`'s current `EXPERIMENT DESCRIPTION` block verbatim (the only thing agents read
+about the objective — system prompt is experiment-agnostic). A copy of
+`agents/coordinator/experiments/template/run.yaml`, kept outside the tree, states this run:
+`repository`, `budget_accelerator_hours`, `max_agents`, `starts_at`, `duration_hours`. They
+depend on `NUM_AGENTS`/`CHIPS_PER_AGENT`/`planned_run_hours`, decided now, not ahead of time.
+Fill in every `REPLACE-WITH`, then:
 
-Required fields (`GET $API_URL/openapi.json` is the source of truth): `name`, `description`,
-`budget_accelerator_hours`, `max_agents`, `metrics`, `report_interval_seconds`, `starts_at`,
-`ends_at` (RFC3339).
+    cat agents/coordinator/experiments/$EXPERIMENT/.hypothesisloop/experiment.yaml /tmp/hlrun/<run>/run.yaml |
+      hl platform-experiments create -
 
-With `from_repo: true` in the file, every field it leaves out is read from
-`.hypothesisloop/experiment.yaml` at the head of the default branch of the repository the same request names.
-`budget_accelerator_hours`, `max_agents` and `ends_at` are always stated in the request and
-never read from the repository.
+`controlplane/settings/examples/experiment.yaml` is the full DSL reference.
+
+Required of a direct create (`GET $API_URL/openapi.json` is the source of truth): `name`,
+`description`, `metrics`, `budget_accelerator_hours`, a positive `max_agents`, and exactly one
+of `duration_hours` and `ends_at` (RFC3339). A run lasts 30 days at most
+(`quota.max_platform_experiment_days`), and one stated longer is refused `run_too_long`.
+
+On GitHub a request with `from_repo: true` reads every field it leaves out from
+`.hypothesisloop/experiment.yaml` at the head of the default branch of the repository it names.
+`budget_accelerator_hours`, `max_agents`, `duration_hours` and `ends_at` are always stated in
+the request and never read from the repository. A deployment on a plain git host refuses
+`from_repo` (`experiment_file_unsupported`), so the command above states everything and works
+on both.
 
 The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
@@ -214,12 +230,12 @@ schedule and the stages answer 403 to its token); it writes those down for you.
 - **Description sync is not optional, ever.** Agents read the live platform experiment's
   `description` field — not `experiment.md`, not `FINAL_RESULT.md`. Any edit to either of those
   files (a resolved question, a new redirect, a stage/direction change) is incomplete until it is
-  mirrored: update `agents/coordinator/experiments/$EXPERIMENT/experiment.yaml`'s `description` to
-  the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then send that block alone with `hl platform-experiments update
+  mirrored: update `agents/coordinator/experiments/$EXPERIMENT/.hypothesisloop/experiment.yaml`'s
+  `description` to the refreshed `EXPERIMENT DESCRIPTION` block verbatim, then send that block alone with `hl platform-experiments update
   --platform-experiment $PLATFORM_EXPERIMENT_ID --description-file FILE`, immediately,
   same turn as the file edit — never batched for later. (The update takes only the fields that
   change, and once the platform experiment is `running` only `name`/`description` do, so the
-  whole experiment.yaml is refused there.) Then `hl
+  whole experiment file is refused there.) Then `hl
   platform-experiments list` or `GET $API_URL/platform-experiments/{id}` and diff its
   `description` against the file's block before moving on; treat any mismatch as a blocker, not a
   note-for-later. This has
@@ -400,6 +416,6 @@ Hand off to `supervise.md` once agents are running.
 Diagnose from the actual failure (logs/job status/API response), not the symptom's shape.
 
 - Platform bug → fix in code, per `important.md`
-- Experiment-definition gap → fix `seed/`/`job.yaml`/`experiment.md` directly, check against
+- Experiment-definition gap → fix `seed/`, `.hypothesisloop/job.yaml` or `experiment.md` directly, check against
   `experiment-checklist.md`.
 - Environment/capacity → redo the relevant step-1 check, don't work around it per-agent.

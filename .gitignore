@@ -104,7 +104,6 @@ controlplane/settings/.hypothesisloop.rendered.yaml
 controlplane/settings/.hypothesisloop.dev.yaml
 localdev/.bin/
 localdev/.run/
-agents/coordinator/experiments/*/seed/*.rendered.yaml
 localdev/.host-address
 localdev/.image-tag
 controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[3]
+EXPERIMENTS = REPO / "agents/coordinator/experiments"
 
 # Every script that carries its own copy of post_metric: seeds are copied into an experiment's
 # repository and workloads into an image, so none of them can import a shared one.
@@ -108,12 +109,38 @@ class MetricHelperTest(unittest.TestCase):
                 self.assertEqual(stderr, "")
 
 
+class ExperimentFilesTest(unittest.TestCase):
+    def test_the_description_is_the_block_of_experiment_md(self):
+        files = sorted(EXPERIMENTS.glob("*/.hypothesisloop/experiment.yaml"))
+        self.assertTrue(files)
+        for path in files:
+            with self.subTest(experiment=path.parents[1].name):
+                block = (path.parents[1] / "experiment.md").read_text().split("## EXPERIMENT DESCRIPTION", 1)[1]
+                if "```" in block:
+                    block = block.split("```")[1]
+                scalar = path.read_text().split("\ndescription: |\n", 1)[1]
+                lines = []
+                for line in scalar.split("\n"):
+                    if line.strip() and not line.startswith("  "):
+                        break
+                    lines.append(line[2:])
+                self.assertEqual("\n".join(lines).strip(), "\n".join(line if line.strip() else "" for line in block.strip().split("\n")))
+
+    def test_one_job_spec_and_no_placeholder_of_another_time(self):
+        self.assertEqual(sorted(p for p in EXPERIMENTS.glob("*/seed/*.yaml")), [])
+        for path in sorted(EXPERIMENTS.glob("*/.hypothesisloop/*.yaml")):
+            with self.subTest(path=path.relative_to(EXPERIMENTS)):
+                text = path.read_text()
+                for stale in ("__WORKLOAD_IMAGE__", "hypothesis_id:", "max_agents:", "ends_at:"):
+                    self.assertNotIn(stale, text)
+
+
 class SampleJobFilesTest(unittest.TestCase):
     """The samples an agent's image carries: none retries a job, since a failed gate would only
     fail again, and every file one of them names is in the image."""
 
     def test_no_sample_retries_and_the_reference_they_name_is_shipped(self):
-        samples = sorted((REPO / "agents/coordinator/experiments").glob("*/seed/*.yaml"))
+        samples = sorted(EXPERIMENTS.glob("*/.hypothesisloop/job.yaml"))
         self.assertTrue(samples)
         dockerfile = (REPO / "agents/experimentator/Dockerfile.base").read_text()
         shipped = "controlplane/settings/examples/experiment-submission.yaml"
@@ -132,7 +159,7 @@ class CatalogueImageJobTest(unittest.TestCase):
     train.py imports."""
 
     def test_the_command_runs_train_py_of_the_clone_with_every_import_installed(self):
-        demo = REPO / "agents/coordinator/experiments/dummy-data-search-demo"
+        demo = EXPERIMENTS / "dummy-data-search-demo"
         spec = (demo / ".hypothesisloop/job.yaml").read_text()
         line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
         shell, flag, script = json.loads(line.split("command:", 1)[1])
