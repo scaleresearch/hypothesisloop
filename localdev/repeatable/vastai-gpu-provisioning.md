@@ -95,7 +95,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi -L   #
 
 ## 6. Reach your local control plane from the rented node
 
-The control plane normally runs locally (`make controlplane-up`). The rented node
+The control plane normally runs locally (`make dev`). The rented node
 needs outbound URLs that actually reach it — use Cloudflare Quick Tunnels:
 
 ```bash
@@ -105,24 +105,32 @@ bash localdev/local-tunnels/tunnels.sh status  # re-check anytime; URLs re-rando
 
 ## 7A. Bare-metal agent path
 
+A cluster is registered for an org before its agent starts, and the agent presents the
+cluster's runtime token on every request. `make -s runtime-token CLUSTER=my-gpu-node` on the
+control-plane host registers the cluster for the org `default` and prints that token. Hand it
+to the node in a file only root reads, so it is on no command line:
+
 ```bash
 GOOS=linux GOARCH=amd64 go build -o /tmp/bare-agent ./runtime/bare-metal/cmd/bare-agent
 scp -i ~/.ssh/vastai_hypothesisloop -P <port> /tmp/bare-agent root@<ip>:/root/
-ssh ... 'CLUSTER_NAME=my-gpu-node \
+make -s runtime-token CLUSTER=my-gpu-node |
+  ssh ... 'umask 077 && { printf RUNTIME_TOKEN=; cat; } > /root/bare-agent.env'
+ssh ... 'set -a && . /root/bare-agent.env && set +a && CLUSTER_NAME=my-gpu-node \
   API_URL=<control-plane API tunnel URL> \
   NODE_NAME=my-gpu-node \
   nohup /root/bare-agent > /root/bare-agent.log 2>&1 &'
 ```
 
-Verify registration: `curl <api tunnel>/internal/clusters` and
-`curl <api tunnel>/resource-catalog/capacity`.
+Verify registration with a token of the org (`HL_TOKEN`, an API key or `make -s staff-token`):
+`hl cluster list` shows the cluster connected, and `hl capacity` shows its GPU.
 
 ## 7B. k3s / cluster-agent path
 
 Use `localdev/k3s-nvidia/install.sh` (mirrors `localdev/k3s-tenstorrent/`) — installs
 nvidia-container-toolkit, k3s (`--docker`), the NVIDIA device plugin, GPU Feature Discovery,
-and the cluster-agent bundle in one shot. Requires `API_URL`/
-`METRICS_URL` env vars pointed at your tunnels. See that script's header comment for why it
+and the cluster-agent chart in one shot. Requires `API_URL` and `METRICS_URL` pointed at your
+tunnels, `RUNTIME_TOKEN` (`make -s runtime-token CLUSTER=k3s-nvidia` on the control-plane host)
+and `TAG`, the tag the runtime images were pushed under. See that script's header comment for why it
 manually applies GPU Feature Discovery's node labels (no Node Feature Discovery installed).
 
 ## 8. Pricing gotcha: the accelerator type must be in `hypothesisloop.yaml`
@@ -134,19 +142,24 @@ hardware can never be admitted. Find out what your rented GPU will report with
 case-insensitive (`domain.AcceleratorType.MatchesLabels`), so don't worry about exact casing —
 different discovery mechanisms (this platform's own NVML probe vs. real NVIDIA GPU Feature
 Discovery) report the same hardware with different casing, and that's handled automatically.
-After editing the yaml, restart the control-service container to pick it up:
-`podman restart hypothesisloop-control-service`.
+After editing the yaml, run `make dev`: it renders the settings again and restarts the API.
 
 ## 9. Submitting a real job
 
 See `tests/support/api.py`'s `API.register_agent`/`create_platform_experiment`/`signup_and_start`/
 `submit_job`, and `tests/e2e/test_nvidia_hardware.py` for a full worked example (bare-node
-+ optional k3s leg, positive completion, negative-admission, mid-run eviction). Force-admit
-onto your specific node while testing (bypasses the normal capacity-based scheduling race):
++ optional k3s leg, positive completion, negative-admission, mid-run eviction).
+
+The control plane decides where a job runs, and nothing places one by hand. A job lands on
+your node when it names the node's accelerator type, copied verbatim from `hl capacity`, and
+no other cluster of the org offers that type with room. To keep another cluster out while
+testing, turn it off for the org and on again afterwards:
 ```bash
-curl -X POST <api tunnel>/experiments/<job_id>/admit \
-  -H 'Content-Type: application/json' -d '{"cluster_name": "my-gpu-node"}'
+hl cluster disable <other cluster>
+hl job status <job_id>          # cluster_name says where it ran
+hl cluster enable <other cluster>
 ```
+A job that stays QUEUED says why in `not_admitted_reason`.
 
 ## 10. Teardown
 
