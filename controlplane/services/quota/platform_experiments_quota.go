@@ -105,19 +105,21 @@ func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, 
 
 // AgentQuotaView is an agent's quota as the quota reads answer it.
 type AgentQuotaView struct {
-	ID                         string    `json:"id"`
-	AgentID                    string    `json:"agent_id"`
-	PlatformExperimentID       string    `json:"platform_experiment_id"`
-	ShareAcceleratorHours      float64   `json:"share_accelerator_hours" doc:"All the agent may spend, on guaranteed and burst jobs together: its part of the budget released so far."`
-	GuaranteedAcceleratorHours float64   `json:"guaranteed_accelerator_hours" doc:"How much of the share may run at guaranteed priority."`
-	BurstAcceleratorHours      float64   `json:"burst_accelerator_hours" doc:"How much of the share may run at burst priority, on idle capacity. Burst hours are part of the share and never on top of it."`
-	UsedGuaranteedAccH         float64   `json:"used_guaranteed_acch" doc:"Spent at guaranteed priority, with a job that has not started at its estimate and a running one at what it has spent so far."`
-	UsedBurstAccH              float64   `json:"used_burst_acch" doc:"The same at burst priority."`
-	RemainingGuaranteed        float64   `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
-	RemainingBurst             float64   `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
-	DataBytes                  *int64    `json:"data_bytes,omitempty" doc:"What the agent holds under its data prefix in this platform experiment, read from the object store as admission reads it. On a read of one agent's quota, where the platform sets a ceiling."`
-	MaxDataBytes               int64     `json:"max_data_bytes,omitempty" doc:"The ceiling on data_bytes: a submit is refused with data_quota_exceeded once data_bytes is at or over it. Absent where the platform sets none."`
-	CreatedAt                  time.Time `json:"created_at"`
+	ID                         string     `json:"id"`
+	AgentID                    string     `json:"agent_id"`
+	PlatformExperimentID       string     `json:"platform_experiment_id"`
+	ShareAcceleratorHours      float64    `json:"share_accelerator_hours" doc:"All the agent may spend, on guaranteed and burst jobs together: its part of the budget released so far."`
+	GuaranteedAcceleratorHours float64    `json:"guaranteed_accelerator_hours" doc:"How much of the share may run at guaranteed priority."`
+	BurstAcceleratorHours      float64    `json:"burst_accelerator_hours" doc:"How much of the share may run at burst priority, on idle capacity. Burst hours are part of the share and never on top of it."`
+	UsedGuaranteedAccH         float64    `json:"used_guaranteed_acch" doc:"Spent at guaranteed priority, with a job that has not started at its estimate and a running one at what it has spent so far."`
+	UsedBurstAccH              float64    `json:"used_burst_acch" doc:"The same at burst priority."`
+	RemainingGuaranteed        float64    `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
+	RemainingBurst             float64    `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
+	NextStageStartsAt          *time.Time `json:"next_stage_starts_at,omitempty" doc:"When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no researcher or was cut."`
+	NextStageShare             *float64   `json:"next_stage_share_accelerator_hours,omitempty" doc:"What share_accelerator_hours becomes when the next stage starts, at the least: the incoming stage's part of the budget is split over the researchers still standing, and what the ones cut then left unspent is added. An agent cut at that boundary holds nothing. Present with next_stage_starts_at: a share that looks spent before it grows again."`
+	DataBytes                  *int64     `json:"data_bytes,omitempty" doc:"What the agent holds under its data prefix in this platform experiment, read from the object store as admission reads it. On a read of one agent's quota, where the platform sets a ceiling."`
+	MaxDataBytes               int64      `json:"max_data_bytes,omitempty" doc:"The ceiling on data_bytes: a submit is refused with data_quota_exceeded once data_bytes is at or over it. Absent where the platform sets none."`
+	CreatedAt                  time.Time  `json:"created_at"`
 }
 
 // QuotaView returns one agent's quota view, nil when it has none.
@@ -184,6 +186,10 @@ func (s *PlatformExperimentsService) quotaViews(ctx context.Context, pe *domain.
 	if err := s.store.AddDesiredQuotaUsage(ctx, pe.ID, quotas); err != nil {
 		return nil, fmt.Errorf("desired usage: %w", err)
 	}
+	next, err := s.nextStage(ctx, pe)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]*AgentQuotaView, len(quotas))
 	for i, q := range quotas {
 		views[i] = &AgentQuotaView{
@@ -193,6 +199,10 @@ func (s *PlatformExperimentsService) quotaViews(ctx context.Context, pe *domain.
 			BurstAcceleratorHours:      min(q.BurstAcceleratorHours, q.Share()),
 			RemainingGuaranteed:        q.Remaining(domain.CapacityGuaranteed),
 			RemainingBurst:             q.Remaining(domain.CapacityBurst),
+		}
+		if next != nil && next.standing[q.AgentID] {
+			share := domain.RoundHours(q.Share() + next.credit)
+			views[i].NextStageStartsAt, views[i].NextStageShare = &next.startsAt, &share
 		}
 	}
 	if err := s.correctRunningCosts(ctx, pe, quotas); err != nil {
