@@ -76,10 +76,8 @@ func (c *JobWorkloadClient) BuildJob(exp *domain.Experiment, placement Accelerat
 // policy §1 established, and PollJobStatus reports the SET's phase, so a failure anywhere
 // ends the experiment and takes every group's pods with it.
 func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement AcceleratorPlacement) ([]*batchv1.Job, error) {
-	// EffectiveJob, never exp.Job directly: an admitted experiment's literal CPU/memory/storage
-	// live in exp.ResolvedJob (see domain.Experiment.ResolvedJob), because exp.Job may still carry
-	// the "max" sentinel the agent submitted — GET must keep returning exactly what was
-	// submitted, so nothing ever rewrites exp.Job in place.
+	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
+	// exp.ResolvedJob (see domain.Experiment.ResolvedJob), and nothing rewrites exp.Job in place.
 	spec := exp.EffectiveJob()
 	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")

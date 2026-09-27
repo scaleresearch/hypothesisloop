@@ -126,9 +126,8 @@ type Placement struct {
 // scope for a single-node runtime (different-backend.md §4.4) and there is no way to honor it
 // partially.
 func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placement) (containerSpec, error) {
-	// EffectiveJob, never exp.Job directly: an admitted experiment's literal CPU/memory/storage
-	// live in exp.ResolvedJob (see domain.Experiment.ResolvedJob) — exp.Job may still carry the
-	// "max" sentinel the agent submitted, and GET must keep returning exactly that.
+	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
+	// exp.ResolvedJob (see domain.Experiment.ResolvedJob).
 	spec := exp.EffectiveJob()
 	// Nodes() sums a grouped job's replicas, so a heterogeneous job is refused here by exactly the
 	// same rule and the same error a num_nodes > 1 job already gets. Groups do not make this
