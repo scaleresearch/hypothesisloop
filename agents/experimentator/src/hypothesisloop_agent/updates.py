@@ -38,6 +38,10 @@ WAKES = {
     "agent": ("experiment.status", "experiment.blocked", "job.underperforming", "agent.cut", "stage.boundary",
               "comment.new", "platform_experiment.status", "platform_experiment.description"),
 }
+# What wakes a coordinator besides, while its platform experiment is open: every job that ends
+# then is a baseline agent's, and one that failed for what the brief says is the coordinator's to
+# repair. Three failed in a row before a coordinator heard of any, from the agent giving up.
+OPEN_WAKES = ("experiment.status",)
 
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
@@ -111,7 +115,7 @@ def _machine(job: dict) -> str:
 
 def _result(job: dict) -> str:
     return ", ".join([
-        *(f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
+        *(f"{m['name']} {m['value']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
           for m in job.get("metrics", [])),
         *([f"ranks nowhere: {job['not_rankable_reason']}"] if job.get("rankable") is False else [])])
 
@@ -169,13 +173,24 @@ async def drain(env: dict[str, str], command: list[str] | None = None) -> list[d
     return await _with_job_state(_events(stdout), env, command[0])
 
 
+async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...]:
+    """The kinds that end the wait of whoever watches with env, as its platform experiment
+    stands now. One it could not read is taken as running."""
+    if _agent(env):
+        return WAKES["agent"]
+    code, stdout = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
+    if code == 0 and json.loads(stdout)["status"] == "open":
+        return WAKES["coordinator"] + OPEN_WAKES
+    return WAKES["coordinator"]
+
+
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
                      command: list[str] | None = None, retry_s: float = _RETRY_S) -> list[dict]:
     """Runs hl watch until an event that wakes this role arrives, and returns it with what waited
     before it. Once idle_s passes without one, returns what waits, which may be nothing. Returns
     [] as soon as stopped() is true. A failed hl watch is retried after retry_s."""
     command = command or watch_command(env)
-    waking = [*command, "--wake", ",".join(WAKES["agent" if _agent(env) else "coordinator"])]
+    waking = [*command, "--wake", ",".join(await _wakes(env, command[0]))]
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
         code, stdout = await _run_hl(waking, env, stopped)

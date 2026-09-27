@@ -167,11 +167,11 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.stop_while_idle([], []), ["Begin.", LAST])
 
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
-        done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc best 0.9 last 0.9"}
+        done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc 0.9"}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         self.assertEqual(await self.stop_while_idle([comment], [done]), [
             "Begin.", LAST + "\n\nPlatform updates:\ncomment.new hyp-1 human\n"
-                           "experiment.status exp-1 COMPLETED acc best 0.9 last 0.9"])
+                           "experiment.status exp-1 COMPLETED acc 0.9"])
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):

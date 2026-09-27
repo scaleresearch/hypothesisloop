@@ -70,6 +70,21 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("experiment.status", updates.WAKES["coordinator"])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
 
+    # Three baseline jobs failed, one of them for the image the brief named, and the coordinator
+    # heard of none until the agent gave up.
+    async def test_a_coordinator_of_an_open_experiment_is_woken_by_a_job_that_ended_and_of_a_running_one_is_not(self):
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        for status, wakes in (("open", updates.WAKES["coordinator"] + ("experiment.status",)), ("running", updates.WAKES["coordinator"])):
+            command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{\n "status": "%s"\n}\'; exit 0; }\n'
+                                       'echo "$*" >> "$0.args"\nexit 0\n' % status)
+            await updates.next_batch(coordinator, lambda: False, 0.2, command=command)
+            with open(counter.replace(".runs", ".args")) as f:
+                self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(wakes))
+        refused, counter = fake_hl('[ "$1" = platform-experiments ] && exit 1\necho "$*" >> "$0.args"\nexit 0\n')
+        await updates.next_batch(coordinator, lambda: False, 0.2, command=refused)
+        with open(counter.replace(".runs", ".args")) as f:
+            self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(updates.WAKES["coordinator"]))
+
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
         events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
@@ -87,11 +102,11 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
 
 
 class JobStateTest(unittest.IsolatedAsyncioTestCase):
-    JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":[{"name":"acc","best":0.9,"last":0.85,"basis":"raw"},'
-            '{"name":"loss","best":0.2608416958176093,"last":0.31,"basis":"per_token"}],"ran_on":{"node":"rtx4090-0","machine":'
+    JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":[{"name":"acc","value":0.9,"basis":"raw"},'
+            '{"name":"loss","value":0.2608416958176093,"basis":"per_token"}],"ran_on":{"node":"rtx4090-0","machine":'
             '{"instance_id":"54493630","host_id":"16358","accelerator_model":"RTX 4090","cpu_model":"AMD Ryzen"}}}\n'
             '{"id":"exp-3","status":"EVICTED","ran_on":{"node":"blackhole-1"}}\n'
-            '{"id":"exp-2","status":"COMPLETED","metrics":[{"name":"acc","best":0.95,"last":0.95,"basis":"raw"}],"rankable":false,'
+            '{"id":"exp-2","status":"COMPLETED","metrics":[{"name":"acc","value":0.95,"basis":"raw"}],"rankable":false,'
             '"not_rankable_reason":"constraint exact_match is 0.5, and must be at least 1"}\n')
     STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
     QUOTA = ('{"agent_id":"agent-a","share_accelerator_hours":2,"remaining_guaranteed_accelerator_hours":1.85,"remaining_burst_accelerator_hours":1.85,'
@@ -105,10 +120,10 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
                                    self.JOBS, self.STATS, self.QUOTA)
         events = await updates.next_batch(ENV, lambda: False, 10, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
-                         "experiment.status exp-1 COMPLETED acc best 0.9 last 0.85, loss best 0.260842 last 0.31 (per_token) "
+                         "experiment.status exp-1 COMPLETED acc 0.9, loss 0.260842 (per_token) "
                          "on host 16358 RTX 4090\n"
                          "comment.new hyp-1 agent by agent-b\n"
-                         "experiment.status exp-2 COMPLETED acc best 0.95 last 0.95, "
+                         "experiment.status exp-2 COMPLETED acc 0.95, "
                          "ranks nowhere: constraint exact_match is 0.5, and must be at least 1\n"
                          "experiment.status exp-3 EVICTED oom on node blackhole-1\n"
                          "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
