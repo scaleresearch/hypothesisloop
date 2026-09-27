@@ -131,10 +131,22 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 	}
 
-	if found, ended := listed(); !found || ended != "" {
-		t.Fatalf("while planning: listed %v, ended %q, want kept", found, ended)
+	answered := func() bool {
+		t.Helper()
+		at, err := pes.PlannerAnsweredAt(ctx, pe, planner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return at != nil
+	}
+
+	if found, ended := listed(); !found || ended != "" || answered() {
+		t.Fatalf("while planning: listed %v, ended %q, answered %v, want kept and at work", found, ended, answered())
 	}
 	propose(0)
+	if !answered() {
+		t.Fatal("a planner whose proposal is stored has not answered, so its token would never end")
+	}
 	if found, ended := listed(); !found || ended != domain.RunEndPlanned {
 		t.Fatalf("just proposed: listed %v, ended %q, want winding down as planned", found, ended)
 	}
@@ -160,8 +172,8 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.PlanningEndsAt.Sub(until).Abs() > time.Second {
 		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
-	if found, ended := listed(); !found || ended != "" {
-		t.Fatalf("revising: listed %v, ended %q, want kept", found, ended)
+	if found, ended := listed(); !found || ended != "" || answered() {
+		t.Fatalf("revising: listed %v, ended %q, answered %v, want kept and at work again", found, ended, answered())
 	}
 	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Launch != "" {
 		t.Fatalf("after a revision the planner's launch is %+v, %v, want none, so that its next machine is a new launch", signup.Instance, err)
@@ -170,6 +182,9 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	propose(windDown + time.Second)
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		setPEStatus(t, pool, pe, status, 0)
+		if !answered() {
+			t.Fatalf("the planner of a platform experiment that is %s has not answered", status)
+		}
 		if found, _ := listed(); found {
 			t.Fatalf("a planner is kept in a platform experiment that is %s", status)
 		}

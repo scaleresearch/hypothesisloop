@@ -27,6 +27,7 @@ func TestATokenWhoseRunEndedSaysSo(t *testing.T) {
 		"agent after the close":                   {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
 		"agent after its cut":                     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = inWindDown }, true},
 		"agent whose rival was cut":               {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-2"] = inWindDown }, false},
+		"planner whose answer is stored":          {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = inWindDown }, true},
 		"coordinator at work":                     {CoordinatorScope("pe-a"), func(*fakeDirectory) {}, false},
 		"coordinator after the close":             {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
 		"job at work":                             {JobScope("job-a"), job, false},

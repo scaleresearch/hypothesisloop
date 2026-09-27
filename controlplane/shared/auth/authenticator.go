@@ -46,6 +46,7 @@ type Directory interface {
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	IsSignedUp(ctx context.Context, platformExperimentID, agentID string) (bool, error)
+	PlannerAnsweredAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
 }
@@ -179,14 +180,21 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		if a.woundDown(cutAt) {
 			return Principal{}, unauthenticated("agent %s was cut from platform experiment %s", p.AgentID, p.PlatformExperimentID)
 		}
+		answeredAt, err := a.directory.PlannerAnsweredAt(ctx, p.PlatformExperimentID, p.AgentID)
+		if err != nil {
+			return Principal{}, err
+		}
+		if a.woundDown(answeredAt) {
+			return Principal{}, unauthenticated("agent %s planned platform experiment %s and its planning is over", p.AgentID, p.PlatformExperimentID)
+		}
 		p = p.within(tenancy)
-		p.RunOver = closedAt != nil || cutAt != nil
+		p.RunOver = closedAt != nil || cutAt != nil || answeredAt != nil
 	}
 	return p, nil
 }
 
-// woundDown reports whether an agent's time after its platform experiment closed, or after it
-// was cut, has run out.
+// woundDown reports whether an agent's time after its run ended has run out: after its platform
+// experiment closed, after it was cut, or for a planner after its answer to its draft was stored.
 func (a *Authenticator) woundDown(endedAt *time.Time) bool {
 	return endedAt != nil && !a.now().Before(endedAt.Add(domain.AgentWindDown))
 }

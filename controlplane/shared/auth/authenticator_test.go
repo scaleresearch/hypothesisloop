@@ -25,6 +25,8 @@ type fakeDirectory struct {
 	jobs     map[string]domain.Tenancy
 	ended    map[string]bool
 	cutAt    map[string]time.Time
+	// answeredAt is when a planner answered its draft, by platform experiment and agent.
+	answeredAt map[string]time.Time
 	// notSignedUp and launchers are read by the methods in roster_test.go.
 	notSignedUp map[string]bool
 	launchers   map[string]bool
@@ -79,6 +81,10 @@ func (d *fakeDirectory) AgentCutAt(_ context.Context, pe, agent string) (*time.T
 	return at(d.cutAt, pe+"/"+agent), d.fail
 }
 
+func (d *fakeDirectory) PlannerAnsweredAt(_ context.Context, pe, agent string) (*time.Time, error) {
+	return at(d.answeredAt, pe+"/"+agent), d.fail
+}
+
 func (d *fakeDirectory) ClusterOrg(_ context.Context, name string) (string, bool, error) {
 	org, ok := d.clusters[name]
 	return org, ok, d.fail
@@ -89,16 +95,17 @@ var tenancyA = domain.Tenancy{PlatformExperimentID: "pe-a", ProjectID: "prj-a", 
 func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, *fakeDirectory) {
 	t.Helper()
 	directory := &fakeDirectory{
-		keys:     map[string]*domain.APIKey{},
-		pes:      map[string]domain.Tenancy{"pe-a": tenancyA},
-		closedAt: map[string]time.Time{},
-		jobs:     map[string]domain.Tenancy{"job-a": tenancyA},
-		ended:    map[string]bool{},
-		cutAt:    map[string]time.Time{},
-		clusters: map[string]string{"cluster-a": "org-a"},
-		staff:    map[string]bool{},
-		homes:    map[string][]string{},
-		names:    map[string]string{},
+		keys:       map[string]*domain.APIKey{},
+		pes:        map[string]domain.Tenancy{"pe-a": tenancyA},
+		closedAt:   map[string]time.Time{},
+		jobs:       map[string]domain.Tenancy{"job-a": tenancyA},
+		ended:      map[string]bool{},
+		cutAt:      map[string]time.Time{},
+		answeredAt: map[string]time.Time{},
+		clusters:   map[string]string{"cluster-a": "org-a"},
+		staff:      map[string]bool{},
+		homes:      map[string][]string{},
+		names:      map[string]string{},
 	}
 	cfg := config.AuthConfig{SigningSecret: testSecret}
 	if len(signers) > 0 {
@@ -162,6 +169,7 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 		"agent of a missing platform experiment":                  {AgentScope("pe-missing", "agent-1"), func(*fakeDirectory) {}},
 		"agent that was cut a wind-down ago":                      {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown }},
 		"agent cut long ago in a platform experiment just closed": {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
+		"planner that answered its draft a wind-down ago":         {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
 		"coordinator of a missing platform experiment":            {CoordinatorScope("pe-missing"), func(*fakeDirectory) {}},
 	} {
 		a, directory := newTestAuthenticator(t)
@@ -186,6 +194,7 @@ func TestAnAgentTokenOutlivesCloseAndCutByTheWindDownOnly(t *testing.T) {
 		"platform experiment closed a second short of it": func(d *fakeDirectory) { d.closedAt["pe-a"] = lastInstant },
 		"agent cut this instant":                          func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = testNow },
 		"agent cut a second short of it":                  func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = lastInstant },
+		"planner answered a second short of it":           func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = lastInstant },
 	} {
 		a, directory := newTestAuthenticator(t)
 		change(directory)

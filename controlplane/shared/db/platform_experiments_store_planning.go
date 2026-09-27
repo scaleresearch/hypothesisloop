@@ -234,6 +234,24 @@ WHERE q.platform_experiment_id = $1 AND s.platform_experiment_id = q.platform_ex
 	return nil
 }
 
+// PlannerAnsweredAt returns when the planner agentID answered its draft, with a proposal or with
+// why there is none: the moment its run ended. nil for an agent that is no planner, and for a
+// planner that is planning, which a revision makes true again.
+func (s *PlatformExperimentsStore) PlannerAnsweredAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
+	var answeredAt *time.Time
+	err := s.pool.pool.QueryRow(ctx, `
+SELECT pe.proposed_at
+FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
+WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.flavor = '`+domain.PlannerFlavor+`'`, platformExpID, agentID).Scan(&answeredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments_store.PlannerAnsweredAt: %w", err)
+	}
+	return answeredAt, nil
+}
+
 // JobHasFinding says a finding was filed for the job.
 func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experimentID string) (bool, error) {
 	var found bool
