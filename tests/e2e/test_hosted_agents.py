@@ -403,8 +403,10 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         # Its findings are the platform experiment's summary, written through hl with no agent id.
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "what the run found so far")
         assert with_repo.get_json(f"/platform-experiments/{pe_id}")["summary"] == "what the run found so far"
-        refused = as_coordinator.hl_expect("hypothesis", "comment", "hyp-any", "--text", "t")
-        assert refused.returncode == 1 and "no agent" in refused.stderr, f"a coordinator commenting as nobody: {refused.stderr}"
+        # A note it writes is its own and no agent's.
+        idea = with_repo.register_human_hypothesis(pe_id, "an idea the coordinator has a note on")
+        note = json.loads(as_coordinator.hl("hypothesis", "comment", idea["id"], "--text", "the coordinator's note"))
+        assert (note["agent_id"], note["actor"]) == ("", {"kind": "coordinator", "id": pe_id, "name": "coordinator"}), note
 
         # Its machine exits: recorded on the platform experiment, asked for again under a new name.
         first = coordinator["name"]
@@ -655,7 +657,7 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
         changed = {key: (pe[key], after[key]) for key in (*live, "stages") if after[key] != pe[key]}
         assert not changed, f"a refused update changed {changed}"
 
-        # It acts as no agent, with or without one named.
+        # It acts as no agent, and writes for none.
         r = as_coordinator.post(f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent_id})
         assert r.status_code == 403, f"a coordinator fetching an agent's data key: {r.status_code} {r.text}"
         refused = as_coordinator.hl_expect("hypothesis", "comment", "hyp-any", "--text", "t", "--agent", agent_id)
