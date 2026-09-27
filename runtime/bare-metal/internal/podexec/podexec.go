@@ -93,7 +93,11 @@ type Executor struct {
 	inFlight map[string]operation
 	// failedPulls is each job's last pull, when it failed.
 	failedPulls map[string]failedPull
-	workers     sync.WaitGroup
+	// written and writtenAt are the last measurement of the containers' writable layers (see
+	// writtenBytes).
+	written   map[string]int64
+	writtenAt time.Time
+	workers   sync.WaitGroup
 }
 
 // engine is the part of the Engine API client this package calls.

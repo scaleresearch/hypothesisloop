@@ -42,7 +42,7 @@ func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, 
 }
 
 // listContainers measures each container's writable layer when written is set. The engine walks
-// the layer's files to answer, so only the storage reading asks.
+// the layer's files to answer, so only writtenBytes asks.
 func (e *Executor) listContainers(ctx context.Context, written bool) ([]containerInfo, error) {
 	summaries, err := e.docker.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,

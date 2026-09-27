@@ -47,6 +47,8 @@ type fakeEngine struct {
 	// stoppingState is what a container inside its stop grace is listed as: podman says
 	// "stopping", docker keeps saying "running".
 	stoppingState string
+	// sizedLists counts the lists that asked for sizes.
+	sizedLists int
 }
 
 func newFakeEngine() *fakeEngine {
@@ -132,6 +134,9 @@ func (f *fakeEngine) ContainerList(ctx context.Context, options client.Container
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out client.ContainerListResult
+	if options.Size {
+		f.sizedLists++
+	}
 	for name, c := range f.containers {
 		summary := container.Summary{
 			ID: name, Names: []string{"/" + name}, Labels: c.labels, State: container.ContainerState(c.state),
