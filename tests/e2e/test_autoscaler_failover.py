@@ -129,9 +129,10 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
 
 def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experiment, run_id, deadline):
     """Scenario 2: a short per-cluster scale_up_timeout_seconds means the never-arriving node is
-    given up on quickly. The job requeues with the failed cluster in tried_clusters,
-    infra_requeue_count/max_retries are untouched (a scheduling failure is not the job's fault),
-    and once every autoscaler candidate is tried the reason becomes no_scalable_capacity.
+    given up on quickly. The job requeues with the failed cluster in tried_clusters and one of
+    its infrastructure requeues spent, as any fault of the environment spends one, so its own
+    retries are untouched. Once every autoscaler candidate is tried the reason becomes
+    no_scalable_capacity.
 
     Uses a 2-node request on a flavor with exactly one real host, not the oversized-single-node
     shape autoscaler.md's own wording suggests, for the same reason documented on
@@ -171,11 +172,11 @@ def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experime
             accept=lambda e: e["status"] == "QUEUED",
             deadline=Deadline.in_seconds(60),
         )
-        assert requeued.get("infra_requeue_count", 0) == 0, (
-            "scale_up_timeout must not spend infra_requeue_count -- it is a scheduling failure, "
-            "not an environment fault charged to the job"
+        assert (requeued["attempt_count"], requeued["infra_requeue_count"]) == (1, 1), (
+            "a scale-up timeout is the environment's fault: it spends one infrastructure requeue "
+            f"and none of the job's own retries, got attempt_count={requeued['attempt_count']} "
+            f"infra_requeue_count={requeued['infra_requeue_count']}"
         )
-        assert requeued.get("attempt_count", 0) >= 1, "attempt_count should still advance"
 
         # This cluster is the only autoscaler candidate for SOLO_TYPE -- once tried, the job has
         # nowhere left to speculate and must report no_scalable_capacity, not sit silently QUEUED
