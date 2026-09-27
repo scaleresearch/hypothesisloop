@@ -732,3 +732,28 @@ func TestAFreeSlotOfAnotherAcceleratorCountDoesNotStandInForAVictim(t *testing.T
 		t.Fatalf("preempted %v (reason %q), want the burst job on the only slot of the job's shape", store.requeued, store.reasons["guaranteed"])
 	}
 }
+
+// While the instance of a preempted job still holds the larger slot, the job's reason names that
+// slot. Sized by the tick to the smallest shape, it read as short of that shape's whole size.
+func TestAJobWaitingForAPreemptedSlotSaysWhichSlot(t *testing.T) {
+	c := newSlots().add("small-0", 1, size(8000, 32, 100)).add("large-0", 1, size(16000, 64, 200))
+	holder := pinnedTo(sized(t, c, h100Job("holder", "2")), "small-0")
+	holder.CapacityTier = domain.CapacityGuaranteed
+	holder.Status, holder.ClusterName = domain.StatusRunning, rented
+	c.take("small-0").take("large-0")
+	guaranteed := h100Job("guaranteed", "4")
+	guaranteed.CapacityTier = domain.CapacityGuaranteed
+	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{holder}}
+	l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"holder": "small-0"}})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reason := store.reasons["guaranteed"]
+	if !strings.HasPrefix(reason, domain.NotAdmittedCapacityUnavailable+": ") || !strings.Contains(reason, "large-0") || strings.Contains(reason, "short") {
+		t.Fatalf("reason %q, want it to say the job waits for slot large-0 to be left", reason)
+	}
+	if len(store.requeued) != 0 || len(store.written) != 0 {
+		t.Fatalf("while the slot is being freed: preempted %v, admitted %v", store.requeued, store.written)
+	}
+}

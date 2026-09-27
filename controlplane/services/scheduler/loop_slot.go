@@ -153,6 +153,10 @@ func vacatingSlots(cluster string, sizes, freeAtTickStart map[string]map[string]
 	return vacating
 }
 
+func waitingForSlotReason(cluster, slot string) string {
+	return fmt.Sprintf("%s: waiting for slot %s of cluster %s: no job holds it and its instance has not left yet", domain.NotAdmittedCapacityUnavailable, slot, cluster)
+}
+
 // slotCovers reports whether a slot of this size holds the quantity a job named. "max" and no
 // quantity ask for whatever the slot has.
 func slotCovers(quantity, name string, size map[string]int64) bool {

@@ -457,6 +457,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			slots := hasSlots(nodeLabels[cluster])
 			totalCovers := scalarFits && !slots
 			promised := !slots && !scalarFits && domain.Fits(desiredFree[cluster], fp)
+			leaving := ""
 			if slots {
 				if vacating[cluster] == nil {
 					claimed, err := resolveCache.loadClaimed(ctx)
@@ -467,7 +468,7 @@ func (l *Loop) tick(ctx context.Context) error {
 					vacating[cluster] = vacatingSlots(cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], claimed)
 				}
 				if node, free, _ := slotFor(exp, cluster, nodeResourcesTotal[cluster], vacating[cluster], nodeLabels[cluster]); free {
-					promised = true
+					leaving, promised = nodeLabels[cluster][node][domain.NodeSlotLabel], true
 					delete(vacating[cluster], node)
 				}
 			}
@@ -526,6 +527,8 @@ func (l *Loop) tick(ctx context.Context) error {
 			backlog.record(start, cluster, "guaranteed", exp, shortage)
 			reason := ""
 			switch {
+			case leaving != "":
+				reason = waitingForSlotReason(cluster, leaving)
 			case waitingForScaleUp:
 				reason = domain.NotAdmittedWaitingForScaleUp
 			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, registeredClusters, l.triedClusterTTL):
