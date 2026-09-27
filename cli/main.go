@@ -325,9 +325,26 @@ func (fs *flagSet) Parse(args []string) error {
 		return errUsage
 	}
 	if err != nil {
-		return misuse(fs, "%s", err)
+		return misuse(fs, "%s", asTyped(err.Error(), args))
 	}
 	return nil
+}
+
+// asTyped is a flag error of the standard library, which names every flag with one dash, naming
+// the flag the way args spelled it.
+func asTyped(msg string, args []string) string {
+	for _, arg := range args {
+		spelled, _, _ := strings.Cut(arg, "=")
+		if !strings.HasPrefix(spelled, "--") {
+			continue
+		}
+		if one := spelled[1:]; strings.HasSuffix(msg, ": "+one) {
+			return strings.TrimSuffix(msg, one) + spelled
+		} else if strings.Contains(msg, " "+one+": ") {
+			return strings.Replace(msg, " "+one+": ", " "+spelled+": ", 1)
+		}
+	}
+	return msg
 }
 
 // printFlags lists the flags except the aliases, which are registered with an empty usage.

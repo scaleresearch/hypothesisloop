@@ -937,3 +937,23 @@ func TestProposeSaysARefusedProposalChangesNothing(t *testing.T) {
 		t.Fatalf("the help does not say a refused proposal changes nothing:\n%s", stderr.String())
 	}
 }
+
+// hl answered --text with "flag needs an argument: -text": a flag is named the way it was typed.
+func TestAFlagErrorNamesTheFlagAsItWasTyped(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"hypothesis", "comment", "hyp-1", "--text", "a note", "--text"}, "hl: hypothesis comment: flag needs an argument: --text\n"},
+		{[]string{"hypothesis", "comment", "hyp-1", "-text"}, "hl: hypothesis comment: flag needs an argument: -text\n"},
+		{[]string{"hypothesis", "comment", "hyp-1", "--note", "x"}, "hl: hypothesis comment: flag provided but not defined: --note\n"},
+		{[]string{"job", "list", "--limit", "many"}, "hl: job list: invalid value \"many\" for flag --limit: parse error\n"},
+		{[]string{"job", "list", "--limit=many"}, "hl: job list: invalid value \"many\" for flag --limit: parse error\n"},
+		{[]string{"job", "list", "--needs-summary=perhaps"}, "hl: job list: invalid boolean value \"perhaps\" for --needs-summary: parse error\n"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tc.args, &stdout, &stderr); code != 2 || !strings.HasPrefix(stderr.String(), tc.want) {
+			t.Errorf("hl %s: exit %d, stderr %q, want it to begin %q", strings.Join(tc.args, " "), code, stderr.String(), tc.want)
+		}
+	}
+}
