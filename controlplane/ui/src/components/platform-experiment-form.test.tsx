@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubInstallations, fetchGitHubRepositories, startPlatformExperiment,
+  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, startPlatformExperiment,
   updatePlatformExperiment,
 } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -13,7 +13,7 @@ import type { Me, PlatformExperiment } from '@/types'
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
   startPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
 }))
 
@@ -48,6 +48,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 beforeEach(() => {
   onSaved.mockReset()
   vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockResolvedValue(created)
@@ -130,8 +131,8 @@ describe('a new platform experiment with hosted agents', () => {
     expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new')
   })
 
-  // Hosting needed a repository, so a person with an idea and no repository could not start.
-  it('is created with no repository when none is chosen', async () => {
+  // Hosting needed a repository named, so a person with an idea and no repository could not start.
+  it('names no repository when none is chosen, and the platform creates one', async () => {
     show()
     await essentials()
     await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))

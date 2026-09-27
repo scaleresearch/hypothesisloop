@@ -7,10 +7,10 @@ import { useTenant } from '@/lib/tenant'
 import { TextLink } from '@/components/ui/link'
 
 /**
- * Where the org stands with GitHub when it creates an experiment. On a deployment with a GitHub
- * App an experiment keeps its code in a repository, so the org either has an account connected,
- * to name a repository on or have one created on, or must connect one first. Undefined while it
- * is being read, and on a deployment with no App, where an experiment needs no repository.
+ * Where the org stands with GitHub when it creates an experiment. On a deployment whose git host
+ * is GitHub the org either has an account connected, to name a repository on or have one created
+ * on, or must connect one first. Undefined while it is being read, and on a deployment whose git
+ * host is another one, where the repository is named by hand.
  */
 export function useGitHub(): 'connected' | 'unconnected' | undefined {
   const { org } = useTenant()

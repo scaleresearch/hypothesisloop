@@ -1,6 +1,5 @@
 'use client'
 
-import { CodeRef } from '@/components/code-bundle'
 import useSWR from 'swr'
 import { useRecordScope } from '@/lib/read-only'
 import { TextLink } from '@/components/ui/link'
@@ -298,7 +297,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             <Table>
               <tbody>
                 {j.job?.image && <Row label="Image" value={j.job.image} />}
-                {j.code_ref && <Row label="Code (git commit)" value={<CodeRef codeRef={j.code_ref} />} />}
+                {j.code_ref && <Row label="Code (git commit)" value={j.code_ref} />}
                 {j.config_hash && <Row label="Configuration checksum" value={j.config_hash} />}
                 {j.data_ref && <Row label="Data" value={j.data_ref} />}
               </tbody>

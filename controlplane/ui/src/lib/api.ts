@@ -458,24 +458,6 @@ export interface CreatePlatformExperimentRequest {
   coordinator_hosted?: boolean
 }
 
-/**
- * The parts of a job's code_ref when the platform keeps the code, which it does for a platform
- * experiment that names no repository: .../platform-experiments/PE/agents/AGENT/code@SHA. Null
- * for a git remote.
- */
-export function platformCodeRef(ref: string): { platformExperimentID: string; agentID: string; sha: string } | null {
-  const named = /\/platform-experiments\/([^/@]+)\/agents\/([^/@]+)\/code@([0-9a-f]{40})$/.exec(ref)
-  return named && { platformExperimentID: named[1], agentID: named[2], sha: named[3] }
-}
-
-/** The git bundle the platform keeps for such a code_ref: `git clone FILE` opens it. */
-export async function fetchCodeBundle(ref: string): Promise<Blob> {
-  const named = platformCodeRef(ref)
-  if (!named) throw new Error(`${ref} is not code the platform keeps`)
-  const res = await answer('GET', `/platform-experiments/${named.platformExperimentID}/agents/${named.agentID}/code/${named.sha}`)
-  return res.blob()
-}
-
 /** What a repository's .hypothesisloop/experiment.yaml states of a platform experiment. */
 export interface ExperimentFile {
   repository: string
@@ -735,14 +717,14 @@ export function acceptOrgInvite(token: string): Promise<OrgMember> {
 // GitHub
 // ---------------------------------------------------------------------------
 
-/** The reason the API gives on a deployment that has no GitHub App. */
+/** The reason the API gives on a deployment whose git host is not GitHub. */
 export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
 /** The person's GitHub account reaches no installation of the App. */
 export const APP_NOT_INSTALLED = 'app_not_installed'
 /** The person reaches several installations; the refusal's body lists them as `installations`. */
 export const INSTALLATION_CHOICE_REQUIRED = 'installation_choice_required'
 
-// Answered 503 github_not_configured on a deployment that has no GitHub App.
+// Answered 503 github_not_configured on a deployment whose git host is not GitHub.
 export function fetchGitHubApp(): Promise<GitHubApp> {
   return apiFetch<GitHubApp>('/github/app')
 }

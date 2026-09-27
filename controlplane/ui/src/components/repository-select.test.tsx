@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { ApiError, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { GitHubRepository, Me } from '@/types'
@@ -11,7 +11,7 @@ import type { GitHubRepository, Me } from '@/types'
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('project=prj_1') }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -46,6 +46,7 @@ function show(initial?: string) {
 }
 
 beforeEach(() => {
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockImplementation(async (_, params) => {
     const found = repositories.filter(r => r.repository.includes(params?.q ?? ''))
@@ -108,10 +109,13 @@ describe('the repository of a new platform experiment', () => {
     expect(fetchGitHubRepositories).not.toHaveBeenCalled()
   })
 
-  it('says so on a deployment without a GitHub App', async () => {
-    vi.mocked(fetchGitHubRepositories).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
+  it('is typed on a deployment whose git host is not GitHub', async () => {
+    vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
     show()
-    expect(await screen.findByText('This deployment has no GitHub App configured, so the experiment has no repository.')).toBeTruthy()
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Repository' }), 'sweep.git')
+    expect(screen.getByRole('status').textContent).toBe('sweep.git')
+    expect(screen.getByText(/created there beforehand/)).toBeTruthy()
+    expect(fetchGitHubInstallations).not.toHaveBeenCalled()
   })
 
   it('says why the repositories could not be listed', async () => {

@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
+import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { InlineError } from '@/components/ui/status-message'
@@ -24,12 +25,14 @@ export function repositoryFields(value: string): { repository?: string; reposito
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
  * With none chosen the platform creates one. With no account connected it says where one is
- * connected.
+ * connected. On a deployment whose git host is not GitHub the repository is typed: the platform
+ * creates none there.
  */
 export function RepositorySelect({ value, onChange }: { value: string; onChange: (repository: string) => void }) {
   const { org } = useTenant()
   const [q, setQ] = useState('')
-  const installations = useSWR(['github-installations', org.id], () => fetchGitHubInstallations(org.id))
+  const app = useSWR(['github-app'], fetchGitHubApp, { shouldRetryOnError: false })
+  const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const { data, error } = useSWR(
     connected ? ['github-repositories', org.id, q] : null,
@@ -37,6 +40,15 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
     { keepPreviousData: true, shouldRetryOnError: false },
   )
 
+  if (app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED) {
+    return (
+      <>
+        <Input mono className="w-full" aria-label="Repository" value={value} onChange={e => onChange(e.target.value)} />
+        <p className="text-sm text-muted">The name of a repository on this deployment&apos;s git host, created there beforehand.</p>
+      </>
+    )
+  }
+  if (app.error) return <InlineError>Could not read the deployment&apos;s git host: {app.error.message}</InlineError>
   if (installations.error) return <InlineError>Could not load the GitHub accounts of {org.name}: {installations.error.message}</InlineError>
   if (installations.data && !connected) {
     return (
@@ -45,9 +57,6 @@ export function RepositorySelect({ value, onChange }: { value: string; onChange:
         <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
       </p>
     )
-  }
-  if (error instanceof ApiError && error.reason === GITHUB_NOT_CONFIGURED) {
-    return <p className="text-sm text-muted">This deployment has no GitHub App configured, so the experiment has no repository.</p>
   }
 
   const listed = data?.items ?? []
