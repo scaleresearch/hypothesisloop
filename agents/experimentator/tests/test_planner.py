@@ -47,7 +47,16 @@ class PlannerPromptTest(unittest.TestCase):
     # nothing, so its briefing is half of what it was and lists no command that runs something.
     def test_the_planner_defines_the_experiment_and_runs_nothing(self):
         prompt, flat = render(planner())
-        self.assertIn("You run nothing: no clone, no code, no job, no hypothesis", flat)
+        self.assertIn("You define the experiment and run nothing: no trial, no measurement, no install, no clone, no job, no hypothesis", flat)
+        # One measured scikit-learn on its own machine for 17 minutes, through three command
+        # timeouts, to learn whether the person's gate could be reached, and declined on that.
+        self.assertIn("Whether a gate can be reached is its to measure: state a doubt in `risks` and plan what the person asked", flat)
+        self.assertIn("A bound the person stated stays as stated", flat)
+        self.assertIn("A gate you doubt is a risk and no ground to decline", flat)
+        # Its brief named the image by a word of its own and a `uv pip install` that failed in
+        # the job: three baseline jobs went to those two lines.
+        self.assertIn("a name the type's line in `hl capacity` lists in `job_images`, spelled as there", flat)
+        self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("git clone", "hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
         self.assertLess(len(prompt.encode()), 5_500)
