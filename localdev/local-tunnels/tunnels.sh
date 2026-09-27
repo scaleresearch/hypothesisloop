@@ -7,11 +7,13 @@
 # not for anything that needs a stable address. For that, switch to a named tunnel
 # (requires a domain added to a free Cloudflare account) and a cloudflared config.yml.
 #
-# Services to expose are read from tunnels.conf (name + local port, one per line).
+# Services to expose are read from tunnels.conf (name + local port, one per line), and the local
+# git server is one more on a stack that runs it.
 set -euo pipefail
 
 ACTION="${1:?usage: tunnels.sh up|down|status|addresses}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../lib/auth.sh"
 CONF_FILE="${TUNNELS_CONF:-$SCRIPT_DIR/tunnels.conf}"
 BASE_PATH="${TUNNELS_BASE_PATH:-$HOME/.hypothesisloop-tunnels}"
 PID_DIR="$BASE_PATH/pids"
@@ -24,8 +26,13 @@ require_cloudflared() {
   fi
 }
 
+# A stack with no GitHub App keeps its code on the git server make dev runs, which a hosted agent
+# and a rented instance clone from like they call the API.
 read_services() {
   grep -Ev '^\s*(#|$)' "$CONF_FILE"
+  if [[ "${HL_GIT_PROVIDER}" == "plain" ]]; then
+    echo "git ${HL_GIT_PORT}"
+  fi
 }
 
 down() {

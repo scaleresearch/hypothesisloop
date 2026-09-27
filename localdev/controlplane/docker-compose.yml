@@ -124,6 +124,8 @@ services:
       # (localdev/lib/auth.sh). Empty and unread otherwise.
       HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
       HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
+      # The local git server's password, which the rendered settings name when .env has no App.
+      HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
     ports:
       - "${API_HOST_PORT:-8081}:8081"
     volumes:
@@ -148,6 +150,8 @@ services:
       # (localdev/lib/auth.sh). Empty and unread otherwise.
       HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET:-}
       HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY:-}
+      # The local git server's password, which the rendered settings name when .env has no App.
+      HYPOTHESISLOOP_GIT_PASSWORD: ${HYPOTHESISLOOP_GIT_PASSWORD:-}
     ports:
       - "8084:8084"
     volumes:

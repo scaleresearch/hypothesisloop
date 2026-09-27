@@ -6,7 +6,7 @@
 # with its pid and its log in localdev/.run, so one can be restarted while the rest keep running.
 #
 #   up       render the settings for the local cluster and (re)start the API and metrics-service;
-#            start the UI unless it runs
+#            start the UI unless it runs, and the git server when the stack has no GitHub App
 #   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io or E2B, whichever
 #            HOSTED_SANDBOX_PROVIDER in .env names) and cloud-agent
 #            (vast.ai) as two more processes, and settings that name the running tunnels (make
@@ -31,7 +31,7 @@ rendered=controlplane/settings/.hypothesisloop.rendered.yaml
 settings=controlplane/settings/.hypothesisloop.dev.yaml
 bin=localdev/.bin
 run=localdev/.run
-processes=(control-service metrics-service ui cloud-agent agent-launcher)
+processes=(control-service metrics-service ui git-server cloud-agent agent-launcher)
 # The name every org sees the platform's rented compute under.
 cloud_cluster=hypothesisloop-vast
 
@@ -115,6 +115,10 @@ render_settings() {
             -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
+    if [[ "${HL_GIT_PROVIDER}" == "plain" ]]; then
+      hosted+=(-e "s|^  base_url: http://${host}:${HL_GIT_PORT}$|  base_url: ${public_git}|")
+      values+=("  base_url: ${public_git}")
+    fi
     values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}")
   fi
@@ -177,6 +181,7 @@ hosted_inputs() {
   public_api="$(awk '$1 == "api" { print $2 }' <<<"${tunnels}")"
   public_metrics="$(awk '$1 == "metric-controller" { print $2 }' <<<"${tunnels}")"
   public_store="$(awk '$1 == "object-store" { print $2 }' <<<"${tunnels}")"
+  public_git="$(awk '$1 == "git" { print $2 }' <<<"${tunnels}")"
   # The registry's address as infra/pulumi composes it from the same three keys.
   registry="$(lib_env_value REGISTRY_LOCATION)-docker.pkg.dev/$(lib_env_value GCP_PROJECT)/$(lib_env_value REGISTRY_REPOSITORY)"
   tag="$(lib_env_value IMAGE_TAG)"
@@ -230,6 +235,21 @@ start_control_plane() {
   lib_register_local_clusters
 }
 
+# The git host of a stack with no GitHub App. A stack with one runs none.
+start_git_server() {
+  if [[ "${HL_GIT_PROVIDER}" != "plain" ]]; then
+    stop git-server
+    return
+  fi
+  go build -o "${repo}/${bin}/git-server" ./localdev/local-git
+  mkdir -p "${HL_GIT_ROOT}"
+  stop git-server
+  require_port "${HL_GIT_PORT}"
+  GIT_SERVER_ADDRESS=":${HL_GIT_PORT}" GIT_SERVER_ROOT="${HL_GIT_ROOT}" GIT_SERVER_USERNAME="${HL_GIT_USERNAME}" \
+    GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_PASSWORD}" start git-server "${bin}/git-server"
+  wait_for git-server "http://localhost:${HL_GIT_PORT}/health"
+}
+
 start_datastores() {
   podman compose -f "${compose}" stop control-service metrics-service >/dev/null 2>&1 || true
   REGISTRY=unused TAG=unused podman compose -f "${compose}" up -d --no-recreate postgres memgraph greptimedb minio minio-init >/dev/null
@@ -261,6 +281,7 @@ case "${action}" in
   up)
     render_settings
     start_datastores
+    start_git_server
     # Local settings give hosted agents no address they could reach, so nothing rents for them.
     stop cloud-agent
     stop agent-launcher
@@ -279,6 +300,7 @@ case "${action}" in
     render_runtime_configs
     go build -o "${repo}/${bin}/" ./runtime/cloud/cmd/cloud-agent ./runtime/cloud/cmd/agent-launcher
     start_datastores
+    start_git_server
     start_control_plane
     # The cloud cluster belongs to the org every schema starts with and is shared, so every org's
     # jobs are placed on it. Registering again changes nothing and prints the same token.

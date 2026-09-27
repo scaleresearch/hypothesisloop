@@ -326,14 +326,14 @@ func (c *Config) build() error {
 		}
 	case GitProviderGitHub:
 		if !c.GitHub.Configured() || g != (GitConfig{Provider: GitProviderGitHub}) {
-			return fmt.Errorf("git provider github is the GitHub App of the github section: that section is required, and base_url, username and password are for provider plain")
+			return fmt.Errorf("git provider github is the GitHub App of the github section: that section is required, and base_url, allow_http, username and password are for provider plain")
 		}
 	case GitProviderPlain:
 		if c.GitHub.Configured() {
 			return fmt.Errorf("git provider plain and a github section are set together: a deployment keeps its code on one git host")
 		}
-		if !strings.HasPrefix(g.BaseURL, "https://") {
-			return fmt.Errorf("git base_url %q must be the https root the repositories of the deployment are cloned from", g.BaseURL)
+		if !strings.HasPrefix(g.BaseURL, "https://") && !(g.AllowHTTP && strings.HasPrefix(g.BaseURL, "http://")) {
+			return fmt.Errorf("git base_url %q must be the https root the repositories of the deployment are cloned from, or an http one with allow_http: true", g.BaseURL)
 		}
 		if (g.Username == "") != (g.Password == "") {
 			return fmt.Errorf("git username and password are set together or not at all")

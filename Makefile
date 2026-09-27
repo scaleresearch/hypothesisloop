@@ -7,7 +7,7 @@
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e tt-reload \
-	git-daemon-start git-daemon-stop git-daemon-status git-daemon-destroy
+	git-repository
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -107,8 +107,8 @@ dev-status:
 dev-down:
 	bash localdev/dev.sh down
 
-# Cloudflare quick tunnels to this machine's API, metrics-service and object store, which is how
-# a hosted agent and a rented instance reach them. They keep running across restarts of the dev
+# Cloudflare quick tunnels to this machine's API, metrics-service and object store, and to its git
+# server on a stack with no GitHub App, which is how a hosted agent and a rented instance reach them. They keep running across restarts of the dev
 # stack, and their addresses change only when they are started again.
 tunnels:
 	bash localdev/local-tunnels/tunnels.sh up
@@ -284,22 +284,14 @@ tt-dev-nodes-down:
 tt-status:
 	bash localdev/k3s-tenstorrent/status.sh
 
-# ---- git:// daemon: serves per-experiment code repos to experimentator agent containers ----------
-# Always restarts (not just "start if not running") and always passes --enable=receive-pack --
-# see localdev/local-git/git-daemon.sh's header comment for why both matter. Run `start` again any time a new
-# experiment repo is created under the daemon's base-path, since a running daemon won't pick it up on
-# its own.
-git-daemon-start:
-	bash localdev/local-git/git-daemon.sh start
-
-git-daemon-stop:
-	bash localdev/local-git/git-daemon.sh stop
-
-git-daemon-status:
-	bash localdev/local-git/git-daemon.sh status
-
-git-daemon-destroy:
-	bash localdev/local-git/git-daemon.sh destroy
+# ---- Local git host: a stack with no GitHub App keeps its code on the git server make dev runs ----
+# One bare repository on it, which a platform experiment then names in `repository` as NAME.git:
+# the platform creates none on a plain git host. Usage: make git-repository NAME=my-experiment
+git-repository:
+	@test -n "$(NAME)" || { echo "make git-repository: NAME is required" >&2; exit 1; }
+	@bash -c '. localdev/lib/auth.sh && \
+	  { test "$$HL_GIT_PROVIDER" = plain || { echo "make git-repository: this stack keeps its code on GitHub (.env names a GitHub App)" >&2; exit 1; }; } && \
+	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
 
 tt-stop:
 	bash localdev/k3s-tenstorrent/stop.sh

@@ -342,6 +342,9 @@ const (
 type GitConfig struct {
 	Provider string `yaml:"provider"`
 	BaseURL  string `yaml:"base_url"`
+	// AllowHTTP lets BaseURL be http, for a host on the deployment's own network. The credential
+	// then travels in the clear.
+	AllowHTTP bool `yaml:"allow_http"`
 	// Username and Password are the deployment's one credential on a plain host. The settings
 	// file names the environment variables that hold them.
 	Username string `yaml:"username"`

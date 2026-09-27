@@ -384,6 +384,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 	for name, section := range map[string]string{
 		"a plain host that asks for no credential": plain,
 		"a plain host with the credential":         plain + credential,
+		"a plain host over http that says so":      "\ngit:\n  provider: plain\n  base_url: http://git.example\n  allow_http: true\n",
 		"github with its App":                      githubSection + "git:\n  provider: github\n",
 	} {
 		if err := loadText(t, productionConfig(t)+section); err != nil {
@@ -405,6 +406,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		"plain beside a GitHub App":        githubSection + strings.TrimPrefix(plain, "\n"),
 		"plain with no base_url":           "\ngit:\n  provider: plain\n",
 		"plain over http":                  "\ngit:\n  provider: plain\n  base_url: http://git.example\n",
+		"plain over another scheme":        "\ngit:\n  provider: plain\n  base_url: git://git.example\n  allow_http: true\n",
 		"plain with a username alone":      plain + "  username: ${HL_TEST_GIT_USERNAME}\n",
 		"plain with a variable nobody set": plain + "  username: platform\n  password: ${HL_TEST_GIT_UNSET}\n",
 	} {

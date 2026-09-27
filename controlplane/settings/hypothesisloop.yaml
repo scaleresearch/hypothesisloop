@@ -192,6 +192,8 @@ job_images:
 #
 #   base_url   the https root of any git host. A repository is a name under it, created on the host
 #              beforehand: the platform creates none there and reads no experiment file from one.
+#   allow_http true lets base_url be http, for a host on the deployment's own network, as local
+#              development's is. The credential then travels in the clear.
 #   username, password
 #              what the host takes, both left out for a host that asks for nothing.
 #
