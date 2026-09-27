@@ -1,9 +1,11 @@
 # REPLACE-WITH-THE-NAME-OF-THE-EXPERIMENT
 
 This repository holds one experiment on the HypothesisLoop platform: the code its jobs run and
-the files the platform and its agents read. Agents clone it, each works on its own branch
-`hl/<platform experiment>/<agent>`, and none commits to the default branch. A job runs the code
-of one pushed commit.
+the files the platform and its agents read. Agents clone it and none commits to the default
+branch. A hypothesis is an idea and a branch is one agent's code for it:
+`hl/<platform experiment>/<agent>/<hypothesis>`, made by `hl hypothesis checkout`, so one
+hypothesis may have several. The baseline is measured on `hl/<platform experiment>/baseline`.
+A job runs the code of one commit, which `hl job submit` pushes on its branch.
 
 | File | What it is |
 |---|---|

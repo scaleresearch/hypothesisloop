@@ -29,7 +29,8 @@ const repoFiles = `  README.md                         what is measured, how one
 func repoInit(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("repo init", `usage: hl repo init
 
-Run in a clone of the experiment's repository, on your own branch. Adds the files every
+Run in a clone of the experiment's repository, on a branch under hl/PE/ and never the default
+branch (a baseline agent's is hl/PE/baseline). Adds the files every
 experiment repository holds, where the clone has none at that path:
 
 `+repoFiles+`
@@ -37,7 +38,7 @@ experiment repository holds, where the clone has none at that path:
 A file that is there is kept as it is, and nothing is committed. A kept file may describe an
 earlier experiment of this repository: read it, keep what fits yours and rewrite the rest. Each
 added file marks what to fill in with REPLACE-WITH or a commented-out example. Fill them in, then
-git add, commit and push on your branch. hl repo check says what is left.`, stderr)
+git add and commit on that branch: hl job submit pushes it. hl repo check says what is left.`, stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
