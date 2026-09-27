@@ -65,8 +65,9 @@ What you produce, in this order:
        - the gate, and that changing how it is checked voids the result;
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
-       - how to run a trial: `hl-clone` that code_ref, the job spec to submit (the type and
-         count, memory, command), how long one takes and what it costs;
+       - how to run a trial: the job spec to submit (the type and count, memory, command),
+         how long one takes and what it costs. Researchers are told to start their code from
+         that code_ref, so say nothing of cloning;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
   6. The size: the smallest plan that can reach the goal, since the person pays for all of
      it and can ask for more. Count the trials the goal needs (the levers worth trying, a

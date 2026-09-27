@@ -22,6 +22,11 @@ class SystemPromptTest(unittest.TestCase):
             # every command starts in.
             self.assertIn("clone https://github.com/acme/model.git into the directory you start in", flat)
             self.assertIn("work on branch `hl/pe-1/agent-a`", flat)
+            # Told to branch off the default branch, a researcher never met the planner's seed,
+            # and the `hl-clone` a brief sent it to leaves a directory with no origin to push to.
+            self.assertIn("create it off the commit after `@` in the description's BASELINE `code_ref` "
+                          "(`git checkout -b <branch> <sha>`), or off the default branch when it names none", flat)
+            self.assertLess(len(prompt.encode()), 11_000)
 
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
@@ -51,7 +56,6 @@ class SystemPromptTest(unittest.TestCase):
     def test_the_briefing_names_hl_and_no_http_endpoint(self):
         prompt = self.render("generalist")
         self.assertIsNone(re.search(r"(GET|POST|PUT) /|/explore|openapi|\$API_URL", prompt))
-        self.assertLess(len(prompt.encode()), 11_000)
 
     # The variant for a platform experiment with no repository replaces the paragraphs about the
     # repository and adds none, so it fits the same limit.

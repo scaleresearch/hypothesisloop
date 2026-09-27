@@ -44,9 +44,11 @@ class PlannerPromptTest(unittest.TestCase):
         prompt = self.render("https://github.com/acme/model.git")
         flat = " ".join(prompt.split())
         self.assertIn("Where it is kept: clone https://github.com/acme/model.git into the directory you start in", flat)
-        self.assertIn("work on branch `hl/pe-1/ag-planner`", flat)
+        self.assertIn("work on branch `hl/pe-1/ag-planner`: create it off the default branch", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
-        for absent in ("hl code push", "git init", "no repository", "{", "===="):
+        # What a researcher is told of the others' branches and of a base job spec is not true
+        # of a planner, whose repository holds one commit and whose draft has no other agent.
+        for absent in ("hl code push", "git init", "no repository", "{", "====", "Others push", "job.yaml", "BASELINE `code_ref`"):
             self.assertNotIn(absent, flat)
         self.assertLess(len(prompt.encode()), 11_000)
 

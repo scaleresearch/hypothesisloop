@@ -1,14 +1,20 @@
 Where an agent's code lives, spliced into the briefings by core.system_prompt: a section per
-placeholder, each opened by a line of ==== and its name. This one is for a platform experiment
-that names none: the platform keeps each pushed commit.
+placeholder, each opened by a line of ==== and its name, and {start} the start_ section of the
+agent's role. This one is for a platform experiment that names none: the platform keeps each
+pushed commit.
 
 ==== workspace
-this experiment has no repository. Run `git init` in the directory you start
+this experiment has no repository. {start} in the directory you start
      in, where every command starts again, and commit your work there. `hl code push` stores
      your committed HEAD with the platform: the purge-safe home for your workload code,
      harnesses, job specs and Dockerfiles. To read another agent's code, or after a restart
      to take back your own, `hl-clone <code_ref of a job> <dir>`. $WORKLOAD_SAMPLES holds
      working examples to copy and adapt.
+==== start_planner
+Run `git init`
+==== start_researcher
+Run `hl-clone <the description's BASELINE code_ref> .`
+     (`git init` when it names none)
 ==== code_submit
        - submit from there with `code_ref` left empty: hl pins the HEAD you pushed. Commit and
          `hl code push` only after changing a tracked file (message = hypothesis id + theory).

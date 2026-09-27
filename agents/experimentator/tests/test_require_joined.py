@@ -156,7 +156,8 @@ class StartupTest(PlatformCase):
         setup = self.prepare()
         self.assertEqual(setup.repository_url, "")
         flat = " ".join(setup.system_prompt.split())
-        self.assertIn("this experiment has no repository. Run `git init` in the directory you start in", flat)
+        self.assertIn("this experiment has no repository. Run `hl-clone <the description's BASELINE code_ref> .` "
+                      "(`git init` when it names none) in the directory you start in", flat)
         self.assertIn("`hl code push` stores your committed HEAD with the platform", flat)
         self.assertNotIn("git push", flat)
         self.assertNotIn("github", flat)

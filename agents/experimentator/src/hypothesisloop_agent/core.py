@@ -40,7 +40,8 @@ def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
 
 def _code_sections(repository_url: str) -> dict[str, str]:
     """The paragraphs of a briefing that depend on where code lives: the experiment's repository,
-    or with none the platform, which keeps each pushed commit."""
+    or with none the platform, which keeps each pushed commit. A planner starts the code and a
+    researcher starts from the planner's, so how the workspace begins is a section per role."""
     text = (_PROMPTS_DIR / "code" / ("repository.md" if repository_url else "platform.md")).read_text()
     sections = {}
     for section in text.split("\n==== ")[1:]:
@@ -52,15 +53,17 @@ def _code_sections(repository_url: str) -> dict[str, str]:
 def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str) -> str:
     values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
                   repository_url=repository_url)
+    code = _code_sections(repository_url)
     template, sections = "coordinator.md", ("repository_line", "start_code")
     if config.plans(cfg):
         template, sections = "planner.md", ("workspace", "code_submit", "code_access")
         values.update(agent_id=cfg.agent_id)
+        values.update(start=code["start_planner"].format(**values))
     elif not config.coordinates(cfg):
         template, sections = "system_prompt.md", ("workspace", "code_submit", "code_access")
         values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
                       flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip())
-    code = _code_sections(repository_url)
+        values.update(start=code["start_researcher"].format(**values))
     return (_PROMPTS_DIR / template).read_text().format(**values, **{name: code[name].format(**values) for name in sections})
 
 
