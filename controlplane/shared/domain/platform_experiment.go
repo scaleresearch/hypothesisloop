@@ -41,8 +41,9 @@ const (
 	// default when Role is left empty, so an experiment created before this field existed
 	// keeps ranking on every declared metric exactly as it always did.
 	MetricRoleRanking MetricRole = "ranking"
-	// MetricRoleConstraint must be reported and must satisfy Bound; a job that violates it is
-	// ineligible for standings but never itself ranked or cut on.
+	// MetricRoleConstraint must be reported and must satisfy Bound. It is judged per job: a
+	// completed job that violates it or never reported it ranks nowhere (metricsdb.RankableJobs),
+	// and the metric itself is never ranked or cut on.
 	MetricRoleConstraint MetricRole = "constraint"
 	// MetricRoleAttribute is reported and shown, never ranked or cut on, and never gates
 	// standings eligibility — "which kind of result is this" facts (precision class, result
@@ -80,6 +81,14 @@ type MetricDefinition struct {
 	Direction string     `json:"direction"` // "maximize" | "minimize"
 	Role      MetricRole `json:"role,omitempty"`
 	Bound     *float64   `json:"bound,omitempty"`
+}
+
+// Holds reports whether value satisfies the bound of a constraint metric.
+func (d MetricDefinition) Holds(value float64) bool {
+	if d.Direction == "minimize" {
+		return value <= *d.Bound
+	}
+	return value >= *d.Bound
 }
 
 // ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream

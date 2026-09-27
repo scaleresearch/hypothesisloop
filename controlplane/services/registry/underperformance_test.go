@@ -26,6 +26,12 @@ type underperformStore struct {
 	exp     *domain.Experiment
 	metrics []domain.MetricDefinition
 	marks   *marks
+	// completed is the siblings that ran to a successful end.
+	completed map[string]bool
+}
+
+func (s underperformStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
+	return s.completed, nil
 }
 
 type marks struct{ events []db.Event }
@@ -150,6 +156,48 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 	got := notifier.events[0]
 	if got.Kind != db.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
 		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, db.EventJobUnderperforming)
+	}
+}
+
+// A job at 0.5 beside four siblings near 0.9 trails them, unless those numbers rank nowhere: a
+// sibling that completed and broke the gate is no cohort, and one still running is not judged.
+func TestUnderperformanceLeavesOutCompletedSiblingsThatBrokeAConstraint(t *testing.T) {
+	siblings := cohortSeriesServer([]float64{0.9, 0.9, 0.9125, 0.9375})
+	defer siblings.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if !strings.Contains(r.Form.Get("query"), `metric_name="exact_match"`) {
+			siblings.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` +
+			`{"metric":{"job_id":"sib-0","metric_basis":"raw"},"value":[1,"0.97"]},` +
+			`{"metric":{"job_id":"sib-1","metric_basis":"raw"},"value":[1,"0.97"]},` +
+			`{"metric":{"job_id":"sib-2","metric_basis":"raw"},"value":[1,"0.97"]},` +
+			`{"metric":{"job_id":"sib-3","metric_basis":"raw"},"value":[1,"1"]}]}}`))
+	}))
+	defer server.Close()
+
+	bound := 1.0
+	gated := append(rankingMetric("acc", "maximize"), domain.MetricDefinition{Key: "exact_match", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound})
+	for name, c := range map[string]struct {
+		completed map[string]bool
+		events    int
+	}{
+		"three of four completed and broke the gate": {map[string]bool{"sib-0": true, "sib-1": true, "sib-2": true, "sib-3": true}, 0},
+		"the same three still run":                   {map[string]bool{"sib-3": true}, 1},
+	} {
+		notifier := &marks{}
+		svc := &Service{
+			store:        underperformStore{exp: theJob(), metrics: gated, marks: notifier, completed: c.completed},
+			metricsDBURL: server.URL,
+			logger:       zap.NewNop(),
+		}
+		svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
+		if len(notifier.events) != c.events {
+			t.Errorf("%s: events = %d, want %d", name, len(notifier.events), c.events)
+		}
 	}
 }
 

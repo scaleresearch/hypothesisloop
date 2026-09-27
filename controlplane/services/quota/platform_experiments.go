@@ -73,7 +73,8 @@ type PlatformExperimentsStore interface {
 	PlannerID(ctx context.Context, platformExpID string) (string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
 	ListParticipants(ctx context.Context, platformExpID string) ([]string, error)
-	// CompletedJobIDs is the jobs whose metrics rank: the ones that ran to a successful end.
+	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
+	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
@@ -89,7 +90,7 @@ type PlatformExperimentsStore interface {
 	// a job runs longer (or shorter) than that estimate — see running_cost.go for why that matters.
 	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	// GetExperiment resolves a winning sample's job_id to the row carrying its code_ref — see
-	// standingsOnMetric, where a standing without it is a number nobody can reproduce.
+	// rank, where a standing without it is a number nobody can reproduce.
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (decision db.AdmitDecision, rejectionReason string, err error)
 	ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (rejectionReason string, err error)

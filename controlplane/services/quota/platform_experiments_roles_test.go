@@ -109,7 +109,7 @@ func TestAbsentSignupRoleResolvesToCompetitor(t *testing.T) {
 	}
 }
 
-// standingsStore adds the two reads standingsOnMetric makes on top of signupStore's.
+// standingsStore adds the reads a ranking makes on top of signupStore's.
 type standingsStore struct {
 	signupStore
 	competitors []string
@@ -141,9 +141,13 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking}
-	standings, err := svc.standingsOnMetric(context.Background(), pe, metric)
+	best, _, err := svc.bestPerAgent(context.Background(), pe, metric)
 	if err != nil {
-		t.Fatalf("standingsOnMetric err = %v, want nil", err)
+		t.Fatalf("bestPerAgent err = %v, want nil", err)
+	}
+	standings, err := svc.rank(context.Background(), pe, metric, best)
+	if err != nil {
+		t.Fatalf("rank err = %v, want nil", err)
 	}
 	if len(standings) != 2 {
 		t.Fatalf("standings = %v, want the 2 competitors only", standings)
@@ -204,8 +208,8 @@ func (f *standingsStore) ListSignups(ctx context.Context, platformExpID string) 
 	return f.competitors, nil
 }
 
-// An agent that breaks a constraint is not in the standings Results serves, so it must not be in
-// the top 3 recorded at close either: that record is what earns the bonus in the next run.
+// An agent whose only job breaks a constraint is not in the standings Results serves, so it must
+// not be in the top 3 recorded at close either: that record is what earns the bonus in the next run.
 func TestCloseDerivesTheTopResultsFromConstraintEligibleAgentsOnly(t *testing.T) {
 	bound := 60.0
 	// Every metric answers the same values, so c1 leads on score and breaks the bound on memory.

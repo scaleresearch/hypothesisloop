@@ -138,6 +138,13 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"}, nil)
 			return err
 		}},
+		{"RankableJobs (zero start)", func(dbURL string) error {
+			bound := 1.0
+			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: zero, Metrics: []domain.MetricDefinition{
+				{Key: "exact_match", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound}}}
+			_, err := RankableJobs(ctx, dbURL, pe, nil)
+			return err
+		}},
 		{"acceleratorTypeChanges", func(dbURL string) error {
 			_, err := acceleratorTypeChanges(ctx, dbURL, "exp-1", now.Add(-time.Hour), now, 30*time.Second)
 			return err

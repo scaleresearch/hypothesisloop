@@ -79,11 +79,6 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		return nil, fmt.Errorf("not_found")
 	}
 
-	ineligible, err := s.constraintIneligibleAgents(ctx, pe, pe.Metrics)
-	if err != nil {
-		return nil, err
-	}
-
 	out := &PlatformExperimentResults{
 		PlatformExperimentID: pe.ID,
 		Name:                 pe.Name,
@@ -106,14 +101,14 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		eligible, err := s.eligibleStandings(ctx, pe, metric, best, ineligible)
+		standings, err := s.rank(ctx, pe, metric, best)
 		if err != nil {
 			return nil, err
 		}
 		out.Metrics = append(out.Metrics, MetricStandings{
 			Metric:            metric.Key,
 			Direction:         metric.Direction,
-			Standings:         eligible,
+			Standings:         standings,
 			NonRawBasisAgents: nonRawAgents,
 		})
 	}
@@ -143,44 +138,6 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 	return out, nil
 }
 
-// constraintIneligibleAgents returns the set of agents whose best value on any declared
-// constraint metric violates its bound, or who never reported that metric at all — a
-// constraint must be reported and satisfied, not merely absent. A job violating one is
-// ineligible for standings entirely (docs: "the correctness gate"), never itself ranked.
-func (s *PlatformExperimentsService) constraintIneligibleAgents(ctx context.Context, pe *domain.PlatformExperiment, metrics []domain.MetricDefinition) (map[string]bool, error) {
-	ineligible := make(map[string]bool)
-	for _, metric := range metrics {
-		if metric.EffectiveRole() != domain.MetricRoleConstraint {
-			continue
-		}
-		standings, err := s.standingsOnMetric(ctx, pe, metric)
-		if err != nil {
-			return nil, err
-		}
-		reported := make(map[string]bool, len(standings))
-		for _, st := range standings {
-			reported[st.AgentID] = true
-			satisfies := st.Best >= *metric.Bound
-			if metric.Direction == "minimize" {
-				satisfies = st.Best <= *metric.Bound
-			}
-			if !satisfies {
-				ineligible[st.AgentID] = true
-			}
-		}
-		signups, err := s.store.ListSignups(ctx, pe.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, agentID := range signups {
-			if !reported[agentID] {
-				ineligible[agentID] = true
-			}
-		}
-	}
-	return ineligible, nil
-}
-
 // derivedTopResults ranks agents on the experiment's first declared ranking metric — the primary
 // metric by convention — so an auto-closed run records the same placements a hand-closed one would.
 func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id string) ([]AgentResult, error) {
@@ -195,15 +152,11 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	if !ok {
 		return nil, nil
 	}
-	ineligible, err := s.constraintIneligibleAgents(ctx, pe, pe.Metrics)
-	if err != nil {
-		return nil, err
-	}
 	best, _, err := s.bestPerAgent(ctx, pe, primary)
 	if err != nil {
 		return nil, fmt.Errorf("results: %w", err)
 	}
-	standings, err := s.eligibleStandings(ctx, pe, primary, best, ineligible)
+	standings, err := s.rank(ctx, pe, primary, best)
 	if err != nil {
 		return nil, err
 	}
@@ -214,8 +167,9 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 	return out, nil
 }
 
-// bestPerAgent is every agent's best on one metric over its COMPLETED jobs: the one figure
-// results, standings and the top-3 at close read.
+// bestPerAgent is every agent's best on one metric over its COMPLETED jobs that hold every
+// constraint: the one figure results, standings and the top-3 at close read. An agent none of
+// whose jobs holds the constraints has no best and so no standing.
 func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
 	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
 	if err != nil {
@@ -224,37 +178,9 @@ func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domai
 	return metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric, completed)
 }
 
-// eligibleStandings is the ranking a run is judged by: competitors that pass every constraint,
-// best-first. Results and the top-3 recorded at close both read it, so they cannot diverge.
-func (s *PlatformExperimentsService) eligibleStandings(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, ineligible map[string]bool) ([]AgentStanding, error) {
-	standings, err := s.rank(ctx, pe, metric, best)
-	if err != nil {
-		return nil, err
-	}
-	eligible := make([]AgentStanding, 0, len(standings))
-	for _, st := range standings {
-		if ineligible[st.AgentID] {
-			continue
-		}
-		eligible = append(eligible, st)
-	}
-	assignRanks(eligible)
-	return eligible, nil
-}
-
-// standingsOnMetric ranks every agent by its best "raw"-basis value on one metric, best-first.
-// The ranking itself is metricsdb.BestPerAgentOnMetric — the same call the stage ladder cuts with,
-// so a run's final standings and its mid-run cuts can never disagree about who is ahead.
-func (s *PlatformExperimentsService) standingsOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) ([]AgentStanding, error) {
-	best, _, err := s.bestPerAgent(ctx, pe, metric)
-	if err != nil {
-		return nil, fmt.Errorf("results: %w", err)
-	}
-	return s.rank(ctx, pe, metric, best)
-}
-
 // rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts
-// and assigns ranks.
+// and assigns ranks. It is the ranking a run is judged by: results and the top-3 recorded at close
+// both read it, from the bests the stage ladder cuts with, so none of them can diverge.
 func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
 	// Only competitors are ranked. The metrics store answers for every agent that reported —
 	// which is the point, a baseline's numbers stay fully readable — so the roles are applied

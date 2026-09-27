@@ -99,11 +99,7 @@ func checkBaseline(p Proposal, experiment CreatePlatformExperimentRequest, plann
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		holds := value >= *metric.Bound
-		if metric.Direction == "minimize" {
-			holds = value <= *metric.Bound
-		}
-		if !holds {
+		if !metric.Holds(value) {
 			return refusedProposal("baseline_breaks_constraint", "the baseline reported %s = %g, which does not hold the bound %g you propose: a gate the baseline fails disqualifies everyone", metric.Key, value, *metric.Bound)
 		}
 	}

@@ -3,6 +3,7 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -14,11 +15,55 @@ type AgentBest struct {
 	ExperimentID string
 }
 
+// RankableJobs narrows completed to the jobs whose values rank: those that hold every constraint
+// metric of pe. A constraint is judged per job, on the last "raw"-basis value the job reported
+// for it, the one the proposal check reads of a baseline. A job that reported none, or whose
+// value violates the bound, ran to the end and found its result wrong: it stays a completed
+// trial and none of its values rank.
+//
+// Judged per agent, on the agent's best value of the constraint, a job that broke the gate with
+// the best number of the run ranked first as long as another job of its agent held the gate. So
+// a harness had to fail such a job to keep it out, and a trial that found the gate broken was
+// no completed trial.
+func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]bool, error) {
+	rankable := maps.Clone(completed)
+	for _, metric := range pe.Metrics {
+		if metric.EffectiveRole() != domain.MetricRoleConstraint {
+			continue
+		}
+		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+		samples, err := QueryVector(ctx, dbURL, promQL)
+		if err != nil {
+			return nil, fmt.Errorf("metricsdb.RankableJobs: %s: %w", metric.Key, err)
+		}
+		reported, violated := map[string]bool{}, map[string]bool{}
+		for _, sm := range samples {
+			if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
+				continue
+			}
+			job := sm.Labels["job_id"]
+			reported[job] = true
+			if !metric.Holds(sm.Value) {
+				violated[job] = true
+			}
+		}
+		for job := range rankable {
+			if !reported[job] || violated[job] {
+				delete(rankable, job)
+			}
+		}
+	}
+	return rankable, nil
+}
+
 // BestPerAgentOnMetric returns, for every agent in platformExpID, its best "raw"-basis value on
-// one metric over the jobs in completed, plus the agents that only ever reported it on some other
-// basis. completed is the platform experiment's COMPLETED jobs as the relational store has them:
-// a job that failed or was stopped reported numbers and proved nothing, so none of its values
-// rank.
+// one metric over the rankable jobs in completed, plus the agents that only ever reported it on
+// some other basis. completed is the platform experiment's COMPLETED jobs as the relational
+// store has them: a job that failed or was stopped reported numbers and proved nothing, so none
+// of its values rank. Of those, only the ones that hold every constraint rank (RankableJobs),
+// which is read here so that no ranking can leave it out: an agent has a best exactly when it
+// has a rankable job.
 //
 // This is the single definition of "who is ahead". The stage ladder cuts with it and the final
 // standings rank with it, and the two ran as separately-built copies of the same PromQL — a
@@ -41,6 +86,10 @@ type AgentBest struct {
 // code ref). It does not change who wins: the per-agent best is still the same direction-aware
 // aggregation, just taken over each agent's per-job bests.
 func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
+	rankable, err := RankableJobs(ctx, dbURL, pe, completed)
+	if err != nil {
+		return nil, nil, err
+	}
 	agg := "max"
 	if metric.Direction == "minimize" {
 		agg = "min"
@@ -55,7 +104,7 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 	best := make(map[string]AgentBest, len(samples))
 	nonRaw := make(map[string]bool)
 	for _, sm := range samples {
-		if !completed[sm.Labels["job_id"]] {
+		if !rankable[sm.Labels["job_id"]] {
 			continue
 		}
 		agentID := sm.Labels["agent_id"]

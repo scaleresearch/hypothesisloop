@@ -128,3 +128,59 @@ func assertGroupedBy(t *testing.T, query string, labels ...string) {
 		t.Fatalf("query %q does not contain %q — grouping changed underneath the merge logic", query, want)
 	}
 }
+
+// A job that ran to the end and broke the gate exits 0 and is COMPLETED. Judged per agent, the
+// bf16 job below ranked first for a1 with a number its own gate value voids, because a1's fp16
+// job held the gate. A constraint is judged per job.
+func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
+	vector := func(samples ...string) string {
+		return `{"status":"success","data":{"resultType":"vector","result":[` + strings.Join(samples, ",") + `]}}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		w.Header().Set("Content-Type", "application/json")
+		if query := r.Form.Get("query"); strings.Contains(query, `metric_name="fp32_agreement"`) {
+			if !strings.Contains(query, "by (job_id, metric_basis) (last_over_time(") {
+				t.Errorf("the constraint is read as %q, want each job's last value", query)
+			}
+			_, _ = w.Write([]byte(vector(
+				`{"metric":{"job_id":"job-fp16","metric_basis":"raw"},"value":[1,"0.998"]}`,
+				`{"metric":{"job_id":"job-bf16","metric_basis":"raw"},"value":[1,"0.9844"]}`,
+				`{"metric":{"job_id":"job-ok"},"value":[1,"1"]}`,
+				`{"metric":{"job_id":"job-rescaled","metric_basis":"per_batch"},"value":[1,"1"]}`,
+				`{"metric":{"job_id":"job-broken","metric_basis":"raw"},"value":[1,"0.5"]}`)))
+			return
+		}
+		_, _ = w.Write([]byte(vector(
+			`{"metric":{"agent_id":"a1","metric_basis":"raw","job_id":"job-fp16"},"value":[1,"10284"]}`,
+			`{"metric":{"agent_id":"a1","metric_basis":"raw","job_id":"job-bf16"},"value":[1,"15000"]}`,
+			`{"metric":{"agent_id":"a2","metric_basis":"raw","job_id":"job-ok"},"value":[1,"9000"]}`,
+			`{"metric":{"agent_id":"a2","metric_basis":"raw","job_id":"job-silent"},"value":[1,"20000"]}`,
+			`{"metric":{"agent_id":"a2","metric_basis":"raw","job_id":"job-rescaled"},"value":[1,"30000"]}`,
+			`{"metric":{"agent_id":"a3","metric_basis":"raw","job_id":"job-broken"},"value":[1,"99999"]}`)))
+	}))
+	defer server.Close()
+
+	bound := 0.99
+	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour), Metrics: []domain.MetricDefinition{
+		{Key: "images_per_sec", Direction: "maximize"},
+		{Key: "fp32_agreement", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
+	}}
+	completed := map[string]bool{"job-fp16": true, "job-bf16": true, "job-ok": true, "job-silent": true, "job-rescaled": true, "job-broken": true}
+	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, pe.Metrics[0], completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := best["a1"]; got.ExperimentID != "job-fp16" || got.Value != 10284 {
+		t.Errorf("a1 best = %+v, want job-fp16 at 10284: its job-bf16 broke the gate", got)
+	}
+	if got := best["a2"]; got.ExperimentID != "job-ok" || got.Value != 9000 {
+		t.Errorf("a2 best = %+v, want job-ok at 9000: one job reported no gate value and one only a rescaled one", got)
+	}
+	if got, ranked := best["a3"]; ranked {
+		t.Errorf("a3 best = %+v, want none: an agent with no rankable job has no standing", got)
+	}
+	if len(completed) != 6 {
+		t.Errorf("the completed jobs were narrowed in place to %v", completed)
+	}
+}

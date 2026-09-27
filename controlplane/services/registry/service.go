@@ -18,6 +18,8 @@ type Store interface {
 	CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error)
 	ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error)
 	MarkUnderperforming(ctx context.Context, id, metricName string) error
+	// CompletedJobIDs is the jobs of a platform experiment that ran to a successful end.
+	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
 	// GetAgent resolves an agent id, nil when no such agent ever signed up.
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// PlatformExperimentExists says whether a hypothesis has a platform experiment to be in.

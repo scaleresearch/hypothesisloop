@@ -78,8 +78,8 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	if healthyMetrics == 0 {
 		// The metrics store answered and has no ranking value for anyone standing. The boundary
 		// waits only for what can still produce one: a job in flight in a field where none has
-		// completed. Its wait ends with that job. A completed job that reported no ranking value
-		// never will, so it is nothing to wait for.
+		// completed. Its wait ends with that job. A completed job that reported no ranking value,
+		// or broke a constraint and so ranks nowhere, never will: it is nothing to wait for.
 		anyCompleted, anyInFlight := false, false
 		for _, agentID := range survivors {
 			anyCompleted = anyCompleted || jobsBy[agentID].Completed
@@ -157,7 +157,8 @@ func (c *Controller) cutOnMetric(ctx context.Context, pe *domain.PlatformExperim
 	// Ranked by the same call the final standings use, so a mid-run cut and the final results can
 	// never rank the same field differently. Agents that only ever reported this metric on a
 	// non-"raw" basis come back flagged rather than ranked, and are treated here as no data on it
-	// — same as an agent that never reported it at all.
+	// — same as an agent that never reported it at all, and as one none of whose completed jobs
+	// holds every constraint.
 	completed, err := c.stagesStore.CompletedJobIDs(ctx, pe.ID)
 	if err != nil {
 		return nil, false, err

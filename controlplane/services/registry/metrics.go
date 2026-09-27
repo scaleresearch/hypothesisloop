@@ -188,6 +188,19 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
 		return
 	}
+	// A sibling that completed and broke a constraint ranks nowhere, so it is no cohort to trail.
+	// One still running has not been judged. The window is the check's own: a sibling whose last
+	// sample is older is left out below whatever it found.
+	completed, err := s.store.CompletedJobIDs(ctx, exp.PlatformExperimentID)
+	if err != nil {
+		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
+		return
+	}
+	rankable, err := metricsdb.RankableJobs(ctx, s.metricsDBURL, &domain.PlatformExperiment{ID: exp.PlatformExperimentID, Metrics: metrics, CreatedAt: at.Add(-lookback)}, completed)
+	if err != nil {
+		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
+		return
+	}
 	type attempt struct{ job, agent string }
 	progress := make(map[attempt]map[int64]float64, len(fractions))
 	for _, f := range fractions {
@@ -223,7 +236,7 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 
 	var siblingScores []float64
 	for _, s := range series {
-		if s.ExperimentID == exp.ID {
+		if s.ExperimentID == exp.ID || completed[s.ExperimentID] && !rankable[s.ExperimentID] {
 			continue
 		}
 		if len(s.Points) == 0 {
