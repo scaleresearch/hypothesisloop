@@ -13,7 +13,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { LinkTr, Table, num, quiet } from '@/components/ui/table'
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts'
 import { statusColor } from '@/lib/colors'
-import { evictionCode, evictionCodeLabel, evictionDetail } from '@/lib/eviction'
+import { evictionCode, evictionCodeLabel, evictionDetailLines } from '@/lib/eviction'
 import { acceleratorLabel } from '@/lib/format'
 import { occupancy } from '@/lib/units'
 
@@ -276,7 +276,9 @@ function StaffStatistics() {
                     </td>
                     <td className="text-xs">
                       <Badge status="evicted">{evictionCodeLabel(evictionCode(e.eviction_reason))}</Badge>
-                      <div className="mt-0.5 text-2xs text-subtle">{evictionDetail(e.eviction_reason)}</div>
+                      <div className="mt-0.5 text-2xs text-subtle">
+                        {evictionDetailLines(e.eviction_reason).map((line, i) => <div key={i}>{line}</div>)}
+                      </div>
                     </td>
                     <td className="font-mono text-2xs">{e.accelerator_count}× {acceleratorLabel(e.accelerator_type)}</td>
                     <td><TierBadge tier={e.capacity_tier} /></td>

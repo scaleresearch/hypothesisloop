@@ -21,6 +21,7 @@ const END_REASON: Record<NonNullable<AgentInstance['end_reason']>, string> = {
   never_seen: 'no machine came to be',
   still_starting: 'it did not come up in time',
   silent: 'it ran and made no progress',
+  released: 'the platform took it down',
 }
 
 // Rerenders on a timer, so an age on screen keeps up with the clock between reads of the API.
@@ -40,10 +41,14 @@ function useTick(everyMs: number) {
 export function InstanceHealth({ instance }: { instance: AgentInstance }) {
   useTick(15_000)
   const ended = instance.end_reason
+  const released = ended === 'released'
+  const how = released ? 'Released: its run was over and its machine ended'
+    : instance.stopped ? 'Stopped for good: its last machine ended'
+    : 'Replaced: the machine before this one ended'
   return (
     <div className="grid justify-items-start gap-1">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <Badge tone={STATE_TONE[instance.state]}>{instance.state}</Badge>
+        <Badge tone={released && instance.state === 'stopped' ? 'neutral' : STATE_TONE[instance.state]}>{instance.state}</Badge>
         {instance.state !== 'stopped' && (
           <span className="text-xs text-muted">
             {instance.progress_at ? `last progress ${relTime(instance.progress_at)}` : 'no progress seen yet'}
@@ -55,11 +60,12 @@ export function InstanceHealth({ instance }: { instance: AgentInstance }) {
       </div>
       {ended && (
         <p className="text-xs text-subtle">
-          {instance.stopped ? 'Stopped for good: its last machine ended' : 'Replaced: the machine before this one ended'}
+          {how}
           {instance.exited_at ? ` ${relTime(instance.exited_at)}` : ''}, {END_REASON[ended] ?? ended}.
         </p>
       )}
-      {instance.exit_log && (
+      {instance.exit_log && released && <p className="text-xs text-subtle">{instance.exit_log}</p>}
+      {instance.exit_log && !released && (
         <Disclosure label="Exit log">
           <pre className="max-h-48 max-w-[560px] overflow-auto whitespace-pre-wrap break-words rounded border bg-surface-inset px-2.5 py-2 font-mono text-2xs text-muted">{instance.exit_log}</pre>
         </Disclosure>

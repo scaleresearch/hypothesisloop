@@ -209,6 +209,15 @@ describe('the machines the platform runs', () => {
   })
 })
 
+describe('a machine on its way', () => {
+  it('says beside the agent that its start is in progress, in the API\'s words', async () => {
+    const starting = { reason: 'instance_starting', message: 'its machine was asked for 40s ago and is starting: a start in progress and no failure' }
+    roster = [{ ...signup('ag-starting', true), instance: { state: 'starting', restarts: 0, stopped: false, asked_at: new Date().toISOString() }, status_reason: starting }]
+    show(PlatformExperimentStatus.RUNNING)
+    expect((await screen.findByText(starting.message)).closest('tr')).toBe(screen.getByRole('cell', { name: 'ag-starting' }).closest('tr'))
+  })
+})
+
 describe('an experiment waiting to start', () => {
   const waits = { reason: 'baseline_required', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
   const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }

@@ -222,7 +222,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                       {agent.instance
                         ? <InstanceHealth instance={agent.instance} />
                         : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}
-                      {agent.status_reason && agent.instance?.state === 'requested' && (
+                      {agent.status_reason && agent.instance && (
                         <p className="mt-1 max-w-[420px] text-xs text-subtle">{agent.status_reason.message}</p>
                       )}
                     </td>

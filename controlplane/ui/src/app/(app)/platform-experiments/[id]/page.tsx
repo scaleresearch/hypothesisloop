@@ -44,6 +44,7 @@ import { Eyebrow, Pill } from '@/components/ui/text'
 import { semantic, chart } from '@/lib/colors'
 import { formatAccH, formatDate, runClock } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
+import { JobReason } from '@/components/job-reason'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
@@ -651,9 +652,6 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               <tbody>
                 {jobRows.map(exp => {
                   const cost = exp.estimated_cost_acch
-                  const evictionText = exp.eviction_reason
-                    ? evictionLabel(exp.eviction_reason)
-                    : undefined
                   return (
                     <LinkTr key={exp.id} href={`/jobs/${exp.id}`}>
                       <td className="font-mono text-2xs">
@@ -663,9 +661,9 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                       <td>
                         <Badge status={exp.status} />
                         {exp.summary_due && <NoSummary className="ml-1.5" />}
-                        {evictionText && (
+                        {exp.eviction_reason && (
                           <div className="mt-0.5 text-2xs text-subtle" title="eviction_reason">
-                            {evictionText}
+                            <JobReason reason={exp.eviction_reason} />
                           </div>
                         )}
                       </td>

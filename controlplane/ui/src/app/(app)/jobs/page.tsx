@@ -23,7 +23,8 @@ import { Pagination } from '@/components/ui/pagination'
 import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { statusTone } from '@/lib/colors'
-import { evictionCodeLabel, evictionLabel, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
+import { evictionCodeLabel, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
+import { JobReason } from '@/components/job-reason'
 import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { listProject, useExperimentAccess } from '@/lib/read-only'
@@ -269,8 +270,8 @@ function JobsPageContent() {
                           {notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}
                         </div>
                       )}
-                      {status === 'EVICTED' && j.eviction_reason && (
-                        <div className="mt-0.5 text-2xs text-muted">{evictionLabel(j.eviction_reason)}</div>
+                      {j.eviction_reason && (
+                        <div className="mt-0.5 text-2xs text-muted"><JobReason reason={j.eviction_reason} /></div>
                       )}
                       {j.capacity_tier === 'burst' && CANCELABLE.has(status) && (
                         <div className="mt-0.5 text-2xs text-muted">Burst compute, can be preempted</div>

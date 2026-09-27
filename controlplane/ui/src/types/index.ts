@@ -629,6 +629,8 @@ export interface AgentInstance {
   state: 'requested' | 'starting' | 'running' | 'stopped'
   // When the platform last saw the machine's command make progress. Absent until it first did.
   progress_at?: string
+  // When the machine now asked for was asked of the launcher.
+  asked_at?: string
   // When the launcher first reported the machine now asked for.
   seen_at?: string
   // Machines that ended and were asked for again, of domain.MaxAgentInstanceRestarts.
@@ -636,8 +638,9 @@ export interface AgentInstance {
   // The last machine ended with no restart left.
   stopped: boolean
   // Why the last machine that ended was given up on, when, and the end of what it wrote. A
-  // machine that was replaced leaves these set while state is running again.
-  end_reason?: 'exited' | 'gone' | 'never_seen' | 'still_starting' | 'silent'
+  // machine that was replaced leaves these set while state is running again. 'released' is the
+  // platform taking the machine down because its run was over, and exit_log says which end.
+  end_reason?: 'exited' | 'gone' | 'never_seen' | 'still_starting' | 'silent' | 'released'
   exited_at?: string
   exit_log?: string
 }
@@ -670,8 +673,9 @@ export interface AgentSignup {
 }
 
 // An agent as the roster and the answer to adding it carry it. token is set in the answer to
-// adding one the platform does not run. status_reason is set while the agent waits for its open
-// platform experiment to start: its instance reads requested and no machine is asked for yet.
+// adding one the platform does not run. status_reason is set while the agent is not at work yet:
+// it waits for its open platform experiment to start, its instance reading requested and no
+// machine asked for, or its machine is asked for and not running (instance_starting).
 export interface JoinedAgent extends AgentSignup {
   token?: string
   status_reason?: { reason: string; message: string }

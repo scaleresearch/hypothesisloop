@@ -21,8 +21,18 @@ import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
-import { evictionLabel, notAdmittedLabel } from '@/lib/eviction'
+import { notAdmittedLabel, saidLines } from '@/lib/eviction'
+import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
+
+// What eviction_reason says of a job in each status that carries one: a QUEUED job's is the
+// reason its last attempt was requeued for.
+const LAST_ATTEMPT: Record<string, string> = {
+  EVICTED: 'Evicted',
+  FAILED: 'Failed',
+  REJECTED: 'Rejected',
+  QUEUED: 'Requeued, runs again',
+}
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -59,9 +69,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   if (!job) return <Loading />
 
   const j = job
-  // evictionLabel maps the code to its human label and keeps any explanation the scheduler
-  // attached — see lib/eviction.
-  const evictionText = j.eviction_reason ? evictionLabel(j.eviction_reason) : null
+  const lastAttempt = LAST_ATTEMPT[j.status]
 
   // Jobs report one or more metrics (the ranking metric plus any secondary ones the workload
   // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
@@ -123,11 +131,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         }
       />
 
-      {/* Eviction alert */}
-      {j.status === 'EVICTED' && evictionText && (
+      {lastAttempt && j.eviction_reason && (
         <Callout tone="accent" className="text-accent">
-          <strong>Evicted:</strong>{' '}
-          <span>{evictionText}</span>
+          <strong>{lastAttempt}</strong>
+          <JobReason reason={j.eviction_reason} />
         </Callout>
       )}
 
@@ -143,11 +150,9 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
               {j.phase_detail.reason}
             </span>
           )}
-          {j.phase_detail.message && (
-            <span className="ml-2 text-muted">
-              {j.phase_detail.message}
-            </span>
-          )}
+          {j.phase_detail.message && saidLines(j.phase_detail.message).map((line, i) => (
+            <span key={i} className={i === 0 ? 'ml-2 text-muted' : 'block font-mono text-xs text-muted'}>{line}</span>
+          ))}
           {j.phase_detail.restart_count ? (
             <span className="ml-3 font-mono text-xs text-muted">
               restarts: {j.phase_detail.restart_count}

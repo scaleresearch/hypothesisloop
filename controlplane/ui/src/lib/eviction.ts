@@ -19,6 +19,8 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   phase2_hold: 'Held for Phase 2',
   stuck_pending: 'Stuck pending admission',
   scale_up_timeout: 'Autoscaler did not deliver capacity in time',
+  code_unreachable: 'Its code could not be fetched (platform fault, no cost)',
+  no_offer: 'No machine was on offer to rent (platform fault, no cost)',
   flavor_mismatch: 'Landed on a different accelerator type than reserved',
 }
 
@@ -60,10 +62,22 @@ export function evictionCode(reason?: string | null): string {
 }
 
 // evictionDetail is the explanation without the code, empty when the reason carries none.
-export function evictionDetail(reason?: string | null): string {
+function evictionDetail(reason?: string | null): string {
   if (!reason) return ''
   const cut = reason.indexOf(':')
   return cut === -1 ? '' : reason.slice(cut + 1).trim()
+}
+
+// saidLines is a runtime's message one line per row: that of a failed job ends with the last
+// lines the job said, joined by ' | '.
+export function saidLines(message: string): string[] {
+  return message.split(' | ')
+}
+
+// evictionDetailLines is the explanation one line per row, empty when the reason carries none.
+export function evictionDetailLines(reason?: string | null): string[] {
+  const detail = evictionDetail(reason)
+  return detail ? saidLines(detail) : []
 }
 
 // evictionLabel is what a reader should see: the mapped human label for the code, followed by the

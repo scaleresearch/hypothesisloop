@@ -76,6 +76,14 @@ describe('the health of a hosted machine', () => {
     expect(screen.queryByText(/last progress/)).toBeNull()
   })
 
+  it('says a machine the platform released was no failure, with which end of the run it was', () => {
+    const why = 'the platform released the machine on purpose: its agent finished'
+    render(<InstanceHealth instance={instance({ state: 'stopped', end_reason: 'released', exited_at: ago(300), exit_log: why })} />)
+    expect(screen.getByText('Released: its run was over and its machine ended 5m ago, the platform took it down.')).toBeTruthy()
+    expect(screen.getByText(why)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Exit log' })).toBeNull()
+  })
+
   it('shows a reason it does not know as the API sent it', () => {
     render(<InstanceHealth instance={instance({ restarts: 1, end_reason: 'evicted' as never, exited_at: ago(60) })} />)
     expect(screen.getByText(/ended 1m ago, evicted\.$/)).toBeTruthy()
