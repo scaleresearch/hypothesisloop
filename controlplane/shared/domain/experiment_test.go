@@ -286,13 +286,13 @@ func TestGroupedSpecExpandsToOneNodeShapePerReplicaOfEachGroup(t *testing.T) {
 	}
 }
 
-// A job that asked for "max" holds what admission resolved it to. Read from the submitted job,
-// its footprint had no cpu, memory or storage at all, so the cluster's desired-free capacity and
-// a preemption's credit both counted it as holding nothing but its accelerators.
+// A job sized to a slot holds what admission resolved it to. Read from the submitted job, the
+// cluster's desired-free capacity and a preemption's credit both counted it as holding less than
+// the slot it fills.
 func TestExperimentFootprintCountsWhatAdmissionResolved(t *testing.T) {
-	exp := &Experiment{Job: JobSpec{CPU: MaxResourceSentinel, Memory: MaxResourceSentinel, Storage: "10Gi"}}
+	exp := &Experiment{Job: JobSpec{CPU: "2", Memory: "4Gi", Storage: "10Gi"}}
 	submitted := exp.Footprint()
-	if _, counted := submitted[ResourceKey{Kind: ResourceKindCPU}]; counted || submitted[ResourceKey{Kind: ResourceKindStorage}] != 10<<30 {
+	if submitted[ResourceKey{Kind: ResourceKindCPU}] != 2000 || submitted[ResourceKey{Kind: ResourceKindStorage}] != 10<<30 {
 		t.Fatalf("before admission: %v", submitted)
 	}
 
@@ -307,7 +307,7 @@ func TestExperimentFootprintCountsWhatAdmissionResolved(t *testing.T) {
 			t.Errorf("%v = %d, want %d", key, got[key], want)
 		}
 	}
-	if exp.Job.CPU != MaxResourceSentinel {
+	if exp.Job.CPU != "2" {
 		t.Error("the submitted job was rewritten")
 	}
 }
@@ -317,7 +317,7 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 	for body, want := range map[string]string{
 		`{"cpu":4,"groups":[{"cpu":2}]}`:        "4 2",
 		`{"cpu":"500m","groups":[{"cpu":"1"}]}`: "500m 1",
-		`{"cpu":0.5,"groups":[{"cpu":"max"}]}`:  "0.5 max",
+		`{"cpu":0.5,"groups":[{"cpu":"2"}]}`:    "0.5 2",
 		`{"image":"i","groups":[{}]}`:           " ",
 	} {
 		var job JobSpec

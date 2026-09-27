@@ -30,238 +30,138 @@ func resolveTestLoop(running ...*domain.Experiment) *Loop {
 	return &Loop{store: &resolveTestStore{running: running}, logger: zap.NewNop(), observed: observedOnNode(nil, "node-a")}
 }
 
-func maxAcceleratorExperiment(acceleratorCount int) *domain.Experiment {
+const testAccelerator = domain.AcceleratorType("example.com/product=test-accelerator")
+
+func acceleratorExperiment(acceleratorCount int, cpu, storage string) *domain.Experiment {
 	return &domain.Experiment{
-		ID:               "exp-max",
-		AcceleratorType:  "example.com/product=test-accelerator",
+		ID:               "exp-share",
+		AcceleratorType:  testAccelerator,
 		AcceleratorCount: acceleratorCount,
 		Job: domain.JobSpec{Image: "registry.test/job:1",
-			CPU:              domain.MaxResourceSentinel,
-			Memory:           "1Gi", // literal alongside a "max" field, per JobSpec.CPU's doc comment
-			Storage:          domain.MaxResourceSentinel,
-			AcceleratorCount: acceleratorCount,
-			AcceleratorType:  "example.com/product=test-accelerator",
+			CPU: cpu, Memory: "1Gi", Storage: storage,
+			AcceleratorCount: acceleratorCount, AcceleratorType: testAccelerator,
 		},
 	}
 }
 
-// Two differently-shaped nodes in the selected cluster, both eligible: a "max" resolution must
-// use the MINIMUM fair share across them, never the average and never just one of them.
-func TestResolveClusterLocalResourcesMaxUsesMinimumAcrossEligibleNodes(t *testing.T) {
+func shareNode(cpuMillicores, storageBytes int64) map[string]int64 {
+	return map[string]int64{domain.NodeResourceCPUMillicores: cpuMillicores, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: storageBytes}
+}
+
+// A job runs with what it stated, and each quantity is held to the MINIMUM per-accelerator share
+// across the nodes of the selected cluster that report its accelerator: never the average, never
+// one of them, and never a node of another cluster.
+func TestResolveClusterLocalResourcesHoldsAStatedQuantityToTheSmallestShare(t *testing.T) {
+	one := map[string]int64{string(testAccelerator): 1}
+	for name, tc := range map[string]struct {
+		cpu, storage string
+		totals       map[string]map[string]int64
+		avail        map[string]map[string]int64
+		misfit       string
+	}{
+		"at the smaller of two shares": {
+			cpu: "2", storage: "200",
+			totals: map[string]map[string]int64{"roomy": shareNode(8000, 800), "tight": shareNode(2000, 200)},
+			avail:  map[string]map[string]int64{"roomy": one, "tight": one},
+		},
+		"within the only node's share": {
+			cpu: "5", storage: "100",
+			totals: map[string]map[string]int64{"roomy": shareNode(8000, 800)},
+			avail:  map[string]map[string]int64{"roomy": one},
+		},
+		"at the only node's share": {
+			cpu: "4", storage: "400",
+			totals: map[string]map[string]int64{"only": shareNode(4000, 400)},
+			avail:  map[string]map[string]int64{"only": one},
+		},
+		"cpu above the smaller share": {
+			cpu: "9", storage: "100",
+			totals: map[string]map[string]int64{"tight-a": shareNode(2000, 800), "tight-b": shareNode(4000, 800)},
+			avail:  map[string]map[string]int64{"tight-a": one, "tight-b": one},
+			misfit: `exceeds_accelerator_share: cpu 9 is above the 2 that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 2`,
+		},
+		"storage above the smaller share": {
+			cpu: "2", storage: "300",
+			totals: map[string]map[string]int64{"roomy": shareNode(8000, 800), "tight": shareNode(2000, 200)},
+			avail:  map[string]map[string]int64{"roomy": one, "tight": one},
+			misfit: `exceeds_accelerator_share: storage 300 is above the 200 that 1 accelerator(s) get on cluster cluster-a (each node's storage split evenly across its installed accelerators); request at most 200`,
+		},
+		// No node reports the accelerator, so nothing bounds the job here: the capacity check
+		// decides, and a share is never computed against zero installed.
+		"no node reports the accelerator": {
+			cpu: "64", storage: "100",
+			totals: map[string]map[string]int64{"node-a": shareNode(8000, 800)},
+			avail:  map[string]map[string]int64{"node-a": {string(testAccelerator): 0}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			loop := resolveTestLoop()
+			exp := acceleratorExperiment(1, tc.cpu, tc.storage)
+			resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", tc.totals, tc.avail, nil, nil)
+			if err != nil {
+				t.Fatalf("resolveClusterLocalResources: %v", err)
+			}
+			if misfit != tc.misfit {
+				t.Fatalf("misfit = %q\nwant      %q", misfit, tc.misfit)
+			}
+			if tc.misfit != "" {
+				if resolved != nil {
+					t.Fatalf("resolved = %+v beside a misfit", resolved)
+				}
+				return
+			}
+			if resolved.CPU != tc.cpu || resolved.Memory != "1Gi" || resolved.Storage != tc.storage {
+				t.Errorf("resolved = cpu %q, memory %q, storage %q, want the job as stated", resolved.CPU, resolved.Memory, resolved.Storage)
+			}
+		})
+	}
+}
+
+// A quantity that is none is the job's own fault and never read as fitting.
+func TestResolveClusterLocalResourcesRefusesAQuantityItCannotRead(t *testing.T) {
 	loop := resolveTestLoop()
-	exp := maxAcceleratorExperiment(1)
-
-	nodeResourcesTotal := map[string]map[string]int64{
-		// 8000 millicores / 1 installed accelerator = 8000m per-accelerator share.
-		"roomy": {domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 800},
-		// 2000 millicores / 1 installed accelerator = 2000m per-accelerator share — the minimum.
-		"tight": {domain.NodeResourceCPUMillicores: 2000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 200},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"roomy": {"example.com/product=test-accelerator": 1},
-		"tight": {"example.com/product=test-accelerator": 1},
-	}
-
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if misfit != "" {
-		t.Fatalf("misfit = %q, want it to fit", misfit)
-	}
-	if resolved.CPU != "2" {
-		t.Errorf("resolved.CPU = %q, want \"2\" (2000m, the minimum across both nodes, not the average 5000m or the roomy node's 8000m)", resolved.CPU)
-	}
-	if resolved.Storage != "200" {
-		t.Errorf("resolved.Storage = %q, want \"200\" (the minimum)", resolved.Storage)
-	}
-	if resolved.Memory != "1Gi" {
-		t.Errorf("resolved.Memory = %q, want unchanged \"1Gi\" (not a \"max\" field)", resolved.Memory)
+	for _, cpu := range []string{"", "max"} {
+		exp := acceleratorExperiment(1, cpu, "100")
+		totals := map[string]map[string]int64{"only": shareNode(4000, 400)}
+		avail := map[string]map[string]int64{"only": {string(testAccelerator): 1}}
+		if resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", totals, avail, nil, nil); err == nil {
+			t.Errorf("cpu %q: resolved %+v, misfit %q, want an error", cpu, resolved, misfit)
+		}
 	}
 }
 
 // A grouped job's groups have their own per-node accelerator count (Replicas is nodes, not a
-// multiplier on AcceleratorCount) and must each resolve against THAT count, never the job's total.
+// multiplier on AcceleratorCount) and each is held to the share of THAT count, never the job's
+// total.
 func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *testing.T) {
-	loop := resolveTestLoop()
-	const flavor = domain.AcceleratorType("example.com/product=test-accelerator")
-	exp := &domain.Experiment{
-		ID:               "exp-grouped",
-		AcceleratorType:  flavor,
-		AcceleratorCount: 3, // total: 2 (learner) + 1 (actor)
-		Job: domain.JobSpec{Image: "registry.test/job:1",
-			AcceleratorType: flavor,
-			Groups: []domain.JobGroup{
-				{Name: "learner", Replicas: 1, CPU: domain.MaxResourceSentinel, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
-				{Name: "actor", Replicas: 1, CPU: domain.MaxResourceSentinel, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
+	// One node of 9000 millicores and 3 accelerators: 3000m each, so 6 cores for the learner's
+	// two and 3 for the actor's one.
+	totals := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 9000, domain.NodeResourceMemoryBytes: 10 << 30, domain.NodeResourceStorageBytes: 10 << 30}}
+	avail := map[string]map[string]int64{"node-a": {string(testAccelerator): 3}}
+	for name, tc := range map[string]struct {
+		learner, actor string
+		fits           bool
+	}{
+		"each at its own share":        {"6", "3", true},
+		"the actor at the job's share": {"6", "4", false},
+		"the learner above its share":  {"7", "3", false},
+	} {
+		loop := resolveTestLoop()
+		exp := &domain.Experiment{
+			ID: "exp-grouped", AcceleratorType: testAccelerator, AcceleratorCount: 3,
+			Job: domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: testAccelerator,
+				Groups: []domain.JobGroup{
+					{Name: "learner", Replicas: 1, CPU: tc.learner, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
+					{Name: "actor", Replicas: 1, CPU: tc.actor, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
+				},
 			},
-		},
-	}
-	// One node, 9000 total millicores, 3 accelerators installed (matches AcceleratorCount total on
-	// this single node, e.g. an 3-accelerator host running both groups).
-	nodeResourcesTotal := map[string]map[string]int64{
-		"node-a": {domain.NodeResourceCPUMillicores: 9000, domain.NodeResourceMemoryBytes: 10 << 30, domain.NodeResourceStorageBytes: 10 << 30},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"node-a": {string(flavor): 3},
-	}
-
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if misfit != "" {
-		t.Fatalf("misfit = %q, want it to fit", misfit)
-	}
-	// Per-accelerator share = 9000/3 = 3000m. Learner (2 accelerators) gets 6000m; actor (1) gets
-	// 3000m — never the job's TotalAccelerators (3) applied to both groups alike.
-	if resolved.Groups[0].CPU != "6" {
-		t.Errorf("learner CPU = %q, want \"6\" (2 accelerators x 3000m share)", resolved.Groups[0].CPU)
-	}
-	if resolved.Groups[1].CPU != "3" {
-		t.Errorf("actor CPU = %q, want \"3\" (1 accelerator x 3000m share)", resolved.Groups[1].CPU)
-	}
-}
-
-// An explicit (non-"max") number is rejected only when it exceeds every eligible node's fair
-// share IN THE SELECTED CLUSTER — a number that fits the selected cluster must be accepted even
-// though a smaller number is all some other, unselected node/cluster could ever have offered.
-func TestResolveClusterLocalResourcesExplicitNumberJudgedOnlyAgainstSelectedCluster(t *testing.T) {
-	loop := resolveTestLoop()
-	exp := maxAcceleratorExperiment(1)
-	exp.Job.CPU = "5" // 5 cores = 5000m, explicit rather than "max"
-	exp.Job.Storage = "100"
-
-	// The selected cluster's only eligible node offers an 8000m/accelerator share — comfortably
-	// above the 5000m explicit request.
-	nodeResourcesTotal := map[string]map[string]int64{
-		"roomy": {domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 800},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"roomy": {"example.com/product=test-accelerator": 1},
-	}
-
-	_, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if misfit != "" {
-		t.Fatalf("misfit = %q, want it to fit: 5000m is within this cluster's 8000m/accelerator share, regardless of what any other cluster might offer", misfit)
-	}
-}
-
-// The same explicit number must be rejected — as "doesn't fit this cluster/tick", not a hard
-// error — once it exceeds every eligible node's fair share in the selected cluster.
-func TestResolveClusterLocalResourcesExplicitNumberExceedingEveryEligibleNodeDoesNotFit(t *testing.T) {
-	loop := resolveTestLoop()
-	exp := maxAcceleratorExperiment(1)
-	exp.Job.CPU = "9" // 9 cores = 9000m, exceeds every eligible node's share below
-	exp.Job.Storage = "100"
-
-	nodeResourcesTotal := map[string]map[string]int64{
-		"tight-a": {domain.NodeResourceCPUMillicores: 2000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 800},
-		"tight-b": {domain.NodeResourceCPUMillicores: 4000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 800},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"tight-a": {"example.com/product=test-accelerator": 1},
-		"tight-b": {"example.com/product=test-accelerator": 1},
-	}
-
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if resolved != nil {
-		t.Fatalf("resolved = %+v, want nil: 9000m exceeds the smallest eligible node's fair share (2000m)", resolved)
-	}
-	want := `exceeds_accelerator_share: cpu 9 is above the 2 that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 2 or "max"`
-	if misfit != want {
-		t.Fatalf("misfit = %q\nwant      %q", misfit, want)
-	}
-}
-
-// No node in the cluster currently reports the job's accelerator flavor at all (nodeAvail has an
-// entry, but the flavor's free count is 0/absent): haveBound never becomes true, and this must be
-// read as "not admitted this tick" — never a panic on an empty min-reduction, and never a share
-// silently computed against zero installed.
-func TestResolveClusterLocalResourcesNoEligibleNodeDoesNotFit(t *testing.T) {
-	loop := resolveTestLoop()
-	exp := maxAcceleratorExperiment(1)
-
-	nodeResourcesTotal := map[string]map[string]int64{
-		"node-a": {domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 800},
-	}
-	// node-a reports zero of the requested flavor — not currently eligible.
-	nodeAvail := map[string]map[string]int64{
-		"node-a": {"example.com/product=test-accelerator": 0},
-	}
-
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if resolved != nil {
-		t.Fatalf("resolved = %+v, want nil: no node is eligible to resolve against", resolved)
-	}
-	want := `capacity_unavailable: no node on cluster cluster-a reports example.com/product=test-accelerator to resolve "max" against`
-	if misfit != want {
-		t.Fatalf("misfit = %q\nwant      %q", misfit, want)
-	}
-}
-
-// The trivial minimum-of-one: exactly one eligible node in the cluster. A future refactor of the
-// "take the minimum across eligible nodes" logic must not silently break the single-node case by
-// e.g. requiring at least two candidates before it starts comparing.
-func TestResolveClusterLocalResourcesSingleEligibleNodeIsItsOwnMinimum(t *testing.T) {
-	loop := resolveTestLoop()
-	exp := maxAcceleratorExperiment(1)
-
-	nodeResourcesTotal := map[string]map[string]int64{
-		"only": {domain.NodeResourceCPUMillicores: 4000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 400},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"only": {"example.com/product=test-accelerator": 1},
-	}
-
-	resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
-	if err != nil {
-		t.Fatalf("resolveClusterLocalResources: %v", err)
-	}
-	if misfit != "" {
-		t.Fatalf("misfit = %q, want it to fit", misfit)
-	}
-	if resolved.CPU != "4" {
-		t.Errorf("resolved.CPU = %q, want \"4\" (the single eligible node's own share)", resolved.CPU)
-	}
-	if resolved.Storage != "400" {
-		t.Errorf("resolved.Storage = %q, want \"400\"", resolved.Storage)
-	}
-}
-
-// Two nodes with an IDENTICAL fair share must resolve to the same answer every time, regardless
-// of Go's randomized map iteration order — a tie must never be a source of flakiness.
-func TestResolveClusterLocalResourcesTiedNodesResolveDeterministically(t *testing.T) {
-	loop := resolveTestLoop()
-	nodeResourcesTotal := map[string]map[string]int64{
-		"node-a": {domain.NodeResourceCPUMillicores: 3000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 300},
-		"node-b": {domain.NodeResourceCPUMillicores: 3000, domain.NodeResourceMemoryBytes: 1 << 30, domain.NodeResourceStorageBytes: 300},
-	}
-	nodeAvail := map[string]map[string]int64{
-		"node-a": {"example.com/product=test-accelerator": 1},
-		"node-b": {"example.com/product=test-accelerator": 1},
-	}
-
-	for i := 0; i < 25; i++ {
-		exp := maxAcceleratorExperiment(1)
-		resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", nodeResourcesTotal, nodeAvail, nil, nil)
+		}
+		resolved, misfit, err := loop.resolveClusterLocalResources(context.Background(), newResolutionCache(loop), exp, "cluster-a", totals, avail, nil, nil)
 		if err != nil {
-			t.Fatalf("resolveClusterLocalResources: %v", err)
+			t.Fatalf("%s: %v", name, err)
 		}
-		if misfit != "" {
-			t.Fatalf("misfit = %q, want it to fit", misfit)
-		}
-		if resolved.CPU != "3" {
-			t.Fatalf("run %d: resolved.CPU = %q, want \"3\" every time (tie must be deterministic)", i, resolved.CPU)
+		if (misfit == "") != tc.fits || (tc.fits && (resolved.Groups[0].CPU != tc.learner || resolved.Groups[1].CPU != tc.actor)) {
+			t.Errorf("%s: resolved %+v, misfit %q, want fits = %v", name, resolved, misfit, tc.fits)
 		}
 	}
 }
@@ -366,10 +266,11 @@ func (s *resolvedCPUStore) ClaimSubmitted(_ context.Context, id, _ string, resol
 }
 
 // Free accelerators shrink as a tick admits, and jobs admitted this tick are in no claimed list
-// yet, so a share measured against live free capacity grows with every admission.
-func TestMaxSharesDoNotGrowAsATickAdmits(t *testing.T) {
-	first := holdJob("first", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
-	second := holdJob("second", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+// yet, so a share measured against live free capacity grows with every admission: the second
+// job, asking for more than a third of a node of three devices, would be let through.
+func TestSharesDoNotGrowAsATickAdmits(t *testing.T) {
+	first := holdJob("first", domain.CapacityBurst, h100, 1, "4")
+	second := holdJob("second", domain.CapacityBurst, h100, 1, "6")
 	second.AgentID = "agent-2"
 	first.ClusterName, second.ClusterName = "cluster-a", "cluster-a"
 	store := &resolvedCPUStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{first, second}}}}
@@ -378,8 +279,8 @@ func TestMaxSharesDoNotGrowAsATickAdmits(t *testing.T) {
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatalf("tick() = %v, want nil", err)
 	}
-	if store.cpu["first"] == "" || store.cpu["first"] != store.cpu["second"] {
-		t.Fatalf("resolved cpu = %q and %q, want the same share of the node for both", store.cpu["first"], store.cpu["second"])
+	if _, admitted := store.cpu["second"]; store.cpu["first"] != "4" || admitted {
+		t.Fatalf("admitted with cpu %v, want the first alone: 6 of 16 cores is above the share of one device of three", store.cpu)
 	}
 }
 

@@ -51,7 +51,7 @@ type LoopStore interface {
 	// ListCapacityClaimedExperiments returns every experiment that has already claimed
 	// accelerator capacity toward the nodes it landed on — RUNNING and SUBMITTED, not
 	// just RUNNING — see resolutionCache.loadClaimed for why the narrower RUNNING-only view
-	// undercounts "installed" capacity during tick-time "max" resolution.
+	// undercounts "installed" capacity when a job's per-accelerator share is measured.
 	ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	// GetClusterSettings returns the operator overrides for clusterID (scale_up_timeout_seconds,
 	// max_speculative_accelerators), or nil if none were ever set — see domain.ClusterSettings.
@@ -127,8 +127,8 @@ type LoopWorkloadClient interface {
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 	// GetNodeTotalCapacity reports each node's TOTAL installed capacity (not just what's
 	// currently free — see GetNodeResourceCapacity) for CPU/memory/storage, keyed the same way:
-	// cluster -> node -> domain.NodeResource* -> canonical units. Used to compute a job's exact
-	// proportional "max" share of the node it lands on (see resolveClusterLocalResources).
+	// cluster -> node -> domain.NodeResource* -> canonical units. Used to compute a job's
+	// proportional share of the node it lands on (see resolveClusterLocalResources).
 	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node.
 	// A cluster absent from the map is treated as single-node only.

@@ -133,15 +133,9 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 		t.Fatalf("footprint = %v, want the slot's %v", got, whole)
 	}
 
-	// "max" is the slot's size like any other request.
-	greedy := h100Job("greedy", domain.MaxResourceSentinel)
-	greedy.Job.Memory = domain.MaxResourceSentinel
-	if job := sized(t, c, greedy).EffectiveJob(); job.CPU != "8" || job.Memory != "32Gi" || job.Storage != "100Gi" {
-		t.Fatalf("a \"max\" job resolved to %s cpu, %s, %s", job.CPU, job.Memory, job.Storage)
-	}
 	// A grouped job of one node is resolved on its group.
 	grouped := h100Job("grouped", "")
-	grouped.Job = domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", AcceleratorCount: 1, AcceleratorType: h100}}}
+	grouped.Job = domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1, AcceleratorType: h100}}}
 	if job := sized(t, c, grouped).EffectiveJob(); job.Groups[0].CPU != "8" || job.Groups[0].Memory != "32Gi" || grouped.Job.Groups[0].CPU != "2" {
 		t.Fatalf("grouped job resolved to %+v, submitted %+v", job.Groups[0], grouped.Job.Groups[0])
 	}

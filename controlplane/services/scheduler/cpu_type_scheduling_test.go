@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -122,12 +123,7 @@ func priced(exp *domain.Experiment, hours float64) *domain.Experiment {
 }
 
 func coresJob(id string, tier domain.CapacityTier, cores int) *domain.Experiment {
-	exp := holdJob(id, tier, cpuType, cores, "")
-	if err := countSetsCores(&exp.Job); err != nil {
-		panic(err)
-	}
-	shareWhereUnstated(&exp.Job)
-	return exp
+	return holdJob(id, tier, cpuType, cores, strconv.Itoa(cores))
 }
 
 func running(exp *domain.Experiment) *domain.Experiment {
@@ -177,8 +173,8 @@ func TestATickAdmitsACoreJobAndAnAcceleratorJobSideBySide(t *testing.T) {
 					t.Errorf("%s reserved at %+v, want %+v", id, got, w)
 				}
 			}
-			if got := store.resolved["cores"]; got.CPU != "4" || got.Memory != "16Gi" || got.AcceleratorCount != 4 {
-				t.Errorf("the core job runs as cpu %q, memory %q, count %d; want 4 cores and a quarter of the node's 64Gi", got.CPU, got.Memory, got.AcceleratorCount)
+			if got := store.resolved["cores"]; got.CPU != "4" || got.Memory != "1Gi" || got.AcceleratorCount != 4 {
+				t.Errorf("the core job runs as cpu %q, memory %q, count %d; want the 4 cores and 1Gi it stated", got.CPU, got.Memory, got.AcceleratorCount)
 			}
 			if got := store.resolved["gpu"]; got.CPU != "2" || got.AcceleratorCount != 1 {
 				t.Errorf("the accelerator job runs as cpu %q, count %d; want what it asked for", got.CPU, got.AcceleratorCount)
@@ -290,7 +286,7 @@ type tickOutcome struct {
 
 // One accelerator workload, decided twice: with a catalog and a node that know of no cores, and
 // with cores priced, offered by the node and a core job in the queue. A burst tick
-// has a job that fits, one sized by "max", one over its share and one too large for the node. A
+// has a job that fits, one at its share, one over its share and one too large for the node. A
 // guaranteed tick has a job that preempts a burst one. Every outcome of every accelerator job
 // must be the same.
 func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
@@ -321,7 +317,7 @@ func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
 	burst := func() []*domain.Experiment {
 		return []*domain.Experiment{
 			priced(holdJob("fits", domain.CapacityBurst, h100, 1, "1"), 2),
-			priced(holdJob("max", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel), 1),
+			priced(holdJob("at-share", domain.CapacityBurst, h100, 1, "4"), 1),
 			priced(holdJob("over-share", domain.CapacityBurst, h100, 1, "6"), 1),
 			priced(holdJob("too-large", domain.CapacityBurst, h100, 5, "1"), 1),
 		}
@@ -344,7 +340,7 @@ func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
 		t.Errorf("a guaranteed tick of accelerator jobs was decided differently beside jobs on CPU:\nwithout %+v\nwith    %+v", beforeGuaranteed, afterGuaranteed)
 	}
 	// The comparison is of ticks that did something of each kind.
-	if len(beforeBurst.Submitted) != 2 || beforeBurst.Resolved["max"].CPU != "4" || len(beforeBurst.NotAdmitted) != 2 || !near(beforeBurst.Reserved["fits"].Cost, 2) {
+	if len(beforeBurst.Submitted) != 2 || beforeBurst.Resolved["at-share"].CPU != "4" || len(beforeBurst.NotAdmitted) != 2 || !near(beforeBurst.Reserved["fits"].Cost, 2) {
 		t.Errorf("the burst tick exercised too little to compare: %+v", beforeBurst)
 	}
 	if !reflect.DeepEqual(beforeGuaranteed.Requeued, []string{"victim"}) || !strings.HasPrefix(beforeGuaranteed.NotAdmitted["behind"], domain.NotAdmittedOutranked+": ") {

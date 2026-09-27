@@ -4,19 +4,12 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // ParseCPUCores parses a JobSpec.CPU-style quantity string (e.g. "4", "500m") into fractional
-// CPU cores. Empty string, and domain.MaxResourceSentinel ("max", not yet resolved to a literal),
-// both return 0, nil — callers treat 0 as "not specified/not yet known" (cluster default applies
-// at Job-build time; not counted against any quota since the actual value isn't known yet). A
-// "max" field is not resolved until this job is admitted onto a specific cluster (see
-// scheduler.Loop.resolveClusterLocalResources) — so this returns 0 for it wherever it is called
-// before that point, e.g. this same submission's own structural validation.
+// CPU cores. Empty string returns 0, nil.
 func ParseCPUCores(qty string) (float64, error) {
-	if qty == "" || qty == domain.MaxResourceSentinel {
+	if qty == "" {
 		return 0, nil
 	}
 	q, err := parseQuantity(qty)
@@ -40,7 +33,7 @@ func ParseStorageGB(qty string) (float64, error) {
 }
 
 func parseBytesGB(qty string) (float64, error) {
-	if qty == "" || qty == domain.MaxResourceSentinel {
+	if qty == "" {
 		return 0, nil
 	}
 	q, err := parseQuantity(qty)

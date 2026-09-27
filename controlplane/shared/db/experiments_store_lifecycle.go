@@ -62,7 +62,7 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 // MarkQueued sets the QUEUED lifecycle and its current scheduler decision together. Also resets
 // resolved_job_spec to NULL, as every transition to QUEUED does: a requeued job is re-admitted
 // from scratch and may land on a different cluster with a different fair share, or on another
-// slot, so the previous resolution (a "max", a slot's size, the slot pin in its node selector) is
+// slot, so the previous resolution (a slot's size, the slot pin in its node selector) is
 // stale and must not be read as though it were the resolution for wherever it lands next. A
 // QUEUED row therefore never carries one, and EffectiveJob on it is the submitted job.
 func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) error {
@@ -78,7 +78,7 @@ func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) er
 
 // ClaimSubmitted serializes admission decisions for one cluster, checks fresh capacity while
 // holding that lock, and conditionally persists the desired-state claim. resolvedJob is the job
-// as the runtime must run it (any "max" sentinel and the grace periods resolved), written into
+// as the runtime must run it (a slot's size and the grace periods resolved), written into
 // resolved_job_spec in the SAME transaction as the SUBMITTED status transition — see
 // domain.Experiment.ResolvedJob's doc comment. Its image is decided here and set on resolvedJob:
 // the one image the cluster runs, or on a cluster that runs any, the image the job names.

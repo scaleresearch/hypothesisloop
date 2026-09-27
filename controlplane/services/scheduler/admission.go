@@ -3,7 +3,6 @@ package scheduler
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -32,7 +31,9 @@ const (
 	ReasonJobTooLong          = "job_too_long"
 	ReasonEstimateRequired    = "estimate_required"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"
-	// ReasonStorageRequired refuses a job that does not state its storage as a quantity.
+	// A job states the cpu, memory and storage of each node as quantities.
+	ReasonCPURequired     = "cpu_required"
+	ReasonMemoryRequired  = "memory_required"
 	ReasonStorageRequired = "storage_required"
 )
 
@@ -62,50 +63,35 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 	return total, nil
 }
 
-// shareWhereUnstated gives every node that holds units of a priced type its share of the node it
-// lands on ("max") for cpu and memory where the job left them out. The share is resolved against
-// the cluster the job is placed on. A node that holds no unit has no share to take and states
-// both (JobSpec.ValidateGroups). Storage has no share: see storageStated.
-func shareWhereUnstated(job *domain.JobSpec) {
-	shape := func(count int, quantities ...*string) {
-		if count < 1 {
-			return
-		}
-		for _, quantity := range quantities {
-			if *quantity == "" {
-				*quantity = domain.MaxResourceSentinel
-			}
-		}
-	}
-	if len(job.Groups) == 0 {
-		shape(job.AcceleratorCount, &job.CPU, &job.Memory)
-		return
-	}
-	for i := range job.Groups {
-		group := &job.Groups[i]
-		shape(group.AcceleratorCount, &group.CPU, &group.Memory)
-	}
-}
+// shareOfNode is the retired way to ask for a node's share of a quantity. It is refused by name
+// so the answer says what to state instead.
+const shareOfNode = "max"
 
-// storageStated refuses a job that leaves the storage of a node out or asks for a share of it.
-// A node offers its cores and memory whole when idle, so a share of them always fits an idle
-// node. What it offers of its disk is what is free on it, which no share of the disk's size
-// states: a job given one waited on an idle cluster for room the disk never had.
-func storageStated(job domain.JobSpec) error {
-	check := func(field, storage string) error {
-		switch storage {
-		case "":
-			return &AdmissionError{Reason: ReasonStorageRequired, Message: fmt.Sprintf("%s is required: state the scratch space one node of the job writes, as in storage: 4Gi", field)}
-		case domain.MaxResourceSentinel:
-			return &AdmissionError{Reason: ReasonStorageRequired, Message: fmt.Sprintf("%s is %q: storage is stated as a quantity, as in storage: 4Gi, and never as a share of the node", field, storage)}
+// quantitiesStated refuses a job that leaves the cpu, memory or storage of a node out or asks for
+// a share of the node. What a job holds is what it states: a share of the node it lands on held
+// most of a machine for a job that used little, and nothing else fitted beside it.
+func quantitiesStated(job domain.JobSpec) error {
+	check := func(owner string, group domain.JobGroup) error {
+		for _, quantity := range []struct{ name, value, reason, meaning, example string }{
+			{"cpu", group.CPU, ReasonCPURequired, "the cores one node of the job uses", "cpu: 2"},
+			{"memory", group.Memory, ReasonMemoryRequired, "the memory one node of the job uses", "memory: 8Gi"},
+			{"storage", group.Storage, ReasonStorageRequired, "the scratch space one node of the job writes", "storage: 4Gi"},
+		} {
+			field := owner + "." + quantity.name
+			switch quantity.value {
+			case "":
+				return &AdmissionError{Reason: quantity.reason, Message: fmt.Sprintf("%s is required: state %s, as in %s", field, quantity.meaning, quantity.example)}
+			case shareOfNode:
+				return &AdmissionError{Reason: quantity.reason, Message: fmt.Sprintf("%s is %q: %s is stated as a quantity, as in %s, and never as a share of the node", field, quantity.value, quantity.name, quantity.example)}
+			}
 		}
 		return nil
 	}
 	if len(job.Groups) == 0 {
-		return check("job.storage", job.Storage)
+		return check("job", domain.JobGroup{CPU: job.CPU, Memory: job.Memory, Storage: job.Storage})
 	}
 	for _, group := range job.Groups {
-		if err := check(fmt.Sprintf("job.groups[%q].storage", group.Name), group.Storage); err != nil {
+		if err := check(fmt.Sprintf("job.groups[%q]", group.Name), group); err != nil {
 			return err
 		}
 	}
@@ -119,7 +105,7 @@ func asksForCoresOnly(job domain.JobSpec) bool {
 		return false
 	}
 	for _, g := range job.NodeGroups() {
-		if g.CPU != "" && g.CPU != domain.MaxResourceSentinel {
+		if g.CPU != "" {
 			return true
 		}
 	}
@@ -127,35 +113,30 @@ func asksForCoresOnly(job domain.JobSpec) bool {
 }
 
 // countSetsCores is the one rule of the type whose unit is a core (domain.CPUType): on each node
-// the count and the cores are one whole number. A job states either and this writes the other,
-// refuses two that differ or a fraction of a core, and gives a node that names no memory or
-// storage its share of the node it lands on. Everything that reads the job afterwards, the stored
-// row, the footprint, the resolved spec and every runtime, sees a job whose cpu is its count and
-// needs no rule of its own.
+// the count and the cores are one whole number. The job states its cores and this writes the
+// count, and refuses a count that differs or a fraction of a core. Everything that reads the job
+// afterwards, the stored row, the footprint, the resolved spec and every runtime, sees a job
+// whose cpu is its count and needs no rule of its own.
 func countSetsCores(job *domain.JobSpec) error {
-	shape := func(field string, count *int, cpu, memory, storage *string) error {
-		switch cores, err := workload.ParseCPUCores(*cpu); {
-		case *cpu == "" && *count < 1:
-			return fmt.Errorf("%s.cpu is required: a job on CPU states its cores, a whole number of at least 1", field)
-		case *cpu == "":
-			*cpu = strconv.Itoa(*count)
+	shape := func(field string, count *int, cpu string) error {
+		switch cores, err := workload.ParseCPUCores(cpu); {
 		case err != nil:
 			return fmt.Errorf("%s.cpu: %w", field, err)
-		case *cpu == domain.MaxResourceSentinel || cores < 1 || cores != float64(int(cores)):
-			return fmt.Errorf("%s.cpu is %q: a job on CPU holds whole cores, so ask for a whole number of at least 1", field, *cpu)
+		case cores < 1 || cores != float64(int(cores)):
+			return fmt.Errorf("%s.cpu is %q: a job on CPU holds whole cores, so ask for a whole number of at least 1", field, cpu)
 		case *count == 0:
 			*count = int(cores)
 		case cores != float64(*count):
-			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a job on CPU the count is the node's cores, so leave one out or make them equal", field, *cpu, field, *count)
+			return fmt.Errorf("%s.cpu is %q and %s.accelerator_count is %d: for a job on CPU the count is the node's cores, so leave the count out or make them equal", field, cpu, field, *count)
 		}
 		return nil
 	}
 	if len(job.Groups) == 0 {
-		return shape("job", &job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
+		return shape("job", &job.AcceleratorCount, job.CPU)
 	}
 	for i := range job.Groups {
 		group := &job.Groups[i]
-		if err := shape(fmt.Sprintf("job.groups[%q]", group.Name), &group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage); err != nil {
+		if err := shape(fmt.Sprintf("job.groups[%q]", group.Name), &group.AcceleratorCount, group.CPU); err != nil {
 			return err
 		}
 	}
@@ -198,6 +179,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
+	if err := quantitiesStated(exp.Job); err != nil {
+		return err
+	}
 	if asksForCoresOnly(exp.Job) {
 		exp.Job.AcceleratorType = domain.CPUType
 	}
@@ -206,10 +190,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 		}
 		exp.AcceleratorCount = exp.Job.TotalAccelerators()
-	}
-	shareWhereUnstated(&exp.Job)
-	if err := storageStated(exp.Job); err != nil {
-		return err
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.

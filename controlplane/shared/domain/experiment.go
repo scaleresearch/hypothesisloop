@@ -50,8 +50,8 @@ type Experiment struct {
 	// billing/admission-facing canonical values derived from it once at submission time.
 	Job JobSpec `json:"job"`
 	// ResolvedJob is Job as the runtime must run it, written once at admission onto the specific
-	// cluster the job landed on: any MaxResourceSentinel ("max") cpu/memory/storage resolved to a
-	// literal, and the shutdown and checkpoint grace resolved against the operator's limits (see
+	// cluster the job landed on: its cpu, memory and storage sized to the slot it holds on a
+	// cluster of slots, and the shutdown and checkpoint grace resolved against the operator's limits (see
 	// GraceLimits.Resolve). Nil until admitted. Job itself is NEVER rewritten, so a GET always shows exactly what
 	// was submitted; every downstream consumer that needs the runnable/executable values (cost
 	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
@@ -167,8 +167,8 @@ type Experiment struct {
 // EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has
 // already resolved one, otherwise e.Job verbatim (a never-admitted experiment, or one with
 // nothing to resolve). Every consumer of the runnable/executable job shape (cost estimation,
-// BuildJobs, Footprint, NodeShapes) must read this instead of e.Job directly, so a "max" sentinel
-// resolved at admission is honored everywhere the job actually runs while GET still shows exactly
+// BuildJobs, Footprint, NodeShapes) must read this instead of e.Job directly, so what
+// admission resolved is honored everywhere the job actually runs while GET still shows exactly
 // what was submitted.
 func (e *Experiment) EffectiveJob() JobSpec {
 	if e.ResolvedJob != nil {
@@ -215,8 +215,8 @@ func (e *Experiment) ForRuntime() *Experiment {
 }
 
 // NodeShapes is the placement view of e's EffectiveJob — see JobSpec.NodeShapes. It is on
-// Experiment, not JobSpec, specifically so a resolved "max" value is reflected in what the
-// scheduler thinks the job's footprint actually is, never the original possibly-"max" spec.
+// Experiment, not JobSpec, specifically so the resolved job is what the scheduler places, never the
+// spec as submitted.
 func (e *Experiment) NodeShapes() []NodeShape {
 	return e.EffectiveJob().NodeShapes()
 }
@@ -257,7 +257,7 @@ func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 
 // Footprint returns e's physical resource footprint in canonical units, across every dimension
 // with live per-cluster capacity reporting: CPU (millicores), memory/storage (bytes) — read
-// from e.EffectiveJob()'s quantity strings, so what admission resolved (a "max", or the slot a
+// from e.EffectiveJob()'s quantity strings, so what admission resolved (the slot a
 // job holds whole) is what the job is counted as holding — plus its accelerator, if
 // any, keyed by the accelerator type string itself — the same driver-published "key=value" the
 // agent submitted and that capacity reports, so the two sides join with no translation step.

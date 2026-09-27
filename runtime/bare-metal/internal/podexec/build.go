@@ -147,12 +147,6 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	if spec.Image == "" {
 		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no image in desired state", exp.ID)
 	}
-	// Defense-in-depth: see k8sexec.BuildJobs' identical check. Reaching here with a literal
-	// "max" means the scheduler admitted this experiment without resolving it — a control-plane
-	// bug, not something this runtime should compile into a nonsense podman resource request.
-	if group.CPU == domain.MaxResourceSentinel || group.Memory == domain.MaxResourceSentinel || group.Storage == domain.MaxResourceSentinel {
-		return containerSpec{}, fmt.Errorf("podexec: experiment %s reached BuildContainerSpec with an unresolved %q sentinel still in its job spec — this is a control-plane bug, not a placement failure", exp.ID, domain.MaxResourceSentinel)
-	}
 	if len(spec.AcceleratorTolerations) > 0 {
 		log.Printf("podexec: experiment %s requests accelerator_tolerations, which has no meaning on a bare node — ignoring", exp.ID)
 	}
@@ -173,16 +167,6 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 		return containerSpec{}, fmt.Errorf("podexec: accelerator %q requested %d device(s) but placement resolved %d", exp.AcceleratorType, group.AcceleratorCount, len(placement.DevicePaths))
 	}
 
-	// A "max" sentinel is always resolved to a plain literal once an experiment is admitted (see
-	// scheduler.Loop.resolveClusterLocalResources; EffectiveJob above reads exp.ResolvedJob), so it should
-	// never reach here — but resource.ParseQuantity("max") fails with a generic "quantities must
-	// match the regular expression" error that names nothing about the real cause, so name it
-	// explicitly instead.
-	for name, qty := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
-		if qty == domain.MaxResourceSentinel {
-			return containerSpec{}, fmt.Errorf("podexec: job.%s is still %q — it should have been resolved to a literal quantity at submission", name, domain.MaxResourceSentinel)
-		}
-	}
 	cpuQty, err := resource.ParseQuantity(group.CPU)
 	if err != nil {
 		return containerSpec{}, fmt.Errorf("podexec: parse cpu %q: %w", group.CPU, err)

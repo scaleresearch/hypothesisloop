@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,8 +12,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// resolutionCache amortizes the running-experiment node-attribution lookups tick-time "max"
-// resolution needs (see resolveClusterLocalResources) across every queued job considered in one
+// resolutionCache amortizes the running-experiment node-attribution lookups the per-accelerator
+// share needs (see resolveClusterLocalResources) across every queued job considered in one
 // tick: the running set and each running job's node are the same answer for every queued job
 // asking about a given accelerator flavor, so this is built lazily and reused rather than
 // re-queried once per queued job. The speculative-candidate reads are held the same way.
@@ -98,8 +99,8 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 //
 // The cores of domain.CPUType are counted from the node's own total instead. Every job holds
 // cores, an accelerator job too, so free cores plus the cores of CPU jobs falls short of what is
-// installed by whatever the accelerator jobs hold, and a "max" share measured against that would
-// hand the CPU jobs memory the accelerator jobs already have.
+// installed by whatever the accelerator jobs hold, and a share measured against that would
+// allow the CPU jobs memory the accelerator jobs already have.
 func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, cluster string, flavor domain.AcceleratorType, nodeAvail, nodeResourcesTotal map[string]map[string]int64) (map[string]int64, error) {
 	if flavor.Kind() == domain.TypeKindCPU {
 		return installedCoresByNode(nodeAvail, nodeResourcesTotal), nil
@@ -161,26 +162,22 @@ func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]in
 	return installed
 }
 
-// resolveClusterLocalResources resolves any "max" CPU/memory/storage sentinel in exp.Job (or its
-// groups) into a literal quantity, and validates any EXPLICIT number, against exp's cluster-local
-// fair share within `cluster` — the MINIMUM domain.FairShare across every node in `cluster` that
-// is topology-eligible for the group in question (matches exp's accelerator flavor, exp.Job's
-// node_selector, and currently reports live capacity). Runs once cluster and accelerator flavor
-// are already decided for this attempt (see loop_tick.go's placement search that calls this) —
-// never before, since "max" resolved against the wrong cluster's fair share is meaningless the
-// moment placement moves to a different one.
+// resolveClusterLocalResources returns exp's job as it runs on cluster, once cluster and
+// accelerator flavor are decided for this attempt. A job states its cpu, memory and storage, so
+// on a cluster of nodes that is the job as submitted, with each quantity checked against the
+// job's cluster-local share: the MINIMUM domain.FairShare across every node in cluster that
+// reports exp's accelerator flavor and carries exp.Job's node_selector.
 //
-// Resolution is PER GROUP: a grouped job's groups have their own per-node accelerator count
-// (Replicas), and each group's fair share is computed against that group's own count, never the
-// job's TotalAccelerators. A group requesting zero accelerators has no per-accelerator share to
-// compute and is left exactly as submitted (see JobSpec.ValidateGroups: such a group's CPU cannot
-// be "max" — see ValidateExperiment's structural check).
+// The check is PER GROUP: each group's share is computed against that group's own per-node
+// accelerator count, never the job's TotalAccelerators. A group that holds no accelerator has no
+// share and is not checked, and neither is a group no node of the cluster can bound yet (a
+// speculative target with no live node): the capacity check of a later tick catches a request
+// that is too large there.
 //
 // misfit is "" when the job's resources work at this cluster this tick, otherwise the
-// not_admitted_reason to record: exceeds_accelerator_share when an explicit number is above the
-// share, capacity_unavailable when a "max" has no eligible node to resolve against. The caller
-// un-picks the cluster exactly like a scalar or topology miss; a later tick, or a node with more
-// cpu/memory/storage per accelerator, may still admit it, so this is never a hard rejection.
+// not_admitted_reason to record, exceeds_accelerator_share. The caller un-picks the cluster
+// exactly like a scalar or topology miss; a node with more cpu, memory or storage per accelerator
+// may still admit the job later, so this is never a hard rejection.
 //
 // On a cluster of slots (domain.NodeSlotLabel) none of the above applies: the job is sized to the
 // slot it is to hold, see resolveOntoSlot. nodeResources is what each node has free now, which
@@ -191,22 +188,8 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		return resolved, misfit, nil
 	}
 	out := exp.Job
-	if len(exp.Job.Groups) > 0 {
-		out.Groups = append([]domain.JobGroup(nil), exp.Job.Groups...)
-	}
-
 	groups := exp.Job.NodeGroups()
-	needsAccelerator := false
-	for _, g := range groups {
-		if g.AcceleratorCount > 0 {
-			needsAccelerator = true
-			break
-		}
-	}
-	if !needsAccelerator {
-		// No accelerator dimension anywhere in this job to compute a per-accelerator share
-		// against — CPU-only jobs never carry "max" (see ValidateExperiment) and are never
-		// subject to the proportionate-share check, exactly as before this feature existed.
+	if !slices.ContainsFunc(groups, func(g domain.JobGroup) bool { return g.AcceleratorCount > 0 }) {
 		return &out, "", nil
 	}
 
@@ -215,102 +198,47 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		return nil, "", ierr
 	}
 
-	for gi, g := range groups {
+	for _, g := range groups {
 		if g.AcceleratorCount <= 0 {
 			continue
 		}
-		var cpuShare, memShare, storageShare int64
-		haveBound := false
-		for node, total := range nodeResourcesTotal {
-			if !labelsMatch(nodeLabels[node], exp.Job.NodeSelector) {
+		for _, dimension := range []struct{ name, key, requested string }{
+			{"cpu", domain.NodeResourceCPUMillicores, g.CPU},
+			{"memory", domain.NodeResourceMemoryBytes, g.Memory},
+			{"storage", domain.NodeResourceStorageBytes, g.Storage},
+		} {
+			share, bounded := int64(0), false
+			for node, total := range nodeResourcesTotal {
+				if !labelsMatch(nodeLabels[node], exp.Job.NodeSelector) || installed[node] <= 0 {
+					continue
+				}
+				ofNode, err := domain.FairShare(total[dimension.key], int64(g.AcceleratorCount), installed[node])
+				if err != nil {
+					return nil, "", fmt.Errorf("%s fair share: %w", dimension.name, err)
+				}
+				if !bounded || ofNode < share {
+					share, bounded = ofNode, true
+				}
+			}
+			if !bounded {
 				continue
 			}
-			nodeInstalled := installed[node]
-			if nodeInstalled <= 0 {
-				continue // this node does not currently report the job's accelerator flavor at all
-			}
-			c, err := domain.FairShare(total[domain.NodeResourceCPUMillicores], int64(g.AcceleratorCount), nodeInstalled)
+			requested, err := canonicalQuantityValue(dimension.key, dimension.requested)
 			if err != nil {
-				return nil, "", fmt.Errorf("resolve cluster-local resources: cpu fair share: %w", err)
+				return nil, "", fmt.Errorf("job %s %q: %w", dimension.name, dimension.requested, err)
 			}
-			m, err := domain.FairShare(total[domain.NodeResourceMemoryBytes], int64(g.AcceleratorCount), nodeInstalled)
-			if err != nil {
-				return nil, "", fmt.Errorf("resolve cluster-local resources: memory fair share: %w", err)
+			if requested > float64(share) {
+				return nil, shareMisfit(dimension.name, dimension.requested, canonicalQuantityString(dimension.key, float64(share)), g.AcceleratorCount, cluster), nil
 			}
-			s, err := domain.FairShare(total[domain.NodeResourceStorageBytes], int64(g.AcceleratorCount), nodeInstalled)
-			if err != nil {
-				return nil, "", fmt.Errorf("resolve cluster-local resources: storage fair share: %w", err)
-			}
-			if !haveBound || c < cpuShare {
-				cpuShare = c
-			}
-			if !haveBound || m < memShare {
-				memShare = m
-			}
-			if !haveBound || s < storageShare {
-				storageShare = s
-			}
-			haveBound = true
-		}
-		if !haveBound {
-			if g.CPU != domain.MaxResourceSentinel && g.Memory != domain.MaxResourceSentinel && g.Storage != domain.MaxResourceSentinel {
-				// No node in `cluster` is currently eligible to validate this group's EXPLICIT
-				// numbers against — this is exactly the speculative-blind case (a candidate with no
-				// live proof of fit, or no live nodes at all: see fitsLargestNode/speculativeCandidates).
-				// There's nothing to over-fit here since nothing is being resolved, only validated;
-				// refusing to even attempt the submission would repeat the bug this fix addresses one
-				// layer deeper. Leave the group exactly as submitted and let the real cluster-local
-				// fair share (once a node actually appears there) catch an oversized explicit request
-				// on the next tick via the ordinary scalar/topology capacity check.
-				continue
-			}
-			// An unresolved "max" genuinely cannot be guessed without any live node to measure a
-			// share against — this is the one case still folded into "doesn't fit this cluster/tick".
-			return nil, fmt.Sprintf("%s: no node on cluster %s reports %s to resolve \"max\" against",
-				domain.NotAdmittedCapacityUnavailable, cluster, exp.AcceleratorType), nil
-		}
-		cpu, share := resolveOrValidateDimension(g.CPU, domain.NodeResourceCPUMillicores, cpuShare)
-		if share != "" {
-			return nil, shareMisfit("cpu", g.CPU, share, g.AcceleratorCount, cluster), nil
-		}
-		mem, share := resolveOrValidateDimension(g.Memory, domain.NodeResourceMemoryBytes, memShare)
-		if share != "" {
-			return nil, shareMisfit("memory", g.Memory, share, g.AcceleratorCount, cluster), nil
-		}
-		storage, share := resolveOrValidateDimension(g.Storage, domain.NodeResourceStorageBytes, storageShare)
-		if share != "" {
-			return nil, shareMisfit("storage", g.Storage, share, g.AcceleratorCount, cluster), nil
-		}
-		if len(out.Groups) > 0 {
-			out.Groups[gi].CPU, out.Groups[gi].Memory, out.Groups[gi].Storage = cpu, mem, storage
-		} else {
-			out.CPU, out.Memory, out.Storage = cpu, mem, storage
 		}
 	}
 	return &out, "", nil
 }
 
-// shareMisfit is the not_admitted_reason for an explicit request above the per-accelerator share.
+// shareMisfit is the not_admitted_reason for a request above the per-accelerator share.
 func shareMisfit(dimension, requested, share string, accelerators int, cluster string) string {
-	return fmt.Sprintf("%s: %s %s is above the %s that %d accelerator(s) get on cluster %s (each node's %s split evenly across its installed accelerators); request at most %s or \"max\"",
+	return fmt.Sprintf("%s: %s %s is above the %s that %d accelerator(s) get on cluster %s (each node's %s split evenly across its installed accelerators); request at most %s",
 		domain.NotAdmittedExceedsAcceleratorShare, dimension, requested, share, accelerators, cluster, dimension, share)
-}
-
-// resolveOrValidateDimension returns qty unchanged unless it is domain.MaxResourceSentinel (in
-// which case it resolves to bound). share is the bound, rendered, when an explicit qty exceeds it.
-func resolveOrValidateDimension(qty, canonicalKey string, bound int64) (resolved, share string) {
-	if qty == domain.MaxResourceSentinel {
-		return canonicalQuantityString(canonicalKey, float64(bound)), ""
-	}
-	value, err := canonicalQuantityValue(canonicalKey, qty)
-	if err != nil {
-		// A malformed quantity is ValidateExperiment's job to reject; do not duplicate it here.
-		return qty, ""
-	}
-	if value > float64(bound) {
-		return "", canonicalQuantityString(canonicalKey, float64(bound))
-	}
-	return qty, ""
 }
 
 // canonicalQuantityValue parses a JobSpec-style quantity string into the canonical unit

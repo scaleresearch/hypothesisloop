@@ -9,7 +9,7 @@ import (
 )
 
 // cpuQuantity reads a job's cpu from a request, which may write it as a number (cpu: 4) or as a
-// string ("4", "500m", "max"). It is kept and answered as the string.
+// string ("4", "500m"). It is kept and answered as the string.
 type cpuQuantity string
 
 func (q *cpuQuantity) UnmarshalJSON(data []byte) error {
@@ -19,7 +19,7 @@ func (q *cpuQuantity) UnmarshalJSON(data []byte) error {
 	}
 	var number json.Number
 	if err := json.Unmarshal(data, &number); err != nil {
-		return fmt.Errorf(`cpu must be a number or a string such as "4", "500m" or "max"`)
+		return fmt.Errorf(`cpu must be a number or a string such as "4" or "500m"`)
 	}
 	*q = cpuQuantity(number.String())
 	return nil
@@ -29,7 +29,7 @@ func (q *cpuQuantity) UnmarshalJSON(data []byte) error {
 func cpuEitherForm(s *huma.Schema) *huma.Schema {
 	if s.Properties["cpu"] != nil {
 		s.Properties["cpu"] = &huma.Schema{
-			Description: `CPU for each node: a number of cores (4), a quantity ("500m") or "max". Answered as a string.`,
+			Description: `CPU for each node: a number of cores (4) or a quantity ("500m"). Always stated. Answered as a string.`,
 			OneOf:       []*huma.Schema{{Type: huma.TypeString}, {Type: huma.TypeNumber, Minimum: new(float64)}},
 		}
 	}

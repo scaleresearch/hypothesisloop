@@ -95,14 +95,6 @@ func (c *JobWorkloadClient) BuildJobs(exp *domain.Experiment, placement Accelera
 		if group.CPU == "" || group.Memory == "" || group.Storage == "" {
 			return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
 		}
-		// Defense-in-depth: an admitted experiment must never reach BuildJobs with "max" still
-		// unresolved — the scheduler tick resolves it before admission ever writes SUBMITTED (see
-		// scheduler.Loop.resolveClusterLocalResources). Reaching here with a literal "max" is a
-		// control-plane bug, not a runtime concern, and must fail loudly rather than compile a Job
-		// that requests a "max" quantity string k8s would reject with an opaque parse error.
-		if group.CPU == domain.MaxResourceSentinel || group.Memory == domain.MaxResourceSentinel || group.Storage == domain.MaxResourceSentinel {
-			return nil, fmt.Errorf("workload: experiment %s reached BuildJobs with an unresolved %q sentinel still in its job spec — this is a control-plane bug, not a placement failure", exp.ID, domain.MaxResourceSentinel)
-		}
 	}
 	// One rendezvous for the whole job: node 0 of the FIRST group, named through the shared
 	// Service. Every group is told the same address, so groups meet each other exactly the way

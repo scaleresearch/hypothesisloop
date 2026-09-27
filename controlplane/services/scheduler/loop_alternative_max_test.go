@@ -34,11 +34,11 @@ func (w smallFirstTypeWorkload) GetTotalCapacity(context.Context) (map[string]do
 }
 
 // A job asks for four of a type the cluster has two of and accepts a type it has eight of. It is
-// placed at the alternative, and a "max" quantity is its share there: 4 of 8 devices, half the
-// node. The share at the first type, which would be twice the node, decides nothing.
+// placed at the alternative and held to its share there: 4 of 8 devices, half the node. The share
+// at the first type, which would be twice the node, decides nothing.
 func TestAJobTooLargeForItsFirstTypeTakesAnAlternativeThatFits(t *testing.T) {
 	withCPUType(t)
-	for memory, resolved := range map[string]string{"1Gi": "1Gi", domain.MaxResourceSentinel: "32Gi"} {
+	for memory, resolved := range map[string]string{"1Gi": "1Gi", "32Gi": "32Gi"} {
 		for _, tier := range []domain.CapacityTier{domain.CapacityBurst, domain.CapacityGuaranteed} {
 			job := priced(holdJob("job", tier, h100, 4, "1"), 1)
 			job.Job.Memory = memory

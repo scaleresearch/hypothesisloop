@@ -39,7 +39,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// react to a Pending pod). Published once at the end of this tick, whatever else happens.
 	backlog := newBacklogAggregator()
 
-	// Amortizes the running-experiment node-attribution lookups tick-time "max" resolution needs
+	// Amortizes the running-experiment node-attribution lookups the per-accelerator share needs
 	// (see loop_resolve.go) across every queued job this tick considers, in both passes.
 	resolveCache := newResolutionCache(l)
 
@@ -167,7 +167,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// and cannot act on if it is wrong. Both passes classify against the same snapshot.
 	//
 	// It is also what installed accelerators per node are rebuilt from (free plus claimed): a job
-	// admitted this tick is in neither the live free count nor the claimed list, so a "max" share
+	// admitted this tick is in neither the live free count nor the claimed list, so a share
 	// measured against live capacity grows with every admission.
 	nodeAvailAtTickStart := cloneNodeAvailByCluster(nodeAvail)
 	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
@@ -321,9 +321,9 @@ func (l *Loop) tick(ctx context.Context) error {
 				cluster = clusterWithBestFit(candidates, registeredClusters, fp)
 			}
 		}
-		// Resolve any "max" CPU/memory/storage sentinel (and validate any explicit number) against
-		// THIS cluster's own fair share, now that cluster and accelerator flavor are finally
-		// settled for this attempt — see loop_resolve.go. A cluster this job's own resources
+		// Check the job's cpu, memory and storage against THIS cluster's own fair share (or size
+		// it to a slot), now that cluster and accelerator flavor are finally settled for this
+		// attempt — see loop_resolve.go. A cluster this job's own resources
 		// cannot fit is folded into the ordinary not-admitted path below by simply un-picking the
 		// cluster, exactly like a scalar or topology miss: preemption cannot fix a job whose own
 		// request is oversized for every node, so there is nothing else to try here.
@@ -384,13 +384,11 @@ func (l *Loop) tick(ctx context.Context) error {
 			waitingForScaleUp := autoscalerEnabled[cluster] && negativeInDimension(gAvail[cluster], exp.AcceleratorType)
 			if len(candidates) > 0 {
 				specCluster := candidates[0]
-				// The "max" CPU/memory/storage resolution above ran against whichever cluster
-				// looked live-fit-eligible before this job fell through to speculation -- a
-				// different cluster than specCluster, or none at all if every candidate failed
-				// that pre-check. Re-resolve against the actual speculative target now that
-				// it's chosen: a stale resolution would either persist a "max" share sized for
-				// the wrong cluster's nodes, or (if never resolved at all) leave the literal
-				// "max" sentinel in the submitted spec.
+				// The resolution above ran against whichever cluster looked live-fit-eligible
+				// before this job fell through to speculation -- a different cluster than
+				// specCluster, or none at all if every candidate failed that pre-check.
+				// Re-resolve against the actual speculative target now that it's chosen: a
+				// stale resolution would persist a slot size of the wrong cluster.
 				if specCluster != cluster {
 					resolvedJob, specMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, specCluster, nodeResourcesTotal[specCluster], nodeAvailAtTickStart[specCluster], nodeResources[specCluster], nodeLabels[specCluster])
 					if rerr != nil {
@@ -398,10 +396,8 @@ func (l *Loop) tick(ctx context.Context) error {
 						continue
 					}
 					if specMisfit != "" {
-						// This job's own request (post-"max"-resolution) cannot fit even the
-						// speculative target's largest node -- speculativeCandidates' own
-						// fitsLargestNode check used the unresolved request, so this can still
-						// happen. Nothing else to try this tick.
+						// This job's own request is above its share on the speculative target or
+						// no slot there takes it. Nothing else to try this tick.
 						obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 						if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, specMisfit); err != nil {
 							l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))

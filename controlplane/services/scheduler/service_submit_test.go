@@ -628,7 +628,7 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 		retries := 0
 		exp := humanIdeaSubmission()
 		exp.AcceleratorCount = 0
-		exp.Job = domain.JobSpec{Image: image, CPU: "1", Storage: "1Gi", MaxRetries: &retries}
+		exp.Job = domain.JobSpec{Image: image, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries}
 		return exp
 	}
 	submit := func(installed map[string]domain.Footprint, scales map[string]bool, clusters map[string]domain.Cluster, image string) (*AdmissionError, error) {

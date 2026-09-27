@@ -9,11 +9,6 @@ import (
 // how a workload runs. It deliberately exposes no execution-engine concepts (no manifests, pod
 // templates, or CRDs): whatever backend is configured (k8s today; conceivably Slurm/Ray tomorrow)
 // compiles this down into its own native resource, deterministically, from the same desired state.
-// MaxResourceSentinel is the literal JobSpec.CPU/Memory value asking admission to resolve
-// the field to this job's exact proportional per-accelerator share of whatever node it lands on.
-// See JobSpec.CPU's doc comment.
-const MaxResourceSentinel = "max"
-
 type JobSpec struct {
 	// Image is the container image to run. Left out, the job is placed only on a cluster that
 	// runs one image (Cluster.Runs), and admission writes that image into
@@ -33,21 +28,17 @@ type JobSpec struct {
 
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
 	// non-Accelerator resources each node gets.
-	// Storage is ephemeral scratch space (k8s ephemeral-storage), not a persistent volume. It is
-	// always stated as a quantity: a submit that leaves it out or asks for "max" is refused.
-	//
-	// CPU and Memory may each instead be the literal MaxResourceSentinel ("max"), independently,
-	// and one left out is "max": the job's exact proportional share of whatever node it lands on,
-	// for the accelerators it requests. Resolved once this job is admitted onto a specific cluster
-	// (see scheduler.Loop.resolveClusterLocalResources), into domain.Experiment.ResolvedJob's copy
-	// of this field. Job itself is NEVER rewritten, so a GET always shows exactly what was
-	// submitted; every downstream consumer (Footprint, BuildJobs, cost estimation) reads
-	// domain.Experiment.EffectiveJob() instead of this field directly.
+	// Storage is ephemeral scratch space (k8s ephemeral-storage), not a persistent volume.
+	// All three are always stated as quantities: a submit that leaves one out is refused. On a
+	// cluster of slots admission sizes them to the slot the job holds, into
+	// domain.Experiment.ResolvedJob's copy. Job itself is NEVER rewritten, so every downstream
+	// consumer (Footprint, BuildJobs, cost estimation) reads domain.Experiment.EffectiveJob()
+	// instead of this field directly.
 	//
 	// A job that names no accelerator runs on cores: cpu is then a whole number and the job holds
-	// that many units of CPUType. Submission writes the count and every "max" into the job.
-	// cpu is written as a number (cpu: 4) or a string ("4", "500m", "max") and is kept and
-	// answered as the string.
+	// that many units of CPUType. Submission writes the count into the job.
+	// cpu is written as a number (cpu: 4) or a string ("4", "500m") and is kept and answered as
+	// the string.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
@@ -245,9 +236,7 @@ type JobGroup struct {
 	Replicas int `json:"replicas" yaml:"replicas"`
 
 	// CPU/Memory/Storage are this group's PER-REPLICA resource-quantity strings, identical in
-	// meaning to JobSpec's own. Storage is always stated. CPU or memory left out is "max" in a
-	// group that holds units of a priced type. A group that holds none has no share to take and
-	// states all three.
+	// meaning to JobSpec's own, and always stated.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`
@@ -363,13 +352,10 @@ func (j JobSpec) ValidateGroups() error {
 			return fmt.Errorf("job.groups[%q].replicas must be at least 1", g.Name)
 		}
 		if g.CPU == "" || g.Memory == "" || g.Storage == "" {
-			return fmt.Errorf("job.groups[%q] holds no accelerator and no cores of its own count, so it has no share of a node to take: state its cpu, memory and storage", g.Name)
+			return fmt.Errorf("job.groups[%q] states its cpu, memory and storage", g.Name)
 		}
 		if g.AcceleratorCount < 0 {
 			return fmt.Errorf("job.groups[%q].accelerator_count must not be negative", g.Name)
-		}
-		if g.AcceleratorCount == 0 && (g.CPU == MaxResourceSentinel || g.Memory == MaxResourceSentinel || g.Storage == MaxResourceSentinel) {
-			return fmt.Errorf("job.groups[%q].cpu/memory/storage cannot be \"max\" without a positive accelerator_count — there is no accelerator to compute a proportional share against", g.Name)
 		}
 		if g.AcceleratorType == "" {
 			continue

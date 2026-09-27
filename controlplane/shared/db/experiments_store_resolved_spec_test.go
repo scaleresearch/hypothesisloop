@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // fakeExperimentRow feeds scanExperiment's fixed positional Scan call with test-controlled column
@@ -71,10 +69,10 @@ func assignScanDest(dest, v any) {
 
 // The whole point of resolved_job_spec: an admitted experiment's literal resolved values are
 // durably readable independent of any in-memory tick state, and the ORIGINAL job_spec — what the
-// agent submitted — still round-trips verbatim, "max" and all. GET must never show a rewritten
+// agent submitted — still round-trips verbatim. GET must never show a rewritten
 // spec (see domain.Experiment.ResolvedJob's doc comment).
 func TestScanExperimentKeepsOriginalJobSpecAndResolvedJobSpecIndependent(t *testing.T) {
-	original := `{"cpu":"max","memory":"1Gi","storage":"max","accelerator_count":2,"accelerator_type":"example.com/product=test-accelerator","max_retries":0}`
+	original := `{"cpu":"1","memory":"1Gi","storage":"100","accelerator_count":2,"accelerator_type":"example.com/product=test-accelerator","max_retries":0}`
 	resolved := `{"cpu":"2","memory":"1Gi","storage":"200","accelerator_count":2,"accelerator_type":"example.com/product=test-accelerator","max_retries":0}`
 
 	exp, err := scanExperiment(fakeExperimentRow{jobSpec: []byte(original), resolvedJobSpec: []byte(resolved)})
@@ -82,8 +80,8 @@ func TestScanExperimentKeepsOriginalJobSpecAndResolvedJobSpecIndependent(t *test
 		t.Fatalf("scanExperiment: %v", err)
 	}
 
-	if exp.Job.CPU != domain.MaxResourceSentinel || exp.Job.Storage != domain.MaxResourceSentinel {
-		t.Fatalf("exp.Job (original submitted spec) = %+v, want cpu/storage still \"max\" — GET must show exactly what was submitted", exp.Job)
+	if exp.Job.CPU != "1" || exp.Job.Storage != "100" {
+		t.Fatalf("exp.Job (original submitted spec) = %+v, want cpu=1 storage=100 — GET must show exactly what was submitted", exp.Job)
 	}
 	if exp.ResolvedJob == nil {
 		t.Fatal("exp.ResolvedJob is nil, want the durably persisted resolution")
@@ -104,7 +102,7 @@ func TestScanExperimentKeepsOriginalJobSpecAndResolvedJobSpecIndependent(t *test
 // domain.Experiment.EffectiveJob would then wrongly prefer over the real submitted Job).
 func TestScanExperimentLeavesResolvedJobNilWhenColumnIsNull(t *testing.T) {
 	exp, err := scanExperiment(fakeExperimentRow{
-		jobSpec:         []byte(`{"cpu":"max","memory":"1Gi","storage":"1Gi","accelerator_count":2,"accelerator_type":"example.com/product=test-accelerator","max_retries":0}`),
+		jobSpec:         []byte(`{"cpu":"1","memory":"1Gi","storage":"1Gi","accelerator_count":2,"accelerator_type":"example.com/product=test-accelerator","max_retries":0}`),
 		resolvedJobSpec: nil,
 	})
 	if err != nil {
@@ -113,8 +111,8 @@ func TestScanExperimentLeavesResolvedJobNilWhenColumnIsNull(t *testing.T) {
 	if exp.ResolvedJob != nil {
 		t.Fatalf("exp.ResolvedJob = %+v, want nil for a never-admitted experiment", exp.ResolvedJob)
 	}
-	if exp.EffectiveJob().CPU != domain.MaxResourceSentinel {
-		t.Fatalf("EffectiveJob().CPU = %q, want \"max\" (falls back to Job when ResolvedJob is nil)", exp.EffectiveJob().CPU)
+	if exp.EffectiveJob().CPU != "1" {
+		t.Fatalf("EffectiveJob().CPU = %q, want \"1\" (falls back to Job when ResolvedJob is nil)", exp.EffectiveJob().CPU)
 	}
 }
 

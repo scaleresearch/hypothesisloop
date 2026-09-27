@@ -33,7 +33,7 @@ func (e *Executor) buildSpec(exp *domain.Experiment) (provider.Spec, error) {
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
-		if quantity == "" || quantity == domain.MaxResourceSentinel {
+		if quantity == "" {
 			return provider.Spec{}, fmt.Errorf("cloudexec: experiment %s has no resolved %s in desired state", exp.ID, name)
 		}
 	}

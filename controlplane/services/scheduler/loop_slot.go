@@ -55,8 +55,8 @@ func takesWholeSlot(shape domain.NodeShape, nodeKey string, accelerators, resour
 }
 
 // resolveOntoSlot sizes exp's job to the slot it is to hold on a cluster of slots (slotFor): its
-// cpu, memory and storage become that slot's, whether the job named a quantity or "max". Which
-// slot of that size the job lands on is decided when it is claimed.
+// cpu, memory and storage become that slot's. Which slot of that size the job lands on is decided
+// when it is claimed.
 func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (resolved *domain.JobSpec, misfit string) {
 	node, _, misfit := slotFor(exp, cluster, sizes, free, labelsByNode)
 	if misfit != "" {
@@ -177,17 +177,10 @@ func waitingForSlotReason(cluster, slot string) string {
 	return fmt.Sprintf("%s: waiting for slot %s of cluster %s: no job holds it and its instance has not left yet", domain.NotAdmittedCapacityUnavailable, slot, cluster)
 }
 
-// slotCovers reports whether a slot of this size holds the quantity a job named. "max" and no
-// quantity ask for whatever the slot has.
+// slotCovers reports whether a slot of this size holds the quantity a job named.
 func slotCovers(quantity, name string, size map[string]int64) bool {
-	if quantity == "" || quantity == domain.MaxResourceSentinel {
-		return true
-	}
 	value, err := canonicalQuantityValue(name, quantity)
-	if err != nil {
-		return true
-	}
-	return value <= float64(size[name])
+	return err == nil && value <= float64(size[name])
 }
 
 // onSlots returns exp as it would be admitted to a cluster, for a fit check made before the tick

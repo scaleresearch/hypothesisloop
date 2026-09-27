@@ -113,34 +113,16 @@ func TestANegativeRequestInOneGroupIsRejectedEvenWhenTheTotalLooksFine(t *testin
 	mustReject(t, exp, "job.memory")
 }
 
-// What a job leaves out has one meaning for every job: no retries, and for cpu and memory its
-// share of the node it lands on. A minimal job is its type, count and storage, and what
-// submission wrote is what every later reader of the job sees.
-func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
+// A job leaves out its retries and gets none. What submission wrote is what every later reader
+// of the job sees.
+func TestWhatAJobLeavesOutIsZeroRetries(t *testing.T) {
 	exp := validSubmission()
-	exp.Job.CPU, exp.Job.Memory, exp.Job.MaxRetries = "", "", nil
-	if err := validate(t, exp); err != nil {
-		t.Fatalf("a job that states only its type, count and storage: %v", err)
+	exp.Job.MaxRetries = nil
+	if err := validate(t, exp); err != nil || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries != 0 {
+		t.Fatalf("max_retries = %v, err %v; want 0", exp.Job.MaxRetries, err)
 	}
-	const max = domain.MaxResourceSentinel
-	if exp.Job.CPU != max || exp.Job.Memory != max || exp.Job.Storage != "10Gi" || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries != 0 {
-		t.Errorf("cpu, memory, storage, max_retries = %q, %q, %q, %v; want the node's share of cpu and memory, the storage stated and 0", exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries)
-	}
-
-	exp = validSubmission()
-	exp.Job.Memory = ""
-	if err := validate(t, exp); err != nil || exp.Job.CPU != "2" || exp.Job.Memory != max {
-		t.Errorf("a job that leaves out memory alone: cpu %q, memory %q, err %v; want what it stated and the share", exp.Job.CPU, exp.Job.Memory, err)
-	}
-
-	// A group that holds no unit has no share to take.
-	exp = validSubmission()
-	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.AcceleratorCount = "", "", "", 0
-	exp.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1, Storage: "1Gi"}, {Name: "actors", Replicas: 4, CPU: "2", Storage: "1Gi"}}
-	mustReject(t, exp, `job.groups["actors"]`)
-	exp.Job.Groups[1].Memory = "1Gi"
-	if err := validate(t, exp); err != nil || exp.Job.Groups[0].Memory != max {
-		t.Errorf("a group that holds a device and states no size: memory %q, err %v", exp.Job.Groups[0].Memory, err)
+	if exp.Job.CPU != "2" || exp.Job.Memory != "8Gi" || exp.Job.Storage != "10Gi" {
+		t.Errorf("cpu, memory, storage = %q, %q, %q; want them as stated", exp.Job.CPU, exp.Job.Memory, exp.Job.Storage)
 	}
 
 	exp = validSubmission()
@@ -148,30 +130,48 @@ func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
 	mustReject(t, exp, "job.max_retries")
 }
 
-// A node's cores and memory are offered whole when it is idle, so a share of them fits an idle
-// node. Its disk is offered as far as it is free, which no share of its size says: a chip job
-// given the whole disk of its node queued for good on an idle cluster. Storage is stated.
-func TestAJobStatesItsStorageAsAQuantity(t *testing.T) {
-	for name, tc := range map[string]struct {
-		spoil func(*domain.Experiment)
-		field string
-	}{
-		"left out": {func(e *domain.Experiment) { e.Job.Storage = "" }, "job.storage is required"},
-		"a share":  {func(e *domain.Experiment) { e.Job.Storage = domain.MaxResourceSentinel }, `job.storage is "max"`},
-		"left out of a group": {func(e *domain.Experiment) {
+// A job holds what it states. A chip job that left memory out was given the whole memory of its
+// node, and a job that used 2 cores of 32 kept every other job off the machine. Its disk a node
+// offers only as far as it is free, which no share of its size says. So each node's cpu, memory
+// and storage are stated as quantities, by every job and every group.
+func TestAJobStatesItsCPUMemoryAndStorageAsQuantities(t *testing.T) {
+	grouped := func(group domain.JobGroup) func(*domain.Experiment) {
+		return func(e *domain.Experiment) {
 			e.Job.CPU, e.Job.Memory, e.Job.Storage, e.Job.AcceleratorCount = "", "", "", 0
-			e.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1, AcceleratorType: h100}}
-		}, `job.groups["learner"].storage is required`},
+			group.Name, group.Replicas, group.AcceleratorCount, group.AcceleratorType = "learner", 1, 1, h100
+			e.Job.Groups = []domain.JobGroup{group}
+		}
+	}
+	for name, tc := range map[string]struct {
+		spoil  func(*domain.Experiment)
+		reason string
+		field  string
+	}{
+		"cpu left out":     {func(e *domain.Experiment) { e.Job.CPU = "" }, ReasonCPURequired, "job.cpu is required"},
+		"cpu a share":      {func(e *domain.Experiment) { e.Job.CPU = "max" }, ReasonCPURequired, `job.cpu is "max"`},
+		"memory left out":  {func(e *domain.Experiment) { e.Job.Memory = "" }, ReasonMemoryRequired, "job.memory is required"},
+		"memory a share":   {func(e *domain.Experiment) { e.Job.Memory = "max" }, ReasonMemoryRequired, `job.memory is "max"`},
+		"storage left out": {func(e *domain.Experiment) { e.Job.Storage = "" }, ReasonStorageRequired, "job.storage is required"},
+		"storage a share":  {func(e *domain.Experiment) { e.Job.Storage = "max" }, ReasonStorageRequired, `job.storage is "max"`},
+		"nothing stated on CPU": {func(e *domain.Experiment) {
+			e.AcceleratorType, e.Job.AcceleratorType, e.AcceleratorCount, e.Job.AcceleratorCount = "", domain.CPUType, 0, 4
+			e.Job.CPU = ""
+		}, ReasonCPURequired, "job.cpu is required"},
+		"cpu left out of a group":     {grouped(domain.JobGroup{Memory: "1Gi", Storage: "1Gi"}), ReasonCPURequired, `job.groups["learner"].cpu is required`},
+		"memory a share in a group":   {grouped(domain.JobGroup{CPU: "1", Memory: "max", Storage: "1Gi"}), ReasonMemoryRequired, `job.groups["learner"].memory is "max"`},
+		"storage left out of a group": {grouped(domain.JobGroup{CPU: "1", Memory: "1Gi"}), ReasonStorageRequired, `job.groups["learner"].storage is required`},
 	} {
 		exp := validSubmission()
 		tc.spoil(exp)
 		var refused *AdmissionError
-		if err := ValidateExperiment(exp, domain.QuotaConfig{}); !errors.As(err, &refused) || refused.Reason != ReasonStorageRequired || !strings.Contains(refused.Message, tc.field) {
-			t.Errorf("%s: err = %v, want %s naming the field (%s)", name, err, ReasonStorageRequired, tc.field)
+		if err := ValidateExperiment(exp, domain.QuotaConfig{}); !errors.As(err, &refused) || refused.Reason != tc.reason || !strings.Contains(refused.Message, tc.field) {
+			t.Errorf("%s: err = %v, want %s naming the field (%s)", name, err, tc.reason, tc.field)
 		}
 	}
-	if got := admissionHTTPStatus(ReasonStorageRequired); got != http.StatusUnprocessableEntity {
-		t.Errorf("%s answers %d, want 422", ReasonStorageRequired, got)
+	for _, reason := range []string{ReasonCPURequired, ReasonMemoryRequired, ReasonStorageRequired} {
+		if got := admissionHTTPStatus(reason); got != http.StatusUnprocessableEntity {
+			t.Errorf("%s answers %d, want 422", reason, got)
+		}
 	}
 }
 
@@ -183,10 +183,6 @@ func TestAJobThatHoldsNoUnitOfAPricedTypeIsRejected(t *testing.T) {
 	for name, spoil := range map[string]func(*domain.Experiment){
 		"a type and no count": func(*domain.Experiment) {},
 		"no cores either":     func(e *domain.Experiment) { e.Job.CPU = "0" },
-		"no type and its share of nothing": func(e *domain.Experiment) {
-			e.AcceleratorType, e.Job.AcceleratorType = "", ""
-			e.Job.CPU, e.Job.Memory = domain.MaxResourceSentinel, domain.MaxResourceSentinel
-		},
 		"groups that all hold none": func(e *domain.Experiment) {
 			e.Job.CPU, e.Job.Memory, e.Job.Storage = "", "", ""
 			e.Job.Groups = []domain.JobGroup{
@@ -214,8 +210,6 @@ func TestAGroupWithNoAcceleratorIsAcceptedBesideOneThatHoldsSome(t *testing.T) {
 	if err := validate(t, exp); err != nil {
 		t.Fatalf("a learner with one accelerator and four actors with none: %v", err)
 	}
-	exp.Job.Groups[1].CPU = domain.MaxResourceSentinel
-	mustReject(t, exp, "max")
 }
 
 // The ID is used verbatim in cluster resource names, so anything a DNS subdomain rejects fails at

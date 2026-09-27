@@ -2,29 +2,25 @@ package workload
 
 import (
 	"testing"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// "max" is not a size — it is a request to be given whatever the cluster this job lands on has,
-// and it is not resolved to a literal until admission picks that cluster. Every parse before then
-// must read it as 0, meaning "not yet known", so the submission's own structural validation and
-// any quota arithmetic run against it count nothing rather than counting a parse failure or, far
-// worse, some fabricated number.
-func TestUnresolvedMaxParsesAsNotYetKnownRatherThanFailing(t *testing.T) {
-	for _, qty := range []string{"", domain.MaxResourceSentinel} {
-		cpu, err := ParseCPUCores(qty)
-		if err != nil || cpu != 0 {
-			t.Errorf("ParseCPUCores(%q) = %v, %v; want 0, nil", qty, cpu, err)
-		}
-		mem, err := ParseMemoryGB(qty)
-		if err != nil || mem != 0 {
-			t.Errorf("ParseMemoryGB(%q) = %v, %v; want 0, nil", qty, mem, err)
-		}
-		storage, err := ParseStorageGB(qty)
-		if err != nil || storage != 0 {
-			t.Errorf("ParseStorageGB(%q) = %v, %v; want 0, nil", qty, storage, err)
-		}
+// A quantity left out parses as 0. Admission refuses a job that leaves one out before it parses
+// any, and "max", the retired share of a node, is no quantity.
+func TestAQuantityLeftOutParsesAsZeroAndMaxIsNoQuantity(t *testing.T) {
+	if _, err := ParseCPUCores("max"); err == nil {
+		t.Error(`ParseCPUCores("max") = nil error`)
+	}
+	if _, err := ParseMemoryGB("max"); err == nil {
+		t.Error(`ParseMemoryGB("max") = nil error`)
+	}
+	if cpu, err := ParseCPUCores(""); err != nil || cpu != 0 {
+		t.Errorf(`ParseCPUCores("") = %v, %v; want 0, nil`, cpu, err)
+	}
+	if mem, err := ParseMemoryGB(""); err != nil || mem != 0 {
+		t.Errorf(`ParseMemoryGB("") = %v, %v; want 0, nil`, mem, err)
+	}
+	if storage, err := ParseStorageGB(""); err != nil || storage != 0 {
+		t.Errorf(`ParseStorageGB("") = %v, %v; want 0, nil`, storage, err)
 	}
 }
 

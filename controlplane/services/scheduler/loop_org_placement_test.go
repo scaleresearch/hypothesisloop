@@ -550,13 +550,13 @@ func (s *twoOrgMaxStore) RegisteredClusters(context.Context) (map[string]domain.
 	return s.registered, nil
 }
 
-// "max" is a share of the node per accelerator held, whoever holds it: two orgs' jobs on a
-// shared cluster resolve to the same share, and it is the share a job gets on its org's own
-// cluster, where the other org's job resolves to nothing because it is not placed.
-func TestMaxResolvesToTheSameShareForTwoOrgsOnASharedCluster(t *testing.T) {
+// A job runs with what it stated, whoever holds the cluster: two orgs' jobs on a shared cluster
+// resolve alike, as a job does on its org's own cluster, where the other org's job resolves to
+// nothing because it is not placed.
+func TestAJobResolvesAlikeForTwoOrgsOnASharedCluster(t *testing.T) {
 	resolve := func(registered map[string]domain.Cluster) map[string]string {
-		ofA := holdJob("of-a", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
-		ofB := holdJob("of-b", domain.CapacityBurst, h100, 1, domain.MaxResourceSentinel)
+		ofA := holdJob("of-a", domain.CapacityBurst, h100, 1, "4")
+		ofB := holdJob("of-b", domain.CapacityBurst, h100, 1, "4")
 		ofA.OrgID, ofB.OrgID = "org-a", "org-b"
 		ofA.ClusterName, ofB.ClusterName = "cluster-a", "cluster-a"
 		store := &twoOrgMaxStore{registered: registered}

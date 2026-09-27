@@ -24,18 +24,17 @@ func withCPUType(t *testing.T) {
 	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{h100: 1.0}) })
 }
 
-// cpuSubmission asks for cores the plain way and says nothing else about its size.
+// cpuSubmission asks for cores the plain way.
 func cpuSubmission(cores int) *domain.Experiment {
 	exp := validSubmission()
 	exp.AcceleratorType, exp.AcceleratorCount = "", 0
 	exp.Job.AcceleratorType, exp.Job.AcceleratorCount = "", 0
-	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = strconv.Itoa(cores), "", "1Gi"
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = strconv.Itoa(cores), "1Gi", "1Gi"
 	return exp
 }
 
 func TestAJobOnCPUHoldsItsCoresAsUnitsOfTheCPUType(t *testing.T) {
 	withCPUType(t)
-	const max = domain.MaxResourceSentinel
 	type job struct {
 		typ                  domain.AcceleratorType
 		count                int
@@ -45,15 +44,14 @@ func TestAJobOnCPUHoldsItsCoresAsUnitsOfTheCPUType(t *testing.T) {
 		in, want job
 		refused  string
 	}{
-		"cores alone":                {in: job{cpu: "4", storage: "1Gi"}, want: job{cpuType, 4, "4", max, "1Gi"}},
-		"the type and a count":       {in: job{typ: cpuType, count: 4, storage: "1Gi"}, want: job{cpuType, 4, "4", max, "1Gi"}},
-		"the type and cores":         {in: job{typ: cpuType, cpu: "4", storage: "1Gi"}, want: job{cpuType, 4, "4", max, "1Gi"}},
-		"both, and its own memory":   {in: job{typ: cpuType, count: 8, cpu: "8000m", memory: "4Gi", storage: "20Gi"}, want: job{cpuType, 8, "8000m", "4Gi", "20Gi"}},
-		"half a core":                {in: job{cpu: "500m"}, refused: "whole cores"},
-		"a core and a half":          {in: job{cpu: "1.5"}, refused: "whole cores"},
-		"no cores":                   {in: job{cpu: "0"}, refused: "whole cores"},
-		"the type and max":           {in: job{typ: cpuType, cpu: max}, refused: "whole cores"},
-		"cores other than the count": {in: job{typ: cpuType, count: 8, cpu: "4"}, refused: "leave one out or make them equal"},
+		"cores alone":                {in: job{cpu: "4", memory: "2Gi", storage: "1Gi"}, want: job{cpuType, 4, "4", "2Gi", "1Gi"}},
+		"the type and cores":         {in: job{typ: cpuType, cpu: "4", memory: "2Gi", storage: "1Gi"}, want: job{cpuType, 4, "4", "2Gi", "1Gi"}},
+		"the type, cores and count":  {in: job{typ: cpuType, count: 8, cpu: "8000m", memory: "4Gi", storage: "20Gi"}, want: job{cpuType, 8, "8000m", "4Gi", "20Gi"}},
+		"half a core":                {in: job{cpu: "500m", memory: "2Gi", storage: "1Gi"}, refused: "whole cores"},
+		"a core and a half":          {in: job{cpu: "1.5", memory: "2Gi", storage: "1Gi"}, refused: "whole cores"},
+		"no cores":                   {in: job{cpu: "0", memory: "2Gi", storage: "1Gi"}, refused: "whole cores"},
+		"cores other than the count": {in: job{typ: cpuType, count: 8, cpu: "4", memory: "2Gi", storage: "1Gi"}, refused: "leave the count out or make them equal"},
+		"the type and a count":       {in: job{typ: cpuType, count: 4, memory: "2Gi", storage: "1Gi"}, refused: "job.cpu is required"},
 		"the type and nothing":       {in: job{typ: cpuType}, refused: "job.cpu is required"},
 	} {
 		exp := cpuSubmission(1)
@@ -102,16 +100,16 @@ func TestAJobOnCPUHoldsItsCoresAsUnitsOfTheCPUType(t *testing.T) {
 func TestEachGroupOfAJobOnCPUHoldsItsOwnCores(t *testing.T) {
 	withCPUType(t)
 	exp := cpuSubmission(1)
-	exp.Job.CPU, exp.Job.Storage = "", ""
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = "", "", ""
 	exp.Job.Groups = []domain.JobGroup{
-		{Name: "driver", Replicas: 1, CPU: "2", Storage: "1Gi"},
+		{Name: "driver", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi"},
 		{Name: "workers", Replicas: 3, CPU: "4", Memory: "2Gi", Storage: "1Gi"},
 	}
 	if err := validate(t, exp); err != nil {
 		t.Fatalf("a grouped job on cores: %v", err)
 	}
 	want := []domain.JobGroup{
-		{Name: "driver", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: domain.MaxResourceSentinel, Storage: "1Gi"},
+		{Name: "driver", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: "1Gi", Storage: "1Gi"},
 		{Name: "workers", Replicas: 3, AcceleratorCount: 4, CPU: "4", Memory: "2Gi", Storage: "1Gi"},
 	}
 	if !reflect.DeepEqual(exp.Job.Groups, want) {
@@ -122,9 +120,11 @@ func TestEachGroupOfAJobOnCPUHoldsItsOwnCores(t *testing.T) {
 	}
 
 	// A group that states no cores would run beside the groups that pay.
-	exp.Job.Groups = []domain.JobGroup{{Name: "driver", Replicas: 1, AcceleratorCount: 2}, {Name: "free", Replicas: 8, Memory: "2Gi", Storage: "1Gi"}}
+	exp.Job.Groups = []domain.JobGroup{{Name: "driver", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi"}, {Name: "free", Replicas: 8, Memory: "2Gi", Storage: "1Gi"}}
 	exp.Job.AcceleratorType = cpuType
-	mustReject(t, exp, `job.groups["free"].cpu is required`)
+	if err := validate(t, exp); err == nil || !strings.Contains(err.Error(), `job.groups["free"].cpu is required`) {
+		t.Errorf("a group that states no cores: err = %v", err)
+	}
 }
 
 // The same submissions, with the catalog pricing cores and without: nothing about an accelerator
@@ -132,11 +132,6 @@ func TestEachGroupOfAJobOnCPUHoldsItsOwnCores(t *testing.T) {
 func TestAnAcceleratorSubmissionIsValidatedAsBeforeBesideTheCPUType(t *testing.T) {
 	submissions := map[string]func() *domain.Experiment{
 		"plain": validSubmission,
-		"max shares": func() *domain.Experiment {
-			exp := validSubmission()
-			exp.Job.CPU, exp.Job.Storage = domain.MaxResourceSentinel, domain.MaxResourceSentinel
-			return exp
-		},
 		"more cores than devices": func() *domain.Experiment {
 			exp := validSubmission()
 			exp.Job.CPU = "32"
@@ -178,15 +173,15 @@ func TestAnAcceleratorSubmissionIsValidatedAsBeforeBesideTheCPUType(t *testing.T
 	if after := read(); !reflect.DeepEqual(before, after) {
 		t.Errorf("accelerator submissions read differently once the catalog prices cores:\nbefore %+v\nafter  %+v", before, after)
 	}
-	if before["no cpu"].exp.Job.CPU != domain.MaxResourceSentinel || before["plain"].err != "" {
+	if !strings.Contains(before["no cpu"].err, ReasonCPURequired) || before["plain"].err != "" {
 		t.Errorf("the comparison proves nothing: %+v", before)
 	}
 }
 
 // Each core of a node comes with an equal part of its memory and storage, measured against the
 // cores the node has and never against the ones free, so the cores an accelerator job holds
-// beside a CPU job do not hand the CPU job that job's memory.
-func TestTheResolvedSpecOfAJobOnCPUHoldsItsCoresAndTheirPartOfTheNode(t *testing.T) {
+// beside a CPU job do not allow the CPU job that job's memory. A job holds what it stated.
+func TestTheResolvedSpecOfAJobOnCPUIsWhatItStatedWithinItsCoresPartOfTheNode(t *testing.T) {
 	withCPUType(t)
 	loop := resolveTestLoop()
 	total := map[string]map[string]int64{
@@ -207,16 +202,14 @@ func TestTheResolvedSpecOfAJobOnCPUHoldsItsCoresAndTheirPartOfTheNode(t *testing
 
 	for name, freeCores := range map[string]int64{"an idle node": 16, "a chip job holds 4 cores": 12, "no core free": 0} {
 		exp := cpuSubmission(4)
+		exp.Job.Memory = "16Gi"
 		resolved, misfit := resolve(exp, freeCores)
 		if misfit != "" {
 			t.Fatalf("%s: misfit = %q", name, misfit)
 		}
 		if resolved.CPU != "4" || resolved.Memory != "16Gi" || resolved.Storage != "1Gi" || resolved.AcceleratorCount != 4 || resolved.AcceleratorType != cpuType {
-			t.Errorf("%s: resolved = cpu %q, memory %q, storage %q, %d of %q; want 4 cores, 16Gi, the 1Gi stated, 4 of the CPU type",
+			t.Errorf("%s: resolved = cpu %q, memory %q, storage %q, %d of %q; want the 4 cores, 16Gi and 1Gi stated, 4 of the CPU type",
 				name, resolved.CPU, resolved.Memory, resolved.Storage, resolved.AcceleratorCount, resolved.AcceleratorType)
-		}
-		if exp.Job.Memory != domain.MaxResourceSentinel {
-			t.Errorf("%s: the submitted job's memory was rewritten to %q at resolution", name, exp.Job.Memory)
 		}
 	}
 

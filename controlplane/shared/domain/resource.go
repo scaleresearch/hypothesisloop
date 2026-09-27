@@ -126,7 +126,7 @@ func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, r
 
 // FairShare returns a node's per-accelerator entitlement for heldAccelerators of its
 // installedAccelerators, in the same canonical integer unit totalCanonical is expressed in.
-// Floored, never ceiling: a "max" resolution built from this value must never be judged as
+// Floored, never ceiling: a request of exactly this value must never be judged as
 // exceeding its own fair share later by loop_disbalance.go's evictor, which compares with a
 // strict > — a floored exact share is always <= itself, so it is never flagged as disbalanced
 // due to rounding up.
@@ -218,15 +218,6 @@ func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
 	total := NewFootprint()
 	for _, group := range j.NodeGroups() {
 		perNode := NewFootprint()
-		// A "max" sentinel is always resolved to a plain literal once an experiment is admitted (see
-		// scheduler.Loop.resolveClusterLocalResources; JobSpec.Footprint is called with the already-
-		// resolved copy — see domain.Experiment.EffectiveJob), so it should never reach here in that
-		// case — but resource.ParseQuantity("max") fails with a generic
-		// "quantities must match the regular expression" error that names nothing about the real
-		// cause, so name it explicitly instead.
-		if group.CPU == MaxResourceSentinel || group.Memory == MaxResourceSentinel || group.Storage == MaxResourceSentinel {
-			return nil, fmt.Errorf("job.cpu/memory/storage is still %q — it should have been resolved to a literal quantity at submission", MaxResourceSentinel)
-		}
 		if group.CPU != "" {
 			q, err := resource.ParseQuantity(group.CPU)
 			if err != nil {

@@ -203,8 +203,7 @@ func (tickQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQu
 type layoutShortWorkload struct{ LoopWorkloadClient }
 
 func (layoutShortWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	fp := domain.NewFootprint()
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: h100}, 2)
+	fp := domain.CapacityFootprint(16, map[string]int64{h100: 2}, 64<<30, 64<<30)
 	return map[string]domain.Footprint{"cluster-a": fp}, map[string]domain.Footprint{"cluster-a": domain.NewFootprint()}, nil
 }
 func (layoutShortWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
@@ -213,10 +212,10 @@ func (layoutShortWorkload) GetAcceleratorCapacityByNode(context.Context) (map[st
 	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 2}}}, nil
 }
 func (layoutShortWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}}, nil
 }
 func (layoutShortWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}}, nil
 }
 func (layoutShortWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
@@ -266,10 +265,10 @@ func (scaleUpWaitingWorkload) GetAcceleratorCapacityByNode(context.Context) (map
 	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 1}}}, nil
 }
 func (scaleUpWaitingWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}}, nil
 }
 func (scaleUpWaitingWorkload) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {}}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}}, nil
 }
 func (scaleUpWaitingWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
 	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
@@ -289,6 +288,7 @@ func (scaleUpWaitingWorkload) GetClusterIDs(context.Context) (map[string]string,
 
 func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) {
 	exp := distributedExperiment(1, 2) // needs more accelerators than the only known node has
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = "1", "1Gi", "1Gi"
 	exp.ID = "exp-1"
 	exp.AgentID = "agent-1"
 	exp.PlatformExperimentID = "pe-1"
@@ -316,6 +316,7 @@ func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) 
 
 func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 	exp := distributedExperiment(2, 1)
+	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage = "1", "1Gi", "1Gi"
 	exp.ID = "exp-1"
 	exp.AgentID = "agent-1"
 	exp.PlatformExperimentID = "pe-1"
@@ -397,7 +398,7 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 			if err := l.tick(context.Background()); err != nil {
 				t.Fatalf("tick() = %v, want nil", err)
 			}
-			want := `exceeds_accelerator_share: cpu 1 is above the 750m that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 750m or "max"`
+			want := `exceeds_accelerator_share: cpu 1 is above the 750m that 1 accelerator(s) get on cluster cluster-a (each node's cpu split evenly across its installed accelerators); request at most 750m`
 			if got := store.notAdmitted[exp.ID]; got != want {
 				t.Fatalf("not_admitted_reason = %q\nwant                  %q", got, want)
 			}
@@ -585,7 +586,7 @@ func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType,
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
 		AcceleratorType: flavor, AcceleratorCount: count,
-		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, AcceleratorType: flavor, AcceleratorCount: count},
+		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: flavor, AcceleratorCount: count},
 	}
 }
 
@@ -614,9 +615,9 @@ func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
 		"another cluster is admitted":                {4, 1, h100, "cluster-b", true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, tc.guaranteedCount, "")
+			guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, tc.guaranteedCount, "1")
 			guaranteed.ClusterName = "cluster-a"
-			burst := holdJob("burst", domain.CapacityBurst, tc.burstFlavor, 1, "")
+			burst := holdJob("burst", domain.CapacityBurst, tc.burstFlavor, 1, "1")
 			burst.ClusterName = tc.burstCluster
 			store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{burst, guaranteed}}}
 			l := holdLoop(store, holdWorkload{cpuCores: 16, terminating: tc.terminating}, noopEvictor{})
@@ -711,11 +712,11 @@ func (terminatingWorkload) GetAcceleratorCapacityByNode(context.Context) (map[st
 }
 
 func TestTickPreemptsOnceWhileTheVictimTerminates(t *testing.T) {
-	guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, 2, "")
+	guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, 2, "1")
 	guaranteed.ClusterName = "cluster-a"
 	store := &terminatingStore{holdStore: holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{guaranteed}}}}
 	for _, id := range []string{"b1", "b2", "b3"} {
-		b := holdJob(id, domain.CapacityBurst, h100, 1, "")
+		b := holdJob(id, domain.CapacityBurst, h100, 1, "1")
 		b.ClusterName = "cluster-a"
 		b.Status = domain.StatusRunning
 		store.running = append(store.running, b)
