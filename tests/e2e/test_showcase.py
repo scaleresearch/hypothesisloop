@@ -17,7 +17,10 @@ import requests
 from support import admin
 from support.api import API
 
-pytestmark = pytest.mark.parallel
+# Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
+# created and started while the default org's clusters are shared with every org
+# (API.clusters_shared).
+pytestmark = pytest.mark.exclusive
 
 
 @dataclass
@@ -48,14 +51,16 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
     a, b = _org(api, run_id, "a"), _org(api, run_id, "b")
     agent = f"showcase-agent-{uuid.uuid4().hex[:8]}-{run_id}"
     a.api.register_agent(agent)
-    pe_id = a.api.create_platform_experiment(f"showcase-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 2)
+    with a.api.clusters_shared():
+        pe_id = a.api.create_platform_experiment(f"showcase-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 2)
     try:
         a.api.signup_ok(pe_id, agent)
         posted = a.api.post_hypothesis(pe_id, text=f"a showcase claim {uuid.uuid4().hex[:8]}", agent_id=agent)
         assert posted.status_code in (200, 201), f"hypothesis: {posted.status_code} {posted.text}"
         hyp_id = posted.json()["id"]
         # Started, since an agent's quota exists from the start on and is one of the reads.
-        a.api.start_platform_experiment(pe_id)
+        with a.api.clusters_shared():
+            a.api.start_platform_experiment(pe_id)
 
         # What another org reads of it. Every one of these is a read route an org uses for its own.
         reads = [
@@ -144,7 +149,8 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         # An agent of another platform experiment stays in its own, shared or not.
         other_agent = f"showcase-other-{uuid.uuid4().hex[:8]}-{run_id}"
         b.api.register_agent(other_agent)
-        other_pe = b.api.create_platform_experiment(f"showcase-other-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
+        with b.api.clusters_shared():
+            other_pe = b.api.create_platform_experiment(f"showcase-other-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
         try:
             b.api.signup_ok(other_pe, other_agent)
             outsider = api.as_caller(admin.token(f"agent:{other_pe}/{other_agent}"), b.org_id, b.api.project_id)

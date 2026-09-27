@@ -17,8 +17,6 @@ import requests
 from support import signin
 from support.api import API, HLError
 
-pytestmark = pytest.mark.parallel
-
 
 @dataclass
 class Person:
@@ -84,6 +82,7 @@ def _lines(out: str) -> list[dict]:
     return [json.loads(line) for line in out.splitlines() if line.strip()]
 
 
+@pytest.mark.parallel
 def test_an_invite_brings_a_person_into_the_org_once(api: API, run_id: str):
     owner, guest, late = (_person(api, run_id, label) for label in ("owner", "guest", "late"))
     org = owner.home.org_id
@@ -118,6 +117,7 @@ def test_an_invite_brings_a_person_into_the_org_once(api: API, run_id: str):
     assert late.subject not in _members(owner.home, org)
 
 
+@pytest.mark.parallel
 def test_an_invite_that_was_revoked_admits_nobody(api: API, run_id: str):
     owner, guest, stranger = (_person(api, run_id, label) for label in ("owner", "guest", "stranger"))
     invite = _invite(owner.home, "owner")
@@ -133,6 +133,7 @@ def test_an_invite_that_was_revoked_admits_nobody(api: API, run_id: str):
     _refused(owner.home, "GET", f"/orgs/{owner.home.org_id}/invites?limit=201", None, 422, "invalid_page")
 
 
+@pytest.mark.exclusive
 def test_a_member_reads_the_org_and_changes_none_of_what_an_owner_holds(api: API, run_id: str):
     owner, guest = _person(api, run_id, "owner"), _person(api, run_id, "guest")
     org, project = owner.home.org_id, owner.home.project_id
@@ -161,7 +162,10 @@ def test_a_member_reads_the_org_and_changes_none_of_what_an_owner_holds(api: API
     assert _members(owner.home, org) == {owner.subject: "owner", guest.subject: "member"}
 
     # What a member is in the org for: platform experiments and what goes on in them.
-    pe_id = member.create_platform_experiment(f"members-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
+    # The org owns no cluster, so the default org's are shared with every org for the create,
+    # which is why the test is exclusive.
+    with member.clusters_shared():
+        pe_id = member.create_platform_experiment(f"members-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
     try:
         assert member.get_json(f"/platform-experiments/{pe_id}")["project_id"] == project
         assert owner.home.get_json(f"/platform-experiments/{pe_id}")["id"] == pe_id
@@ -185,6 +189,7 @@ def test_a_member_reads_the_org_and_changes_none_of_what_an_owner_holds(api: API
     assert _members(owner.home, org) == {owner.subject: "owner"}
 
 
+@pytest.mark.parallel
 def test_an_org_keeps_its_last_owner(api: API, run_id: str):
     first, second = _person(api, run_id, "first"), _person(api, run_id, "second")
     org = first.home.org_id
@@ -218,6 +223,7 @@ def test_an_org_keeps_its_last_owner(api: API, run_id: str):
     assert _call(first.home, "GET", f"/orgs/{org}/members").status_code == 404
 
 
+@pytest.mark.parallel
 def test_an_api_key_manages_members_and_joins_nothing(api: API, run_id: str):
     owner, guest = _person(api, run_id, "owner"), _person(api, run_id, "guest")
     org = owner.home.org_id
@@ -236,6 +242,7 @@ def test_an_api_key_manages_members_and_joins_nothing(api: API, run_id: str):
     assert _members(with_key, org) == {owner.subject: "owner"}
 
 
+@pytest.mark.parallel
 def test_an_account_creates_up_to_its_limits(api: API, run_id: str):
     """Every person of the suite is a distinct one, so each starts with the one org of their first
     sign-in and the one project it came with. The bounds are read from /me, not assumed."""

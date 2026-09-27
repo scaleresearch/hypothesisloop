@@ -13,10 +13,11 @@ import os
 import subprocess
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 import yaml
@@ -168,6 +169,8 @@ class API:
         # Every platform experiment created through hl by this caller and the callers made from
         # it, closed by conftest at session end.
         self.created_platform_experiments: list[str] = []
+        # The session's staff caller, which every other caller is made from.
+        self.staff: API = self
 
     # ---- hl CLI -----------------------------------------------------------------------------
 
@@ -238,7 +241,26 @@ class API:
         creates, so the session closes it too."""
         caller = API(self.base_url, self.hl_bin, token, org_id, project_id)
         caller.created_platform_experiments = self.created_platform_experiments
+        caller.staff = self.staff
         return caller
+
+    @contextmanager
+    def clusters_shared(self) -> Iterator[None]:
+        """Has the platform share the default org's connected clusters with every org while the
+        block runs. An org the suite makes owns no cluster that runs anything, and a platform
+        experiment is created, and its baseline measured, only where a cluster takes the org's
+        jobs. Every org reads those clusters meanwhile, so a test that uses it is exclusive."""
+        staff = self.staff
+        names = [c["name"] for c in staff.get_json(f"/orgs/{staff.org_id}/clusters")["clusters"]
+                 if c["owned"] and c["connected"] and not c["shared"]]
+        assert names, "the default org has no connected cluster to share"
+        for name in names:
+            admin.share_cluster(name, True)
+        try:
+            yield
+        finally:
+            for name in names:
+                admin.share_cluster(name, False)
 
     def hl_expect(self, *args: str, input: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
         """Raw `hl` invocation returning the CompletedProcess as-is, unlike hl() which raises on a

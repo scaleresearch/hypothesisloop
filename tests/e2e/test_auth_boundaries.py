@@ -24,7 +24,10 @@ from support import admin
 from support.api import API
 from support.wait import eventually
 
-pytestmark = pytest.mark.parallel
+# Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
+# created and started while the default org's clusters are shared with every org
+# (API.clusters_shared).
+pytestmark = pytest.mark.exclusive
 
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes, so a job
@@ -96,8 +99,9 @@ def _running_experiment(org: Org, caller: API, run_id: str, agents: int) -> tupl
     names = [f"agent-{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}" for _ in range(agents)]
     for name in names:
         caller.register_agent(name)
-    pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents)
-    caller.signup_and_start(pe_id, names)
+    with caller.clusters_shared():
+        pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents)
+        caller.signup_and_start(pe_id, names)
     members = []
     for name in names:
         hypothesis_id = caller.register_hypothesis(pe_id, name, _claim(name))["id"]
@@ -295,9 +299,10 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
     person = api.as_caller(token, me["orgs"][0]["id"], me["projects"][0]["id"])
     agent = f"agent-of-{subject}"
     person.register_agent(agent)
-    pe_id = person.create_platform_experiment(f"jwt-{subject}", 1.0, 1)
-    try:
+    with person.clusters_shared():
+        pe_id = person.create_platform_experiment(f"jwt-{subject}", 1.0, 1)
         person.signup_and_start(pe_id, [agent])
+    try:
         ada = {"kind": "user", "id": subject, "name": "Ada Lovelace"}
         as_another = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("under another name"), author="Mallory"))
         assert as_another.status_code == 422, f"a person stating who they are: {as_another.status_code} {as_another.text}"

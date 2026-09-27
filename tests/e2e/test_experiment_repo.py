@@ -47,9 +47,12 @@ def orgs(api: API, run_id: str):
 
 @pytest.fixture(scope="module")
 def run(orgs, run_id: str):
-    """A platform experiment of org a with one self-run agent, and that agent's own caller."""
+    """A platform experiment of org a with one self-run agent, and that agent's own caller. The
+    org owns no cluster, so it is created while the default org's are shared with every org, and
+    a test that uses it is exclusive."""
     a, _ = orgs
-    pe_id = a.api.create_platform_experiment(f"repo-{run_id}", 1, 2)
+    with a.api.clusters_shared():
+        pe_id = a.api.create_platform_experiment(f"repo-{run_id}", 1, 2)
     agent = a.api.add_agents(pe_id)[0]
     yield pe_id, a.api.as_caller(agent["token"], a.org_id, a.project_id)
     a.api.close_platform_experiment(pe_id)
@@ -112,7 +115,7 @@ def test_connect_is_refused_without_proof_from_github(orgs):
     assert _installations(a) == []
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_an_agent_token_reaches_nothing_of_the_orgs_github(orgs, run):
     a, _ = orgs
     _, agent = run
@@ -124,7 +127,7 @@ def test_an_agent_token_reaches_nothing_of_the_orgs_github(orgs, run):
         assert _call(agent, method, path, body).status_code == 403, (method, path)
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs, run):
     a, _ = orgs
     _, agent = run
@@ -149,7 +152,7 @@ def test_a_job_runs_only_a_commit_of_its_experiments_repository(api: API, experi
     assert api.get(f"/experiments/{job_id}").status_code == 404, "the refused job was stored"
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_changes(orgs, run):
     """A create without from_repo states its name, description and metrics, one with it names the
     repository, and an update changes the fields it names and no others."""
@@ -163,7 +166,8 @@ def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_change
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"}).status_code == 422
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {}).status_code == 422
     assert _call(a.api, "PUT", f"/platform-experiments/{pe_id}", {"name": "x"}).status_code == 405
-    amended = _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"description": "amended"})
+    with a.api.clusters_shared():
+        amended = _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"description": "amended"})
     assert amended.status_code == 200, amended.text
     after = agent.get_json(f"/platform-experiments/{pe_id}")
     assert after["description"] == "amended"
@@ -205,7 +209,7 @@ def _git(agent: API, cwd, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branch_to_it(orgs, run, run_id: str, tmp_path):
     a, _ = orgs
     if _call(a.api, "GET", "/github/app").status_code != 503:
@@ -218,14 +222,16 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
     # The platform creates no repository on such a host and reads no file from one.
     whole = {**RUN, "project_id": a.project_id, "name": f"repo-plain-{run_id}", "description": "names a repository",
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
-    for body, reason in (
-        (whole, "repository_required"),
-        ({**whole, "repository": f"no-such-{run_id}.git"}, "repository_not_reachable"),
-        ({**whole, "repository": address}, "invalid_repository"),
-        ({**RUN, "project_id": a.project_id, "repository": repository, "from_repo": True}, "experiment_file_unsupported"),
-    ):
-        refused = _call(a.api, "POST", "/platform-experiments", body)
-        assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
+    # A repository is made for a platform experiment that could run, so the org is given a cluster.
+    with a.api.clusters_shared():
+        for body, reason in (
+            (whole, "repository_required"),
+            ({**whole, "repository": f"no-such-{run_id}.git"}, "repository_not_reachable"),
+            ({**whole, "repository": address}, "invalid_repository"),
+            ({**RUN, "project_id": a.project_id, "repository": repository, "from_repo": True}, "experiment_file_unsupported"),
+        ):
+            refused = _call(a.api, "POST", "/platform-experiments", body)
+            assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
 
     # A credential is handed out for the experiment's repository and for no other address.
     host = urlparse(address)
@@ -248,7 +254,7 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
     assert listed.returncode == 0 and branch in listed.stdout, listed.stderr
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_disconnected(api: API, run_id: str, tmp_path):
     sandbox = {name: os.environ.get(name, "") for name in SANDBOX_ENV}
     if not all(sandbox.values()):
@@ -271,7 +277,8 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         assert _call(other.api, "GET", f"/orgs/{org.org_id}/github-installations").status_code == 404
         assert _installations(other) == []
 
-        pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2, repository=repo)
+        with org.api.clusters_shared():
+            pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2, repository=repo)
         clone_url = f"https://github.com/{repo}.git"
         read = org.api.get_json(f"/platform-experiments/{pe_id}")
         assert (read["repository"], read["repository_url"]) == (repo, clone_url), read

@@ -67,8 +67,9 @@ def _key(api: API, org_id: str, name: str, project_id: str = "") -> dict:
     return api.post_json(f"/orgs/{org_id}/api-keys", body)
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_an_api_key_runs_its_org_through_hl(orgs):
+    """Exclusive: its platform experiment is created while the default org's clusters are shared."""
     a, b = orgs
 
     me = a.api.get_json("/me")
@@ -97,7 +98,8 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     assert created["minted_by"] == me["key_id"], "a key made with a key names the key that made it"
     bound = a.api.as_caller(created["token"], a.org_id, project["id"])
 
-    pe_id = bound.create_platform_experiment(f"{a.marker}-pe", 1.0, 1)
+    with bound.clusters_shared():
+        pe_id = bound.create_platform_experiment(f"{a.marker}-pe", 1.0, 1)
     assert bound.get_json(f"/platform-experiments/{pe_id}")["project_id"] == project["id"]
     assert pe_id in bound.hl("platform-experiments", "list")
     assert pe_id not in a.api.hl("platform-experiments", "list", "--project", a.project_id)
@@ -235,8 +237,9 @@ def _running_org(org: Org, run_id: str) -> tuple[str, str]:
     """An agent in a started platform experiment of the org's default project."""
     agent = f"agent-{uuid.uuid4().hex[:10]}-{run_id}"
     org.api.register_agent(agent)
-    pe_id = org.api.create_platform_experiment(f"{org.marker}-{run_id}", 5.0, 2)
-    org.api.signup_and_start(pe_id, [agent])
+    with org.api.clusters_shared():
+        pe_id = org.api.create_platform_experiment(f"{org.marker}-{run_id}", 5.0, 2)
+        org.api.signup_and_start(pe_id, [agent])
     return agent, pe_id
 
 
@@ -619,8 +622,9 @@ def test_only_staff_see_every_org(orgs, api: API):
     assert created.json()["id"] not in a.api.get("/me").text, "an org-wide key reached an org made after it"
 
 
-@pytest.mark.parallel
+@pytest.mark.exclusive
 def test_tokens_the_platform_derives_reach_no_account(orgs, api: API, run_id: str):
+    """Exclusive: its platform experiment is started while the default org's clusters are shared."""
     a, _ = orgs
     agent, pe_id = _running_org(a, run_id)
     try:

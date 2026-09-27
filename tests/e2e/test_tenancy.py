@@ -17,7 +17,10 @@ from support import admin
 from support.api import API
 from support.wait import eventually
 
-pytestmark = pytest.mark.parallel
+# Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
+# created and started while the default org's clusters are shared with every org
+# (API.clusters_shared).
+pytestmark = pytest.mark.exclusive
 
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes.
@@ -48,8 +51,9 @@ def _tenant(api: API, run_id: str, label: str) -> Tenant:
     caller = api.as_caller(admin.add_api_key(subject, home["org_id"]), home["org_id"], home["project_id"])
     agent = f"agent-{marker}-{run_id}"
     caller.register_agent(agent)
-    pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
-    caller.signup_and_start(pe_id, [agent])
+    with caller.clusters_shared():
+        pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+        caller.signup_and_start(pe_id, [agent])
     hypothesis_id = caller.register_hypothesis(pe_id, agent, f"{marker} hypothesis")["id"]
     # An accelerator type no local cluster has, so the job stays QUEUED: non-terminal for the job
     # token, and holding nothing.
@@ -456,8 +460,9 @@ def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenan
     lone = api.as_caller(admin.add_api_key(f"user-{marker}-{run_id}", home["org_id"]), home["org_id"], home["project_id"])
     lone_agent = f"agent-{marker}-{run_id}"
     lone.register_agent(lone_agent)
-    lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
-    lone.signup_and_start(lone_pe, [lone_agent])
+    with lone.clusters_shared():
+        lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+        lone.signup_and_start(lone_pe, [lone_agent])
 
     away_job = a.api.submit_job(a.pe_id, a.agent, job_overrides=HOSTLESS_JOB)
     lone_job = lone.submit_job(lone_pe, lone_agent, job_overrides=HOSTLESS_JOB)
