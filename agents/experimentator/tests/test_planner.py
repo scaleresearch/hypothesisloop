@@ -193,6 +193,13 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("What the image does not carry it installs with `uv pip install X`", flat)
         self.assertIn("`image` a job image name of `hl capacity` or a full address: any other word is refused", flat)
 
+    # A baseline agent stopped at the close answered its last turn with a finish, which the
+    # platform refuses: the close had ended its run.
+    def test_a_refusal_for_a_closed_experiment_ends_the_turn(self):
+        from hypothesisloop_agent.claude import run
+        self.assertIn("`experiment_closed` is final: end your turn", render(baseline_agent())[1])
+        self.assertIn("A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing", run._SHUTDOWN_PROMPT)
+
     # hl once said an agent's next step on stderr beside the record. The record's
     # `status_reason` says it now, and nothing else does.
     def test_its_next_step_is_read_from_status_reason(self):

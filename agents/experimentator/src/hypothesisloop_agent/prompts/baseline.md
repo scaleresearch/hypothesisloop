@@ -56,7 +56,7 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
      The coordinator copies it into the brief. Its hypothesis states the control, which
      claims no effect: set no status on it.
   5. `hl platform-experiments agents finish --reason "baseline measured by job ID"`, then end
-     your turn. It is final: your machine stops.
+     your turn.
 
 You finish at 5, or once you can say why no baseline is possible: one failure came back three
 times through your fixes, or a job stays queued with `capacity_unavailable` or
@@ -64,3 +64,4 @@ times through your fixes, or a job stays queued with `capacity_unavailable` or
 coordinator is sent it and acts on it. Never finish with a fix not yet run.
 
 An error from `hl` is signal: read its reason and message, fix exactly that and retry.
+`experiment_closed` is final: end your turn.

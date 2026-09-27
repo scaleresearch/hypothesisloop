@@ -170,7 +170,8 @@ _SHUTDOWN_TURN_S = 60
 _SHUTDOWN_PROMPT = (
     "This is your last turn, about a minute long. Start nothing new and "
     "leave unfinished jobs running: they cannot be summarised yet. File the summaries you owe on "
-    "finished jobs and set the verdicts your evidence already supports, then end your turn."
+    "finished jobs and set the verdicts your evidence already supports, then end your turn. "
+    "A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing."
 )
 
 
