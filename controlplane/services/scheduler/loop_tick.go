@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -301,6 +302,13 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
+				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
+				if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ranOnTypeUncoveredReason(exp)); err != nil {
+					l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+				}
+				continue
+			}
 			// Reverting to the requested flavor re-places the job, layout included: picking on
 			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
 			// and charge it a failed placement there.
@@ -601,6 +609,13 @@ func (l *Loop) tick(ctx context.Context) error {
 			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
 		}
 		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
+			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
+				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
+				if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ranOnTypeUncoveredReason(exp)); err != nil {
+					l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+				}
+				continue
+			}
 			// Reverting to the requested flavor re-places the job, layout included: picking on
 			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
 			// and charge it a failed placement there.
@@ -879,6 +894,13 @@ func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool 
 		used, limit = quota.UsedGuaranteedAccH, quota.GuaranteedAcceleratorHours
 	}
 	return used-exp.EstimatedCostAccH+newCost <= limit && quota.Used()-exp.EstimatedCostAccH+newCost <= quota.Share()
+}
+
+// ranOnTypeUncoveredReason is the not_admitted_reason of a job that ran on an alternative type
+// its quota no longer covers. The type it asked for is not one it may be placed on
+// (candidateAcceleratorTypes), so it waits for quota.
+func ranOnTypeUncoveredReason(exp *domain.Experiment) string {
+	return fmt.Sprintf("%s: the job ran on %s and is placed on that type alone, which the agent's quota no longer covers", domain.NotAdmittedInsufficientQuota, exp.RanOnAcceleratorType)
 }
 
 // footprintStr renders a Footprint for logging — domain.Footprint's struct-keyed map can't be

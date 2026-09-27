@@ -736,3 +736,43 @@ func TestTickPreemptsOnceWhileTheVictimTerminates(t *testing.T) {
 		t.Fatal("the guaranteed job was admitted while its capacity was still held")
 	}
 }
+
+// --- Tick-level: a job that ran stays on the accelerator type it ran on ---
+
+// The job asked for h100, accepts l40 and its row is at l40, which its quota does not cover while
+// h100 is free. One that never ran goes back to the type it asked for. One that ran on l40 may be
+// placed on no other type (candidateAcceleratorTypes): it waits and says why.
+func TestTickDoesNotMoveAJobThatRanWhenItsQuotaNoLongerCoversItsType(t *testing.T) {
+	withCPUType(t)
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		for name, ran := range map[string]bool{"never ran": false, "ran on the alternative": true} {
+			t.Run(string(tier)+"/"+name, func(t *testing.T) {
+				exp := holdJob("a1", tier, l40, 1, "1")
+				exp.Job.AcceleratorType, exp.Job.AcceptableAcceleratorTypes = h100, []domain.AcceleratorType{l40}
+				exp.EstimatedDurationHours = 1
+				if ran {
+					exp.RanOnAcceleratorType = l40
+				}
+				store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{exp}}}
+				l := holdLoop(store, holdWorkload{cpuCores: 16}, noopEvictor{})
+
+				if err := l.tick(context.Background()); err != nil {
+					t.Fatalf("tick() = %v, want nil", err)
+				}
+				cluster, admitted := store.submitted["a1"]
+				if !ran {
+					if !admitted || exp.AcceleratorType != h100 {
+						t.Fatalf("admitted = %v at %q (reason %q), want it back on the type it asked for", admitted, exp.AcceleratorType, store.notAdmitted["a1"])
+					}
+					return
+				}
+				if admitted || exp.AcceleratorType != l40 {
+					t.Fatalf("placed on %q at %q, want it waiting at the type it ran on", cluster, exp.AcceleratorType)
+				}
+				if got := store.notAdmitted["a1"]; !strings.HasPrefix(got, domain.NotAdmittedInsufficientQuota+": ") || !strings.Contains(got, l40) {
+					t.Fatalf("not_admitted_reason = %q, want %s naming the type", got, domain.NotAdmittedInsufficientQuota)
+				}
+			})
+		}
+	}
+}
