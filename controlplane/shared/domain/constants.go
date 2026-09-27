@@ -295,18 +295,24 @@ const (
 // the job and travels in every update about it.
 const failureCauseDetailRunes = 400
 
-// FailureCause is the reason a job that failed is stored and announced with, in the "code:
-// detail" shape of an eviction reason: how the runtime says its process ended. Empty when the
-// runtime's last word on the job is not about a process that ended.
+// FailureNoReason is the cause of a failed job whose runtime did not say how its process ended.
+const FailureNoReason = "failed, runtime gave no reason; see `hl job logs`"
+
+// FailureCause is the reason a job that failed is stored and announced with: how the runtime
+// says its process ended, in the "code: detail" shape of an eviction reason. A failed job always
+// has one. Where the runtime's last word is not about a process that ended, the cause says so,
+// with what a runtime that named no reason said beside it, its exit code where it reports one.
 func (d PhaseDetail) FailureCause() string {
-	if d.Reason != PhaseReasonContainerFailed && d.Reason != PhaseReasonOOMKilled {
-		return ""
-	}
 	message, _, _ := strings.Cut(d.Message, "\n")
 	if runes := []rune(message); len(runes) > failureCauseDetailRunes {
 		message = string(runes[:failureCauseDetailRunes])
 	}
-	if message == "" {
+	switch {
+	case d.Reason == "" && message != "":
+		return FailureNoReason + " (" + message + ")"
+	case d.Reason != PhaseReasonContainerFailed && d.Reason != PhaseReasonOOMKilled:
+		return FailureNoReason
+	case message == "":
 		return d.Reason
 	}
 	return d.Reason + ": " + message

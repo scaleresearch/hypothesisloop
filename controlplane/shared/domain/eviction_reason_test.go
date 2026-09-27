@@ -21,8 +21,9 @@ func TestSilenceReasonsAreDistinct(t *testing.T) {
 	}
 }
 
-// A failed job is announced with how its process ended and with nothing else the runtime last
-// said of it: a job that failed while its last report was about starting has no cause to give.
+// A failed job is announced with how its process ended. A runtime that named no reason leaves a
+// cause that says so with what it did say, and one whose last report was about starting says
+// nothing of the failure, so none of it is repeated.
 func TestFailureCauseIsHowTheProcessEnded(t *testing.T) {
 	for _, c := range []struct {
 		detail PhaseDetail
@@ -31,8 +32,9 @@ func TestFailureCauseIsHowTheProcessEnded(t *testing.T) {
 		{PhaseDetail{Reason: PhaseReasonContainerFailed, Message: "command exited with code 1"}, "container_failed: command exited with code 1"},
 		{PhaseDetail{Reason: PhaseReasonOOMKilled, Message: "container exited with code 137 (OOMKilled): killed\nat step 3"}, "oom_killed: container exited with code 137 (OOMKilled): killed"},
 		{PhaseDetail{Reason: PhaseReasonContainerFailed}, "container_failed"},
-		{PhaseDetail{Reason: PhaseReasonInstanceStarting, Message: "a machine is rented"}, ""},
-		{PhaseDetail{}, ""},
+		{PhaseDetail{Reason: PhaseReasonInstanceStarting, Message: "a machine is rented"}, FailureNoReason},
+		{PhaseDetail{Message: "container exited with code 2"}, FailureNoReason + " (container exited with code 2)"},
+		{PhaseDetail{}, FailureNoReason},
 	} {
 		if got := c.detail.FailureCause(); got != c.want {
 			t.Errorf("FailureCause(%+v) = %q, want %q", c.detail, got, c.want)
