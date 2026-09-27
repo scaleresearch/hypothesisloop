@@ -433,7 +433,7 @@ class API:
         unless the test already declared one, and waits for the platform to start the run, which
         it does within a minute when a researcher has joined. baseline_job is declare_baseline's."""
         if pe_id not in self.baseline_of:
-            self.declare_baseline(pe_id, baseline_job)
+            self.declare_baseline(pe_id, baseline_job, job_wait_seconds=BASELINE_JOB_WAIT_SECONDS)
 
         def standing() -> tuple[str, dict | None]:
             pe = self.get_json(f"/platform-experiments/{pe_id}")
@@ -452,14 +452,15 @@ class API:
     # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
     baseline_of: dict[str, "Baseline"] = {}
 
-    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None) -> "Baseline":
+    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, *, job_wait_seconds: float) -> "Baseline":
         """Gives an open platform experiment its baseline as a client does: an agent of role
         baseline joins, its job runs to the end and gets its finding, and the description that
         names the job is sent with the declaration.
 
         The job reports every metric the experiment declares, on the default accelerator alone.
         job_overrides are laid over it: where it runs, or with command None the image's own
-        workload, which then has to report them."""
+        workload, which then has to report them. job_wait_seconds is how long the job may take
+        to complete: BASELINE_JOB_WAIT_SECONDS where the test has the default timeout."""
         pe = self.get_json(f"/platform-experiments/{pe_id}")
         agent = self.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]["agent_id"]
         hypothesis = self.register_hypothesis(pe_id, agent, "the control, unchanged")["id"]
@@ -472,7 +473,7 @@ class API:
             lambda: self.experiment(job),
             accept=lambda e: e["status"] == "COMPLETED",
             reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
-            deadline=Deadline.in_seconds(BASELINE_JOB_WAIT_SECONDS),
+            deadline=Deadline.in_seconds(job_wait_seconds),
             interval=1,
         )
         self.file_finding(job, f"the control ran unchanged as {job}")

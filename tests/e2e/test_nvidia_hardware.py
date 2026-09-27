@@ -61,6 +61,10 @@ _REASON = _skip_reason()
 if _REASON is not None:
     pytest.skip(f"nvidia-hardware preconditions not met: {_REASON}", allow_module_level=True)
 
+# A baseline on the rented accelerator may queue behind an image pull: half of this test's own
+# timeout of 600 seconds, which leaves the run the rest.
+RENTED_BASELINE_JOB_WAIT_SECONDS = 300
+
 
 def _detected_accelerator_type() -> str:
     raw = subprocess.run(
@@ -126,7 +130,8 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
         )
         api.signup_ok(pe_id, agent)
         # The baseline runs where the run does: no other cluster has this accelerator.
-        api.declare_baseline_and_wait_running(pe_id, baseline_job={"accelerator_type": acc_type, "accelerator_count": 1})
+        api.declare_baseline(pe_id, {"accelerator_type": acc_type, "accelerator_count": 1}, job_wait_seconds=RENTED_BASELINE_JOB_WAIT_SECONDS)
+        api.declare_baseline_and_wait_running(pe_id)
 
         _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted)
     finally:

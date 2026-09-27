@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from support.api import API, token_scope
+from support.api import API, BASELINE_JOB_WAIT_SECONDS, token_scope
 from support.wait import Deadline, eventually
 
 pytestmark = pytest.mark.exclusive
@@ -136,7 +136,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
 
         # What the coordinator has done: an agent of role baseline measures the control, and the
         # baseline is declared with the brief that names it. The platform starts the run itself.
-        baseline = api.declare_baseline(pe_id)
+        baseline = api.declare_baseline(pe_id, job_wait_seconds=BASELINE_JOB_WAIT_SECONDS)
         declared = api.get_json(f"/platform-experiments/{pe_id}")
         assert declared["baseline_job_id"] == baseline.job and declared["job_estimated_duration_hours"] > 0, declared
         eventually("the accepted draft to run once its baseline is declared", lambda: api.get_json(f"/platform-experiments/{pe_id}"),
