@@ -11,11 +11,15 @@
 # --estimated-duration-hours states it for one submit: for the baseline job itself, which has
 # nothing measured yet, and for a trial that will run longer.
 job:
-  # REQUIRED: a job that names no image stays QUEUED and never runs. Copy the `image` of a job
-  # image `hl capacity` lists for the type below, verbatim. Delete this line only where
-  # `hl capacity` shows the cluster with only_job_image.
-  image: REPLACE-WITH-AN-IMAGE-HL-CAPACITY-LISTS
-  # hl-clone checks out the commit the job was submitted from and prints its directory.
+  # REQUIRED on every cluster, CPU, GPU or chip. The name
+  # of a job image exactly as `hl capacity` shows it (job_image; the line of the type below
+  # lists the ones that suit it as job_images, `python` for work on cores), or the full registry
+  # address of an image of your own. Anything else is refused at submit. Where `hl capacity`
+  # shows the cluster with only_job_image, name that image.
+  image: REPLACE-WITH-A-JOB-IMAGE-NAME-HL-CAPACITY-LISTS
+  # hl-clone checks out the commit the job was submitted from and prints its directory. The
+  # platform's job images have no virtualenv: install what a trial needs ahead of its command
+  # with `uv pip install --system PACKAGE`.
   command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
   # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines and
   # states `cpu: N`, whole cores.

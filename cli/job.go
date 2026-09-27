@@ -66,14 +66,16 @@ Minimal shape:
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
-    image: ...                    # an image 'hl capacity' lists for the type; leave out only on a cluster with only_job_image
+    image: python                 # a job_image name from 'hl capacity', or a full registry address
     accelerator_type: ...         # a job on CPU states only its cores instead: cpu: 4
     accelerator_count: 1
     ...
 
-Only hypothesis_id, theory and, in job, a command with accelerator_type and accelerator_count,
-or cpu, are needed, and estimated_duration_hours where the platform measured none. cpu, memory and storage left out
-are the job's share of the node; max_retries left out is 0.
+Only hypothesis_id, theory and, in job, an image, a command and accelerator_type with
+accelerator_count, or cpu, are needed, and estimated_duration_hours where the platform measured
+none. Any other image value is refused. The platform's job images have no virtualenv: install
+with uv pip install --system. cpu, memory and storage left out are the job's share of the node;
+max_retries left out is 0.
 
 The full DSL reference is experiment-submission.yaml: in an agent's image under
 $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, stderr)

@@ -122,12 +122,14 @@ hypothesisloop.dev/cpu=core): cores_available, cores_total and acch_per_core_hou
 a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
 whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
 string a job spec takes; a type with none available queues and never errors. Last, one line per
-image the deployment offers a job to run in: job_image its name, image what job.image takes,
-carries what is installed. A type's line names in job_images the ones that suit it, so a job
-there names one of those and installs no framework. A cluster's line with only_job_image is of
-a cluster that runs that image and no other, so a job meant for it leaves job.image out, and
-job_image_carries says what is installed in it. A line without only_job_image is of a cluster
-that runs the image a job names, and a job that names none is not placed there. A line with
+image the deployment offers a job to run in: job_image is its name and what job.image takes,
+image its registry address, carries what is installed. A type's line names in job_images the
+ones that suit it, so a job there names one of those and installs no framework. job.image is
+such a name or the full registry address of an image of your own, and anything else is refused
+at submit. Every job names one: a line without only_job_image is of a cluster that runs the
+image a job names, and a line with it is of a cluster that runs that image and no other, so a
+job meant for it names that image; job_image_carries says what is installed in it. The offered
+images have no virtualenv: a job adds a package with uv pip install --system. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented.
