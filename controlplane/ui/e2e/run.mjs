@@ -557,7 +557,7 @@ async function scenarios(browser) {
   await agentRows.filter({ hasText: 'ag-hosted-new' }).getByText('not reported yet').waitFor()
   await page.unroute(agentsAPI)
 
-  section('home: Advanced opens the full form in a dialog, and the new experiment is created and started from there')
+  section('home: Advanced opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
   await page.goto(`${UI}/platform-experiments`)
   await page.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
   await page.getByText(experimentName).first().waitFor()
@@ -576,26 +576,42 @@ async function scenarios(browser) {
   const homeExperimentID = (await (await homeCreated).json()).id
   await page.waitForURL(u => u.pathname === `/platform-experiments/${homeExperimentID}`)
   await page.getByRole('heading', { name: homeExperimentName }).waitFor()
-  // Starting with nobody in it is the API's to refuse, in its own words.
-  const refusedStart = page.waitForResponse(r => r.url() === `${API}/platform-experiments/${homeExperimentID}/start`)
-  await page.getByRole('button', { name: 'Start now' }).click()
-  await confirmWith(page, 'Start')
-  assert.equal((await refusedStart).status(), 400)
-  await page.locator('.error-banner').first().waitFor()
+  await page.getByText('Preparing the baseline.').waitFor()
   // A self-run agent: the platform rents nothing for it.
   await page.getByRole('button', { name: 'Me', exact: true }).click()
   await page.getByRole('button', { name: 'Add agent' }).click()
   await page.getByTestId('secret').waitFor()
   secrets.add((await page.getByTestId('secret').innerText()).match(/HL_TOKEN=(\S+)/)[1])
-  const started = page.waitForResponse(r => r.url() === `${API}/platform-experiments/${homeExperimentID}/start`)
+  // Starting before a baseline is declared is the API's to refuse, in its own words.
+  const homeStart = `${API}/platform-experiments/${homeExperimentID}/start`
+  const refusedStart = page.waitForResponse(r => r.url() === homeStart && r.request().method() === 'POST')
   await page.getByRole('button', { name: 'Start now' }).click()
   await confirmWith(page, 'Start')
-  assert.equal((await started).status(), 200)
+  assert.equal((await refusedStart).status(), 400)
+  await page.locator('.error-banner', { hasText: 'has no baseline' }).waitFor()
+  assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'open', 'the API did not start it')
+  // This org has no cluster to measure a baseline on, so the API's side of a start that is
+  // accepted is stood in for: the page sends it and shows the experiment the API then answers with.
+  const homeExperiment = `${API}/platform-experiments/${homeExperimentID}`
+  let homeStarted = false
+  await page.route(homeStart, route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    homeStarted = true
+    return route.fulfill({ headers: { 'access-control-allow-origin': UI }, json: { status: 'running', quotas: [] } })
+  })
+  await page.route(homeExperiment, async route => {
+    if (!homeStarted || route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    return route.fulfill({ response, json: { ...await response.json(), status: 'running' } })
+  })
+  await page.getByRole('button', { name: 'Start now' }).click()
+  await confirmWith(page, 'Start')
   await page.getByText('The experiment is running:').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Start now' }).count(), 0, 'a started experiment is not started again')
-  assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'running')
+  await page.unroute(homeExperiment)
+  await page.unroute(homeStart)
 
-  section('home: Create and run composes create, one call an agent, and start, and nothing is rented')
+  section('home: Create and run composes create, one call an agent, and a start time, and nothing is rented')
   // The stack has no GitHub account connected, and an agent the platform really hosts has a
   // launcher rent for it. So the repository list is stood in for, and each write goes to
   // the real API with what would rent taken out of it: the repository and the hosted coordinator
@@ -615,10 +631,10 @@ async function scenarios(browser) {
   }))
   const runWrites = []
   let standInAgents = true
-  const runWrite = url => url.href === `${API}/platform-experiments` || /\/platform-experiments\/[^/]+\/(agents|start)$/.test(url.pathname)
+  const runWrite = url => url.origin === API && /^\/platform-experiments(\/[^/]+(\/agents)?)?$/.test(url.pathname)
   await page.route(runWrite, route => {
     const request = route.request()
-    if (request.method() !== 'POST') return route.fallback()
+    if (!['POST', 'PATCH'].includes(request.method())) return route.fallback()
     const path = new URL(request.url()).pathname
     const body = request.postDataJSON()
     runWrites.push({ path, body })
@@ -660,16 +676,19 @@ async function scenarios(browser) {
   }
 
   const ranID = await createAndRunFromHome(`ui-e2e-run-${run}`, 2)
-  await page.getByText('The experiment is running:').waitFor()
+  await page.getByText('Preparing the baseline.').waitFor()
   assert.deepEqual(runWrites.map(w => w.path), [
-    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/start`,
-  ], 'create, then one call an agent, then the start')
+    '/platform-experiments', `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}/agents`, `/platform-experiments/${ranID}`,
+  ], 'create, then one call an agent, then the start time, and no start: the platform starts it once its baseline is declared')
   assert.equal(runWrites[0].body.repository, 'acme/widgets')
   assert.equal(runWrites[0].body.coordinator_hosted, true)
   assert.ok(!('starts_at' in runWrites[0].body), 'no start time is sent, so nothing starts it between two agents')
   assert.deepEqual(runWrites.slice(1, 3).map(w => w.body), [{ hosted: true }, { hosted: true }], 'each agent is asked for hosted, with no count')
   const ranToken = await tokenOf(ada)
-  assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}`)).json()).status, 'running', 'the API says it is running')
+  assert.deepEqual(Object.keys(runWrites[3].body), ['starts_at'], 'the last call sets the start time and nothing else')
+  const ran = await (await api(ranToken, `/platform-experiments/${ranID}`)).json()
+  assert.equal(ran.status, 'open', 'the API holds it open until its baseline is declared')
+  assert.equal(Date.parse(ran.starts_at), Date.parse(runWrites[3].body.starts_at), 'with the start time the page sent')
   assert.equal((await (await api(ranToken, `/platform-experiments/${ranID}/agents`)).json()).agents.length, 2, 'and holds the two agents')
   assert.equal(await page.locator('.error-banner').count(), 0)
 
