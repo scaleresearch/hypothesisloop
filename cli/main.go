@@ -146,14 +146,38 @@ has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
 
-// notStarted is what an agent can do about an open platform experiment: nothing but wait. It
-// says how long when startsAt is the experiment's start time.
-func notStarted(startsAt string) string {
-	in := ""
-	if at, err := time.Parse(time.RFC3339, startsAt); err == nil {
-		in = fmt.Sprintf(" starts in %d s;", max(0, int(time.Until(at).Seconds())))
+// openNotice is what the caller can do about an open platform experiment, which starts within a
+// minute of its baseline being declared. agent is the agent the command acts as, empty for
+// none, and baselineJob the declared baseline job, empty for none.
+func openNotice(c *apiclient.Client, platformExperiment, agent, baselineJob string) (string, error) {
+	role := ""
+	if agent != "" {
+		var roster struct {
+			Agents []struct {
+				ID   string `json:"agent_id"`
+				Role string `json:"role"`
+			} `json:"agents"`
+		}
+		if err := c.Do("GET", agentsPath(platformExperiment), nil, &roster); err != nil {
+			return "", err
+		}
+		for _, signup := range roster.Agents {
+			if signup.ID == agent {
+				role = signup.Role
+			}
+		}
 	}
-	return "not started:" + in + " every job submit is refused until it runs; prepare, then end your turn and the start arrives as an update"
+	switch {
+	case agent != "" && role != "baseline":
+		return "open: every job submit is refused until the platform starts the run, within a minute of the baseline being declared; prepare, then end your turn and the start arrives as an update", nil
+	case baselineJob != "":
+		return "open: the baseline is declared and the platform starts the run within a minute", nil
+	case agent != "":
+		return "open: your job is admitted now. Measure the baseline with one job, file its summary (hl job summary), then hl platform-experiments agents finish; the run starts once the baseline is declared", nil
+	case kindOf(c.Token) == callerCoordinator:
+		return "open: add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job; the run starts then", nil
+	}
+	return "open: the run starts within a minute once a baseline is declared. An agent added with hl platform-experiments agents add --role baseline measures it, and hl platform-experiments update --baseline-job JOB declares it", nil
 }
 
 // subcommand is one command of a group. The group's listing takes its synopsis from the command's
@@ -875,8 +899,13 @@ its planner answered, when the platform closes it if nothing happened by then.`,
 	delete(out, "$schema")
 	// Ahead of the record, whose description is long: a reader of its first lines must not miss it.
 	if out["status"] == "open" {
-		startsAt, _ := out["starts_at"].(string)
-		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notStarted(startsAt))
+		_, _, agent := scopeOf(c.Token)
+		baselineJob, _ := out["baseline_job_id"].(string)
+		notice, err := openNotice(c, id, agent, baselineJob)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notice)
 	}
 	printJSON(stdout, out)
 	return 0

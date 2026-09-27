@@ -149,7 +149,11 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		var refused *apiclient.HTTPError
 		if errors.As(err, &refused) && strings.Contains(refused.Body, `"experiment_not_started"`) {
-			fmt.Fprintln(stderr, "hl: job submit: "+notStarted(""))
+			notice, err := openNotice(c, fmt.Sprint(metadata["platform_experiment_id"]), *agent, "")
+			if err != nil {
+				return fail(stderr, err)
+			}
+			fmt.Fprintln(stderr, "hl: job submit: "+notice)
 			return 1
 		}
 		return fail(stderr, err)

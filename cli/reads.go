@@ -52,12 +52,16 @@ data_quota_exceeded until some is deleted.`, stderr)
 		// Quota is granted at the start, so before it the agent has none: no error of its own.
 		var refused *apiclient.HTTPError
 		var exp struct {
-			Status   string `json:"status"`
-			StartsAt string `json:"starts_at"`
+			Status      string `json:"status"`
+			BaselineJob string `json:"baseline_job_id"`
 		}
 		if errors.As(err, &refused) && refused.Status == 404 &&
 			c.Do("GET", "/platform-experiments/"+url.PathEscape(*pe), nil, &exp) == nil && exp.Status == "open" {
-			fmt.Fprintln(stderr, "hl: quota: "+notStarted(exp.StartsAt))
+			notice, err := openNotice(c, *pe, *agent, exp.BaselineJob)
+			if err != nil {
+				return fail(stderr, err)
+			}
+			fmt.Fprintln(stderr, "hl: quota: "+notice)
 			return 0
 		}
 		return fail(stderr, err)
