@@ -83,7 +83,7 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	clone := emptyClone(t)
 	code, out := repo(t, "check")
-	for _, name := range []string{"readme: README.md is missing", "experiment: " + repotemplate.ExperimentFile + " is missing", "job-spec: " + repotemplate.JobSpec + " is missing", "metrics: metrics.py is missing: hl repo init adds it"} {
+	for _, name := range []string{"readme: README.md is missing", "experiment: " + repotemplate.ExperimentFile + " is missing", "job-spec: " + repotemplate.JobSpec + " is missing", metricsHelperAbsent} {
 		if code != 1 || !strings.Contains(out, name) {
 			t.Fatalf("an empty clone: hl repo check = %d, want %q in\n%s", code, name, out)
 		}
@@ -98,18 +98,19 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
-	// A baseline agent retyped the metrics helper from a sample: a clone without it is told.
+	// A prepared repository, or one in another language, reports through the platform's request
+	// and holds no helper: it passes, and is told the request.
 	if err := os.Remove(filepath.Join(clone, repotemplate.MetricsHelper)); err != nil {
 		t.Fatal(err)
 	}
-	if code, out := repo(t, "check"); code != 1 || out != "metrics: metrics.py is missing: hl repo init adds it\n" {
+	if code, out := repo(t, "check"); code != 0 || out != metricsHelperAbsent+"\n"+repoChecked+"\n" || !strings.Contains(out, "/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics") {
 		t.Fatalf("a clone with no metrics helper: hl repo check = %d\n%s", code, out)
 	}
 	repo(t, "init")
 	// A baseline agent read "ready" of another experiment's files and went on with them: a pass
 	// says what was checked and what was not, in one line, and never calls the repository ready.
-	if code, out := repo(t, "check"); code != 0 || out != repoChecked+"\n" || strings.Contains(out, "ready") ||
-		!strings.HasPrefix(out, "checked: layout and file validity") || !strings.HasSuffix(out, "Not checked: that the files describe this experiment.\n") {
+	if code, out := repo(t, "check"); code != 0 || out != metricsHelperPresent+"\n"+repoChecked+"\n" || strings.Contains(out, "ready") ||
+		!strings.Contains(out, "\nchecked: layout and file validity") || !strings.HasSuffix(out, "Not checked: that the files describe this experiment.\n") {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{
@@ -125,7 +126,7 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 		write(t, clone, repotemplate.JobSpec, filledJobSpec)
 		write(t, clone, tc.path, tc.content)
-		if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, tc.want) || strings.Count(out, "\n") != 1 {
+		if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, tc.want) || strings.Count(out, "\n") != 2 || !strings.HasSuffix(out, metricsHelperPresent+"\n") {
 			t.Errorf("%s: hl repo check = %d, want only %q in\n%s", name, code, tc.want, out)
 		}
 	}

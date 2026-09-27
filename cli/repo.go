@@ -81,17 +81,19 @@ func repoCheck(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	fs := newFlags("repo check", `usage: hl repo check
 
 Run in a clone of the experiment's repository. Checks two things in the working tree: the
-layout, that each file below is there, and each file's validity. Prints one line for each
-failure, as NAME: what to fix, and exits 1. With none it exits 0 and prints one line saying what
-it checked and what it did not.
+layout, that each of the first three files below is there, and each file's validity. Prints one
+line for each failure, as NAME: what to fix, and exits 1. With none it exits 0 and prints one
+line saying what it checked and what it did not. The metrics line is printed either way and
+fails nothing.
 
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
               them ranked
   job-spec    .hypothesisloop/job.yaml states a job and its storage as a quantity, in each
               group of a grouped job, with no REPLACE-WITH left and no secret_env
-  metrics     metrics.py is there: a job reports each metric with its post_metric, as it runs
-              and once at the end
+  metrics     whether metrics.py, the Python helper hl repo init supplies, is there, and
+              without it the request a job reports a metric with: a repository needs no
+              helper to report
 
 Not checked: that the files describe this experiment. Those of an earlier experiment in the
 same repository pass, so read them against the brief. Nor the code the job spec runs or its
@@ -108,19 +110,32 @@ hl repo init adds a missing file.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	failures, err := notReady(os.DirFS(root))
+	clone := os.DirFS(root)
+	failures, err := notReady(clone)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	metrics := metricsHelperAbsent
+	if _, err := iofs.Stat(clone, repotemplate.MetricsHelper); err == nil {
+		metrics = metricsHelperPresent
+	} else if !errors.Is(err, iofs.ErrNotExist) {
+		return fail(stderr, err)
+	}
 	if len(failures) > 0 {
-		fmt.Fprintln(stdout, strings.Join(failures, "\n"))
+		fmt.Fprintln(stdout, strings.Join(append(failures, metrics), "\n"))
 		return 1
 	}
+	fmt.Fprintln(stdout, metrics)
 	fmt.Fprintln(stdout, repoChecked)
 	return 0
 }
 
-const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + ", " + repotemplate.MetricsHelper + "). Not checked: that the files describe this experiment."
+const (
+	metricsHelperPresent = "metrics: " + repotemplate.MetricsHelper + " is there: post_metric(fraction_complete, value, \"key\") reports a metric"
+	metricsHelperAbsent  = "metrics: no " + repotemplate.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
+)
+
+const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + "). Not checked: that the files describe this experiment."
 
 func cloneRoot() (string, error) {
 	root, err := git(".", "rev-parse", "--show-toplevel")
@@ -150,7 +165,6 @@ func notReady(clone iofs.FS) ([]string, error) {
 		{"readme", repotemplate.Readme, nil},
 		{"experiment", repotemplate.ExperimentFile, experimentGap},
 		{"job-spec", repotemplate.JobSpec, jobSpecGap},
-		{"metrics", repotemplate.MetricsHelper, nil},
 	} {
 		data, err := iofs.ReadFile(clone, item.path)
 		var gap string
