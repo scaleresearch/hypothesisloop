@@ -28,10 +28,11 @@ class SystemPromptTest(unittest.TestCase):
             # the branch was the agent's, so git followed no idea.
             self.assertIn("A branch is your implementation of one hypothesis, named by hl: before working on an idea, and after a "
                           "restart, `hl hypothesis checkout ID` checks yours out, created from its parent's last "
-                          "completed job, from the baseline under `root`, or from `--from JOB` to improve that job", flat)
+                          "completed job, from the baseline under `root`, or `--from JOB`, refused once yours exists", flat)
             self.assertIn("`hl job submit` pushes it", flat)
-            self.assertIn("A different claim is a child hypothesis; another implementation of a claim, yours or another "
-                          "agent's, is your branch of its hypothesis", flat)
+            # --from is refused on a branch that exists, so a second way on from a job is a new idea.
+            self.assertIn("A different claim, or a second way to improve your job, is a child hypothesis; another "
+                          "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
             self.assertLess(len(prompt.encode()), 11_000)

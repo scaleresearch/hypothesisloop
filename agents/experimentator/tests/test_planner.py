@@ -128,7 +128,9 @@ class BaselinePromptTest(unittest.TestCase):
     def test_its_code_goes_to_the_experiments_repository(self):
         flat = render(baseline_agent())[1]
         self.assertIn("Where it is kept: run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
-        self.assertIn("Work on branch `hl/pe-1/baseline`: create it off the default branch", flat)
+        self.assertIn("Work on branch `hl/pe-1/baseline`: run exactly `git checkout -b hl/pe-1/baseline` once", flat)
+        self.assertIn("Submit only when `hl repo check` passes: the submit pushes the branch", flat)
+        self.assertNotIn("push and submit", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
         # What a researcher is told of the others' branches is not true of the agent that
         # starts the code.
@@ -151,7 +153,7 @@ class BaselinePromptTest(unittest.TestCase):
         # straight after `hl repo init` had kept all three.
         self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
                       "make all three match this experiment's definition before the baseline job", flat)
-        self.assertIn('`hl job submit .hypothesisloop/job.yaml --theory "..."`', flat)
+        self.assertIn("`hl job submit .hypothesisloop/job.yaml` with `--estimated-duration-hours` your guess", flat)
         self.assertEqual(flat.count("$WORKLOAD_SAMPLES"), 1)
         self.assertIn("`$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing else there", flat)
 
@@ -159,8 +161,10 @@ class BaselinePromptTest(unittest.TestCase):
     # of every other: the baseline is the objective's own.
     def test_the_baseline_takes_no_hypothesis(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("The baseline is the objective's own and takes no hypothesis", flat)
+        self.assertIn("The baseline is the objective's own and takes no hypothesis and no theory: "
+                      "naming or registering one is refused", flat)
         self.assertNotIn("--hypothesis", flat)
+        self.assertNotIn("--theory", flat)
 
     # Told to hold the baseline job to its own estimate, both planners of a run ran the baseline
     # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.
@@ -183,7 +187,7 @@ class BaselinePromptTest(unittest.TestCase):
     # pushed, and its successor took 4.5 minutes to run that fix.
     def test_a_failed_job_with_a_known_fix_is_run_again_and_one_failure_three_times_over_ends_it(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("has its cause in `hl job logs ID`: fix it, push and submit again, as often as you know a fix", flat)
+        self.assertIn("has its cause in `hl job logs ID`: fix it, commit and submit again, as often as you know a fix", flat)
         self.assertIn("once you can say why no baseline is possible: one failure came back three times through your fixes, "
                       "or a job stays queued with `capacity_unavailable` or `no_cluster_for_image`", flat)
         self.assertIn("the coordinator is sent it and acts on it. Never finish with a fix not yet run", flat)

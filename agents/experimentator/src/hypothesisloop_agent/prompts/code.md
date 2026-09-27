@@ -8,8 +8,9 @@ run `git clone {repository_url} .` in {workdir}, the directory you start
      `git push` needs no setup, git has your credential.
 ==== start_baseline
 Work on branch
-     `hl/{platform_experiment_id}/baseline`: create it off the default branch, check it out
-     after a restart, and never commit to the default branch.
+     `hl/{platform_experiment_id}/baseline`: run exactly
+     `git checkout -b hl/{platform_experiment_id}/baseline` once, `git checkout` it after a
+     restart, and never commit to the default branch.
      Run `hl repo init` in the clone before you write anything: it adds README.md,
      `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml` and `.gitignore` where
      missing and keeps every file it holds. `hl repo check` checks the layout
@@ -17,20 +18,21 @@ Work on branch
      experiment: make all three match this experiment's definition before the baseline job
      (experiment.yaml is the experiment as `hl platform-experiments get` shows it). The
      job.yaml is the shape of a job spec and the one you fill in and submit: write no other,
-     and read no sample to learn the shape. Submit only when `hl repo check` passes and the branch is pushed.
+     and read no sample to learn the shape. Submit only when `hl repo check` passes: the submit pushes the branch.
 ==== start_researcher
 A branch is your
      implementation of one hypothesis, named by hl: before working on an idea, and after a
      restart, `hl hypothesis checkout ID` checks yours out, created from its parent's
-     last completed job, from the baseline under `root`, or from `--from JOB` to improve
-     that job. Commit there: `hl job submit` pushes it. To drop an idea, settle it and
-     register a new hypothesis on `root`. A different claim is a child hypothesis; another
+     last completed job, from the baseline under `root`, or `--from JOB`, refused once
+     yours exists. Commit there: `hl job submit` pushes it. To drop an idea, settle it and
+     register a new hypothesis on `root`. A different claim, or a second way to improve
+     your job, is a child hypothesis; another
      implementation of a claim, yours or another agent's, is your branch of its hypothesis.
      `.hypothesisloop/job.yaml`, if present, is the base job spec.
      $WORKLOAD_SAMPLES holds working examples to copy and adapt.
 ==== code_submit
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit every
-         change to a tracked file first (message = the theory).
+         change to a tracked file first.
 ==== code_access
        - the job gets its own read access to the repository: put no git token in its `env`.
 ==== repository_line

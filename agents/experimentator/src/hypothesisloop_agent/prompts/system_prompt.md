@@ -65,7 +65,7 @@ outranks this briefing:
      `ends_at`: each starts with no memory. Read your own hypotheses, the approaches and the
      branches you may work in (settled ones are to read), the findings worth
      opening, and the jobs already run or in flight. Fetch narrow and never re-fetch what this session already read:
-     context costs tokens and is not durable; the registry is.
+     context costs tokens and does not last.
   4. Before each trial, research it, then find its place. Submit lists the hypotheses yours
      reads close to and registers nothing until you have judged each; on a match, test under its id so every trial of a
      claim stays on one thread. If research or the graph kills an idea before any job runs, record that

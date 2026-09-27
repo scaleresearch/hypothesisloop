@@ -41,14 +41,14 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
          message. What the image does not carry it installs with `uv pip install X`.
 {code_access}
      Size it to finish in minutes: every trial runs it.
-  3. The run. The baseline is the objective's own and takes no hypothesis:
-     `hl job submit .hypothesisloop/job.yaml --theory "..."` with
+  3. The run. The baseline is the objective's own and takes no hypothesis and no theory:
+     naming or registering one is refused. `hl job submit .hypothesisloop/job.yaml` with
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
      The file states no estimate: guess generously, within quota. Then end your turn,
      which is to answer in one line and call no tool: the result arrives as a message. Never
      poll, sleep or block in `hl watch`. A job that failed, or completed without one of the experiment's
-     `metrics`, has its cause in `hl job logs ID`: fix it, push and submit again, as often
+     `metrics`, has its cause in `hl job logs ID`: fix it, commit and submit again, as often
      as you know a fix. Never run a good baseline a second time.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took and what it cost (`hl job cost`), and how a

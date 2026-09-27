@@ -106,7 +106,7 @@ class BriefingTest(unittest.TestCase):
         flat = " ".join(self.render().split())
         self.assertIn("You remove only an agent you added. One the owner added stays, whatever the mix or the count", flat)
         self.assertIn("`max_agents` counts researchers alone: baseline agents and you never count, and a researcher that finished still does", flat)
-        self.assertIn("An agent's jobs, hypotheses and branches are the agent's. You cancel, submit and comment on none", flat)
+        self.assertIn("An agent's jobs, hypotheses and branches are the agent's. You cancel and submit none", flat)
         self.assertNotIn("agents remove", flat)
 
     # Three baseline jobs failed for what the brief said of the image before a coordinator
@@ -139,7 +139,8 @@ class BriefingTest(unittest.TestCase):
         flat = " ".join(self.render().split())
         self.assertIn("the objective's children are distinct approaches, each one claim, a refinement or a combination "
                       "sits under what it refines, and the best result is a node", flat)
-        self.assertIn("Roots that overlap, or stay flat while one holds a whole sweep, you name in the brief", flat)
+        self.assertIn("Roots that overlap, or stay flat while one holds a whole sweep, you comment on: "
+                      "`hl hypothesis comment ID --text T`", flat)
         self.assertIn("and the path from the objective to the best finding, hypothesis by hypothesis", flat)
 
     def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
