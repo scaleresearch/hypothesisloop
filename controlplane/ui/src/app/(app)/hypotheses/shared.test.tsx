@@ -18,7 +18,7 @@ vi.mock('@/lib/api', () => ({
   searchHypotheses: vi.fn(), registerHumanHypothesis: vi.fn(), addHumanHypothesisComment: vi.fn(), addHumanHypothesisLink: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-select', () => ({ PlatformExperimentSelect: () => <span>experiment select</span> }))
-vi.mock('@/components/hypothesis-graph', () => ({ HypothesisGraphCanvas: () => <div>graph canvas</div> }))
+vi.mock('@/components/hypothesis-graph', async original => ({ ...await original(), HypothesisGraphCanvas: () => <div>graph canvas</div> }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
@@ -29,6 +29,7 @@ const me: Me = {
 }
 const graph = {
   root: 'pe-x',
+  objective: {},
   nodes: [{
     id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', agent_id: 'ag-1',
     actor: { kind: 'user', id: 'u7', name: 'Grace Hopper' }, status_actor: null,
@@ -76,6 +77,24 @@ describe('the hypothesis graph', () => {
     expect((await screen.findByText('Grace Hopper')).getAttribute('title')).toBe('u7')
     expect(screen.getByText('human')).toBeTruthy()
     expect((await screen.findByText('Researcher 1')).getAttribute('title')).toBe('ag-1')
+  })
+
+  it('shows what the baseline found on the objective, which no hypothesis stands for', async () => {
+    vi.mocked(fetchHypothesisGraph).mockResolvedValue({
+      ...graph,
+      objective: {
+        finding: { id: 'f1', hypothesis_id: 'pe-x', experiment_id: 'job-base', agent_id: 'ag-0', actor: { kind: 'agent', id: 'ag-0', name: 'Baseline' }, summary: 'the stock config reaches 1.8', created_at: at },
+        best_job: { id: 'job-base', metric: { name: 'val_loss', value: 1.8, last: 1.8 }, summary_due: false },
+      },
+    } as unknown as HypothesisGraph)
+    Element.prototype.scrollIntoView = vi.fn()
+    show('pe=pe-x&view=outline', { project_id: 'prj_1', shared: false })
+    expect((await screen.findByRole('link', { name: 'val_loss 1.8000' })).getAttribute('href')).toBe('/jobs/job-base')
+    expect(screen.getByText('the stock config reaches 1.8')).toBeTruthy()
+    const root = screen.getByRole('button', { name: /Objective/ })
+    expect(root.textContent).toBe('ObjectiveVision benchmarkbaseline 1.8000')
+    expect(root.querySelector('[title="Baseline finding: the stock config reaches 1.8"]')).toBeTruthy()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
   })
 
   it('opens on the newest experiment listed for the project, which a shared one may be', async () => {

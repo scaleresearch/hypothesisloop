@@ -29,6 +29,7 @@ import { useTenant } from '@/lib/tenant'
 import { listProject, useExperimentAccess } from '@/lib/read-only'
 import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
 import { Branch } from '@/components/code-ref'
+import { JobHypothesis } from '@/components/job-hypothesis'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
@@ -300,7 +301,7 @@ function JobsPageContent() {
                       {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
                     <td className="truncate text-xs" title={j.hypothesis}>
-                      <TextLink href={`/hypotheses/${j.hypothesis_id}`} onClick={e => e.stopPropagation()}>{j.hypothesis}</TextLink>
+                      <JobHypothesis job={j} />
                       <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
                         {j.branch && <><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />{' '}</>}
                         {envSettings(j, variedByHypothesis.get(j.hypothesis_id) ?? [])}

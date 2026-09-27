@@ -29,6 +29,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
   onAddIdea: (parentID: string) => void
 }) {
   const readOnly = useReadOnly()
+  const { finding, best_job: bestJob } = graph.objective
   return (
     <Card>
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-2">
@@ -44,6 +45,20 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
           </span>
         </div>
         {pe.description && <CollapsibleDescription text={pe.description} collapseLength={140} />}
+        {bestJob && (
+          <div className="font-mono text-xs">
+            <span className="text-muted">Baseline job </span>
+            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
+          </div>
+        )}
+        {finding && (
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <Eyebrow>
+              Baseline finding · <TextLink href={`/jobs/${finding.experiment_id}`} className="font-mono normal-case">{finding.experiment_id}</TextLink>
+            </Eyebrow>
+            <CollapsibleDescription text={finding.summary} collapseLength={140} />
+          </div>
+        )}
       </CardContent>
     </Card>
   )

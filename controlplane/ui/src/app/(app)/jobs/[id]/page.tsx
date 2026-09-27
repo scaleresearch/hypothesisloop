@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
 import { Branch } from '@/components/code-ref'
+import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
 import { Callout, Loading, EmptyState, ErrorMessage } from '@/components/ui/status-message'
 import { Table } from '@/components/ui/table'
 import { semantic, agentPalette, chart } from '@/lib/colors'
@@ -96,13 +97,14 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
   })
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
+  const baseline = measuresBaseline(j)
 
   return (
     <div>
       <PageHeader
         title={
           <>
-            <span className="line-clamp-3 min-w-0 text-lg font-semibold leading-snug" title={j.hypothesis}>{j.hypothesis}</span>
+            <span className="line-clamp-3 min-w-0 text-lg font-semibold leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
             <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
@@ -110,7 +112,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <span className="font-mono text-2xs">Job {j.id}</span>
             <CopyButton value={j.id} />
-            <TextLink href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap">View hypothesis →</TextLink>
+            {!baseline && <TextLink href={`/hypotheses/${j.hypothesis_id}`} className="whitespace-nowrap">View hypothesis →</TextLink>}
             <TextLink href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap">In graph →</TextLink>
           </span>
         }

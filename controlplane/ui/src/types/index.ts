@@ -134,6 +134,8 @@ export interface Experiment {
   project_id: string
   cluster_name?: string
   capacity_tier?: CapacityTier
+  // The hypothesis the job tests. A baseline agent's job tests none: this is its
+  // platform_experiment_id, standing for the objective, and hypothesis is empty.
   hypothesis_id: string
   hypothesis: string
   theory?: string
@@ -427,17 +429,22 @@ interface HypothesisGraphEdge {
   created_at: string
 }
 
-// A node of the graph: its newest finding, and the job testing it that did best on the ranking
-// metric with the summary filed for that job. Each is absent when there is none.
-export interface HypothesisGraphNode extends HypothesisListItem {
+// What was found for a hypothesis or for the objective: its newest finding, and the job testing it
+// that did best on the ranking metric with the summary filed for that job. Each is absent when
+// there is none.
+export interface Evidence {
   finding?: HypothesisFinding
   best_job?: { id: string; metric: JobMetric; summary?: string; summary_due: boolean }
 }
 
+export interface HypothesisGraphNode extends HypothesisListItem, Evidence {}
+
 // GET /hypotheses/graph: one platform experiment's whole graph. `root` is the objective's id,
-// equal to the platform_experiment_id.
+// equal to the platform_experiment_id. `objective` is the baseline's evidence: a baseline agent's
+// jobs test no hypothesis and hang on the root.
 export interface HypothesisGraph {
   root: string
+  objective: Evidence
   nodes: HypothesisGraphNode[]
   edges: HypothesisGraphEdge[]
 }

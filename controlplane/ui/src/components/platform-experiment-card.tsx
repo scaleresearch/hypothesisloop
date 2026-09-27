@@ -63,7 +63,7 @@ export function PlatformExperimentCard({
     { refreshInterval: 15_000 },
   )
   const hypothesisCount = verdicts?.total ?? 0
-  const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {})
+  const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}, pe.id)
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))

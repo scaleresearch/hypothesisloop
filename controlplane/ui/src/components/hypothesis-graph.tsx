@@ -9,7 +9,7 @@ import type { Edge, Node, NodeProps, NodeTypes } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types'
+import type { Evidence, HypothesisGraph, HypothesisGraphNode } from '@/types'
 import { hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
 import { Dot } from '@/components/ui/badge'
 import { Eyebrow } from '@/components/ui/text'
@@ -42,8 +42,24 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
   )
 }
 
+/** What the baseline found, on the objective its jobs hang on: shared by the graph's root node and the outline's root row. */
+export function ObjectiveMeta({ objective }: { objective: Evidence }) {
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap font-mono text-2xs text-muted">
+      {objective.finding && (
+        <span className={COUNT} title={`Baseline finding: ${objective.finding.summary}`}><FileText size={11} aria-label="Baseline finding" /></span>
+      )}
+      {objective.best_job && (
+        <span className={clsx(COUNT, 'text-accent')} title={`Best ${objective.best_job.metric.name} of the baseline's jobs`}>
+          baseline {objective.best_job.metric.value.toFixed(4)}
+        </span>
+      )}
+    </span>
+  )
+}
+
 type HypothesisNodeData = { item: HypothesisGraphNode }
-type ObjectiveNodeData = { label: string }
+type ObjectiveNodeData = { label: string; objective: Evidence }
 
 // Kept out of node data so that selecting or filtering re-renders only the drawn nodes instead of
 // rebuilding every React Flow node.
@@ -97,7 +113,10 @@ const ObjectiveNode = memo(function ObjectiveNode({ id, data }: NodeProps<Node<O
   return (
     <div className={clsx(NODE, 'justify-center border-primary', selected === id ? 'bg-surface-raised shadow-glow' : 'bg-primary/10')}>
       <HiddenHandles />
-      <Eyebrow>Objective</Eyebrow>
+      <div className="flex items-center justify-between gap-2">
+        <Eyebrow>Objective</Eyebrow>
+        <ObjectiveMeta objective={data.objective} />
+      </div>
       <div className={NODE_TEXT}>{data.label}</div>
     </div>
   )
@@ -170,7 +189,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
       position: positions.get(graph.root)!,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      data: { label: rootLabel },
+      data: { label: rootLabel, objective: graph.objective },
     },
     ...graph.nodes.filter(item => positions.has(item.id)).map(item => ({
       id: item.id,

@@ -13,12 +13,14 @@ const TERMINAL: string[] = [
 
 // Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until
 // its owner rules on it. jobsByHypothesis is the stats endpoint's group_by=hypothesis, which has a
-// group only for a hypothesis with jobs.
+// group only for a hypothesis with jobs, and one under the platform experiment's id for the
+// baseline's jobs, which test no hypothesis.
 export function hypothesisActivity(
   hypothesisCount: number,
   jobsByHypothesis: Record<string, ExperimentStats>,
+  platformExperimentID: string,
 ): string {
-  const groups = Object.values(jobsByHypothesis)
+  const groups = Object.entries(jobsByHypothesis).filter(([id]) => id !== platformExperimentID).map(([, stats]) => stats)
   const inFlight = groups.filter(g => Object.keys(g.by_status).some(s => !TERMINAL.includes(s))).length
   const untested = hypothesisCount - groups.length
   return [

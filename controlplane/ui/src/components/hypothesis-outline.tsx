@@ -6,7 +6,7 @@ import type { HypothesisGraph } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
-import { NodeMeta } from '@/components/hypothesis-graph'
+import { NodeMeta, ObjectiveMeta } from '@/components/hypothesis-graph'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
 import { verdictBy } from '@/components/actor'
 import type { GraphFilters } from '@/lib/hypothesis-graph'
@@ -41,6 +41,7 @@ export function HypothesisOutline({ graph, rootLabel, selected, hits, filters, o
         >
           <Eyebrow>Objective</Eyebrow>
           <span className="min-w-0 flex-1 truncate">{rootLabel}</span>
+          <ObjectiveMeta objective={graph.objective} />
         </RowButton>
       </li>
       {rows.map(({ node, depth, alsoBuildsOn }) => (

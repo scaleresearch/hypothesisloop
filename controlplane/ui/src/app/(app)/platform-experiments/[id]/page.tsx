@@ -24,6 +24,7 @@ import type { StagesStatus } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, Experiment, AgentMetricSeries } from '@/types'
 import { PlatformExperimentStatus } from '@/types'
 import { Baseline } from '@/components/baseline'
+import { JobHypothesis } from '@/components/job-hypothesis'
 import { DraftView } from '@/components/draft'
 import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker, MetricSelector, useAgentColorMap } from '@/components/experiment-charts'
 import { ExperimentAgents } from '@/components/experiment-agents'
@@ -212,7 +213,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const hypothesisCount = verdicts?.total ?? 0
   const hypothesisSub = [
     HYPOTHESIS_STATUSES.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
-    hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}),
+    hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}, id),
   ].filter(Boolean).join(' · ')
 
   // Best result first; a hypothesis whose jobs reported no metric comes last.
@@ -669,9 +670,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                         )}
                       </td>
                       <td className="max-w-xs truncate text-xs" title={exp.hypothesis}>
-                        {exp.hypothesis_id
-                          ? <TextLink onClick={e => e.stopPropagation()} href={`/hypotheses/${exp.hypothesis_id}`}>{exp.hypothesis}</TextLink>
-                          : exp.hypothesis}
+                        <JobHypothesis job={exp} />
                         <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
                           {envSettings(exp, variedByHypothesis.get(exp.hypothesis_id) ?? [])}
                         </div>

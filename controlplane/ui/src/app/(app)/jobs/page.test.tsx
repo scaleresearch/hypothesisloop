@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchExperimentsPage, fetchExperimentStats, fetchOrgClusters } from '@/lib/api'
@@ -96,6 +96,27 @@ describe('the cluster of a job', () => {
     await screen.findByText('own-0001…')
     expect(vi.mocked(fetchExperimentsPage).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
     expect(vi.mocked(fetchExperimentStats).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
+  })
+})
+
+describe('the job of a baseline agent', () => {
+  it('tests no hypothesis: it is named the baseline of the objective and opens the graph, on its own branch', async () => {
+    vi.mocked(fetchExperimentsPage).mockResolvedValue({
+      items: [{ ...job('base-0001', 'lab'), hypothesis_id: 'pe-1', hypothesis: '', branch: 'hl/pe-1/baseline' }, job('own-0001', 'lab')],
+      total: 2,
+    })
+    const resolved = resolveTenant(me, '')
+    if (resolved.state !== 'selected') throw new Error('no tenant')
+    render(
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <TenantContext.Provider value={resolved.tenant}><JobsPage /></TenantContext.Provider>
+      </SWRConfig>,
+    )
+    const row = within((await screen.findByText('base-000…')).closest('tr')!)
+    expect(row.getByRole('link', { name: 'Baseline of the objective' }).getAttribute('href')).toBe('/hypotheses?pe=pe-1')
+    expect(row.getByRole('link', { name: 'baseline' }).getAttribute('href')).toBe('https://github.com/acme/widgets/tree/hl/pe-1/baseline')
+    expect(row.queryAllByRole('link').some(a => a.getAttribute('href')!.startsWith('/hypotheses/'))).toBe(false)
+    expect(screen.getByRole('link', { name: 'a claim' }).getAttribute('href')).toBe('/hypotheses/h1')
   })
 })
 
