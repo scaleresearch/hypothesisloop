@@ -126,6 +126,12 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
         self.assertIn("Ending a turn takes no command, and an `echo` before it does nothing", flat)
 
+    # One looked for comments with a relationship it made up, which matched no row, and for a
+    # job's summary with the command that files one.
+    def test_it_is_told_where_comments_and_a_jobs_summary_are_read(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("One hypothesis with its findings and comments: `hl hypothesis get ID`. A job's summary is in `hl job status ID`", flat)
+
     def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
         prompt = self.render()
         self.assertIn("hl platform-experiments summary --file", prompt)
