@@ -192,6 +192,25 @@ func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
 	}
 }
 
+// An experiment that states no starts_at has no moment of its own: with its baseline declared it
+// waits for whoever starts it, which is what its coordinator is briefed to tell the owner.
+func TestAnExperimentWithoutAStartTimeIsStartedByACallAndNeverByTheSweep(t *testing.T) {
+	store := &sweptStore{startStore: startStore{
+		pe: &domain.PlatformExperiment{
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline",
+			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+		},
+		participants: []db.StartParticipant{participant("agent-1", "")},
+	}}
+	svc := newSignupTestService(t, store)
+	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 0 {
+		t.Fatalf("the sweep with a baseline and no starts_at: %v, %d starts, want it left to its owner", err, store.started)
+	}
+	if quotas, err := svc.Start(context.Background(), "pe-1"); err != nil || len(quotas) != 1 || store.started != 1 {
+		t.Fatalf("its owner's start: got = %+v, %v, want it started", quotas, err)
+	}
+}
+
 // sweptStore is startStore with what the sweep reads, counting the starts that got through.
 type sweptStore struct {
 	startStore
