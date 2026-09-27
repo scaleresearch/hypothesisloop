@@ -29,7 +29,9 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    CLIConnectionError,
     HookMatcher,
+    ProcessError,
     RateLimitEvent,
     ResultMessage,
 )
@@ -185,6 +187,13 @@ def _shutdown_prompt(setup: core.RunSetup) -> str:
 
 class TurnStalled(Exception):
     pass
+
+
+def _transport_error(error: Exception) -> bool:
+    """Whether error is a lost connection to the CLI, which a new session repairs. The SDK
+    raises a CLI that died mid-stream, and a control request it never answered, as Exception
+    itself, so that exact class counts and no subclass of it does."""
+    return isinstance(error, (CLIConnectionError, ProcessError, TurnStalled)) or type(error) is Exception
 
 
 # What the platform reads this agent's health from, see progress.py. A turn silent for longer
@@ -580,8 +589,10 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
             resets_at, rotated = await _run_one_session(
                 setup, model, resume_id, started_at, stop_flag, initial_prompt, reset_backoff,
             )
-        except Exception:
-            log.exception("session ended with an unexpected error — will retry after backoff")
+        except Exception as e:
+            if not _transport_error(e):
+                raise
+            log.warning("session lost its connection to the CLI (%s): reconnecting after backoff", e)
             resets_at, rotated = None, False
         if rotated or core.stop_reason(setup, started_at, stop_flag):
             continue

@@ -159,9 +159,9 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
             resumed.append(resume_id)
             if len(resumed) == 1:
                 run._save_resume_id(setup, "s-2")
-                raise ConnectionError("dropped")
+                raise run.ProcessError("the CLI exited", exit_code=1)
             if len(resumed) == 2:
-                raise ConnectionError("dropped")
+                raise Exception("the SDK's own word for a CLI that died mid-stream")
             on_good_turn()
             if len(resumed) == 4:
                 stop_flag[0] = True
@@ -177,6 +177,16 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(run._run(setup, "m"), timeout=5)
         self.assertEqual(resumed, [None, "s-2", "s-2", "s-2"])
         self.assertEqual(sleeps, [30, 60, 30])
+
+    # A bug in the harness once read as a flaky connection and was retried for the whole run.
+    async def test_an_error_that_is_no_lost_connection_ends_the_process(self):
+        async def session(*_):
+            raise KeyError("session_id")
+
+        with mock.patch.object(run, "_run_one_session", session), \
+                mock.patch.object(run.core, "install_signal_handler", lambda: [False]), \
+                self.assertRaises(KeyError):
+            await asyncio.wait_for(run._run(_setup(), "m"), timeout=5)
 
     def test_a_handoff_opens_the_next_session_only_while_no_session_id_is_saved(self):
         setup = _setup()
