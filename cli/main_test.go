@@ -901,3 +901,20 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q, requests %+v", code, stderr.String(), *got)
 	}
 }
+
+// A tunnel in front of the platform answered 530 with a whole HTML page, which hl printed into
+// the agent's context on every call.
+func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
+	for status, body := range map[int]string{530: "<!DOCTYPE html>\n<html><head><title>Cloudflare Tunnel error</title></head>\n<body>" + strings.Repeat("<p>x</p>\n", 500) + "</body></html>", 502: "error code: 502"} {
+		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}))
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"job", "status", "job-1"}, &stdout, &stderr)
+		want := fmt.Sprintf("hl: GET /experiments/job-1 -> HTTP %d: the platform could not be reached and something in front of it answered. Nothing in your request caused this: run the same command again later\n", status)
+		if code != 1 || stdout.Len() != 0 || stderr.String() != want {
+			t.Errorf("HTTP %d: exit %d, stdout %q, stderr %q, want %q", status, code, stdout.String(), stderr.String(), want)
+		}
+	}
+}

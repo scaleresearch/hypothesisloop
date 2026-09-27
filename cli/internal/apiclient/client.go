@@ -32,6 +32,10 @@ type HTTPError struct {
 	Body         string
 }
 
+// Unreachable is the Body of an answer that is no JSON, which the platform never sends: a proxy
+// in front of it answered in its place, often with a whole HTML page.
+const Unreachable = "the platform could not be reached and something in front of it answered. Nothing in your request caused this: run the same command again later"
+
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s -> HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
@@ -77,7 +81,11 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 		return nil, fmt.Errorf("%s %s: reading response: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		body := strings.TrimSpace(string(data))
+		if !json.Valid(data) {
+			body = Unreachable
+		}
+		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: body}
 	}
 	if out == nil || len(data) == 0 {
 		return resp.Header, nil
