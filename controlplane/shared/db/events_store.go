@@ -105,8 +105,8 @@ type EventKindDoc struct {
 var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED",
 		Description: "Your job moved. detail carries why, when the platform knows: the reason a job was evicted, rejected or requeued, or how a FAILED job's process ended (container_failed: command exited with code 1: the last line it said), which a FAILED job always has. The queue reason is experiment.blocked."},
-	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
-		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
+	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
+		Description: "Why a job is still waiting. detail is the sentence that goes with the code (not_admitted_message), empty where there is none. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
 		Description: "A grant or a stage move landed. detail is its guaranteed and burst parts; what is used of it comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
@@ -559,7 +559,8 @@ WHERE platform_experiment_id = $1
 		events = append(events, answered(Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
 			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}))
 		if notAdmitted != "" && notAdmitted != domain.NotAdmittedAwaitingAdmission && notAdmitted != domain.NotAdmittedSummaryGate {
-			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: notAdmitted,
+			reason, message := domain.SplitQueueReason(notAdmitted)
+			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: reason, Detail: message,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
 		}
 		// An advisory to cancel a job that has ended has nothing left to advise.

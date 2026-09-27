@@ -550,7 +550,12 @@ func (l *Loop) tick(ctx context.Context) error {
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
-				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, shortage)
+				claimed, cerr := resolveCache.loadClaimed(ctx)
+				if cerr != nil {
+					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list the jobs that hold capacity: %w", cerr))
+					continue
+				}
+				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -679,7 +684,12 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
 			}
 			if reason == "" {
-				reason = notAdmittedReasonFor(fitAtTickStart, domain.Fits(bAvail[cluster], fp), shortage)
+				claimed, cerr := resolveCache.loadClaimed(ctx)
+				if cerr != nil {
+					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list the jobs that hold capacity: %w", cerr))
+					continue
+				}
+				reason = notAdmittedReasonFor(fitAtTickStart, domain.Fits(bAvail[cluster], fp), shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -716,34 +726,85 @@ func (l *Loop) skipExperiment(errs *[]error, exp *domain.Experiment, err error) 
 	*errs = append(*errs, fmt.Errorf("experiment %s: %w", exp.ID, err))
 }
 
-// notAdmittedReasonFor names why a queued job was skipped. fitAtTickStart is the whole
-// discriminator: outranked means the job *would* have been admitted against the capacity this
-// tick started with and lost it to jobs earlier in sort order, so waiting is the right response.
-// It used to be inferred from "some dimension of the footprint shrank this tick", which is true
-// of every skipped job on any busy cluster — a request oversized for the hardware was told it
-// had been outranked, and waiting for the queue to drain would never admit it.
+// notAdmittedReasonFor names why a queued job was skipped, as "code: message". fitAtTickStart is
+// the whole discriminator: outranked means the job *would* have been admitted against the
+// capacity this tick started with and lost it to jobs earlier in sort order, so waiting is the
+// right response. A request oversized for the hardware is never told it was outranked.
 //
 // scalarFits is the case waiting on the cluster total cannot explain: the total has room and no
-// arrangement of the job's nodes over the cluster's nodes holds it.
-func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footprint) string {
+// arrangement of the job's nodes over the cluster's nodes holds it. cluster is the one the job
+// was judged on, "" when none could be picked, and held the jobs that hold there what it is
+// short of.
+func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footprint, cluster string, held holders) string {
 	if fitAtTickStart {
-		return domain.NotAdmittedOutranked
+		return domain.NotAdmittedOutranked + ": it fit when this pass began, and jobs ahead of it in the queue took the room"
 	}
-	if scalarFits {
-		reason := domain.NotAdmittedCapacityUnavailable + ": the cluster total has room, no node layout holds the job"
-		if len(shortage) > 0 {
-			reason += "; short on its nodes " + footprintStr(shortage)
+	short := describeFootprint(shortage)
+	switch {
+	case cluster == "" && short == "":
+		return domain.NotAdmittedCapacityUnavailable + ": no cluster that runs it has room for it now"
+	case cluster == "":
+		return domain.NotAdmittedCapacityUnavailable + ": no cluster that runs it has room for it now: it is short of " + short
+	case scalarFits && short == "":
+		return fmt.Sprintf("%s: cluster %s has room for it in total and no node of it holds the job", domain.NotAdmittedCapacityUnavailable, cluster)
+	case scalarFits:
+		return fmt.Sprintf("%s: cluster %s has room for it in total and no node of it holds the job: the node nearest to holding it is short of %s", domain.NotAdmittedCapacityUnavailable, cluster, short)
+	case short == "":
+		return fmt.Sprintf("%s: cluster %s has no room for it now", domain.NotAdmittedCapacityUnavailable, cluster)
+	}
+	return fmt.Sprintf("%s: cluster %s is short of %s, %s", domain.NotAdmittedCapacityUnavailable, cluster, short, held)
+}
+
+// holders counts the jobs that hold, on one cluster, what a queued job is short of there: those
+// of the queued job's own platform experiment and those of any other. Another platform
+// experiment may be another org's, so it is counted and never named.
+type holders struct {
+	own, others int
+}
+
+func (h holders) String() string {
+	jobs := func(n int) string {
+		if n == 1 {
+			return "1 job"
 		}
-		return reason
+		return fmt.Sprintf("%d jobs", n)
 	}
-	// The shortfall vector is otherwise only visible in the scheduler's own logs (see the
-	// "guaranteed job needs preemption" log a few lines above this call site) -- a submitter has
-	// no other way to tell "your request is oversized for this cluster" from "the cluster is
-	// just busy right now", and no way to self-diagnose which resource to shrink.
-	if len(shortage) > 0 {
-		return domain.NotAdmittedCapacityUnavailable + ": short " + footprintStr(shortage)
+	switch {
+	case h.own+h.others == 0:
+		return "which no job holds: the cluster's nodes do not have it free"
+	case h.others == 0:
+		return "held by " + jobs(h.own) + " of this platform experiment"
+	case h.own == 0:
+		return "held by " + jobs(h.others) + " of other platform experiments"
 	}
-	return domain.NotAdmittedCapacityUnavailable
+	return fmt.Sprintf("held by %s: %d of this platform experiment and %d of other platform experiments", jobs(h.own+h.others), h.own, h.others)
+}
+
+// holdersOf counts, among the jobs that have claimed capacity, those on cluster that hold some of
+// a dimension exp is short of.
+func holdersOf(claimed []*domain.Experiment, cluster string, shortage domain.Footprint, exp *domain.Experiment) holders {
+	var held holders
+	for _, other := range claimed {
+		if other.ClusterName != cluster || other.ID == exp.ID {
+			continue
+		}
+		footprint := other.Footprint()
+		holds := false
+		for key, short := range shortage {
+			if short > 0 && footprint[key] > 0 {
+				holds = true
+				break
+			}
+		}
+		switch {
+		case !holds:
+		case other.PlatformExperimentID == exp.PlatformExperimentID:
+			held.own++
+		default:
+			held.others++
+		}
+	}
+	return held
 }
 
 // exceedsInstalled reports whether exp asks for more than every cluster that may run it has
@@ -819,7 +880,7 @@ func exceedsInstalledReason(installed map[string]domain.Footprint, autoscalerEna
 }
 
 func exceedsClusterCapacityReason(exp *domain.Experiment) string {
-	return domain.NotAdmittedExceedsClusterCapacity + ": needs " + footprintStr(exp.Footprint()) + ", more than any connected cluster has installed"
+	return domain.NotAdmittedExceedsClusterCapacity + ": it asks for " + describeFootprint(exp.Footprint()) + ", more than any connected cluster that runs it has when idle"
 }
 
 // eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
@@ -942,7 +1003,7 @@ func noClusterForImageReason(runs, others []domain.Cluster, installed map[string
 	if len(serving) == 0 {
 		return ""
 	}
-	needs := footprintStr(exp.Footprint())
+	needs := describeFootprint(exp.Footprint())
 	switch {
 	case exp.Job.Image == "" && len(runs) == 0:
 		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)"

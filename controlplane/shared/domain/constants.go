@@ -142,6 +142,13 @@ func QueueReasonClearsByWaiting(reason string) bool {
 	return false
 }
 
+// SplitQueueReason splits a stored not_admitted_reason, "code" or "code: message", into the code
+// a client branches on and the sentence a person or an agent reads.
+func SplitQueueReason(stored string) (reason, message string) {
+	reason, message, _ = strings.Cut(stored, ": ")
+	return reason, message
+}
+
 // EvictionReason classifies why a job was terminated early.
 type EvictionReason string
 

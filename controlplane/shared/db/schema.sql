@@ -742,7 +742,10 @@ BEGIN
     -- (replayExperiments leaves out the same two).
     IF NEW.not_admitted_reason NOT IN ('awaiting_admission', 'summary_gate')
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
-        PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id, NEW.not_admitted_reason, '',
+        PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id,
+            split_part(NEW.not_admitted_reason, ': ', 1),
+            CASE WHEN position(': ' in NEW.not_admitted_reason) > 0
+                 THEN substr(NEW.not_admitted_reason, position(': ' in NEW.not_admitted_reason) + 2) ELSE '' END,
             NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     IF NEW.underperforming_metric IS NOT NULL

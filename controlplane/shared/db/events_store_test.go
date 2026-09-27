@@ -333,8 +333,24 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 		}
 	}
 	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'capacity_unavailable', updated_at = now() WHERE id = $1`, jobID)
-	if got := awaitEvent(t, events, EventExperimentBlocked, jobID).Value; got != "capacity_unavailable" {
-		t.Errorf("first live blocked event: got = %v, want = capacity_unavailable", got)
+	if got := awaitEvent(t, events, EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != "" {
+		t.Errorf("first live blocked event: got = %q with detail %q, want = capacity_unavailable and none", got.Value, got.Detail)
+	}
+
+	// A reason with more to say is its code and its sentence, live, replayed and read.
+	const sentence = "cluster box-b is short of 16 cores, held by 2 jobs: 1 of this platform experiment and 1 of other platform experiments"
+	before = cursorNow(t, pool)
+	exec(t, pool, `UPDATE experiments SET not_admitted_reason = $2, updated_at = now() WHERE id = $1`, jobID, "capacity_unavailable: "+sentence)
+	if got := awaitEvent(t, events, EventExperimentBlocked, jobID); got.Value != "capacity_unavailable" || got.Detail != sentence {
+		t.Errorf("live blocked event: got = %q with detail %q, want = the code and the sentence", got.Value, got.Detail)
+	}
+	replayed, err := store.Replay(context.Background(), filter, before)
+	if err != nil || len(replayed) != 1 || replayed[0].Value != "capacity_unavailable" || replayed[0].Detail != sentence {
+		t.Errorf("replayed blocked event: got = %+v, %v, want = the code and the sentence", replayed, err)
+	}
+	job, err := NewExperimentsStore(pool).GetExperiment(context.Background(), jobID)
+	if err != nil || job.NotAdmittedReason != "capacity_unavailable" || job.NotAdmittedMessage != sentence {
+		t.Errorf("the job read: got = %q, %q, %v, want = the code and the sentence apart", job.NotAdmittedReason, job.NotAdmittedMessage, err)
 	}
 }
 
@@ -790,7 +806,7 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
 		{Kind: EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable: short {accelerator:nvidia.com/gpu.product=nvidia-l40=1}", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"},
 		{Kind: EventQuotaChanged, Value: "4", AgentID: "agent-b"},
@@ -957,7 +973,7 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 		{Kind: EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
 		{Kind: EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
-		{Kind: EventExperimentBlocked, Value: "capacity_unavailable: short {accelerator:nvidia.com/gpu.product=nvidia-l40=1}", AgentID: "agent-a"},
+		{Kind: EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
 		{Kind: EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"},
 	}
 	for _, e := range admitted {

@@ -83,7 +83,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		exp.EvictionReason = *evictionReason
 	}
 	if notAdmittedReason != nil {
-		exp.NotAdmittedReason = *notAdmittedReason
+		exp.NotAdmittedReason, exp.NotAdmittedMessage = domain.SplitQueueReason(*notAdmittedReason)
 	}
 	return exp, nil
 }

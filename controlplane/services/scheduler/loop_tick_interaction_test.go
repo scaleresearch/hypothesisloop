@@ -332,7 +332,7 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 	if err := l.tick(context.Background()); err != nil {
 		t.Fatalf("tick() = %v, want nil", err)
 	}
-	if got := store.notAdmitted[exp.ID]; !strings.HasPrefix(got, domain.NotAdmittedCapacityUnavailable+": the cluster total has room, no node layout holds the job") {
+	if got := store.notAdmitted[exp.ID]; !strings.HasPrefix(got, domain.NotAdmittedCapacityUnavailable+": cluster cluster-a has room for it in total and no node of it holds the job") {
 		t.Fatalf("not_admitted_reason = %q, want it to say the layout is what does not fit", got)
 	}
 	if store.requeuePreemptedCall {
@@ -630,7 +630,7 @@ func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
 			if _, ok := store.submitted["burst"]; ok != tc.admitted {
 				t.Fatalf("burst job admitted = %v, want %v (reason %q)", ok, tc.admitted, store.notAdmitted["burst"])
 			}
-			if got := store.notAdmitted["burst"]; !tc.admitted && got != domain.NotAdmittedOutranked {
+			if got, _ := domain.SplitQueueReason(store.notAdmitted["burst"]); !tc.admitted && got != domain.NotAdmittedOutranked {
 				t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedOutranked)
 			}
 		})
@@ -669,7 +669,7 @@ func TestTickEvictsNothingForABurstJobHeldByAWaitingGuaranteedJob(t *testing.T) 
 	if len(evictor.evicted) != 0 {
 		t.Fatalf("evicted %v for a burst job that only waits behind a guaranteed one", evictor.evicted)
 	}
-	if got := store.notAdmitted["burst"]; got != domain.NotAdmittedOutranked {
+	if got, _ := domain.SplitQueueReason(store.notAdmitted["burst"]); got != domain.NotAdmittedOutranked {
 		t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedOutranked)
 	}
 }

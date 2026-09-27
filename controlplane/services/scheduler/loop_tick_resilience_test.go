@@ -277,3 +277,7 @@ func TestTickLogsASkippedClusterWithItsReasonAndContinues(t *testing.T) {
 		t.Fatalf("skipped cluster log = %v, want one entry carrying the inconsistency", entries)
 	}
 }
+
+func (*resilienceStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}

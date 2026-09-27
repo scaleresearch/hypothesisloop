@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -346,7 +347,7 @@ func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
 	if len(beforeBurst.Submitted) != 2 || beforeBurst.Resolved["max"].CPU != "4" || len(beforeBurst.NotAdmitted) != 2 || !near(beforeBurst.Reserved["fits"].Cost, 2) {
 		t.Errorf("the burst tick exercised too little to compare: %+v", beforeBurst)
 	}
-	if !reflect.DeepEqual(beforeGuaranteed.Requeued, []string{"victim"}) || beforeGuaranteed.NotAdmitted["behind"] != domain.NotAdmittedOutranked {
+	if !reflect.DeepEqual(beforeGuaranteed.Requeued, []string{"victim"}) || !strings.HasPrefix(beforeGuaranteed.NotAdmitted["behind"], domain.NotAdmittedOutranked+": ") {
 		t.Errorf("the guaranteed tick exercised too little to compare: %+v", beforeGuaranteed)
 	}
 }

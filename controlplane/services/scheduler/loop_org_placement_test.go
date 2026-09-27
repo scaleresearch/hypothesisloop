@@ -609,7 +609,7 @@ func TestTickNeverPlacesAJobOnAClusterItsOrgTurnedOff(t *testing.T) {
 			if cluster, admitted := store.submitted["a2"]; admitted {
 				t.Errorf("a2 was placed on %s with its org's only enabled cluster full", cluster)
 			}
-			if got := store.notAdmitted["a2"]; got != domain.NotAdmittedOutranked {
+			if got, _ := domain.SplitQueueReason(store.notAdmitted["a2"]); got != domain.NotAdmittedOutranked {
 				t.Errorf("a2 not_admitted_reason = %q, want %q: a cluster its org left on exists and a1 took its room", got, domain.NotAdmittedOutranked)
 			}
 			for _, id := range []string{"b1", "c1"} {
@@ -751,7 +751,7 @@ func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
 
 	got := exceedsInstalledReason(map[string]domain.Footprint{"rented": small, "metal": large}, nil, registered, exp)
 	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image (rented), and none has installed what it asks for, " +
-		footprintStr(exp.Footprint()) + ". A cluster that runs the image a job names has (metal): set job.image (hl capacity lists the images offered)"
+		"8 cores, 1 GiB memory, 1 GiB storage. A cluster that runs the image a job names has (metal): set job.image (hl capacity lists the images offered)"
 	if got != want {
 		t.Errorf("a cluster the image choice rules out has it installed:\n got %q\nwant %q", got, want)
 	}

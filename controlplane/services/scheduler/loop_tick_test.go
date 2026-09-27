@@ -57,23 +57,81 @@ func TestShortfallOnlyCountsDeficitDimensions(t *testing.T) {
 }
 
 func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
+	code := func(stored string) string {
+		reason, _ := domain.SplitQueueReason(stored)
+		return reason
+	}
 	// Never fit this cluster to begin with: waiting for the queue to drain cannot admit it, so
 	// telling the submitter it was outranked would point them at the wrong remedy.
-	if got := notAdmittedReasonFor(false, false, nil); got != domain.NotAdmittedCapacityUnavailable {
+	if got := notAdmittedReasonFor(false, false, nil, "c", holders{}); code(got) != domain.NotAdmittedCapacityUnavailable {
 		t.Fatalf("unchanged insufficient capacity reason = %q", got)
 	}
 	// Would have fit against the capacity the tick opened with; jobs ahead of it took that.
-	if got := notAdmittedReasonFor(true, false, nil); got != domain.NotAdmittedOutranked {
+	if got := notAdmittedReasonFor(true, false, nil, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
 		t.Fatalf("capacity consumed earlier in tick reason = %q", got)
-	}
-	shortage := domain.Footprint{cpuKey: 1000}
-	if got := notAdmittedReasonFor(false, false, shortage); got != domain.NotAdmittedCapacityUnavailable+": short "+footprintStr(shortage) {
-		t.Fatalf("detailed shortage reason = %q", got)
 	}
 	// A shortage vector alongside a fit at tick start still means outranked: the shortfall is
 	// measured against what is left now, which is the definition of having lost it.
-	if got := notAdmittedReasonFor(true, true, shortage); got != domain.NotAdmittedOutranked {
+	if got := notAdmittedReasonFor(true, true, domain.Footprint{cpuKey: 1000}, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
 		t.Fatalf("outranked with a live shortfall reason = %q", got)
+	}
+}
+
+// A queue reason read as "short {accelerator:hypothesisloop.dev/cpu=core=16,cpu:=16000,
+// memory:=66302314496,storage:=1967854743552}". It is a code and a sentence: the cluster, what
+// it is short of in units a person reads, and who holds that, counted and never named.
+func TestAWaitForCapacitySaysWhatIsShortAndWhoHoldsIt(t *testing.T) {
+	cores := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "hypothesisloop.dev/cpu=core"}
+	chip := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "tenstorrent.com/chiparch=blackhole"}
+	memory := domain.ResourceKey{Kind: domain.ResourceKindMemory}
+	storage := domain.ResourceKey{Kind: domain.ResourceKindStorage}
+	for name, tc := range map[string]struct {
+		scalarFits bool
+		shortage   domain.Footprint
+		cluster    string
+		held       holders
+		want       string
+	}{
+		"cores, held by both": {false, domain.Footprint{cores: 16, cpuKey: 16000, memory: 66302314496, storage: 1967854743552}, "box-b", holders{own: 1, others: 1},
+			"cluster box-b is short of 16 cores, 61.7 GiB memory, 1.8 TiB storage, held by 2 jobs: 1 of this platform experiment and 1 of other platform experiments"},
+		"a chip, held by another's": {false, domain.Footprint{chip: 1}, "box-b", holders{others: 1},
+			"cluster box-b is short of 1 x tenstorrent.com/chiparch=blackhole, held by 1 job of other platform experiments"},
+		"its own jobs": {false, domain.Footprint{cpuKey: 500}, "box-b", holders{own: 3},
+			"cluster box-b is short of 0.5 cores, held by 3 jobs of this platform experiment"},
+		"nobody holds it": {false, domain.Footprint{storage: 485902352384}, "box-b", holders{},
+			"cluster box-b is short of 452.5 GiB storage, which no job holds: the cluster's nodes do not have it free"},
+		"no node layout": {true, domain.Footprint{memory: 8 << 30}, "box-b", holders{own: 1},
+			"cluster box-b has room for it in total and no node of it holds the job: the node nearest to holding it is short of 8 GiB memory"},
+		"no cluster picked": {false, domain.Footprint{chip: 1, cpuKey: 8000}, "", holders{},
+			"no cluster that runs it has room for it now: it is short of 1 x tenstorrent.com/chiparch=blackhole, 8 cores"},
+	} {
+		reason, message := domain.SplitQueueReason(notAdmittedReasonFor(false, tc.scalarFits, tc.shortage, tc.cluster, tc.held))
+		if reason != domain.NotAdmittedCapacityUnavailable || message != tc.want {
+			t.Errorf("%s:\n got %s: %s\nwant %s: %s", name, reason, message, domain.NotAdmittedCapacityUnavailable, tc.want)
+		}
+	}
+}
+
+func TestHoldersCountTheJobsThatHoldWhatIsShortOnTheCluster(t *testing.T) {
+	job := func(id, pe, cluster, cpu string) *domain.Experiment {
+		return &domain.Experiment{ID: id, PlatformExperimentID: pe, ClusterName: cluster, Job: domain.JobSpec{CPU: cpu, Storage: "1Gi"}}
+	}
+	chipJob := job("chip", "pe-other", "box-b", "")
+	chipJob.AcceleratorType, chipJob.AcceleratorCount = "tenstorrent.com/chipArch=blackhole", 1
+	chipJob.Job.Storage = ""
+	claimed := []*domain.Experiment{
+		job("mine", "pe-1", "box-b", "16"),
+		job("theirs", "pe-2", "box-b", "16"),
+		job("elsewhere", "pe-2", "other", "16"),
+		job("waiting", "pe-1", "box-b", "16"),
+		chipJob,
+	}
+	waiting := claimed[3]
+	if got := holdersOf(claimed, "box-b", domain.Footprint{cpuKey: 16000}, waiting); got != (holders{own: 1, others: 1}) {
+		t.Errorf("short of cores: got = %+v, want one of its own experiment and one of another, itself and the job that holds no cores left out", got)
+	}
+	if got := holdersOf(claimed, "box-b", domain.Footprint{acceleratorKey("tenstorrent.com/chiparch=blackhole"): 1}, waiting); got != (holders{others: 1}) {
+		t.Errorf("short of a chip: got = %+v, want the one job that holds a chip", got)
 	}
 }
 
