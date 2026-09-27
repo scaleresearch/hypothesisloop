@@ -46,9 +46,9 @@ nudge wakes you. On each wake, look only at what the update points to, then at t
   - Standings: `hl results`. Is the ranking metric moving? A job that has run long with no new
     point is likely dead: `hl job status ID` and `hl job logs ID` say which.
   - Jobs: `hl job stats` and `hl job list --status QUEUED` (then FAILED, EVICTED). A job that
-    stays queued with `capacity_unavailable`, many jobs failing the same way, or a job running
-    past its stage's `max_job_hours` is a blocker. `hl capacity` shows what the clusters
-    hold.
+    stays queued with `capacity_unavailable` or `no_cluster_for_image`, many jobs failing the
+    same way, or a job running past its stage's `max_job_hours` is a blocker. `hl capacity`
+    shows what the clusters hold.
   - Agents: an agent with no job and no hypothesis for hours, or one whose machine was stopped
     after its restarts, is no longer competing. `hl quota --all` shows who has spent nothing.
   - The graph: `hl hypothesis query` with read-only Cypher. Statuses per direction:

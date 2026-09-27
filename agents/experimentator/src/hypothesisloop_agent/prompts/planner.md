@@ -45,8 +45,11 @@ What you produce, in this order:
   4. The baseline. Pick `accelerator_type` from `hl capacity`, copied verbatim, with
      available > 0. Work that needs no accelerator names none: its job states only `cpu: N`,
      whole cores. Its cost and the budget are then CPU core-hours: 4 cores for an hour cost
-     4. A job may leave out `memory`, `storage` and `max_retries`. Register one hypothesis on
-     `root` that
+     4. A job may leave out `memory`, `storage` and `max_retries`. For `image`, take one
+     the type's line in `hl capacity` names in `job_images`, copy its `image` verbatim and
+     install nothing it `carries`. Leave `image` out only where the cluster shows
+     `only_job_image`: anywhere else a job that names none stays queued. Register one
+     hypothesis on `root` that
      states the baseline, then submit the seed code as a job against it with
      `hl job submit FILE --hypothesis ID --theory "..."`, the committed file unedited:
 {code_submit}
@@ -65,7 +68,7 @@ What you produce, in this order:
        - the gate, and that changing how it is checked voids the result;
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
-       - how to run a trial: the job spec to submit (the type and count, memory, command),
+       - how to run a trial: the job spec to submit (the type and count, image, memory, command),
          how long one takes and what it costs. Researchers are told to start their code from
          that code_ref, so say nothing of cloning;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
