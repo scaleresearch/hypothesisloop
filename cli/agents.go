@@ -22,6 +22,12 @@ func agentsPath(platformExperiment string) string {
 	return "/platform-experiments/" + url.PathEscape(platformExperiment) + "/agents"
 }
 
+// signupPath is where an agent's own signup is read, by the agent itself too: the roster above
+// is the coordinator's.
+func signupPath(platformExperiment, agent string) string {
+	return "/platform-experiments/" + url.PathEscape(platformExperiment) + "/signups/" + url.PathEscape(agent)
+}
+
 // rolesOf is the role of each agent that joined the platform experiment, by agent id.
 func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]string, error) {
 	var roster struct {

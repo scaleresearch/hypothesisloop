@@ -876,25 +876,13 @@ with the reason when there is nothing to start from (no baseline is declared yet
 	if err := c.Do("GET", "/hypotheses/"+url.PathEscape(id)+"?limit=1", nil, &h); err != nil {
 		return fail(stderr, err)
 	}
-	var roster struct {
-		Agents []struct {
-			ID   string `json:"agent_id"`
-			Name string `json:"name"`
-		} `json:"agents"`
+	var signup struct {
+		Name string `json:"name"`
 	}
-	if err := c.Do("GET", agentsPath(h.PlatformExperiment), nil, &roster); err != nil {
+	if err := c.Do("GET", signupPath(h.PlatformExperiment, *agent), nil, &signup); err != nil {
 		return fail(stderr, err)
 	}
-	name := ""
-	for _, signup := range roster.Agents {
-		if signup.ID == *agent {
-			name = signup.Name
-		}
-	}
-	if name == "" {
-		return fail(stderr, fmt.Errorf("hypothesis checkout: agent %s is none of platform experiment %s, which hypothesis %s belongs to", *agent, h.PlatformExperiment, h.ID))
-	}
-	branch, err := implementationBranch(h.PlatformExperiment, name, h.Text, h.ID)
+	branch, err := implementationBranch(h.PlatformExperiment, signup.Name, h.Text, h.ID)
 	if err != nil {
 		return fail(stderr, fmt.Errorf("hypothesis checkout: %w", err))
 	}

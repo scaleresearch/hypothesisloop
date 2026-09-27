@@ -28,16 +28,18 @@ func TestAnImplementationBranchIsNamedByItsAgentAndItsHypothesis(t *testing.T) {
 const checkoutHypothesis = "0198c2d4-aaaa-7bbb-8ccc-000000a1b2c3"
 const checkoutBranchName = "hl/pe-1/researcher-1/fp16-at-batch-32-a1b2c3"
 
-// checkoutServer answers the reads hl hypothesis checkout makes: the hypothesis with baseRef,
-// the roster naming ag-1 Researcher 1, and job-other with otherRef.
+// checkoutServer answers the reads hl hypothesis checkout makes as agent ag-1 of pe-1 behind the
+// platform's own check of what an agent's token may call: the hypothesis with baseRef, the
+// agent's signup naming it Researcher 1, and job-other with otherRef.
 func checkoutServer(t *testing.T, baseRef, otherRef string) {
 	t.Helper()
-	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+	token := derivedToken("agent:pe-1/ag-1")
+	setAPIURL(t, withServer(t, asThePlatformAdmits(t, token, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/hypotheses/" + checkoutHypothesis:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": checkoutHypothesis, "platform_experiment_id": "pe-1", "text": "FP16 at batch 32", "base_ref": baseRef})
-		case "/platform-experiments/pe-1/agents":
-			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]string{{"agent_id": "ag-2", "name": "Researcher 2"}, {"agent_id": "ag-1", "name": "Researcher 1"}}})
+		case "/platform-experiments/pe-1/signups/ag-1":
+			_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": "ag-1", "name": "Researcher 1"})
 		case "/experiments/job-other":
 			_ = json.NewEncoder(w).Encode(map[string]string{"platform_experiment_id": "pe-1", "code_ref": otherRef})
 		case "/experiments/job-elsewhere":
@@ -46,12 +48,13 @@ func checkoutServer(t *testing.T, baseRef, otherRef string) {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
+	})))
+	t.Setenv("HL_TOKEN", token)
 }
 
 func checkout(args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
-	code := run(append([]string{"hypothesis", "checkout", "--agent", "ag-1"}, args...), &stdout, &stderr)
+	code := run(append([]string{"hypothesis", "checkout"}, args...), &stdout, &stderr)
 	return code, strings.TrimSpace(stdout.String()), stderr.String()
 }
 
