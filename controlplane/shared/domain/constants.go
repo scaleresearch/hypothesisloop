@@ -293,7 +293,7 @@ const (
 
 // failureCauseDetailRunes bounds the runtime's message in a failure cause: the cause is stored on
 // the job and travels in every update about it.
-const failureCauseDetailRunes = 200
+const failureCauseDetailRunes = 400
 
 // FailureCause is the reason a job that failed is stored and announced with, in the "code:
 // detail" shape of an eviction reason: how the runtime says its process ended. Empty when the
