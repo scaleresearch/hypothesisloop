@@ -306,8 +306,8 @@ func draftWithPlanner() *draftStore {
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		baseline: &Baseline{
-			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc"},
-			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
+			Job:     &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc", EstimatedDurationHours: 0.3},
+			Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, ObservedHours: 0.2, Reachable: map[string]bool{"rtx-4090": true},
 		},
 	}
 }
@@ -546,7 +546,11 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 		"a metric nothing reports":        {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
 		"a gate the baseline fails":       {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		"a type nobody has now":           {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
-		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
+		// A spec estimating 0.1 hours for a trial that ran 0.046 held twice what each job spent,
+		// and one job at a time fit a researcher's first stage.
+		"an estimate over twice the run": {nil, func(b *Baseline) { b.Job.EstimatedDurationHours = 0.41 }, "estimate_far_from_baseline"},
+		"an estimate under the run":      {nil, func(b *Baseline) { b.Job.EstimatedDurationHours = 0.19 }, "estimate_far_from_baseline"},
+		"a budget below one run apiece":  {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
 	} {
 		store := draftWithPlanner()
 		c.change(store.baseline)

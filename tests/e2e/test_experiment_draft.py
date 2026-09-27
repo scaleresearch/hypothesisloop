@@ -76,7 +76,9 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert (early.status_code, early.json()["reason"]) == (409, "invalid_transition"), early.text
 
         # A proposal rests on a baseline the platform saw: none, then one still running.
-        job = planner.submit_job(pe_id, planner_id, hours=0.02, hyp_text="the baseline: the sample classifier as it is")
+        # The sample job runs a minute: a proposal is refused when its baseline's estimate is under
+        # the hours it ran or over twice them.
+        job = planner.submit_job(pe_id, planner_id, hours=0.03, hyp_text="the baseline: the sample classifier as it is")
         # The type the proposal sizes its jobs for is the one the baseline runs on, which the
         # platform reads from the job: a body that states one is refused.
         on, code_ref = api.experiment(job)["accelerator_type"], api.experiment(job)["code_ref"]
