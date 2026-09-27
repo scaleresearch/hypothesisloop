@@ -40,6 +40,9 @@ export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
 # lives in localdev/lib/auth.sh and reaches compose, the scripts and the tests from here.
 export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
 REGISTRY_TLS_VERIFY ?= false
+# Run before every push. A registry whose login expires (infra/Makefile's publish) logs in here; the
+# dev registry takes none.
+REGISTRY_LOGIN ?= true
 # The platform every image is built for: the container engine's own unless set (linux/amd64 for
 # nodes of another architecture). It is always stated to the build. Left unstated, a base image
 # the engine already holds for another platform is used as it is, and the image built on it
@@ -332,6 +335,7 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 		echo "==> building hypothesisloop-$$name:$(TAG)"; \
 		podman build --platform $(IMAGE_PLATFORM) -f "$$dockerfile" -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$$ctx" || exit 1; \
 		podman tag "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" "$(REGISTRY)/hypothesisloop-$$name:latest"; \
+		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:latest" || exit 1; \
 	done
@@ -349,6 +353,7 @@ job-images: check-tag
 		name="$${entry%%=*}"; base="$${entry#*=}"; \
 		echo "==> building hypothesisloop-$$name:$(TAG) from $$base"; \
 		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 	done
 
@@ -359,6 +364,7 @@ job-images: check-tag
 chart-push: check-tag
 	@package="$$(mktemp -d)" && trap 'rm -rf "$$package"' EXIT && \
 	  helm package runtime/k8s/infra/chart --version "0.1.0+$(TAG)" --app-version "$(TAG)" --destination "$$package" >/dev/null && \
+	  $(REGISTRY_LOGIN) && \
 	  helm push "$$package"/hypothesisloop-cluster-agent-*.tgz "oci://$(REGISTRY)/charts" $(if $(filter false,$(REGISTRY_TLS_VERIFY)),--plain-http)
 
 # The UI image is no part of `images`: nothing the local stack runs uses it (local development
@@ -375,6 +381,7 @@ locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$
 	podman build --platform $(IMAGE_PLATFORM) $(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)="$($(arg))") \
 		-f controlplane/build/Dockerfile.ui -t "$(REGISTRY)/hypothesisloop-ui:$(TAG)" controlplane/ui
 	podman tag "$(REGISTRY)/hypothesisloop-ui:$(TAG)" "$(REGISTRY)/hypothesisloop-ui:latest"
+	$(REGISTRY_LOGIN)
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:$(TAG)"
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:latest"
 	$(MAKE) prune-images TAGS="$(TAG)"
