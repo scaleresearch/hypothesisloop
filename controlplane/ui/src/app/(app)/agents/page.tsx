@@ -7,7 +7,7 @@ import { TextLink } from '@/components/ui/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import {
   ApiError, fetchAgentQuota, fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage,
-  fetchExperimentStats, fetchPlatformExperimentAgents, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
+  fetchExperimentStats, fetchPlatformExperimentQuotas, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
 } from '@/lib/api'
 import type { Draft } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types'
@@ -115,9 +115,11 @@ function AgentsPageContent() {
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
-  const { data: roster } = useSWR(
-    experimentFilter ? ['pe-agents', experimentFilter] : null,
-    () => fetchPlatformExperimentAgents(experimentFilter),
+  // What the platform allocated each agent of the selected experiment.
+  const { data: quotas } = useSWR(
+    experimentFilter ? ['pe-quotas', experimentFilter] : null,
+    () => fetchPlatformExperimentQuotas(experimentFilter),
+    { refreshInterval: 30_000 },
   )
 
   // What each agent did in the selected experiment: its jobs, its best result and standing, and
@@ -138,7 +140,7 @@ function AgentsPageContent() {
     { refreshInterval: 15_000 },
   )
   const ranking = results?.metrics[0]
-  const colSpan = experimentFilter ? 7 : 4
+  const colSpan = experimentFilter ? 8 : 4
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'performance_score', desc: true }])
   const agentColumns = useMemo(() => [
@@ -155,12 +157,6 @@ function AgentsPageContent() {
     getSortedRowModel: getSortedRowModel(),
   })
   const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
-
-  // The budget is shared by every agent but the baseline's and the planner.
-  const sharing = roster?.filter(a => a.role !== 'baseline' && a.role !== 'planner').length ?? 0
-  const share = selectedPE && sharing > 0
-    ? `In ${selectedPE.name} that share is ${formatAccH(selectedPE.budget_accelerator_hours / sharing)} ${unitOf(selectedPE)}: ${formatAccH(selectedPE.budget_accelerator_hours)} among ${sharing} ${sharing === 1 ? 'agent' : 'agents'}. `
-    : ''
 
   return (
     <div>
@@ -184,8 +180,8 @@ function AgentsPageContent() {
           />
         </FormField>
         <p className="max-w-[860px] text-xs text-muted">
-          An experiment&apos;s budget is split equally among its agents when it starts, the baseline agent apart. {share}An agent that placed in the
-          top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
+          What an experiment&apos;s baseline leaves of its budget is split equally among its agents when it starts, the baseline agent apart,
+          and each stage releases its part of it. An agent that placed in the top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
           twice that amount as burst compute, which can be preempted.
         </p>
       </div>
@@ -208,6 +204,7 @@ function AgentsPageContent() {
                 ))}
                 {experimentFilter && (
                   <>
+                    <th className="text-right">Share{selectedPE ? `, ${unitOf(selectedPE)}` : ''}</th>
                     <th className="text-right">Best {ranking?.metric ?? 'metric'}</th>
                     <th>Jobs</th>
                     <th>Summaries filed</th>
@@ -228,6 +225,7 @@ function AgentsPageContent() {
               ) : sortedAgents.map(a => {
                 const isExpanded = expandedAgent === a.id
                 const standing = ranking?.standings.find(st => st.agent_id === a.id)
+                const quota = quotas?.find(q => q.agent_id === a.id)
                 const jobs = jobStats?.groups?.[a.id]
                 const completed = jobs?.by_status.COMPLETED ?? 0
                 const due = summariesDue?.groups?.[a.id]?.total ?? 0
@@ -248,6 +246,9 @@ function AgentsPageContent() {
                       <td className={num}>{a.performance_score.toFixed(3)}</td>
                       {experimentFilter && (
                         <>
+                          <td className={num} title="Its part of the budget released so far">
+                            {quota ? formatAccH(quota.share_accelerator_hours) : <span className="text-subtle">—</span>}
+                          </td>
                           <td className={num}>
                             {standing?.experiment_id ? (
                               <TextLink href={`/jobs/${standing.experiment_id}`} onClick={e => e.stopPropagation()}>
