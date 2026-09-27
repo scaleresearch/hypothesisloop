@@ -64,6 +64,8 @@ type Controller struct {
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
 	minSilenceWindow      time.Duration
+	// startTimeout is how long a job that ran may read pending with no sign of life.
+	startTimeout time.Duration
 	// clusterSilenceCeiling bounds how long a job may be held by a cluster that has stopped
 	// pushing status snapshots entirely before it is evicted as EvictionClusterUnreachable.
 	// A policy decision about how long an outage is tolerated, not a protocol timing value —
@@ -111,6 +113,14 @@ func (c *Controller) WithDefaultReportInterval(d time.Duration) *Controller {
 	return c
 }
 
+// WithStartTimeout sets how long a running job may read pending with no sign of life before it
+// is evicted as stuck_pending: the time a placed job is given to start (scheduler
+// start_timeout_seconds).
+func (c *Controller) WithStartTimeout(d time.Duration) *Controller {
+	c.startTimeout = d
+	return c
+}
+
 // WithMinSilenceWindow floors the silence window (silenceMultiplier * report interval) —
 // see MinSilenceWindowSeconds's doc comment in shared/config for why.
 func (c *Controller) WithMinSilenceWindow(d time.Duration) *Controller {
@@ -149,7 +159,7 @@ func (c *Controller) Start(ctx context.Context) error {
 		return fmt.Errorf("controller: metrics DB URL is required")
 	}
 	if c.reconcileInterval <= 0 ||
-		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 ||
+		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 || c.startTimeout <= 0 ||
 		c.silenceMultiplier <= 0 || c.clusterSilenceCeiling <= 0 {
 		return fmt.Errorf("controller: all timing and multiplier values must be explicitly valid")
 	}

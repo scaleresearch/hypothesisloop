@@ -86,10 +86,24 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// samples still inside the window below.
 		return true, domain.EvictionWorkloadGone, nil
 	}
+	if phase == workload.JobPhasePending {
+		// Pending/recreating — quiet is expected here, not evidence of a hung process, for as
+		// long as a placed job is given to start. A job that ran and has read pending with no
+		// sign of life for longer than that is not coming back: its machine is held, and on
+		// rented compute paid for, by a workload that does not run. The job watcher bounds a
+		// job that never ran; nothing else bounds this one.
+		alive, err := c.isAlive(ctx, exp.ID, c.startTimeout)
+		if err != nil {
+			return false, "", fmt.Errorf("silence liveness of a pending job: %w", err)
+		}
+		if !alive {
+			return true, domain.EvictionStuckPending, nil
+		}
+		return false, "", nil
+	}
 	if phase != workload.JobPhaseRunning {
-		// Pending/recreating — quiet is expected here, not evidence of a hung process. Let the
-		// reschedule finish; next tick re-checks. (Succeeded/Failed are terminalized by the
-		// job watcher's own faster poll, not here — one path per outcome.)
+		// Succeeded/Failed are terminalized by the job watcher's own faster poll, not here:
+		// one path per outcome.
 		return false, "", nil
 	}
 

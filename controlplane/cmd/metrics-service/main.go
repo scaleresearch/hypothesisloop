@@ -110,6 +110,7 @@ func newControllerServer(authenticator *auth.Authenticator, store *db.Store, peF
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
 		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second).
 		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
+		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds) * time.Second).
 		WithClusterSilenceCeiling(time.Duration(pcfg.Scheduler.ClusterStatusSilenceCeilingSeconds) * time.Second).
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself

@@ -27,9 +27,13 @@ type fakeObserved struct {
 	firstObserved time.Time
 	observedOK    bool
 
-	alive      bool
-	phase      workload.JobPhase
-	phaseFound bool
+	alive bool
+
+	// lastSeenAgo, when set, is how long ago the job last showed life, and decides IsAlive.
+
+	lastSeenAgo time.Duration
+	phase       workload.JobPhase
+	phaseFound  bool
 
 	presence metricsdb.SnapshotPresence
 
@@ -66,7 +70,10 @@ func (f fakeObserved) fail(method string) error {
 	return nil
 }
 
-func (f fakeObserved) IsAlive(_ context.Context, _ string, _ time.Duration) (bool, error) {
+func (f fakeObserved) IsAlive(_ context.Context, _ string, window time.Duration) (bool, error) {
+	if f.lastSeenAgo > 0 {
+		return f.lastSeenAgo <= window, f.fail("IsAlive")
+	}
 	return f.alive, f.fail("IsAlive")
 }
 

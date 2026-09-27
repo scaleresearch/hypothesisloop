@@ -22,6 +22,7 @@ func silenceController(observed ObservedState) *Controller {
 		silenceMultiplier:     3,
 		defaultReportInterval: 10 * time.Second,
 		minSilenceWindow:      10 * time.Second,
+		startTimeout:          30 * time.Minute,
 		clusterSilenceCeiling: 5 * time.Minute,
 		reconcileInterval:     5 * time.Second,
 	}
@@ -282,10 +283,17 @@ func TestCheckSilenceEvictsAWorkloadTheClusterConfirmsIsGone(t *testing.T) {
 func TestCheckSilenceSparesAJobThatIsNotYetRunning(t *testing.T) {
 	obs := liveJob()
 	obs.phase = workload.JobPhasePending
-	obs.alive = false
+	obs.lastSeenAgo = 2 * time.Minute
 
 	if evict, reason := silence(t, obs, declared); evict {
 		t.Fatalf("evicted as %q while the pod was Pending — quiet is expected mid-reschedule", reason)
+	}
+
+	// A job that ran and has read pending with no sign of life for longer than a placed job is
+	// given to start is not rescheduling: a rented machine sat like that for 18 minutes.
+	obs.lastSeenAgo = 31 * time.Minute
+	if evict, reason := silence(t, obs, declared); !evict || reason != domain.EvictionStuckPending {
+		t.Fatalf("pending and lifeless past the start timeout: evict = %v as %q, want stuck_pending", evict, reason)
 	}
 }
 
