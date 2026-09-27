@@ -862,7 +862,9 @@ a leading quote.
     - |
       what the goal left open and you decided
 
-The proposal is checked before it is stored, and a refusal names what to fix. One that passes is
+The proposal is checked before it is stored, and a refusal names what to fix: for a file that
+is no YAML the line and what is wrong there, which is all the checking the file needs. A
+refused proposal changes nothing, so fix the file and run propose again. One that passes is
 stored at once, replaces the one before, releases your machine and is what the person is asked
 to accept: send only the finished proposal, never one written to try the checks.`, stderr)
 	pe := experimentFlag(fs)

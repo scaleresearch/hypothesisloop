@@ -918,3 +918,22 @@ func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
 		}
 	}
 }
+
+// A planner had propose refuse its file, then tried to install a YAML parser to check the file
+// before proposing again: the help says a refusal changes nothing and propose is the check.
+func TestProposeSaysARefusedProposalChangesNothing(t *testing.T) {
+	requests := 0
+	setAPIURL(t, withServer(t, func(http.ResponseWriter, *http.Request) { requests++ }))
+	file := t.TempDir() + "/proposal.yaml"
+	if err := os.WriteFile(file, []byte("experiment:\n  name: a: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"platform-experiments", "propose", "--platform-experiment", "pe-1", file}, &stdout, &stderr); code != 2 || requests != 0 || !strings.Contains(stderr.String(), "line 2, column") {
+		t.Fatalf("a file that is no YAML: exit %d after %d requests, stderr %s, want 2, none sent and the line", code, requests, stderr.String())
+	}
+	stderr.Reset()
+	if run([]string{"platform-experiments", "propose", "-h"}, &stdout, &stderr); !strings.Contains(stderr.String(), "A\nrefused proposal changes nothing, so fix the file and run propose again.") {
+		t.Fatalf("the help does not say a refused proposal changes nothing:\n%s", stderr.String())
+	}
+}
