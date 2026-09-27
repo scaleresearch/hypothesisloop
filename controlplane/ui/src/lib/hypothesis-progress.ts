@@ -8,6 +8,7 @@ const TERMINAL: string[] = [
   ExperimentStatus.FAILED,
   ExperimentStatus.EVICTED,
   ExperimentStatus.REJECTED,
+  ExperimentStatus.CANCELLED,
 ]
 
 // Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until

@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useMemo, useState } from 'react'
-import { jobStatusLabel } from '@/lib/job-status'
 import { TextLink } from '@/components/ui/link'
 import useSWR from 'swr'
 import {
@@ -170,7 +169,7 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
         <div>
           <Eyebrow className="mb-1.5 block">Job</Eyebrow>
           <SearchableSelect
-            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${jobStatusLabel(j)} · ${agentName(j.agent_id)}` }))}
+            options={sorted.map(j => ({ value: j.id, label: `${j.id.slice(0, 8)}… · ${j.status} · ${agentName(j.agent_id)}` }))}
             value={selectedJob.id}
             onChange={v => { if (v) setJobId(v) }}
             placeholder="Search jobs…"
@@ -449,7 +448,7 @@ export function AgentJobsPanel({ projectId, platformExperimentId, agentId, track
         <InsetCard key={job.id}>
           <div className="mb-1 flex items-center justify-between text-2xs">
             <TextLink href={`/jobs/${job.id}`} className="font-mono font-semibold">{job.id.slice(0, 8)}…</TextLink>
-            <Badge status={job.status}>{jobStatusLabel(job)}</Badge>
+            <Badge status={job.status} />
           </div>
           <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />
         </InsetCard>

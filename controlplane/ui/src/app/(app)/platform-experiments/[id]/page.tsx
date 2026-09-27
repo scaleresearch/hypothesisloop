@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useState } from 'react'
-import { jobStatusLabel } from '@/lib/job-status'
 import { quotaShareAccH } from '@/lib/quota'
 import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly, ReadOnlyProvider, useRecordScope } from '@/lib/read-only'
@@ -232,7 +231,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const variedByHypothesis = variedEnvByHypothesis(jobRows)
 
   // Evicted jobs, broken down by eviction_reason — a platform experiment can evict for very
-  // different reasons (stuck on admission vs. explicitly cancelled vs. ran past a stage's job
+  // different reasons (stuck on admission vs. silent vs. ran past a stage's job
   // length cap), so a single opaque count hides whether evictions are a symptom of something
   // wrong versus routine stage cuts. Counted server-side over the whole experiment, not over
   // the page of jobs above it, and already grouped by code (a reason may carry a ': detail'
@@ -662,7 +661,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                       </td>
                       <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
-                        <Badge status={exp.status}>{jobStatusLabel(exp)}</Badge>
+                        <Badge status={exp.status} />
                         {exp.summary_due && <NoSummary className="ml-1.5" />}
                         {evictionText && (
                           <div className="mt-0.5 text-2xs text-subtle" title="eviction_reason">

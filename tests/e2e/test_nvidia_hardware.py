@@ -217,9 +217,9 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
 
     api.cancel_job(job3)
     eventually(
-        f"{job3} reaches EVICTED",
+        f"{job3} reaches CANCELLED",
         lambda: api.experiment(job3),
-        accept=lambda e: e["status"] == "EVICTED",
+        accept=lambda e: e["status"] == "CANCELLED",
         deadline=deadline,
     )
 

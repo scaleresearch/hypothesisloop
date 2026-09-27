@@ -168,26 +168,6 @@ const summaryGate = "summary_gate"
 
 const resultArrives = "the result arrives as an update with its metrics when you end your turn"
 
-// A cancelled job is stored as REJECTED when it never ran and EVICTED when it did, with this
-// eviction reason. Neither word says what happened, so hl prints its status as CANCELLED.
-// --status still takes the stored one.
-const (
-	cancelledReason = "cancelled"
-	cancelledStatus = "CANCELLED"
-)
-
-// cancelledHeadline is raw with the status of a cancelled job printed as CANCELLED.
-func cancelledHeadline(raw json.RawMessage) json.RawMessage {
-	var job struct {
-		Status string `json:"status"`
-		Reason string `json:"eviction_reason"`
-	}
-	if json.Unmarshal(raw, &job) != nil || job.Reason != cancelledReason {
-		return raw
-	}
-	return bytes.Replace(raw, []byte(`"status":"`+job.Status+`"`), []byte(`"status":"`+cancelledStatus+`"`), 1)
-}
-
 // progress reports whether a job can still change status, and whether an owed summary holds it.
 func progress(raw json.RawMessage) (unfinished, held bool) {
 	var job struct {
@@ -196,7 +176,7 @@ func progress(raw json.RawMessage) (unfinished, held bool) {
 	}
 	_ = json.Unmarshal(raw, &job)
 	switch job.Status {
-	case "COMPLETED", "FAILED", "EVICTED", "REJECTED":
+	case "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED":
 		return false, false
 	}
 	return true, job.Reason == summaryGate
@@ -318,9 +298,6 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 		if err := json.Unmarshal(raw, &briefs[i]); err != nil {
 			return nil, fmt.Errorf("response is not a job: %w", err)
 		}
-		if briefs[i].EvictionReason == cancelledReason {
-			briefs[i].Status = cancelledStatus
-		}
 		_ = json.Unmarshal(raw, &spec)
 		envs[i] = spec.Job.Env
 	}
@@ -355,7 +332,7 @@ for a job listed alone). hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
-	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED or REJECTED; a cancelled job is REJECTED or EVICTED here and prints as CANCELLED")
+	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
 	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
 	offset := fs.Int("offset", 0, "jobs to skip")
@@ -408,8 +385,8 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
-One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED or
-REJECTED, and CANCELLED for a job somebody cancelled), metrics, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
+One line per job: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED, EVICTED,
+REJECTED or CANCELLED), metrics, finished_at, summary, eviction_reason, phase_detail, and the spec. While QUEUED, not_admitted_reason says
 what the job waits for: awaiting_admission for the scheduler's first look at it, summary_gate
 for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
@@ -426,7 +403,7 @@ for a summary on each of your COMPLETED jobs (hl job list --needs-summary).`, st
 			code = fail(stderr, err)
 			continue
 		}
-		if err := printLine(stdout, cancelledHeadline(out), jobDrop...); err != nil {
+		if err := printLine(stdout, out, jobDrop...); err != nil {
 			return fail(stderr, err)
 		}
 		unfinished, gated := progress(out)
@@ -577,7 +554,7 @@ func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdo
 }
 
 func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a QUEUED or RUNNING job; its credits are refunded.", stderr)
+	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a QUEUED or RUNNING job and prints it, CANCELLED; its credits are refunded.", stderr)
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
 		return parseExit(err)
@@ -586,7 +563,7 @@ func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/cancel", map[string]any{}, &out); err != nil {
 		return fail(stderr, err)
 	}
-	if err := printLine(stdout, out); err != nil {
+	if err := printLine(stdout, out, jobDrop...); err != nil {
 		return fail(stderr, err)
 	}
 	return 0

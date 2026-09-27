@@ -256,7 +256,8 @@ func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID
 
 // DescribeJobs sets on each job what an answer says of it beyond its own row: its agent's name,
 // the agent's id when it has none, and whether its summary is due. It is one read however many
-// jobs are given.
+// jobs are given. Every job an operation answers with passes here, so Status becomes the
+// answered one (domain.AnsweredStatus) and a described job is good for answering only.
 func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error {
 	if len(jobs) == 0 {
 		return nil
@@ -266,6 +267,7 @@ func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Expe
 	for i, job := range jobs {
 		byID[job.ID], ids[i] = job, job.ID
 		job.AgentName = job.AgentID
+		job.Status = domain.AnsweredStatus(job.Status, job.EvictionReason)
 	}
 	rows, err := s.pool.pool.Query(ctx, `SELECT id,
 		COALESCE((SELECT NULLIF(a.name, '') FROM agents a WHERE a.id = experiments.agent_id), agent_id),

@@ -9,12 +9,12 @@ on one running stack, sharing the disconnect/verify setup:
      job keeps running independently (its workload metrics/node heartbeats are direct liveness
      signals and do not stop merely because cluster-agent's own capacity reporting is down).
   3. desired deletion converges after reconciliation was unavailable -- cancelling a job while
-     cluster-agent is disconnected must persist EVICTED in PostgreSQL immediately (the control
+     cluster-agent is disconnected must end it in PostgreSQL immediately, read as CANCELLED (the control
      plane decides; commands go one way only, per important.md), while the actual Kubernetes Job
      stays put until cluster-agent reconnects and reconciles it away.
   4. fault attribution -- none of the above is the agent's fault: attempt_count/infra_requeue_count
      must show zero retries spent across every job that lived through an outage, and
-     evictions_by_class must show a policy (not workload) eviction for the cancelled job.
+     evictions_by_class must show no workload eviction, and the cancelled job is no eviction at all.
 
 Ported 1:1 from tests/scenarios/connectivity-loss.sh. Disconnection is simulated by scaling the
 cluster-agent Deployment to 0 replicas (tests/support/cluster.py::disconnect_cluster_agent) -- the
@@ -253,8 +253,8 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
 
     api.cancel_job(delete_job)
     delete_status = api.experiment(delete_job)["status"]
-    assert delete_status == "EVICTED", (
-        f"cancelled job did not become EVICTED in PostgreSQL (status={delete_status})"
+    assert delete_status == "CANCELLED", (
+        f"cancelled job did not become CANCELLED in PostgreSQL (status={delete_status})"
     )
     assert job_resource_exists(delete_job), (
         "actual Job disappeared before cluster-agent reconnected -- deletion was pushed instead "
@@ -301,14 +301,13 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
             "cause was charged to it"
         )
 
-    # The cancelled job in phase 3 is EVICTED with reason `cancelled`, which is FaultPolicy: the
-    # platform decided and the job was fine. So this agent must have a policy eviction and no
-    # workload one -- nothing it submitted was ever its own fault in this scenario.
-    policy_n = api.eviction_class_count(pe_id, agent, "policy")
+    # The cancelled job in phase 3 is CANCELLED, which is counted as its own status and as no
+    # eviction. So this agent must have a cancelled job and no workload eviction -- nothing it
+    # submitted was ever its own fault in this scenario.
+    cancelled_n = api.experiment_stats(pe_id, agent)["by_status"].get("CANCELLED", 0)
     workload_n = api.eviction_class_count(pe_id, agent, "workload")
-    assert policy_n is not None and policy_n >= 1, (
-        f"evictions_by_class.policy is {policy_n!r} -- a cancellation is the platform's own "
-        "decision and must be reported as one"
+    assert cancelled_n >= 1, (
+        f"by_status.CANCELLED is {cancelled_n!r} -- the job cancelled in phase 3 is not counted as cancelled"
     )
     assert workload_n == 0, (
         f"evictions_by_class.workload is {workload_n!r}, expected 0 -- an outage the agent did "

@@ -38,7 +38,7 @@ from support.cluster import L40, H100, job_resource_absent, node_allocatable_gpu
 from support.wait import eventually
 
 ADMITTED_STATUSES = ("SUBMITTED", "RUNNING")
-TERMINAL_STATUSES = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
+TERMINAL_STATUSES = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
 
 
 @pytest.mark.exclusive("l40")

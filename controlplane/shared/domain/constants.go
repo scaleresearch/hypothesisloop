@@ -16,15 +16,28 @@ const (
 	StatusFailed    ExperimentStatus = "FAILED"
 	StatusEvicted   ExperimentStatus = "EVICTED"
 	StatusRejected  ExperimentStatus = "REJECTED"
+	// StatusCancelled is what a job somebody cancelled is answered as, and no row holds it: such
+	// a job is stored REJECTED when it never ran and EVICTED when it did, with EvictionCancelled
+	// as its reason. See AnsweredStatus.
+	StatusCancelled ExperimentStatus = "CANCELLED"
 )
 
-// ValidExperimentStatus reports whether s is one of the recognized statuses. Callers filtering on
-// a status validate here first: the column is a Postgres enum, so an unrecognized value otherwise
-// surfaces as a driver error and a 500 rather than the client mistake it is.
+// AnsweredStatus is the status the API answers for a job stored with this status and eviction
+// reason, on a job, in a count and as a filter. It is the one place a cancel is told apart.
+func AnsweredStatus(stored ExperimentStatus, evictionReason string) ExperimentStatus {
+	if EvictionReason(evictionReason).Code() == EvictionCancelled {
+		return StatusCancelled
+	}
+	return stored
+}
+
+// ValidExperimentStatus reports whether s is one of the statuses a job is answered with. Callers
+// filtering on a status validate here first, so an unrecognized value is the client mistake it is
+// and no driver error.
 func ValidExperimentStatus(s ExperimentStatus) bool {
 	switch s {
 	case StatusSubmitted, StatusQueued, StatusRunning,
-		StatusCompleted, StatusFailed, StatusEvicted, StatusRejected:
+		StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled:
 		return true
 	default:
 		return false
@@ -88,7 +101,7 @@ const (
 // or progress reporting can follow.
 func (s ExperimentStatus) IsTerminal() bool {
 	switch s {
-	case StatusCompleted, StatusFailed, StatusEvicted, StatusRejected:
+	case StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled:
 		return true
 	default:
 		return false

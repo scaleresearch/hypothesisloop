@@ -277,12 +277,12 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     api.cancel_job(job2)
 
     exp2 = eventually(
-        f"{job2} to reach EVICTED after cancel",
+        f"{job2} to reach CANCELLED after cancel",
         lambda: api.experiment(job2),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ("CANCELLED", "EVICTED", "COMPLETED", "FAILED"),
         deadline=deadline,
     )
-    assert exp2["status"] == "EVICTED", f"expected EVICTED after cancelling a RUNNING job, got {exp2['status']}"
+    assert exp2["status"] == "CANCELLED", f"expected CANCELLED after cancelling a RUNNING job, got {exp2['status']}"
 
     eventually(
         f"the {engine} container for {job2} is removed after cancel",

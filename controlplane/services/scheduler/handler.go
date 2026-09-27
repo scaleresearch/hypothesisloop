@@ -141,7 +141,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
 		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
 		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
-		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
+		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
 		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
@@ -283,7 +283,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
-		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED. " +
+		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED, and is CANCELLED once somebody cancelled the job, whether or not it ran. " +
 			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting, " +
 			"and metrics: its best and last value on each declared metric it reported, with metric the one on the first ranking metric.",
 	}, func(ctx context.Context, in *struct {
@@ -328,14 +328,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
-		Description: "Credits are refunded.",
+		Description: "Credits are refunded. Answers the job, whose status is CANCELLED from then on.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{ Body *domain.Experiment }, error) {
 		if err := access.OwnExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
@@ -345,13 +341,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 			return nil, auth.Internal(h.svc.logger, "cancel experiment", err, zap.String("id", in.ID))
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "cancelled"
-		return out, nil
+		exp, err := h.svc.GetExperiment(ctx, in.ID)
+		if err != nil {
+			return nil, auth.Internal(h.svc.logger, "cancel experiment", err, zap.String("id", in.ID))
+		}
+		if exp == nil {
+			return nil, huma.Error404NotFound("experiment not found")
+		}
+		return &struct{ Body *domain.Experiment }{Body: exp}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

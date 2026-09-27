@@ -1,6 +1,7 @@
 package db
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,5 +69,28 @@ func TestQualifyColumnsPrefixesEveryColumn(t *testing.T) {
 	}
 	if !strings.Contains(project, "tpe.id = e.platform_experiment_id") {
 		t.Errorf("the project column %q does not read through the aliased job", project)
+	}
+}
+
+func TestACancelledJobIsCountedAndFilteredAsCancelled(t *testing.T) {
+	stats := newExperimentStats()
+	for _, row := range [][2]string{{"EVICTED", "cancelled"}, {"REJECTED", "cancelled"}, {"EVICTED", "silent"}, {"REJECTED", ""}} {
+		tallyExperimentStats(stats, row[0], "burst", row[1], domain.TypeKindAccelerator, 1, 1)
+	}
+	if want := map[string]int{"CANCELLED": 2, "EVICTED": 1, "REJECTED": 1}; !reflect.DeepEqual(stats.ByStatus, want) {
+		t.Errorf("by status: got = %v, want = %v", stats.ByStatus, want)
+	}
+	if want := map[string]int{"silent": 1}; !reflect.DeepEqual(stats.EvictionsByReason, want) {
+		t.Errorf("evictions by reason: got = %v, want = %v", stats.EvictionsByReason, want)
+	}
+
+	clauses, args := experimentFilterClauses(domain.ExperimentFilter{Scope: domain.AllTenants, Status: domain.StatusCancelled})
+	if joined := strings.Join(clauses, " AND "); strings.Contains(joined, "status =") || !reflect.DeepEqual(args, []any{"cancelled"}) {
+		t.Errorf("status CANCELLED: got = %q %v, want the cancelled reason alone", joined, args)
+	}
+	clauses, args = experimentFilterClauses(domain.ExperimentFilter{Scope: domain.AllTenants, Status: domain.StatusEvicted, AgentID: "a", PlatformExperimentID: "pe-1"})
+	if joined := strings.Join(clauses, " AND "); !strings.Contains(joined, "status = $2 AND "+evictionReasonCode+" <> $3") ||
+		!reflect.DeepEqual(args, []any{"a", "EVICTED", "cancelled", "pe-1"}) || !strings.Contains(joined, "platform_experiment_id = $4") {
+		t.Errorf("status EVICTED: got = %q %v, want the stored status without the cancelled jobs", joined, args)
 	}
 }

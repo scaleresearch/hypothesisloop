@@ -11,6 +11,7 @@ export enum ExperimentStatus {
   FAILED = 'FAILED',
   EVICTED = 'EVICTED',
   REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
 }
 
 // AcceleratorType is an open, operator-defined identifier (see hypothesisloop.yaml's accelerator_types) — any

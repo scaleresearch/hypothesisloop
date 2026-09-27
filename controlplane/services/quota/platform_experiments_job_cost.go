@@ -48,7 +48,7 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 
 	out := &JobCost{
 		ExperimentID:      exp.ID,
-		Status:            string(exp.Status),
+		Status:            string(domain.AnsweredStatus(exp.Status, exp.EvictionReason)),
 		EstimatedCostAccH: exp.EstimatedCostAccH,
 		AcceleratorType:   string(exp.AcceleratorType),
 		AcceleratorCount:  exp.AcceleratorCount,

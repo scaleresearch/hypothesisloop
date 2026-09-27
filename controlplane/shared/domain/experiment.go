@@ -284,8 +284,10 @@ type ExperimentFilter struct {
 	AgentID              string
 	PlatformExperimentID string
 	HypothesisID         string
-	Status               ExperimentStatus
-	Since                time.Time
+	// Status is the status a job is answered with (AnsweredStatus): CANCELLED selects the
+	// cancelled jobs, and EVICTED and REJECTED leave them out.
+	Status ExperimentStatus
+	Since  time.Time
 	// Search matches against hypothesis/theory text, case-insensitively, substring
 	// match (mirrors PlatformExperimentsFilter.Search).
 	Search string

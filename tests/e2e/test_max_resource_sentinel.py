@@ -92,7 +92,7 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
     eventually(
         f"{max_job} to leave RUNNING after cancel",
         lambda: api.experiment(max_job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED"),
+        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"),
         deadline=deadline,
     )
 

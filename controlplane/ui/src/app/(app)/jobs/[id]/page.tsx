@@ -1,6 +1,5 @@
 'use client'
 
-import { jobStatusLabel } from '@/lib/job-status'
 import { CodeRef } from '@/components/code-bundle'
 import useSWR from 'swr'
 import { useRecordScope } from '@/lib/read-only'
@@ -104,7 +103,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
         title={
           <>
             <span className="line-clamp-3 min-w-0 text-lg font-semibold leading-snug" title={j.hypothesis}>{j.hypothesis}</span>
-            <Badge status={j.status ?? 'UNKNOWN'}>{jobStatusLabel(j)}</Badge>
+            <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
         description={

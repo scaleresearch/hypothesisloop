@@ -1,10 +1,9 @@
 """Job/platform-experiment termination semantics, ported 1:1 from tests/scenarios/job-lifecycle.sh:
   1. A valid job that can never be scheduled (known flavor, impossible physical count) fails
      closed -- stays QUEUED indefinitely, never debits guaranteed quota -- and cancelling it while
-     still QUEUED terminates it as REJECTED (not EVICTED: it was never admitted).
-  2. A RUNNING job that's cancelled is EVICTED (terminal, refunded) -- and stays EVICTED, unlike
-     preemption (see preemption-requeue.sh), confirming cancel-while-QUEUED and
-     cancel-while-RUNNING are genuinely different terminal outcomes of the same endpoint.
+     still QUEUED ends it as CANCELLED with its reservation returned.
+  2. A RUNNING job that's cancelled is CANCELLED too (terminal, refunded) -- and stays so, unlike
+     preemption (see preemption-requeue.sh).
   3. Closing a platform experiment is not just a status flip: controller.reconcileClosedExperiments
      (a self-healing sweep, not a synchronous side effect of the close call itself) evicts every
      still-RUNNING job under it with reason "experiment_closed" on its next reconcile
@@ -79,13 +78,13 @@ def test_cancel_while_queued_is_rejected_and_refunded(api, experiment, run_id, d
 
     api.cancel_job(stuck)
     final = eventually(
-        f"{stuck} to terminate as REJECTED",
+        f"{stuck} to terminate as CANCELLED",
         lambda: api.experiment(stuck),
-        accept=lambda e: e["status"] in ("EVICTED", "REJECTED", "FAILED"),
+        accept=lambda e: e["status"] in ("CANCELLED", "EVICTED", "REJECTED", "FAILED"),
         deadline=deadline,
     )
-    assert final["status"] == "REJECTED", (
-        f"cancelling a still-QUEUED job produced {final['status']}, expected REJECTED"
+    assert final["status"] == "CANCELLED", (
+        f"cancelling a still-QUEUED job produced {final['status']}, expected CANCELLED"
     )
 
     debit_after = api.quota_field(pe_id, agent, "used_guaranteed_acch") - quota_before
@@ -114,15 +113,15 @@ def test_cancel_while_running_is_evicted_and_terminal(api, experiment, run_id, d
     final = eventually(
         f"{runner} to terminate",
         lambda: api.experiment(runner),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ("CANCELLED", "EVICTED", "COMPLETED", "FAILED"),
         deadline=deadline,
     )
-    assert final["status"] == "EVICTED", f"expected EVICTED after cancelling a RUNNING job, got {final['status']}"
+    assert final["status"] == "CANCELLED", f"expected CANCELLED after cancelling a RUNNING job, got {final['status']}"
 
     assert_stable(
-        "eviction is terminal, unlike preemption (no auto-resubmission)",
+        "a cancel is terminal, unlike preemption (no auto-resubmission)",
         lambda: api.experiment(runner)["status"],
-        ok=lambda s: s == "EVICTED",
+        ok=lambda s: s == "CANCELLED",
         duration=5,
     )
 

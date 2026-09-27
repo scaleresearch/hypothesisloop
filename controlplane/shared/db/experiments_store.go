@@ -233,10 +233,8 @@ func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.Ex
 		groupColumn = column
 	}
 	clauses, args := experimentFilterClauses(filter)
-	// split_part yields the whole string when there is no ':', so a reason with no detail
-	// suffix is its own code — the same rule the UI applies when it labels one.
 	q := `SELECT ` + groupColumn + ` AS group_key, status, capacity_tier,
-       split_part(COALESCE(eviction_reason, ''), ':', 1) AS reason_code, accelerator_type, COUNT(*), SUM(accelerator_count)
+       ` + evictionReasonCode + ` AS reason_code, accelerator_type, COUNT(*), SUM(accelerator_count)
 FROM experiments WHERE ` + strings.Join(clauses, " AND ") + `
 GROUP BY group_key, status, capacity_tier, reason_code, accelerator_type`
 
@@ -275,6 +273,10 @@ GROUP BY group_key, status, capacity_tier, reason_code, accelerator_type`
 	return out, nil
 }
 
+// evictionReasonCode is a row's eviction reason without its detail, as EvictionReason.Code
+// gives it: split_part yields the whole string when there is no ':'.
+const evictionReasonCode = `split_part(COALESCE(eviction_reason, ''), ':', 1)`
+
 func newExperimentStats() *domain.ExperimentStats {
 	return &domain.ExperimentStats{
 		ByStatus:              map[string]int{},
@@ -286,15 +288,16 @@ func newExperimentStats() *domain.ExperimentStats {
 	}
 }
 
-func tallyExperimentStats(out *domain.ExperimentStats, status, tier, reasonCode string, kind domain.TypeKind, n, units int) {
+func tallyExperimentStats(out *domain.ExperimentStats, stored, tier, reasonCode string, kind domain.TypeKind, n, units int) {
+	status := domain.AnsweredStatus(domain.ExperimentStatus(stored), reasonCode)
 	out.Total += n
-	out.ByStatus[status] += n
+	out.ByStatus[string(status)] += n
 	out.ByCapacityTier[tier] += n
 	inFlight := &out.InFlightAccelerators
 	if kind == domain.TypeKindCPU {
 		inFlight = &out.InFlightCores
 	}
-	switch domain.ExperimentStatus(status) {
+	switch status {
 	case domain.StatusSubmitted:
 		*inFlight += units
 	case domain.StatusRunning:
@@ -325,10 +328,14 @@ func experimentFilterClauses(filter domain.ExperimentFilter) ([]string, []any) {
 		args = append(args, filter.AgentID)
 		n++
 	}
-	if filter.Status != "" {
-		clauses = append(clauses, fmt.Sprintf("status = $%d", n))
-		args = append(args, string(filter.Status))
+	if filter.Status == domain.StatusCancelled {
+		clauses = append(clauses, fmt.Sprintf("%s = $%d", evictionReasonCode, n))
+		args = append(args, string(domain.EvictionCancelled))
 		n++
+	} else if filter.Status != "" {
+		clauses = append(clauses, fmt.Sprintf("status = $%d AND %s <> $%d", n, evictionReasonCode, n+1))
+		args = append(args, string(filter.Status), string(domain.EvictionCancelled))
+		n += 2
 	}
 	if filter.PlatformExperimentID != "" {
 		clauses = append(clauses, fmt.Sprintf("platform_experiment_id = $%d", n))
