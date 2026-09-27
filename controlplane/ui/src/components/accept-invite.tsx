@@ -49,19 +49,29 @@ export function AcceptInvite() {
   const [step, setStep] = useState<Step>({ at: 'reading' })
 
   useEffect(() => {
-    let current = true
-    const token = heldInvite()
-    if (!token) {
-      setStep({ at: 'no-invite' })
-      return
+    let reading = 0
+    function read() {
+      const mine = ++reading
+      const token = heldInvite()
+      if (!token) {
+        setStep({ at: 'no-invite' })
+        return
+      }
+      accessToken().then(
+        session => { if (mine === reading) setStep(session ? { at: 'offered', token } : { at: 'signed-out' }) },
+        (e: unknown) => {
+          if (mine === reading) setStep({ at: 'offered', token, failure: `Could not check your session: ${e instanceof Error ? e.message : String(e)}` })
+        },
+      )
     }
-    accessToken().then(
-      session => { if (current) setStep(session ? { at: 'offered', token } : { at: 'signed-out' }) },
-      (e: unknown) => {
-        if (current) setStep({ at: 'offered', token, failure: `Could not check your session: ${e instanceof Error ? e.message : String(e)}` })
-      },
-    )
-    return () => { current = false }
+    read()
+    // Another invite link opened in this tab changes only the fragment, which loads no page.
+    const opened = () => { if (window.location.hash.length > 1) read() }
+    window.addEventListener('hashchange', opened)
+    return () => {
+      reading = -1
+      window.removeEventListener('hashchange', opened)
+    }
   }, [])
 
   async function accept(token: string) {

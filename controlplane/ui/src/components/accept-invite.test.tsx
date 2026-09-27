@@ -64,6 +64,17 @@ describe('opening an invite link', () => {
     expect(document.body.textContent).not.toContain(TOKEN)
   })
 
+  it('offers the invite of a second link opened in the same tab', async () => {
+    vi.mocked(acceptOrgInvite).mockRejectedValueOnce(new ApiError(409, 'used', 'invite_used'))
+    open()
+    await accept()
+    await screen.findByText(/already accepted/)
+    window.location.hash = 'hli_another'
+    await accept()
+    await waitFor(() => expect(acceptOrgInvite).toHaveBeenLastCalledWith('hli_another'))
+    expect(window.location.hash).toBe('')
+  })
+
   it('sends nothing until the person accepts', async () => {
     open()
     await screen.findByRole('button', { name: 'Accept invite' })
