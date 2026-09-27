@@ -252,6 +252,9 @@ func (contractCapacity) GetTotalCapacity(context.Context) (map[string]domain.Foo
 func (contractCapacity) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
 	return nil, nil
 }
+func (contractCapacity) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return nil, nil
+}
 
 type contractSettler struct{}
 

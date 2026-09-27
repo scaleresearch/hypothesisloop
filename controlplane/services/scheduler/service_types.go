@@ -93,10 +93,11 @@ type CodeHost interface {
 	Serves(repository, protocol, host, path string) bool
 }
 
-// InstalledCapacity is what each connected cluster has installed and whether it scales up, as
-// the admission loop reads them (LoopWorkloadClient).
+// InstalledCapacity is what each connected cluster and each of its nodes has installed and
+// whether it scales up, as the admission loop reads them (LoopWorkloadClient).
 type InstalledCapacity interface {
 	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
+	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
 }
 

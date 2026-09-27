@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -112,18 +113,18 @@ func TestANegativeRequestInOneGroupIsRejectedEvenWhenTheTotalLooksFine(t *testin
 	mustReject(t, exp, "job.memory")
 }
 
-// What a job leaves out has one meaning for every job: no retries, and for cpu, memory and
-// storage its share of the node it lands on. A minimal job is its type and count and nothing
-// else, and what submission wrote is what every later reader of the job sees.
+// What a job leaves out has one meaning for every job: no retries, and for cpu and memory its
+// share of the node it lands on. A minimal job is its type, count and storage, and what
+// submission wrote is what every later reader of the job sees.
 func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
 	exp := validSubmission()
-	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries = "", "", "", nil
+	exp.Job.CPU, exp.Job.Memory, exp.Job.MaxRetries = "", "", nil
 	if err := validate(t, exp); err != nil {
-		t.Fatalf("a job that states only its type and count: %v", err)
+		t.Fatalf("a job that states only its type, count and storage: %v", err)
 	}
 	const max = domain.MaxResourceSentinel
-	if exp.Job.CPU != max || exp.Job.Memory != max || exp.Job.Storage != max || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries != 0 {
-		t.Errorf("cpu, memory, storage, max_retries = %q, %q, %q, %v; want the node's share of each and 0", exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries)
+	if exp.Job.CPU != max || exp.Job.Memory != max || exp.Job.Storage != "10Gi" || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries != 0 {
+		t.Errorf("cpu, memory, storage, max_retries = %q, %q, %q, %v; want the node's share of cpu and memory, the storage stated and 0", exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.MaxRetries)
 	}
 
 	exp = validSubmission()
@@ -135,9 +136,9 @@ func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
 	// A group that holds no unit has no share to take.
 	exp = validSubmission()
 	exp.Job.CPU, exp.Job.Memory, exp.Job.Storage, exp.Job.AcceleratorCount = "", "", "", 0
-	exp.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1}, {Name: "actors", Replicas: 4, CPU: "2"}}
+	exp.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1, Storage: "1Gi"}, {Name: "actors", Replicas: 4, CPU: "2", Storage: "1Gi"}}
 	mustReject(t, exp, `job.groups["actors"]`)
-	exp.Job.Groups[1].Memory, exp.Job.Groups[1].Storage = "1Gi", "1Gi"
+	exp.Job.Groups[1].Memory = "1Gi"
 	if err := validate(t, exp); err != nil || exp.Job.Groups[0].Memory != max {
 		t.Errorf("a group that holds a device and states no size: memory %q, err %v", exp.Job.Groups[0].Memory, err)
 	}
@@ -145,6 +146,33 @@ func TestWhatAJobLeavesOutIsZeroRetriesAndItsShareOfTheNode(t *testing.T) {
 	exp = validSubmission()
 	exp.Job.MaxRetries = maxRetries(-1)
 	mustReject(t, exp, "job.max_retries")
+}
+
+// A node's cores and memory are offered whole when it is idle, so a share of them fits an idle
+// node. Its disk is offered as far as it is free, which no share of its size says: a chip job
+// given the whole disk of its node queued for good on an idle cluster. Storage is stated.
+func TestAJobStatesItsStorageAsAQuantity(t *testing.T) {
+	for name, tc := range map[string]struct {
+		spoil func(*domain.Experiment)
+		field string
+	}{
+		"left out": {func(e *domain.Experiment) { e.Job.Storage = "" }, "job.storage is required"},
+		"a share":  {func(e *domain.Experiment) { e.Job.Storage = domain.MaxResourceSentinel }, `job.storage is "max"`},
+		"left out of a group": {func(e *domain.Experiment) {
+			e.Job.CPU, e.Job.Memory, e.Job.Storage, e.Job.AcceleratorCount = "", "", "", 0
+			e.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, AcceleratorCount: 1, AcceleratorType: h100}}
+		}, `job.groups["learner"].storage is required`},
+	} {
+		exp := validSubmission()
+		tc.spoil(exp)
+		var refused *AdmissionError
+		if err := ValidateExperiment(exp, domain.QuotaConfig{}); !errors.As(err, &refused) || refused.Reason != ReasonStorageRequired || !strings.Contains(refused.Message, tc.field) {
+			t.Errorf("%s: err = %v, want %s naming the field (%s)", name, err, ReasonStorageRequired, tc.field)
+		}
+	}
+	if got := admissionHTTPStatus(ReasonStorageRequired); got != http.StatusUnprocessableEntity {
+		t.Errorf("%s answers %d, want 422", ReasonStorageRequired, got)
+	}
 }
 
 // Budget, quota, fairness and the concurrency cap count the units of a priced type a job holds. A
@@ -157,7 +185,7 @@ func TestAJobThatHoldsNoUnitOfAPricedTypeIsRejected(t *testing.T) {
 		"no cores either":     func(e *domain.Experiment) { e.Job.CPU = "0" },
 		"no type and its share of nothing": func(e *domain.Experiment) {
 			e.AcceleratorType, e.Job.AcceleratorType = "", ""
-			e.Job.CPU, e.Job.Memory, e.Job.Storage = domain.MaxResourceSentinel, domain.MaxResourceSentinel, domain.MaxResourceSentinel
+			e.Job.CPU, e.Job.Memory = domain.MaxResourceSentinel, domain.MaxResourceSentinel
 		},
 		"groups that all hold none": func(e *domain.Experiment) {
 			e.Job.CPU, e.Job.Memory, e.Job.Storage = "", "", ""

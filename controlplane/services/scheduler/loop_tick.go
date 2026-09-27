@@ -545,7 +545,7 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = domain.NotAdmittedNoScalableCapacity
 			case misfit != "":
 				reason = misfit
-			case exceedsInstalled(totalCapacity, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
+			case exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
 				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
@@ -675,7 +675,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			backlog.record(start, cluster, "burst", exp, shortage)
 			reason := misfit
-			if reason == "" && exceedsInstalled(totalCapacity, autoscalerEnabled, bAvail, multiNodeCapable, registeredClusters, exp) {
+			if reason == "" && exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, bAvail, multiNodeCapable, registeredClusters, exp) {
 				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
 			}
 			if reason == "" {
@@ -747,17 +747,41 @@ func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footp
 }
 
 // exceedsInstalled reports whether exp asks for more than every cluster that may run it has
-// installed, on each accelerator type it accepts: a job no wait will admit. A cluster that scales
-// up, or whose installed capacity was not read, may yet hold it. Only the cluster-wide sum is
-// judged, so a job that fits the sum and no layout of the nodes still reads as waiting.
-func exceedsInstalled(installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) bool {
+// when idle (fitsWhenIdle), on each accelerator type it accepts: a job no wait will admit. A
+// cluster that scales up, or whose installed capacity was not read, may yet hold it.
+func exceedsInstalled(installed map[string]domain.Footprint, nodeTotals map[string]map[string]map[string]int64, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) bool {
 	clusters, _ := eligibleClusters(avail, multiNodeCapable, registered, exp)
 	if len(clusters) == 0 {
 		return false
 	}
 	for cluster := range clusters {
 		total, read := installed[cluster]
-		if !read || autoscalerEnabled[cluster] || fitsInstalled(total, exp) {
+		if !read || autoscalerEnabled[cluster] || fitsWhenIdle(total, nodeTotals[cluster], exp) {
+			return false
+		}
+	}
+	return true
+}
+
+// fitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed
+// total covers the job, and each node of the job fits the cpu, memory and storage of some node
+// of the cluster. Nodes whose totals were not read are not judged.
+func fitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) bool {
+	if !fitsInstalled(total, exp) {
+		return false
+	}
+	if len(nodeTotals) == 0 {
+		return true
+	}
+	for _, shape := range exp.NodeShapes() {
+		held := false
+		for _, node := range nodeTotals {
+			if nodeHasRoom(node, shape.Resources) {
+				held = true
+				break
+			}
+		}
+		if !held {
 			return false
 		}
 	}

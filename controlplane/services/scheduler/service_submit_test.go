@@ -137,7 +137,7 @@ func humanHypothesis(platformExperimentID string) oneHypothesis {
 // fights the pool's dedup and splits one claim's evidence across two rows, so the binding must
 // admit a job against a human row exactly as it does against an agent's.
 func TestSubmitAdmitsAnAgentsJobAgainstAHumanSubmittedHypothesis(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 
 	err := s.Submit(context.Background(), humanIdeaSubmission())
 	if !errors.Is(err, errReachedScoring) {
@@ -162,7 +162,7 @@ func TestSubmitRefusesACodeRefThatIsNotTheExperimentsRepository(t *testing.T) {
 		"a credential in the address":    "https://agent:secret@example.com/repo.git",
 		"no address of any host":         "git://hypothesisloop",
 	} {
-		s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.CodeRef = address + sha
 		var refused *AdmissionError
@@ -171,7 +171,7 @@ func TestSubmitRefusesACodeRefThatIsNotTheExperimentsRepository(t *testing.T) {
 			t.Errorf("%s: got = %v, want %s naming the repository", name, err, ReasonCodeRefNotInRepository)
 		}
 	}
-	s := &Service{codeHost: testCodeHost{}, store: bareStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: bareStore{}, hypotheses: humanHypothesis("pe-1")}
 	var refused *AdmissionError
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != ReasonCodeRefNotInRepository {
 		t.Errorf("an experiment from before every one had a repository: got = %v, want %s", err, ReasonCodeRefNotInRepository)
@@ -182,7 +182,7 @@ func TestSubmitRefusesACodeRefThatIsNotTheExperimentsRepository(t *testing.T) {
 // about the hypothesis reaches those paths except its text, so a human author cannot acquire a
 // budget or a placement by having an agent run its idea — the run is the agent's.
 func TestSubmitAgainstAHumanHypothesisLeavesTheRunningAgentAsTheJobsOnlyOwner(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 
 	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
@@ -200,7 +200,7 @@ func TestSubmitAgainstAHumanHypothesisLeavesTheRunningAgentAsTheJobsOnlyOwner(t 
 // belong to the job's own platform experiment, or a job could point at another program's idea
 // pool and contaminate that program's scope and ranking.
 func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-other")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-other")}
 
 	err := s.Submit(context.Background(), humanIdeaSubmission())
 	var admission *AdmissionError
@@ -221,7 +221,7 @@ func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string
 // A job that completed during the agent's turn is unknown to it, so the submit is not refused: it
 // goes on to be queued, saying at once what holds it.
 func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 
 	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
@@ -261,7 +261,7 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 		"nobody of the open one":      {status: domain.PlatformExpOpen},
 		"a draft's baseline agent":    {status: domain.PlatformExpDraft, signup: baseline},
 	} {
-		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, hypotheses: humanHypothesis("pe-1")}
 
 		// An incomplete spec too: the start is what the agent must wait for, before any field.
 		incomplete := humanIdeaSubmission()
@@ -274,7 +274,7 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 		}
 	}
 
-	s := &Service{codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: humanHypothesis("pe-1")}
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)
 	}
@@ -321,7 +321,7 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.SignupRoleBaseline, false},
 	} {
 		store := &finishedJobStore{role: tc.role}
-		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
 		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {
 			t.Fatalf("%+v: the finding was filed by %+v, want the credential that sent it", tc.h, store.filedBy)
@@ -357,7 +357,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 		"cut agent":                  {cutStore{}, "agent_held"},
 		"finished agent":             {finishedStore{}, "agent_finished"},
 	} {
-		s := &Service{codeHost: testCodeHost{}, store: tc.store, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: tc.store, hypotheses: humanHypothesis("pe-1")}
 		var admission *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != tc.reason {
 			t.Errorf("%s: got = %v, want a refusal with reason %s", name, err, tc.reason)
@@ -370,7 +370,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 func TestSubmitAnswersAHypothesisElsewhereAsItDoesAnAbsentOne(t *testing.T) {
 	refusal := func(hypotheses oneHypothesis) *AdmissionError {
 		t.Helper()
-		s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: hypotheses}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: hypotheses}
 		var admission *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) {
 			t.Fatalf("got = %v, want an AdmissionError", err)
@@ -408,7 +408,7 @@ func (n *recordingNovelty) ComputeNovelty(_ context.Context, _ string, existing 
 // another's jobs may be another org's.
 func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {
 	novelty := &recordingNovelty{}
-	s := &Service{codeHost: testCodeHost{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("Submit: got = %v, want it to reach novelty scoring", err)
 	}
@@ -420,7 +420,7 @@ func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing
 // Everything after Submit's first line reads exp.Job: the store that writes job_spec, the answer
 // of POST /experiments, the events of the job. The secret has to be off it by then.
 func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
 
@@ -455,7 +455,7 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 // platform's job images, stored as its address, or states a whole address.
 func TestAJobImageIsStoredAsAnAddressAndABareNameIsRefused(t *testing.T) {
 	offered := []domain.JobImage{{Name: "python", Image: "registry.test/platform/job:7"}, {Name: "pytorch-cuda", Image: "registry.test/platform/job-pytorch:7"}}
-	s := (&Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}).WithJobImages(offered)
+	s := (&Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}).WithJobImages(offered)
 	for stated, want := range map[string]string{
 		"python":                       "registry.test/platform/job:7",
 		"registry.test/platform/job:7": "registry.test/platform/job:7",
@@ -492,6 +492,11 @@ func (s clustersStore) RegisteredClusters(context.Context) (map[string]domain.Cl
 type installedCapacity struct {
 	installed map[string]domain.Footprint
 	scales    map[string]bool
+	nodes     map[string]map[string]map[string]int64
+}
+
+func (c installedCapacity) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
+	return c.nodes, nil
 }
 
 func (c installedCapacity) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
@@ -521,11 +526,11 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 		retries := 0
 		exp := humanIdeaSubmission()
 		exp.AcceleratorCount = 0
-		exp.Job = domain.JobSpec{Image: image, CPU: "1", MaxRetries: &retries}
+		exp.Job = domain.JobSpec{Image: image, CPU: "1", Storage: "1Gi", MaxRetries: &retries}
 		return exp
 	}
 	submit := func(installed map[string]domain.Footprint, scales map[string]bool, clusters map[string]domain.Cluster, image string) (*AdmissionError, error) {
-		s := &Service{codeHost: testCodeHost{}, store: clustersStore{registered: clusters}, clusters: installedCapacity{installed, scales}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{codeHost: testCodeHost{}, store: clustersStore{registered: clusters}, clusters: installedCapacity{installed: installed, scales: scales}, hypotheses: humanHypothesis("pe-1")}
 		var refused *AdmissionError
 		err := s.Submit(context.Background(), job(image))
 		errors.As(err, &refused)
@@ -556,14 +561,21 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 		installed map[string]domain.Footprint
 		scales    map[string]bool
 	}{
-		"the cluster with a job image has cores":    {map[string]domain.Footprint{"rented": cores(4), "metal": cores(16)}, nil},
-		"it scales up":                              {installed, map[string]bool{"rented": true}},
-		"its installed capacity was not read":       {map[string]domain.Footprint{"metal": cores(16)}, nil},
-		"no cluster has cores, whatever the image":  {map[string]domain.Footprint{"rented": noCores, "metal": noCores}, nil},
-		"the other cluster's capacity was not read": {map[string]domain.Footprint{"rented": noCores}, nil},
+		"the cluster with a job image has cores": {map[string]domain.Footprint{"rented": cores(4), "metal": cores(16)}, nil},
+		"it scales up":                           {installed, map[string]bool{"rented": true}},
+		"its installed capacity was not read":    {map[string]domain.Footprint{"metal": cores(16)}, nil},
 	} {
 		if _, err := submit(c.installed, c.scales, registered, ""); !errors.Is(err, errReachedScoring) {
 			t.Errorf("no image, and %s: got = %v, want it accepted and left to the queue", name, err)
+		}
+	}
+	// Where no image choice would help, the job is refused for its size.
+	for name, installed := range map[string]map[string]domain.Footprint{
+		"no cluster has cores, whatever the image":  {"rented": noCores, "metal": noCores},
+		"the other cluster's capacity was not read": {"rented": noCores},
+	} {
+		if refused, err := submit(installed, nil, registered, ""); refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity {
+			t.Errorf("no image, and %s: got = %v, want %s", name, err, domain.NotAdmittedExceedsClusterCapacity)
 		}
 	}
 
@@ -573,6 +585,73 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 	}
 	if _, err := submit(nil, nil, map[string]domain.Cluster{"theirs": registered["theirs"]}, ""); !errors.Is(err, errReachedScoring) {
 		t.Errorf("an org without a cluster: got = %v, want the job queued, where it reads no_cluster_for_org", err)
+	}
+}
+
+// A job that asks for more than the one cluster that runs it has with nothing on it queued for
+// good: a chip job given 3.6 TiB of storage on a node whose disk is that size. It is refused at
+// submit with what it asks for and what the cluster has. A cluster that scales up, or one whose
+// capacity was not read, may yet hold it.
+func TestAJobNoIdleClusterHoldsIsRefusedAtSubmit(t *testing.T) {
+	const chip = "tenstorrent.com/chipArch=blackhole"
+	domain.SetAcceleratorRates(map[string]float64{h100: 1.0, chip: 0.5})
+	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{h100: 1.0}) })
+	registered := map[string]domain.Cluster{"box-b": {Name: "box-b", OrgID: "org-a"}, "theirs": {Name: "theirs", OrgID: "org-b"}}
+	const disk = 3935709487104
+	installed := map[string]domain.Footprint{
+		"box-b": domain.CapacityFootprint(32, map[string]int64{chip: 1}, 132604628992, disk),
+		"theirs":   domain.CapacityFootprint(512, map[string]int64{chip: 64}, 1<<42, 1<<50),
+	}
+	oneNode := map[string]map[string]map[string]int64{"box-b": {"box": {
+		domain.NodeResourceCPUMillicores: 32000, domain.NodeResourceMemoryBytes: 132604628992, domain.NodeResourceStorageBytes: disk,
+	}}}
+	submit := func(capacity installedCapacity, storage string, chips int) (*AdmissionError, error) {
+		retries := 0
+		exp := humanIdeaSubmission()
+		exp.AcceleratorType, exp.AcceleratorCount = chip, chips
+		exp.Job = domain.JobSpec{Image: "registry.test/mine:1", CPU: "8", Memory: "16Gi", Storage: storage, AcceleratorType: chip, AcceleratorCount: chips, MaxRetries: &retries}
+		s := &Service{codeHost: testCodeHost{}, store: clustersStore{registered: registered}, clusters: capacity, hypotheses: humanHypothesis("pe-1")}
+		var refused *AdmissionError
+		err := s.Submit(context.Background(), exp)
+		errors.As(err, &refused)
+		return refused, err
+	}
+
+	if _, err := submit(installedCapacity{installed: installed, nodes: oneNode}, "4Gi", 1); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("a job the idle cluster holds: got = %v, want it accepted", err)
+	}
+	refused, err := submit(installedCapacity{installed: installed, nodes: oneNode}, "4000Gi", 1)
+	if refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+		t.Fatalf("more storage than the node's disk: got = %v, want a 422 %s", err, domain.NotAdmittedExceedsClusterCapacity)
+	}
+	for _, said := range []string{"3.9 TiB storage", "8 cores", "16 GiB memory", "box-b has 1 x " + strings.ToLower(chip), "3.6 TiB storage"} {
+		if !strings.Contains(refused.Message, said) {
+			t.Errorf("the refusal does not say %q: %s", said, refused.Message)
+		}
+	}
+	if strings.Contains(refused.Message, "theirs") {
+		t.Errorf("the refusal names another org's cluster: %s", refused.Message)
+	}
+	if refused, err := submit(installedCapacity{installed: installed, nodes: oneNode}, "4Gi", 2); refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity {
+		t.Errorf("two chips where one is installed: got = %v, want %s", err, domain.NotAdmittedExceedsClusterCapacity)
+	}
+
+	// The total covers the job and no node does.
+	twoNodes := map[string]map[string]map[string]int64{"box-b": {
+		"a": {domain.NodeResourceCPUMillicores: 16000, domain.NodeResourceMemoryBytes: 8 << 30, domain.NodeResourceStorageBytes: disk},
+		"b": {domain.NodeResourceCPUMillicores: 16000, domain.NodeResourceMemoryBytes: 8 << 30, domain.NodeResourceStorageBytes: disk},
+	}}
+	if refused, err := submit(installedCapacity{installed: installed, nodes: twoNodes}, "4Gi", 1); refused == nil || !strings.Contains(refused.Message, "at most 16 cores, 8 GiB memory, 3.6 TiB storage on one node") {
+		t.Errorf("16Gi where each node has 8: got = %v, want a refusal saying the most one node has", err)
+	}
+
+	for name, capacity := range map[string]installedCapacity{
+		"scales up":                    {installed: installed, nodes: oneNode, scales: map[string]bool{"box-b": true}},
+		"has not reported what it has": {installed: map[string]domain.Footprint{}},
+	} {
+		if _, err := submit(capacity, "4000Gi", 1); !errors.Is(err, errReachedScoring) {
+			t.Errorf("a cluster that %s: got = %v, want the job queued", name, err)
+		}
 	}
 }
 
@@ -594,7 +673,7 @@ func (endingStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain
 // then. A job sent in between is refused as one sent after the close is.
 func TestSubmitPastTheEndOfThePlatformExperimentIsRefused(t *testing.T) {
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpOpen} {
-		s := &Service{codeHost: testCodeHost{}, store: endingStore{status: status, endsAt: time.Now().Add(-10 * time.Second)}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: endingStore{status: status, endsAt: time.Now().Add(-10 * time.Second)}, hypotheses: humanHypothesis("pe-1")}
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != "experiment_closed" || !strings.Contains(refused.Message, "ended at") {
 			t.Errorf("%s, 10 s past its end: got = %v, want experiment_closed naming the end", status, err)
@@ -615,7 +694,7 @@ func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, expe
 // A job has one summary. A second one is the caller's to stop sending, so it is a 409 with a
 // reason to branch on and none of the store's text.
 func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
 	_, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, "again")
 	refusal := admissionStatusError(err)
 	if refusal == nil || refusal.GetStatus() != http.StatusConflict {

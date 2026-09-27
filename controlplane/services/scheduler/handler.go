@@ -69,6 +69,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. " +
 			"job.image is the name of one of the platform's job images (GET /resource-catalog/capacity, job_images), stored as that image's whole address, or the whole address of another image, registry host first: 422 unknown_job_image for anything else, such as a bare name of an image on a public registry, with the names that are valid. " +
 			"422 no_cluster_for_image where the image choice keeps the job off every cluster that takes the org's jobs, with which choice runs where: a job that names no image runs only on a cluster with one job image, and a job that names one never on a cluster whose one image is another. " +
+			"job.storage, or each group's, is the scratch space one node of the job writes, stated as a quantity (4Gi): 422 storage_required where it is left out or is max. job.cpu and job.memory left out are the job's share of the node it lands on. " +
+			"422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up, or that has not reported what it has, is not judged. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {

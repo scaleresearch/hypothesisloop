@@ -34,7 +34,7 @@ func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) 
 		"not stated, and one was measured": {0.025, 0, "not_signed_up", 0.025},
 		"not stated, and none measured":    {0, 0, ReasonEstimateRequired, 0},
 	} {
-		s := &Service{codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		var admission *AdmissionError

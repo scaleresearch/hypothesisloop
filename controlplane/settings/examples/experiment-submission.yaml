@@ -41,9 +41,11 @@ job:
   # $NAME from the caller's environment, so no value is committed or put on a command line.
 
   # --- Resources ---------------------------------------------------------------------
-  # cpu/memory/storage: plain quantity strings, or "max". One left out is "max": the job's share
-  # of the node it lands on, one part per accelerator (or per core for a job on CPU). In a
-  # grouped job a group that holds no accelerator states all three.
+  # cpu/memory: plain quantity strings, or "max". One left out is "max": the job's share of the
+  # node it lands on, one part per accelerator (or per core for a job on CPU).
+  # storage: the scratch space one node of the job writes, always stated as a quantity. Left
+  # out, or "max", the submit is refused with 422 storage_required.
+  # In a grouped job a group that holds no accelerator states all three.
   cpu: "4"
   memory: "16Gi"
   storage: "10Gi"
@@ -57,7 +59,7 @@ job:
   #
   # A job that needs no accelerator leaves both out and states only its cores, a whole number:
   # cpu: "4" holds 4 CPU cores (4 units of the type hypothesisloop.dev/cpu=core, 4 core-hours an
-  # hour), and memory and storage left out are its cores' share of the node.
+  # hour), and memory left out is its cores' share of the node. It states its storage too.
   accelerator_count: 1
   # accelerator_type names the hardware the way its own driver publishes it, as a fully-qualified
   # "key=value" — NVIDIA's GPU Feature Discovery writes the node label

@@ -9,7 +9,7 @@ import (
 // how a workload runs. It deliberately exposes no execution-engine concepts (no manifests, pod
 // templates, or CRDs): whatever backend is configured (k8s today; conceivably Slurm/Ray tomorrow)
 // compiles this down into its own native resource, deterministically, from the same desired state.
-// MaxResourceSentinel is the literal JobSpec.CPU/Memory/Storage value asking admission to resolve
+// MaxResourceSentinel is the literal JobSpec.CPU/Memory value asking admission to resolve
 // the field to this job's exact proportional per-accelerator share of whatever node it lands on.
 // See JobSpec.CPU's doc comment.
 const MaxResourceSentinel = "max"
@@ -32,16 +32,17 @@ type JobSpec struct {
 	SecretEnv map[string]string `json:"secret_env,omitempty" yaml:"secret_env,omitempty" writeOnly:"true"`
 
 	// CPU/Memory/Storage are plain resource-quantity strings (e.g. "4", "16Gi") for the
-	// non-Accelerator resources each node gets. One left out is "max", see below.
-	// Storage is ephemeral scratch space (k8s ephemeral-storage) — not a persistent volume.
+	// non-Accelerator resources each node gets.
+	// Storage is ephemeral scratch space (k8s ephemeral-storage), not a persistent volume. It is
+	// always stated as a quantity: a submit that leaves it out or asks for "max" is refused.
 	//
-	// Any of the three may instead be the literal MaxResourceSentinel ("max"), independently —
-	// a job can mix cpu: "max" with memory: "16Gi" — meaning "give me my exact proportional
-	// share of whatever node I land on, for the accelerators I'm requesting". Resolved once this
-	// job is admitted onto a specific cluster (see scheduler.Loop.resolveClusterLocalResources),
-	// into domain.Experiment.ResolvedJob's copy of this field — Job itself is NEVER rewritten, so a
-	// GET always shows exactly what was submitted; every downstream consumer (Footprint, BuildJobs,
-	// cost estimation) reads domain.Experiment.EffectiveJob() instead of this field directly.
+	// CPU and Memory may each instead be the literal MaxResourceSentinel ("max"), independently,
+	// and one left out is "max": the job's exact proportional share of whatever node it lands on,
+	// for the accelerators it requests. Resolved once this job is admitted onto a specific cluster
+	// (see scheduler.Loop.resolveClusterLocalResources), into domain.Experiment.ResolvedJob's copy
+	// of this field. Job itself is NEVER rewritten, so a GET always shows exactly what was
+	// submitted; every downstream consumer (Footprint, BuildJobs, cost estimation) reads
+	// domain.Experiment.EffectiveJob() instead of this field directly.
 	//
 	// A job that names no accelerator runs on cores: cpu is then a whole number and the job holds
 	// that many units of CPUType. Submission writes the count and every "max" into the job.
@@ -244,8 +245,9 @@ type JobGroup struct {
 	Replicas int `json:"replicas" yaml:"replicas"`
 
 	// CPU/Memory/Storage are this group's PER-REPLICA resource-quantity strings, identical in
-	// meaning to JobSpec's own. One left out is "max" in a group that holds units of a priced
-	// type. A group that holds none has no share to take and states all three.
+	// meaning to JobSpec's own. Storage is always stated. CPU or memory left out is "max" in a
+	// group that holds units of a priced type. A group that holds none has no share to take and
+	// states all three.
 	CPU     string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory  string `json:"memory,omitempty" yaml:"memory,omitempty"`
 	Storage string `json:"storage,omitempty" yaml:"storage,omitempty"`

@@ -32,6 +32,8 @@ const (
 	ReasonJobTooLong          = "job_too_long"
 	ReasonEstimateRequired    = "estimate_required"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"
+	// ReasonStorageRequired refuses a job that does not state its storage as a quantity.
+	ReasonStorageRequired = "storage_required"
 )
 
 // AdmissionError is returned when an experiment cannot be admitted.
@@ -61,10 +63,9 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 }
 
 // shareWhereUnstated gives every node that holds units of a priced type its share of the node it
-// lands on ("max") for each of cpu, memory and storage the job left out. The footprint that picks
-// a cluster is still known before admission: the share is resolved against the cluster the job is
-// placed on, never left to a default the control plane does not see. A node that holds no unit
-// has no share to take and must state all three (JobSpec.ValidateGroups).
+// lands on ("max") for cpu and memory where the job left them out. The share is resolved against
+// the cluster the job is placed on. A node that holds no unit has no share to take and states
+// both (JobSpec.ValidateGroups). Storage has no share: see storageStated.
 func shareWhereUnstated(job *domain.JobSpec) {
 	shape := func(count int, quantities ...*string) {
 		if count < 1 {
@@ -77,13 +78,38 @@ func shareWhereUnstated(job *domain.JobSpec) {
 		}
 	}
 	if len(job.Groups) == 0 {
-		shape(job.AcceleratorCount, &job.CPU, &job.Memory, &job.Storage)
+		shape(job.AcceleratorCount, &job.CPU, &job.Memory)
 		return
 	}
 	for i := range job.Groups {
 		group := &job.Groups[i]
-		shape(group.AcceleratorCount, &group.CPU, &group.Memory, &group.Storage)
+		shape(group.AcceleratorCount, &group.CPU, &group.Memory)
 	}
+}
+
+// storageStated refuses a job that leaves the storage of a node out or asks for a share of it.
+// A node offers its cores and memory whole when idle, so a share of them always fits an idle
+// node. What it offers of its disk is what is free on it, which no share of the disk's size
+// states: a job given one waited on an idle cluster for room the disk never had.
+func storageStated(job domain.JobSpec) error {
+	check := func(field, storage string) error {
+		switch storage {
+		case "":
+			return &AdmissionError{Reason: ReasonStorageRequired, Message: fmt.Sprintf("%s is required: state the scratch space one node of the job writes, as in storage: 4Gi", field)}
+		case domain.MaxResourceSentinel:
+			return &AdmissionError{Reason: ReasonStorageRequired, Message: fmt.Sprintf("%s is %q: storage is stated as a quantity, as in storage: 4Gi, and never as a share of the node", field, storage)}
+		}
+		return nil
+	}
+	if len(job.Groups) == 0 {
+		return check("job.storage", job.Storage)
+	}
+	for _, group := range job.Groups {
+		if err := check(fmt.Sprintf("job.groups[%q].storage", group.Name), group.Storage); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // asksForCoresOnly reports whether a job names no type and no accelerator anywhere and does state
@@ -181,6 +207,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		exp.AcceleratorCount = exp.Job.TotalAccelerators()
 	}
 	shareWhereUnstated(&exp.Job)
+	if err := storageStated(exp.Job); err != nil {
+		return err
+	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
 	if err := exp.Job.ValidateGroups(); err != nil {

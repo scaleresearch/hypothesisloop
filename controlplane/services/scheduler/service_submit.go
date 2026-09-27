@@ -81,6 +81,76 @@ func (s *Service) imageChoiceServed(ctx context.Context, exp *domain.Experiment)
 	return nil
 }
 
+// heldWhenIdle refuses a job that asks for more than every cluster that would run it has with
+// nothing else on it (fitsWhenIdle): no wait admits it, and the admission loop would say so for
+// as long as it queued. A cluster that scales up, or whose installed capacity was not read, may
+// yet hold it. The refusal states what the job asks for and what each cluster has.
+func (s *Service) heldWhenIdle(ctx context.Context, exp *domain.Experiment) error {
+	registered, err := s.store.RegisteredClusters(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: registered clusters: %w", err)
+	}
+	runs, _ := byImageChoice(registered, exp)
+	if len(runs) == 0 {
+		return nil
+	}
+	installed, err := s.clusters.GetTotalCapacity(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: installed capacity: %w", err)
+	}
+	autoscalerEnabled, err := s.clusters.GetAutoscalerCapability(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: autoscaler capability: %w", err)
+	}
+	nodeTotals, err := s.clusters.GetNodeTotalCapacity(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: installed capacity of nodes: %w", err)
+	}
+	var offers []string
+	for _, c := range runs {
+		total, read := installed[c.Name]
+		if !read || autoscalerEnabled[c.Name] || fitsWhenIdle(total, nodeTotals[c.Name], exp) {
+			return nil
+		}
+		offers = append(offers, c.Name+" has "+describeOffer(total, nodeTotals[c.Name], exp))
+	}
+	asks := describeFootprint(exp.Footprint())
+	if nodes := exp.Job.Nodes(); nodes > 1 {
+		asks += fmt.Sprintf(" over %d nodes", nodes)
+	}
+	return &AdmissionError{Reason: domain.NotAdmittedExceedsClusterCapacity, Message: fmt.Sprintf(
+		"the job asks for %s, more than any cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
+		asks, strings.Join(offers, "; "))}
+}
+
+// describeOffer says what a cluster has installed of what exp asks for, and the most one node of
+// it has where it has several.
+func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
+	asked := domain.NewFootprint()
+	probe := *exp
+	types := candidateAcceleratorTypes(exp)
+	if len(types) == 0 {
+		types = []domain.AcceleratorType{exp.AcceleratorType}
+	}
+	for _, t := range types {
+		probe.AcceleratorType = t
+		for key := range probe.Footprint() {
+			asked[key] = total[key]
+		}
+	}
+	offer := describeFootprint(asked)
+	if len(nodeTotals) < 2 {
+		return offer
+	}
+	largest := map[string]int64{}
+	for _, node := range nodeTotals {
+		for name, amount := range node {
+			largest[name] = max(largest[name], amount)
+		}
+	}
+	return offer + ", at most " + describeNodeResources(largest) + " on one node"
+}
+
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
@@ -165,6 +235,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return fmt.Errorf("scheduler: org of platform experiment: %w", err)
 	}
 	if err := s.imageChoiceServed(ctx, exp); err != nil {
+		return err
+	}
+	if err := s.heldWhenIdle(ctx, exp); err != nil {
 		return err
 	}
 
