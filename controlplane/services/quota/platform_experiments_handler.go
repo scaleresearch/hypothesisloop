@@ -30,10 +30,6 @@ type PlatformExperimentsHandler struct {
 	launch AgentLaunch
 	// What bounds a draft, from the settings file's planning section.
 	planning Planning
-	// reachable reads the accelerator types an org's jobs can be placed on now; reachableTypes
-	// unless a test sets another.
-	reachable func(ctx context.Context, orgID string) (map[string]bool, error)
-
 	// repos is the git host platform experiments keep their code on.
 	repos githost.Provider
 }
@@ -43,9 +39,7 @@ func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githos
 	if planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.MaxConcurrentPerOrg <= 0 || planning.MaxPerDayPerOrg <= 0 {
 		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
 	}
-	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
-	h.reachable = h.reachableTypes
-	return h
+	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
 }
 
 // WithJobImages attaches the images the deployment offers a job to run in.
@@ -54,19 +48,22 @@ func (h *PlatformExperimentsHandler) WithJobImages(images []domain.JobImage) *Pl
 	return h
 }
 
-// ClusterRegistry says whose each registered cluster is and whether the platform shares it.
-// *db.ClustersStore satisfies it.
+// ClusterRegistry says whose each registered cluster is and whether the platform shares it, and
+// which org a project is of. *db.Store satisfies it.
 type ClusterRegistry interface {
 	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
+	ProjectOrg(ctx context.Context, projectID string) (string, error)
 }
 
 // WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the metrics DB URL
 // per-flavor capacity reports land in, the freshness window past which a cluster's last
-// report is treated as stale, and the registry that says which clusters a caller may see.
+// report is treated as stale, and the registry that says which clusters a caller may see. The
+// service checks a platform experiment against the same read.
 func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry) *PlatformExperimentsHandler {
 	h.metricsDBURL = metricsDBURL
 	h.capacityFreshness = freshness
 	h.clusters = clusters
+	h.svc.reachable = h.reachableTypes
 	return h
 }
 
@@ -171,8 +168,12 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 	return placeableBy(orgID, registered, clusters), nil
 }
 
-// reachableTypes are the accelerator types jobs of orgID can be placed on now.
-func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, orgID string) (map[string]bool, error) {
+// reachableTypes are the accelerator types jobs of the org of projectID can be placed on now.
+func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, projectID string) (map[string]bool, error) {
+	orgID, err := h.clusters.ProjectOrg(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	clusters, err := h.liveCapacity(ctx, orgID, false)
 	if err != nil {
 		return nil, err

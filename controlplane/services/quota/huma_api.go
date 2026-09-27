@@ -152,7 +152,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither), and at most the platform's quota.max_platform_experiment_days from starts_at, or from this create without one (422 run_too_long). " +
 			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, and " +
 			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. With no starts_at it starts when it is started. " +
-			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long. " +
+			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, " +
+			"and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. " +
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
 			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents, duration_hours and ends_at " +
 			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
@@ -369,7 +370,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
-			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
+			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days, " +
+			"accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and POST /platform-experiments/{id}/start takes none without one. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +
 			"brief_without_baseline (the description, as patched, names neither the job nor its code_ref: its BASELINE block does), baseline_missing_metric (a declared metric the job never reported), " +

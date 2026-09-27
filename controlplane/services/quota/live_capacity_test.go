@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -38,7 +40,8 @@ func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
 // reachable but simply has no fresh reports) — this test just pins that WithLiveCapacity flips the
 // handler out of the unconfigured error path; the live-read behavior itself is metricsdb's own.
 func TestLiveCapacityConfiguredDoesNotFailFast(t *testing.T) {
-	h := NewPlatformExperimentsHandler(nil, &fakeRepositories{}, testPlanning, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
+	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	h := NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, nil).WithLiveCapacity("postgres://example-not-dialed/db", time.Minute, nil)
 	if h.metricsDBURL == "" {
 		t.Fatalf("WithLiveCapacity did not set metricsDBURL")
 	}

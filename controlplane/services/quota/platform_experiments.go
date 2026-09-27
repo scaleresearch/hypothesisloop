@@ -115,6 +115,9 @@ type PlatformExperimentsService struct {
 	maxDataBytesPerAgent int64
 	// baseline reads what a declared baseline job did; readBaseline unless a test sets another.
 	baseline baselineReader
+	// reachable reads the accelerator types jobs of a project's org can be placed on now. The
+	// handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
+	reachable func(ctx context.Context, projectID string) (map[string]bool, error)
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
@@ -141,6 +144,7 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		observedGapCap: observedGapCap,
 	}
 	s.baseline = s.readBaseline
+	s.reachable = func(context.Context, string) (map[string]bool, error) { return nil, ErrLiveCapacityUnconfigured }
 	return s
 }
 
@@ -188,6 +192,8 @@ type CreatePlatformExperimentRequest struct {
 	RepositoryAccount string `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
 	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 
+	// acceleratorType is the type a proposal sizes its jobs for. A create and a patch state none.
+	acceleratorType *domain.AcceleratorType
 	// coordinator is CoordinatorHosted resolved by the handler: which launcher and which model.
 	coordinator *domain.HostedCoordinator
 	// maxHosted is how many machines the platform may run for the experiment, from config.

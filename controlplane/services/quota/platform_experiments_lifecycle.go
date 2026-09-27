@@ -61,7 +61,10 @@ func (s *PlatformExperimentsService) checkRunLength(startsAt, endsAt, now time.T
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them and its length as ends_at.
-func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
+//
+// Its jobs must have somewhere to run now: a platform experiment no cluster can serve would stay
+// open until its baseline limit closed it.
+func (s *PlatformExperimentsService) validate(ctx context.Context, spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
 	spec = s.withSettings(spec)
 	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Description) == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
@@ -100,13 +103,26 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 		}
 		spec.EndsAt = from.Add(time.Duration(spec.DurationHours * float64(time.Hour)))
 	}
-	return spec, s.checkRunLength(spec.StartsAt, spec.EndsAt, now)
+	if err := s.checkRunLength(spec.StartsAt, spec.EndsAt, now); err != nil {
+		return spec, err
+	}
+	reachable, err := s.reachable(ctx, spec.ProjectID)
+	if err != nil {
+		return spec, fmt.Errorf("platform_experiments.validate: read capacity: %w", err)
+	}
+	if spec.acceleratorType == nil && len(reachable) == 0 {
+		return spec, refuseUpdate(422, "accelerator_unreachable", "no cluster this org's jobs can be placed on reports capacity now, so nothing of it could run: register a cluster or turn a shared one on (`hl capacity` lists what is reachable)")
+	}
+	if spec.acceleratorType != nil && !reachable[string(*spec.acceleratorType)] {
+		return spec, refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *spec.acceleratorType)
+	}
+	return spec, nil
 }
 
 // Create creates a new platform experiment in open status (accepting signups immediately).
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	req, err := s.validate(req, now)
+	req, err := s.validate(ctx, req, now)
 	if err != nil {
 		return nil, err
 	}
@@ -213,8 +229,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.BaselineJobID != nil {
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
-	if _, err := s.validate(CreatePlatformExperimentRequest{
-		Name: patched.Name, Description: patched.Description,
+	if _, err := s.validate(ctx, CreatePlatformExperimentRequest{
+		ProjectID: patched.ProjectID,
+		Name:      patched.Name, Description: patched.Description,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, EndsAt: patched.EndsAt,

@@ -163,7 +163,7 @@ func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.Pl
 func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder) {
 	t.Helper()
 	store := &createdStore{}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},

@@ -46,6 +46,19 @@ func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context,
 	return insertPlatformExperiment(ctx, s.pool.pool, pe)
 }
 
+// ProjectOrg is the org a project belongs to: ErrProjectNotFound for no such project.
+func (s *PlatformExperimentsStore) ProjectOrg(ctx context.Context, projectID string) (string, error) {
+	var orgID string
+	err := s.pool.pool.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, projectID).Scan(&orgID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrProjectNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("platform_experiments_store.ProjectOrg: %w", err)
+	}
+	return orgID, nil
+}
+
 // execer is a pool or a transaction.
 type execer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)

@@ -23,6 +23,16 @@ var testSettings = domain.QuotaConfig{
 
 var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10}
 
+// reaching has the org of every project reach the given accelerator types and no other.
+func reaching(svc *PlatformExperimentsService, types ...domain.AcceleratorType) *PlatformExperimentsService {
+	reachable := map[string]bool{}
+	for _, t := range types {
+		reachable[string(t)] = true
+	}
+	svc.reachable = func(context.Context, string) (map[string]bool, error) { return reachable, nil }
+	return svc
+}
+
 // One check stands behind a create, a proposal and an accept, so what it refuses and what it
 // takes from the settings is the same for all three.
 func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
@@ -33,8 +43,8 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}
 	}
-	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
-	spec, err := svc.validate(valid(), now)
+	svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
+	spec, err := svc.validate(context.Background(), valid(), now)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -61,11 +71,47 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	} {
 		req := valid()
 		c.mutate(&req)
-		_, err := svc.validate(req, now)
+		_, err := svc.validate(context.Background(), req, now)
 		var refused *api.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
 		}
+	}
+}
+
+// A platform experiment nothing could run is refused whoever states it: a create or a patch in
+// an org whose jobs no cluster takes now, and a proposal sized for a type none of them has.
+func TestValidateRefusesWhatNoClusterCouldRun(t *testing.T) {
+	now := time.Now().UTC()
+	rtx, a100 := domain.AcceleratorType("rtx-4090"), domain.AcceleratorType("a100")
+	for name, c := range map[string]struct {
+		reachable []domain.AcceleratorType
+		sizedFor  *domain.AcceleratorType
+		refused   bool
+	}{
+		"no type stated, a cluster reports":      {[]domain.AcceleratorType{domain.CPUType}, nil, false},
+		"no type stated, no cluster reports":     {nil, nil, true},
+		"a type a cluster has":                   {[]domain.AcceleratorType{domain.CPUType, rtx}, &rtx, false},
+		"a type no cluster has":                  {[]domain.AcceleratorType{domain.CPUType, rtx}, &a100, true},
+		"a type stated while no cluster reports": {nil, &rtx, true},
+	} {
+		svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), c.reachable...)
+		_, err := svc.validate(context.Background(), CreatePlatformExperimentRequest{
+			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
+			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, acceleratorType: c.sizedFor,
+		}, now)
+		var refused *api.Refusal
+		if got := errors.As(err, &refused) && refused.GetStatus() == 422 && refused.Reason == "accelerator_unreachable"; got != c.refused || (!c.refused && err != nil) {
+			t.Errorf("%s: got %v, refused wanted: %v", name, err, c.refused)
+		}
+	}
+
+	unread := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	if _, err := unread.Create(context.Background(), CreatePlatformExperimentRequest{
+		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
+		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
+	}); !errors.Is(err, ErrLiveCapacityUnconfigured) {
+		t.Errorf("a create with no capacity to read: got %v, want ErrLiveCapacityUnconfigured", err)
 	}
 }
 
@@ -87,7 +133,7 @@ func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
 	if _, err := svc.Create(context.Background(), req); err != nil {
 		t.Fatalf("Create from the example: %v", err)
 	}

@@ -62,7 +62,7 @@ func refusedProposal(reason, format string, args ...any) error {
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It returns the experiment the proposal states, as validate
 // answers it: with its cost, its length from now and one place for each researcher.
-func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int, now time.Time) (CreatePlatformExperimentRequest, error) {
+func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Proposal, projectID string, maxHosted int, now time.Time) (CreatePlatformExperimentRequest, error) {
 	experiment, err := decodeExperimentBase(p.Experiment)
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
@@ -75,7 +75,8 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int, no
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}
 	experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
-	if experiment, err = h.svc.validate(experiment, now); err != nil {
+	experiment.ProjectID, experiment.acceleratorType = projectID, &p.AcceleratorType
+	if experiment, err = h.svc.validate(ctx, experiment, now); err != nil {
 		return experiment, err
 	}
 	for i, agent := range p.Agents {
@@ -169,7 +170,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator and each researcher, and starts_at is now. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
 			"no researcher's machine is started before, and the platform starts the experiment once the baseline is declared. " +
-			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
+			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
+			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -215,16 +217,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		if _, err := h.checkProposal(in.Body, pe.MaxHosted, time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		caller, _ := auth.FromContext(ctx)
-		reachable, err := h.reachable(ctx, caller.OrgIDs[0])
-		if err != nil {
-			return nil, h.refusal("read capacity", err)
-		}
-		if !reachable[string(in.Body.AcceleratorType)] {
-			return nil, refusedProposal("accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", in.Body.AcceleratorType)
+		if _, err := h.checkProposal(ctx, in.Body, pe.ProjectID, pe.MaxHosted, time.Now().UTC()); err != nil {
+			return nil, h.refusal("check proposal", err)
 		}
 		stored, err := json.Marshal(in.Body)
 		if err != nil {
@@ -287,9 +281,9 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	// The check the proposal passed, again with the cost and the agents the person states.
 	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
 	now := time.Now().UTC()
-	experiment, err := h.checkProposal(proposal, pe.MaxHosted, now)
+	experiment, err := h.checkProposal(ctx, proposal, pe.ProjectID, pe.MaxHosted, now)
 	if err != nil {
-		return nil, err
+		return nil, h.refusal("check proposal", err)
 	}
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))

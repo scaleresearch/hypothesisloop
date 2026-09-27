@@ -45,7 +45,7 @@ func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.
 func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &hostingStore{}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := chi.NewRouter()
 	doc := apidocs.New(router, "test", "1.0.0", "", ownerOfA, auth.NewAccess(placement), zap.NewNop())
@@ -184,7 +184,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store := &createdStore{created: []*domain.PlatformExperiment{live()}}
-		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+		svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
 		placement := authtest.Placement{
 			Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
 			PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},

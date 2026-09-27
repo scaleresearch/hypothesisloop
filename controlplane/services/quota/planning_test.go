@@ -37,7 +37,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
 	if drafts, ok := store.(*draftStore); ok {
-		handler.reachable = func(context.Context, string) (map[string]bool, error) { return drafts.reachable, nil }
+		svc.reachable = func(context.Context, string) (map[string]bool, error) { return drafts.reachable, nil }
 	}
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
