@@ -502,8 +502,10 @@ func (l *Loop) tick(ctx context.Context) error {
 				}
 			}
 			// A guaranteed job whose capacity is being freed holds what is free against the burst
-			// pass, or burst refills the room and the job never fits.
-			if promised || committed {
+			// pass, or burst refills the room and the job never fits. On a cluster of slots the hold
+			// is the slot itself, taken until its instance leaves: the total is the room of other
+			// slots, which never take this job.
+			if !slots && (promised || committed) {
 				subtractFootprint(bAvail[cluster], fp)
 			}
 			if promised {

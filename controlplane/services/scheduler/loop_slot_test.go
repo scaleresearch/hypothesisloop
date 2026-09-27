@@ -757,3 +757,39 @@ func TestAJobWaitingForAPreemptedSlotSaysWhichSlot(t *testing.T) {
 		t.Fatalf("while the slot is being freed: preempted %v, admitted %v", store.requeued, store.written)
 	}
 }
+
+// A guaranteed job waiting for a slot holds that slot and no other. The one slot of its shape is
+// held by an instance, being left or just preempted, and a slot with two H100 is free: the burst
+// job that asks for two H100 takes the free slot. Held as a footprint against the cluster total,
+// the waiting job took one H100 and its cpu out of the free slot's count and the burst job waited.
+func TestAJobWaitingForASlotHoldsNoOtherSlotAgainstBurst(t *testing.T) {
+	for name, preempts := range map[string]bool{"the slot is being left": false, "the slot's job is preempted this tick": true} {
+		t.Run(name, func(t *testing.T) {
+			c := newSlots().add("one-0", 1, size(8000, 32, 100)).add("two-0", 2, size(16000, 64, 200))
+			store := &slotStore{}
+			if preempts {
+				victim := pinnedTo(sized(t, c, h100Job("victim", "2")), "one-0")
+				victim.Status, victim.ClusterName, victim.EstimatedCostAccH = domain.StatusRunning, rented, 1
+				victim.CreatedAt = time.Now().Add(-time.Hour)
+				store.running = []*domain.Experiment{victim}
+			}
+			c.take("one-0")
+			guaranteed := h100Job("guaranteed", "4")
+			guaranteed.CapacityTier = domain.CapacityGuaranteed
+			burst := h100Job("burst", "4")
+			burst.AcceleratorCount, burst.Job.AcceleratorCount = 2, 2
+			store.queued = []*domain.Experiment{guaranteed, burst}
+			l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"victim": "one-0"}})
+
+			if err := l.tick(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, admitted := store.written["guaranteed"]; admitted || (len(store.requeued) == 1) != preempts {
+				t.Fatalf("the case needs the guaranteed job waiting for one-0: admitted %v, preempted %v, reason %q", admitted, store.requeued, store.reasons["guaranteed"])
+			}
+			if slot := slotOf(store.written["burst"]); slot != "two-0" {
+				t.Fatalf("burst job on %q (reason %q), want the free slot two-0", slot, store.reasons["burst"])
+			}
+		})
+	}
+}
