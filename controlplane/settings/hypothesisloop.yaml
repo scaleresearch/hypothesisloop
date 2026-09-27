@@ -152,10 +152,11 @@ job_images:
     repository: hypothesisloop-job-pytorch-cuda
     carries: PyTorch 2.4.0 built for CUDA 12.1 with cuDNN 9, Python 3.11, uv, git, hl, hl-clone. Runs on an NVIDIA host driver 530 or newer.
     suits: ["nvidia.com/"]
-  # From ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0.
+  # From ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0, which ships
+  # no torch: the Makefile adds the CPU build at the version named here.
   - name: tenstorrent
     repository: hypothesisloop-job-tenstorrent
-    carries: tt-metal and ttnn v0.77.0 with device firmware, Python 3.10 in /opt/venv, uv, git, hl, hl-clone.
+    carries: tt-metal and ttnn v0.77.0 with device firmware, PyTorch 2.11.0 (CPU build) and numpy 1.26, Python 3.10 in /opt/venv, uv, git, hl, hl-clone. python3 is that venv, so import torch and ttnn work as is. Do not install torch again or run in a new venv, either downloads it at every job start. Add other packages with uv pip install.
     suits: ["tenstorrent.com/"]
 
 # The GitHub App a project's repository is reached through (infra/github). A person installs the

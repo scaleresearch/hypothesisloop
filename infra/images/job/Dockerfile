@@ -23,6 +23,15 @@ FROM ${BASE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
+# TORCH_CPU is the version of CPU PyTorch to add to the Python on PATH, for a base that ships a
+# framework which works with torch and carries none (tt-metal). Empty adds nothing. The base's own
+# uv installs it, ahead of everything that changes between builds, so the layer is built once per
+# base and version.
+ARG TORCH_CPU=
+RUN if [ -n "$TORCH_CPU" ]; then \
+      uv pip install --no-cache --python "$(command -v python3)" \
+        --index-url https://download.pytorch.org/whl/cpu "torch==$TORCH_CPU"; \
+    fi
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 COPY agents/coordinator/experiments/hl-clone /usr/local/bin/hl-clone

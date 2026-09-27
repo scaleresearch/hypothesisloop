@@ -346,14 +346,17 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 
 # The job images that carry a framework (job_images in the settings file): the upstream image
 # with the job image's own tools added. Apart from `images` because each pulls gigabytes.
+# An entry is name=base, or name=base=version for a base that gets CPU PyTorch at that version.
+# The tt-metal release ships no torch: 2.11.0 is what its v0.77.0 pins for x86_64 development.
 JOB_IMAGE_BASES := job-pytorch-cuda=docker.io/pytorch/pytorch@sha256:68c022c2f4627943a6f3e574cfd2c8ae4256210d5f66ae2b117942e0a8d4fa9d \
-	job-tenstorrent=ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0
+	job-tenstorrent=ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0=2.11.0
 
 job-images: check-tag
 	@for entry in $(JOB_IMAGE_BASES); do \
-		name="$${entry%%=*}"; base="$${entry#*=}"; \
-		echo "==> building hypothesisloop-$$name:$(TAG) from $$base"; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		name="$${entry%%=*}"; rest="$${entry#*=}"; base="$${rest%%=*}"; torch=""; \
+		case "$$rest" in *=*) torch="$${rest#*=}";; esac; \
+		echo "==> building hypothesisloop-$$name:$(TAG) from $$base$${torch:+ with CPU torch $$torch}"; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f infra/images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
 		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \
 	done
