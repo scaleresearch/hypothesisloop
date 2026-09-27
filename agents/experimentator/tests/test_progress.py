@@ -80,7 +80,7 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_run_loop_prints_markers_while_a_turn_is_alive_and_none_once_it_is_silent_too_long(self):
         printed = []
         beating = progress.Progress(quiet_limit_s=0.15, emit=printed.append)
-        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
                                                     platform_experiment_id="pe-1", max_wall_hours=0))
         with mock.patch.object(run, "ClaudeSDKClient", SilentClient), \

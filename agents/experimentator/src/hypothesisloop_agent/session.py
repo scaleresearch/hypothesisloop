@@ -16,8 +16,10 @@ log = logging.getLogger("llm_agent")
 # domain.MaxAgentSessionBytes on the platform's side.
 MAX_BYTES = 32 << 20
 
-# The two roots a snapshot's members live under, by the name each has inside the archive.
-_WORKDIR, _MODEL_HOME = "workdir", "model-home"
+# The two roots a snapshot's members live under, by the name each has inside the archive. The
+# harness's state is named workdir there: sessions stored while it was kept in the working
+# directory are restored under that name.
+_STATE, _MODEL_HOME = "workdir", "model-home"
 
 _READ_ATTEMPTS = 5
 _READ_PAUSE_S = 5.0
@@ -26,17 +28,17 @@ _READ_PAUSE_S = 5.0
 class Sessions:
     """Keeps this agent's model session with the platform, so that it outlives the machine.
 
-    A snapshot is the files the backend names: its own state in the working directory and the
+    A snapshot is the files the backend names: its own state in its state directory and the
     model CLI's transcript under the CLI's home. It is stored after a turn when it changed and
     restored before the first turn on a machine that has none. The working tree is no part of
     it: the repository, or with none the platform, holds what the agent pushed and is read again.
     """
 
-    def __init__(self, client: api_client.PlatformClient, cfg: config.Config, workdir: str, model_home: str):
+    def __init__(self, client: api_client.PlatformClient, cfg: config.Config, statedir: str, model_home: str):
         self._client = client
         self._path = (f"/platform-experiments/{cfg.platform_experiment_id}/coordinator/session" if config.coordinates(cfg)
                       else f"/platform-experiments/{cfg.platform_experiment_id}/agents/{cfg.agent_id}/session")
-        self._roots = {_WORKDIR: Path(workdir), _MODEL_HOME: Path(model_home)}
+        self._roots = {_STATE: Path(statedir), _MODEL_HOME: Path(model_home)}
         self._stored: str | None = None
 
     def restore(self) -> bool:
@@ -69,11 +71,11 @@ class Sessions:
                 log.warning("could not read the stored session (%s): asking again", e)
                 time.sleep(_READ_PAUSE_S)
 
-    def save(self, workdir_files: list[str], model_home_files: list[str]) -> bool:
+    def save(self, state_files: list[str], model_home_files: list[str]) -> bool:
         """Stores the named files, relative to their roots, when they differ from what is stored.
         True when something was sent. A failed store is logged and tried again after the next
         turn: the agent's work does not wait for it."""
-        snapshot = self._pack({_WORKDIR: workdir_files, _MODEL_HOME: model_home_files})
+        snapshot = self._pack({_STATE: state_files, _MODEL_HOME: model_home_files})
         digest = hashlib.sha256(snapshot).hexdigest()
         if digest == self._stored:
             return False

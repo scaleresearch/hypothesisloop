@@ -85,6 +85,10 @@ class RunSetup:
     client: api_client.PlatformClient
     system_prompt: str
     workdir: str
+    # Where the harness keeps what it needs to go on: outside workdir, which holds nothing but
+    # what the agent puts there, so a clone into it is clean and no file of the harness is ever
+    # an untracked file of the agent's repository.
+    statedir: str
 
 
 def git_identity(cfg: config.Config) -> dict[str, str]:
@@ -114,7 +118,9 @@ def prepare() -> RunSetup:
     # Per-agent by default: two agents launched from the same cwd (the natural way to run a
     # multi-agent competition on one box) must not resolve to the same repo checkout.
     workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
+    statedir = os.environ.get("AGENT_STATE_DIR", f"./state/{cfg.agent_id}")
     os.makedirs(workdir, exist_ok=True)
+    os.makedirs(statedir, exist_ok=True)
 
     # The repository is the one the platform experiment names: the agent clones it through
     # `hl git-credential`, so no address and no git token is handed to it at launch.
@@ -124,7 +130,7 @@ def prepare() -> RunSetup:
 
     commands = hl_commands(plans=True) if config.plans(cfg) else hl_commands(config.coordinates(cfg))
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, os.path.abspath(workdir))
-    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
+    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
 
 
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:

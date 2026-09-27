@@ -90,11 +90,11 @@ def _updates_hook(watch_env: dict[str, str], agent_id: str):
 
 
 def _session_file(setup: core.RunSetup) -> str:
-    return os.path.join(setup.workdir, _SESSION_ID_FILE)
+    return os.path.join(setup.statedir, _SESSION_ID_FILE)
 
 
 def _handoff_file(setup: core.RunSetup) -> str:
-    return os.path.join(setup.workdir, _HANDOFF_FILE)
+    return os.path.join(setup.statedir, _HANDOFF_FILE)
 
 
 def _load_resume_id(setup: core.RunSetup) -> str | None:
@@ -231,14 +231,14 @@ def _seen_session(setup: core.RunSetup, message) -> None:
         session_id = message.data.get("session_id")
     if session_id and session_id != _live_session_id:
         _live_session_id = session_id
-        with open(os.path.join(setup.workdir, _LIVE_SESSION_FILE), "w") as f:
+        with open(os.path.join(setup.statedir, _LIVE_SESSION_FILE), "w") as f:
             f.write(session_id)
 
 
 def _forget_live_session(setup: core.RunSetup) -> None:
     global _live_session_id
     _live_session_id = None
-    _remove_file(os.path.join(setup.workdir, _LIVE_SESSION_FILE))
+    _remove_file(os.path.join(setup.statedir, _LIVE_SESSION_FILE))
 
 
 def _transcript_files(session_id: str | None) -> list[str]:
@@ -258,9 +258,9 @@ async def _store_session(setup: core.RunSetup) -> None:
     """Hands the session as it stands to the platform, unless it already holds this one."""
     if _sessions is None:
         return
-    workdir = Path(setup.workdir)
+    statedir = Path(setup.statedir)
     files = [_SESSION_ID_FILE, _HANDOFF_FILE, _LIVE_SESSION_FILE]
-    files += [str(path.relative_to(workdir)) for path in (workdir / _WATCH_STATE_DIR).rglob("*") if path.is_file()]
+    files += [str(path.relative_to(statedir)) for path in (statedir / _WATCH_STATE_DIR).rglob("*") if path.is_file()]
     transcripts = {name for session_id in (_load_resume_id(setup), _live_session_id) for name in _transcript_files(session_id)}
     async with _store_lock:
         await asyncio.to_thread(_sessions.save, files, sorted(transcripts))
@@ -307,7 +307,7 @@ def _restore_session(setup: core.RunSetup) -> None:
         return
     if _sessions.restore():
         _on_new_machine = True
-        live = os.path.join(setup.workdir, _LIVE_SESSION_FILE)
+        live = os.path.join(setup.statedir, _LIVE_SESSION_FILE)
         if not _load_resume_id(setup) and os.path.exists(live):
             # The machine was lost before the turn in flight ended: that session is the one to
             # resume, and a handoff beside it was already given to it.
@@ -400,7 +400,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     session starts fresh from it. The session id and the handoff live on disk, see _restart_state.
     """
     cfg = setup.cfg
-    watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.workdir)
+    watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
     options = ClaudeAgentOptions(
         system_prompt=setup.system_prompt,
         model=model,
@@ -616,7 +616,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
 def main() -> None:
     global _sessions
     setup = core.prepare()
-    _sessions = session.Sessions(setup.client, setup.cfg, setup.workdir, session.model_home())
+    _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, session.model_home())
     _restore_session(setup)
     model = setup.cfg.model
     log.info(

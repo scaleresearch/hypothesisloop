@@ -38,7 +38,7 @@ class HangingClient:
 
 
 def _setup():
-    return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(),
+    return SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                            client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
                            cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1",
                                                max_wall_hours=0))

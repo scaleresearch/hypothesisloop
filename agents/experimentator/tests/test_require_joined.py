@@ -123,7 +123,7 @@ class StartupTest(PlatformCase):
     """core.prepare is what both backends start with."""
 
     def environment(self, **overrides):
-        env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir}
+        env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir}
         env.update(overrides)
         return {k: v for k, v in env.items() if v is not None}
 
