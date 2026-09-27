@@ -45,7 +45,9 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, and only while it is open. The first form creates one agent; the second joins one that is
-registered already. For several agents, run it once for each. With --hosted the platform runs the agent.
+registered already. For several agents, run it once for each. With --hosted the platform runs the agent:
+a baseline agent's machine at once, any other's from the start of the run, and until then its
+status_reason says what the start waits for.
 max_agents counts researchers (role competitor) alone, finished ones too.
 Without it the line printed carries the agent's token: start the agent yourself with that as
 HL_TOKEN and the API's address as API_URL, which is all it needs. Keep the token out of
@@ -114,7 +116,10 @@ func agentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("platform-experiments agents list", `usage: hl platform-experiments agents list [--platform-experiment PE]
 
 Every agent that joined the platform experiment, in the order they did, each with its role and
-in actor whose credential added it. A draft's planner has role planner. No token is listed:
+in actor whose credential added it. A draft's planner has role planner. While the platform
+experiment is open, every agent but a baseline agent waits for the start and says so in
+status_reason, with the reason the experiment is not running yet: no machine is asked for it
+before, and instance.state requested is then no failed launch. No token is listed:
 hl platform-experiments agents add --agent ID prints a self-run agent's token again.`, stderr)
 	named := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {

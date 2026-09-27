@@ -799,3 +799,46 @@ func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 		}
 	}
 }
+
+// A researcher of an open platform experiment has no machine asked for and its instance reads
+// requested, which a coordinator reported as hosted instances that never launched. Each agent
+// that waits for the start says so in the roster, for the reason its platform experiment waits.
+func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	r := agentsRouter(t, store, waitingCoordinator)
+	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
+	added := addEach(t, r, 1, `{"hosted":true}`)
+	addEach(t, r, 1, `{}`)
+
+	reasonOf := func(agent map[string]any) (string, string) {
+		why, _ := agent["status_reason"].(map[string]any)
+		reason, _ := why["reason"].(string)
+		message, _ := why["message"].(string)
+		return reason, message
+	}
+	if reason, message := reasonOf(added[0]); reason != "baseline_required" || !strings.HasPrefix(message, "its machine is asked for when the platform starts the run, and none is before: ") {
+		t.Errorf("the researcher as it was added: status_reason %q %q, want baseline_required and that no machine is asked for yet", reason, message)
+	}
+	code, out := call(t, r, "GET", "/platform-experiments/pe-1/agents", "")
+	if code != http.StatusOK {
+		t.Fatalf("list: got = %d %v", code, out)
+	}
+	roster := joined(t, out)
+	if _, waits := roster[0]["status_reason"]; waits {
+		t.Errorf("the baseline agent, whose machine starts at once, carries status_reason: %v", roster[0])
+	}
+	for i, begins := range map[int]string{1: "its machine is asked for when the platform starts the run", 2: "it takes its first turn when the platform starts the run"} {
+		reason, message := reasonOf(roster[i])
+		if reason != "baseline_required" || !strings.HasPrefix(message, begins) || !strings.HasSuffix(message, "the platform starts the run only once it has") {
+			t.Errorf("agent %d: status_reason %q %q, want baseline_required beginning %q", i, reason, message, begins)
+		}
+	}
+
+	store.pe.Status = domain.PlatformExpRunning
+	_, out = call(t, r, "GET", "/platform-experiments/pe-1/agents", "")
+	for _, agent := range joined(t, out) {
+		if _, waits := agent["status_reason"]; waits {
+			t.Errorf("an agent of a running platform experiment carries status_reason: %v", agent)
+		}
+	}
+}
