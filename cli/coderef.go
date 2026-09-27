@@ -6,15 +6,11 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
-
-	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
-// fillCodeRef sets an empty metadata.code_ref to the commit at HEAD of the git repository in dir:
-// "<origin url>@<sha>" once it is pushed to origin, and in a repository with no origin, which is
-// what an agent of a platform experiment without a repository works in, the address the platform
-// keeps the commit at once hl code push stored it.
-func fillCodeRef(c *apiclient.Client, metadata map[string]any, dir string) error {
+// fillCodeRef sets an empty metadata.code_ref to the commit at HEAD of the git repository in dir,
+// "<origin url>@<sha>", once it is pushed to origin.
+func fillCodeRef(metadata map[string]any, dir string) error {
 	if v := metadata["code_ref"]; v != nil && v != "" {
 		return nil
 	}
@@ -27,7 +23,7 @@ func fillCodeRef(c *apiclient.Client, metadata map[string]any, dir string) error
 		return err
 	}
 	if !slices.Contains(strings.Fields(remotes), "origin") {
-		return fillPlatformCodeRef(c, metadata, sha)
+		return errors.New("metadata.code_ref is empty and this repository has no origin: a job runs a commit of the platform experiment's repository, so work in your clone of it (hl platform-experiments show names repository_url), or set code_ref")
 	}
 	url, err := git(dir, "remote", "get-url", "origin")
 	if err != nil {
@@ -41,23 +37,6 @@ func fillCodeRef(c *apiclient.Client, metadata map[string]any, dir string) error
 		return fmt.Errorf("HEAD %s is not on origin: git push, then submit again", sha)
 	}
 	metadata["code_ref"] = url + "@" + sha
-	return nil
-}
-
-func fillPlatformCodeRef(c *apiclient.Client, metadata map[string]any, sha string) error {
-	agent, _ := metadata["agent_id"].(string)
-	experiment, _ := metadata["platform_experiment_id"].(string)
-	if agent == "" || experiment == "" {
-		return errors.New("metadata.code_ref is empty and this repository has no origin: the platform keeps such code per agent and platform experiment, so give --agent and --platform-experiment, or set code_ref")
-	}
-	stored, err := codeStored(c, experiment, agent, sha)
-	if err != nil {
-		return err
-	}
-	if !stored {
-		return fmt.Errorf("HEAD %s is not stored with the platform: hl code push, then submit again", sha)
-	}
-	metadata["code_ref"] = codeRef(c.BaseURL, experiment, agent, sha)
 	return nil
 }
 
@@ -76,7 +55,7 @@ func committedHead(dir string) (string, error) {
 		return "", err
 	}
 	if dirty != "" {
-		return "", errors.New("uncommitted changes to tracked files: commit and push (git push, or hl code push with no repository), then submit again (to vary only hypothesis or env, leave the spec as committed and pass --hypothesis and --env)")
+		return "", errors.New("uncommitted changes to tracked files: commit and git push, then submit again (to vary only hypothesis or env, leave the spec as committed and pass --hypothesis and --env)")
 	}
 	return git(dir, "rev-parse", "HEAD")
 }

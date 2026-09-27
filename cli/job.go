@@ -51,9 +51,8 @@ An agent's token says whose job it is and where it runs, so neither is stated. A
 API key names the agent with --agent and the experiment with --platform-experiment.
 An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
 the git repository in the current directory, which must have no uncommitted changes to tracked
-files and HEAD pushed to origin. Commit and git push only after changing a tracked file. In a
-repository with no origin, of a platform experiment that has none, it is the commit as
-hl code push stored it with the platform.
+files and HEAD pushed to origin, the platform experiment's repository. Commit and git push only
+after changing a tracked file.
 Minimal shape:
 
   metadata:
@@ -117,7 +116,7 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = experimentOf(c, "")
 	}
-	if err := fillCodeRef(c, metadata, ""); err != nil {
+	if err := fillCodeRef(metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata

@@ -100,8 +100,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
 		return runGroup("job", jobCommands, client, rest, stdout, stderr)
-	case "code":
-		return runGroup("code", codeCommands, client, rest, stdout, stderr)
 	case "org":
 		return runGroup("org", orgCommands, client, rest, stdout, stderr)
 	case "project":
@@ -128,7 +126,6 @@ const usage = `usage: hl <command> ...
   git-credential        git's credential helper for your experiment's repository; git runs it
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
-  code                  push | fetch CODE_REF FILE: your code, kept by the platform when the experiment has no repository
   org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID
@@ -615,11 +612,12 @@ How long it lasts is duration_hours or ends_at, one of the two. max_agents,
 report_interval_seconds and starts_at may be left out: the platform's limits and defaults
 apply, and without starts_at it starts when you start it.
 
-Where the platform has a GitHub App the experiment keeps its code in a repository:
+The experiment keeps its code in a repository on the deployment's git host. On GitHub,
 repository: owner/name names one a GitHub account connected to the org covers. Left out, the
 platform creates a private one there and the answer names it; repository_account says on
 which account when the org connected several. With no account connected the answer is 422
-github_not_connected: an owner connects GitHub in Settings first.
+github_not_connected: an owner connects GitHub in Settings first. On any other git host,
+repository names one created there beforehand, and leaving it out is 422 repository_required.
 
 To create several platform experiments in one call, use an experiments: list. Fields set
 alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
