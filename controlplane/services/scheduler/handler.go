@@ -286,7 +286,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Get one experiment", Tags: []string{"experiments"},
 		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED, and is CANCELLED once somebody cancelled the job, whether or not it ran. " +
 			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting, " +
-			"and metrics: its best and last value on each declared metric it reported, with metric the one on the first ranking metric.",
+			"and metrics: its best and last value on each declared metric it reported, with metric the one on the first ranking metric. " +
+			"A COMPLETED job of a platform experiment with a constraint metric carries rankable, and when that is false not_rankable_reason: " +
+			"such a job is in no standing.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *domain.Experiment }, error) {

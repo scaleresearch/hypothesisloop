@@ -16,17 +16,31 @@ type AgentBest struct {
 }
 
 // RankableJobs narrows completed to the jobs whose values rank: those that hold every constraint
-// metric of pe. A constraint is judged per job, on the last "raw"-basis value the job reported
-// for it, the one the proposal check reads of a baseline. A job that reported none, or whose
-// value violates the bound, ran to the end and found its result wrong: it stays a completed
-// trial and none of its values rank.
+// metric of pe (UnrankableJobs).
+func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]bool, error) {
+	unrankable, err := UnrankableJobs(ctx, dbURL, pe, completed)
+	if err != nil {
+		return nil, err
+	}
+	rankable := maps.Clone(completed)
+	for job := range unrankable {
+		delete(rankable, job)
+	}
+	return rankable, nil
+}
+
+// UnrankableJobs gives, for each job of completed that ranks nowhere, the first constraint
+// metric of pe it does not hold and how. A constraint is judged per job, on the last
+// "raw"-basis value the job reported for it, the one the proposal check reads of a baseline. A
+// job that reported none, or whose value violates the bound, ran to the end and found its
+// result wrong: it stays a completed trial and none of its values rank.
 //
 // Judged per agent, on the agent's best value of the constraint, a job that broke the gate with
 // the best number of the run ranked first as long as another job of its agent held the gate. So
 // a harness had to fail such a job to keep it out, and a trial that found the gate broken was
 // no completed trial.
-func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]bool, error) {
-	rankable := maps.Clone(completed)
+func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
+	unrankable := map[string]string{}
 	for _, metric := range pe.Metrics {
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
@@ -35,9 +49,9 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 		samples, err := QueryVector(ctx, dbURL, promQL)
 		if err != nil {
-			return nil, fmt.Errorf("metricsdb.RankableJobs: %s: %w", metric.Key, err)
+			return nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
 		}
-		reported, violated := map[string]bool{}, map[string]bool{}
+		reported, violated := map[string]bool{}, map[string]float64{}
 		for _, sm := range samples {
 			if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
 				continue
@@ -45,16 +59,25 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 			job := sm.Labels["job_id"]
 			reported[job] = true
 			if !metric.Holds(sm.Value) {
-				violated[job] = true
+				violated[job] = sm.Value
 			}
 		}
-		for job := range rankable {
-			if !reported[job] || violated[job] {
-				delete(rankable, job)
+		bound := "at least"
+		if metric.Direction == "minimize" {
+			bound = "at most"
+		}
+		for job := range completed {
+			if _, judged := unrankable[job]; judged {
+				continue
+			}
+			if value, broke := violated[job]; broke {
+				unrankable[job] = fmt.Sprintf("constraint %s is %g, and must be %s %g", metric.Key, value, bound, *metric.Bound)
+			} else if !reported[job] {
+				unrankable[job] = fmt.Sprintf("constraint %s was not reported, and must be %s %g", metric.Key, bound, *metric.Bound)
 			}
 		}
 	}
-	return rankable, nil
+	return unrankable, nil
 }
 
 // BestPerAgentOnMetric returns, for every agent in platformExpID, its best "raw"-basis value on

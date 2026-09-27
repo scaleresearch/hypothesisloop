@@ -75,7 +75,8 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
 class JobStateTest(unittest.IsolatedAsyncioTestCase):
     JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":[{"name":"acc","best":0.9,"last":0.85,"basis":"raw"},'
             '{"name":"loss","best":0.2608416958176093,"last":0.31,"basis":"per_token"}]}\n'
-            '{"id":"exp-2","status":"COMPLETED"}\n')
+            '{"id":"exp-2","status":"COMPLETED","metrics":[{"name":"acc","best":0.95,"last":0.95,"basis":"raw"}],"rankable":false,'
+            '"not_rankable_reason":"constraint exact_match is 0.5, and must be at least 1"}\n')
     STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
     QUOTA = ('{"agent_id":"agent-a","share_accelerator_hours":2,"remaining_guaranteed_accelerator_hours":1.85,"remaining_burst_accelerator_hours":1.85,'
              '"guaranteed_accelerator_hours":2,"burst_accelerator_hours":4,'
@@ -90,7 +91,8 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
                          "experiment.status exp-1 COMPLETED acc best 0.9 last 0.85, loss best 0.260842 last 0.31 (per_token)\n"
                          "comment.new hyp-1 agent by agent-b\n"
-                         "experiment.status exp-2 COMPLETED\n"
+                         "experiment.status exp-2 COMPLETED acc best 0.95 last 0.95, "
+                         "ranks nowhere: constraint exact_match is 0.5, and must be at least 1\n"
                          "experiment.status exp-3 EVICTED oom\n"
                          "unfinished_jobs 1 QUEUED, 2 RUNNING\n"
                          "quota_used 0.113 of 2 AccH, room for a job of 1.85 guaranteed or 1.85 burst")

@@ -91,6 +91,11 @@ type Experiment struct {
 	// like PhaseDetail. Set on a read of one job only, and nil until its runtime has reported a
 	// node for it.
 	RanOn *RanOn `json:"ran_on,omitempty"`
+	// Rankable says whether the job's values rank, and NotRankableReason names the constraint
+	// that keeps them out and how. Set on a read of one COMPLETED job whose platform experiment
+	// declares a constraint metric, by the function every ranking reads (metricsdb.UnrankableJobs).
+	Rankable          *bool  `json:"rankable,omitempty" doc:"On a COMPLETED job of a platform experiment with a constraint metric: whether its values rank. False for a job that broke a constraint or reported none for it; it is in no standing and no stage cut counts it."`
+	NotRankableReason string `json:"not_rankable_reason,omitempty" doc:"With rankable false: the constraint the job does not hold, the value it reported and the bound."`
 	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
 	Summary string `json:"summary,omitempty"`
 	// SummaryDue says the job completed and no summary was filed for it: the jobs

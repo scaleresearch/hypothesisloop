@@ -2,6 +2,7 @@ package metricsdb
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,5 +183,17 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 	}
 	if len(completed) != 6 {
 		t.Errorf("the completed jobs were narrowed in place to %v", completed)
+	}
+	why, err := UnrankableJobs(context.Background(), server.URL, pe, completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{
+		"job-bf16":     "constraint fp32_agreement is 0.9844, and must be at least 0.99",
+		"job-broken":   "constraint fp32_agreement is 0.5, and must be at least 0.99",
+		"job-silent":   "constraint fp32_agreement was not reported, and must be at least 0.99",
+		"job-rescaled": "constraint fp32_agreement was not reported, and must be at least 0.99",
+	}; !maps.Equal(why, want) {
+		t.Errorf("unrankable = %v, want %v", why, want)
 	}
 }

@@ -85,8 +85,8 @@ _UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
 
 async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
     """events, completed with what an agent told of an ended job would otherwise read: each
-    COMPLETED job's declared metrics as its event's detail, and two closing events: the count of
-    the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
+    COMPLETED job's declared metrics and, when it ranks nowhere, why, as its event's detail, and
+    two closing events: the count of the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
     read is left out. A coordinator's events are every agent's and are handed over as they are."""
     agent = _agent(env)
     if not agent or not any(e["kind"] == "experiment.status" for e in events):
@@ -99,9 +99,11 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     detail = {}
     if ids:
         _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
-        detail = {job["id"]: ", ".join(
-            f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
-            for m in job.get("metrics", [])) for job in _events(stdout)}
+        detail = {job["id"]: ", ".join([
+            *(f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
+              for m in job.get("metrics", [])),
+            *([f"ranks nowhere: {job['not_rankable_reason']}"] if job.get("rankable") is False else [])])
+            for job in _events(stdout)}
     events = [dict(e, detail=detail[e["subject"]]) if completed(e) and e["subject"] in detail else e for e in events]
     _, stdout = await _run_hl([hl, "job", "stats", "--agent", agent], env, lambda: False)
     for stats in _events(stdout):

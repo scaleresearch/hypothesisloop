@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -40,7 +41,33 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if err := s.mergeMetrics(ctx, []*domain.Experiment{exp}); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
+	if err := s.judgeRankable(ctx, exp); err != nil {
+		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
+	}
 	return exp, nil
+}
+
+// judgeRankable says on a COMPLETED job of a platform experiment with a constraint metric
+// whether its values rank, as every ranking judges it.
+func (s *Service) judgeRankable(ctx context.Context, exp *domain.Experiment) error {
+	if exp.Status != domain.StatusCompleted {
+		return nil
+	}
+	pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
+	if err != nil {
+		return err
+	}
+	if pe == nil || !slices.ContainsFunc(pe.Metrics, func(m domain.MetricDefinition) bool { return m.EffectiveRole() == domain.MetricRoleConstraint }) {
+		return nil
+	}
+	unrankable, err := metricsdb.UnrankableJobs(ctx, s.metricsDBURL, pe, map[string]bool{exp.ID: true})
+	if err != nil {
+		return err
+	}
+	reason, broke := unrankable[exp.ID]
+	rankable := !broke
+	exp.Rankable, exp.NotRankableReason = &rankable, reason
+	return nil
 }
 
 // mergeMetrics attaches what each experiment reported on its platform experiment's declared
