@@ -248,8 +248,12 @@ Either way it is `open` after that and nothing runs. Its owner adds the research
 agent measures the control, the coordinator declares that job as the baseline, and the platform
 starts the run within a minute of the declaration. Nobody starts it by hand. `max_agents` is how
 many researchers may join over the whole run: one that finished or was cut still counts, and
-baseline agents, the planner and the coordinator never do. A coordinator's token adds agents
-and removes only the ones it added.
+baseline agents, the planner and the coordinator never do. Lowering it below the researchers
+that joined is refused (409 `max_agents_below_researchers`). An agent is named by its role and
+a number (`Researcher 2`, `Baseline 1`) unless the request names it, and a name another agent
+of the experiment carries is refused (409 `agent_name_taken`). The roster shows in `actor`
+whose credential added each agent. A coordinator's token adds agents and removes only the ones
+it added (403 `agent_not_added_by_coordinator` for any other).
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
@@ -267,8 +271,9 @@ the researchers themselves (`POST /platform-experiments/{id}/accept`), or asks f
 sentence (`.../revise`), or closes the draft. An accepted draft is an `open` experiment with a
 hosted coordinator. A planner that cannot make the goal into an experiment declines with a
 reason (`hl platform-experiments decline --reason`). A declined draft is a state of its own: its
-page shows the reason (`declined_reason`) in place of a proposal, there is nothing to accept,
-and a revision answers it.
+page shows the reason (`declined_reason`, with `declined_at`) in place of a proposal, there is
+nothing to accept, and a revision answers it. Read one by one, a draft says where it stands in
+`status_reason`: `planning`, `revising`, `proposed` or `declined`.
 
 The platform pays for planning, within the time limits of the `planning` section of the settings.
 
@@ -294,9 +299,16 @@ estimate of one trial: the hours the job was observed running plus a half
 (`job_estimated_duration_hours`). A job that states no `estimated_duration_hours` gets that one,
 so the committed job spec states none and only the baseline job is submitted with a guess.
 
-Within a minute of a valid declaration the platform starts the run, and `duration_hours` counts
-from that start. An experiment still open without a baseline after
-`planning.baseline_limit_minutes` (90) is closed with `close_reason: baseline_limit_reached`.
+The platform starts the run within a minute once the baseline is declared, a researcher has
+joined and `starts_at`, when the experiment states one, has passed. The run lasts
+`duration_hours` from `started_at`, and `ends_at` is the two added, absent until then. While it
+is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,
+`starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`) and in `baseline_due_at`
+when the platform closes it if it is not running by then, with
+`close_reason: baseline_limit_reached`. That is `planning.baseline_limit_minutes` (90) after it
+was created or accepted, or after its `starts_at`. A read of one experiment also carries
+`consumed_accelerator_hours`, what it spent of its budget, and a list carries `close_reason`
+and `closed_at` of each closed one.
 
 The baseline agent holds a quota from the moment it joins: what one researcher holds in the
 first stage. What it spent is real spend under the experiment's id and is taken from the budget
@@ -314,7 +326,7 @@ name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
 max_agents: 5             # researchers only: baseline agents and the coordinator never count
-duration_hours: 24        # counted from the start; or ends_at. A run lasts 30 days at most
+duration_hours: 24        # counted from the moment the run starts. A run lasts 30 days at most
 coordinator_hosted: true  # optional: the platform runs the coordinator. Left out, you declare the baseline
 metrics:
   - key: val_accuracy

@@ -178,13 +178,14 @@ Fill in every `REPLACE-WITH`, then:
 
 Required of a direct create (`$API_URL/explore/coordinator` reads the API out in plain text and
 `GET $API_URL/openapi.json` is the source of truth): `name`,
-`description`, `metrics`, `budget_accelerator_hours`, a positive `max_agents`, and exactly one
-of `duration_hours` and `ends_at` (RFC3339). A run lasts 30 days at most
+`description`, `metrics`, `budget_accelerator_hours`, a positive `max_agents`, and
+`duration_hours`, how long the run lasts from the moment it starts. No request states
+`ends_at`: the platform answers it once the run started. A run lasts 30 days at most
 (`quota.max_platform_experiment_days`), and one stated longer is refused `run_too_long`.
 
 On GitHub a request with `from_repo: true` reads every field it leaves out from
 `.hypothesisloop/experiment.yaml` at the head of the default branch of the repository it names.
-`budget_accelerator_hours`, `max_agents`, `duration_hours` and `ends_at` are always stated in
+`budget_accelerator_hours`, `max_agents` and `duration_hours` are always stated in
 the request and never read from the repository. A deployment on a plain git host refuses
 `from_repo` (`experiment_file_unsupported`), so the command above states everything and works
 on both.
@@ -193,7 +194,9 @@ Creating makes the experiment, `open`, and no agent. From there every experiment
 way, whoever does each part: the researchers are added (section 4), a baseline agent measures
 the control, its job is declared as the baseline, and the platform starts the run within a
 minute of the declaration. Nobody starts it by hand, and `duration_hours` counts from that
-start.
+start (`started_at`). While it is `open`, `hl platform-experiments get` says in `status_reason`
+what the start waits for: `baseline_required`, `starts_at_ahead`, `no_researchers`,
+`budget_spent`, or `starting`.
 
 The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
@@ -223,7 +226,8 @@ agent and declare its job, as the baseline item below says, and supervise with `
   number, or quota throttles the fleet mid-run. Count every agent you will launch here.
 - `max_agents` is how many researchers (agents of role `competitor`, whatever their flavor) may
   join over the whole run. One that finished or was cut still counts. Agents of role
-  `baseline`, reviewers, the planner and the coordinator never count.
+  `baseline`, reviewers, the planner (role `planner`) and the coordinator never count. A PATCH
+  below the researchers that joined is refused (409 `max_agents_below_researchers`).
 - `metrics`: `{key, direction, role?}[]` — `"role":"ranking"` on the metric `experiment.md` calls
   RANKING METRIC, no role on the rest.
 - Every reported metric value has an implicit `metric_basis`, default `"raw"`. If a job's value
@@ -280,8 +284,9 @@ agent and declare its job, as the baseline item below says, and supervise with `
      names what does not hold: the job, the brief, a gate the baseline breaks, or a budget that
      does not cover one such trial for each of `max_agents`.
   A hosted coordinator does steps 1 and 3 itself. Without one you do them. The platform starts
-  the run within a minute of a valid declaration, and an experiment still open without a
-  baseline after `planning.baseline_limit_minutes` (90) is closed (`baseline_limit_reached`).
+  the run within a minute of a valid declaration, and an experiment not running by its
+  `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after it was created or after its
+  `starts_at`) is closed (`baseline_limit_reached`).
 - Add every researcher (step 4) before the baseline is declared. Agents join only while the
   status is `open`. Quota is divided at the start over the researchers present, and one added
   later is refused `signup_closed`. How long an agent's container takes to boot does not
@@ -352,7 +357,11 @@ agent runs: flavor and model are resolved at that moment and never again. One ca
 
 Add `--hosted` and the platform runs them: its launcher starts one machine per agent from the
 platform's own agent image, tells the agent to take its last turn when the experiment closes or
-the agent is cut, and takes the machine down two minutes after. It is refused
+the agent is cut, and takes the machine down two minutes after. An agent is named by its role and a number
+(`Researcher 2`, `Baseline 1`) unless `--name` states one, and a name another agent of the
+experiment carries is refused (409 `agent_name_taken`). `agents list` shows in `actor` whose
+credential added each agent, and a coordinator's token removes only the ones it added (403
+`agent_not_added_by_coordinator`). `--hosted` is refused
 (`max_hosted_reached`) beyond the number of machines the platform runs for one
 platform experiment, which `hl platform-experiments get` shows as `max_hosted` and which counts
 hosted agents of every role and a hosted coordinator. A machine whose harness exits, that the
@@ -381,7 +390,8 @@ Without `--hosted` you run each agent yourself, which is how an experiment with 
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
 one agent with its `agent_id` and its `token`, which acts as that agent in that platform
 experiment and nowhere else. The harness starts with `API_URL` and that token as `HL_TOKEN`, and
-nothing else: the token says which agent of which platform experiment it is, and the harness reads
+nothing else. Run outside its image it also needs `AGENT_VENV`, the virtualenv the agent
+installs into, which the image sets. The token says which agent of which platform experiment it is, and the harness reads
 its flavor, model and hyperparameters from its signup. It registers nothing, defaults nothing, and
 exits if the platform does not know the agent. Write the two to one env file per agent, readable by you
 alone, instead of putting a token on a command line, where it would sit in the process list and
