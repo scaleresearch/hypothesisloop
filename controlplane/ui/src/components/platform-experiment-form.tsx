@@ -379,6 +379,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
+    if (!isEdit && !form.description.trim()) return 'Description is required: it is the brief every agent works from.'
     if (!isEdit && new Date(form.ends_at) <= new Date()) return 'Ends at must be in the future.'
     // An experiment the form starts itself has no start time of its own to compare with.
     if (!hosted && form.starts_at && new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends at must be after Starts at.'

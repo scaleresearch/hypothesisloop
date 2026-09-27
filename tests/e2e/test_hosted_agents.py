@@ -83,7 +83,7 @@ def coordinator_for(api: API, pe_id: str, observed: list[dict] | None = None) ->
 def _hosted_run(project: API, name: str, **more) -> requests.Response:
     body = {
         "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
-        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z",
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "duration_hours": 24,
         **more,
     }
     return project.post("/platform-experiments", body)

@@ -56,7 +56,7 @@ def run(orgs, run_id: str):
 
 
 # What every create states itself, whatever the repository's experiment file says.
-RUN = {"budget_accelerator_hours": 1, "max_agents": 2, "ends_at": "2099-01-01T00:00:00Z"}
+RUN = {"budget_accelerator_hours": 1, "max_agents": 2, "duration_hours": 24}
 
 
 def _call(api: API, method: str, path: str, body: dict | None = None) -> requests.Response:
@@ -156,7 +156,7 @@ def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_change
     a, _ = orgs
     pe_id, agent = run
     partial = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "name": "only a name"})
-    assert partial.status_code == 422 and "description" in partial.json()["error"], partial.text
+    assert partial.status_code == 422 and partial.json()["reason"] == "invalid_experiment" and "description" in partial.json()["message"], partial.text
     unnamed = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
     assert unnamed.status_code == 422 and unnamed.json()["reason"] == "no_repository", unnamed.text
     before = agent.get_json(f"/platform-experiments/{pe_id}")

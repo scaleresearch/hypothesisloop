@@ -104,7 +104,7 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     with pytest.raises(HLError, match="404"):
         bound.hl("platform-experiments", "create", "--project", a.project_id, "-",
                  input=json.dumps({"name": "outside", "description": "outside", "budget_accelerator_hours": 1, "max_agents": 1,
-                                   "report_interval_seconds": 10, "ends_at": "2099-01-01T00:00:00Z",
+                                   "report_interval_seconds": 10, "duration_hours": 24,
                                    "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}))
 
     assert [p["id"] for p in bound.get_json(f"/orgs/{a.org_id}/projects")["projects"]] == [project["id"]]

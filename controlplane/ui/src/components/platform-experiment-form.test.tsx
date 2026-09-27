@@ -38,6 +38,7 @@ function show(initial?: PlatformExperiment) {
 
 async function essentials({ repository }: { repository?: string } = {}) {
   await userEvent.type(screen.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'Run')
+  await userEvent.type(screen.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
   if (repository) {
     await userEvent.click(await screen.findByLabelText('Repository'))
     await userEvent.click(await screen.findByRole('option', { name: repository }))

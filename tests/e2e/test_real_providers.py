@@ -91,7 +91,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
         "project_id": org.project_id, "from_repo": True, "repository": os.environ["HL_E2E_GITHUB_REPO"],
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
-        "coordinator_hosted": True, "ends_at": "2099-01-01T00:00:00Z",
+        "coordinator_hosted": True, "duration_hours": 24,
     })
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]

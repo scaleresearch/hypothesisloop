@@ -49,7 +49,7 @@ def _assert_each(caller: API, who: str, calls: list[tuple[str, str, dict | None,
 def _platform_experiment_body(name: str, project_id: str) -> dict:
     return {
         "name": name, "description": name, "budget_accelerator_hours": 1, "max_agents": 1, "project_id": project_id,
-        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z",
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "duration_hours": 24,
     }
 
 
