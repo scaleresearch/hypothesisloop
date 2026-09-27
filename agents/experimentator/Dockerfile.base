@@ -96,6 +96,12 @@ COPY --from=hl-builder /out/hl /usr/local/bin/hl
 RUN mkdir -p /agent/workspace /agent/.claude /agent/.harness /opt/hypothesisloop-agent \
  && chown -R agent:agent /agent /opt/hypothesisloop-agent
 USER agent
+# The agent's own Python: one virtualenv with pip in it, which the harness puts first on PATH
+# (core.own_python), so `pip install`, `python3 -m pip install` and `uv pip install` all land where
+# the agent's python3 reads. The harness's environment below is no place for it: uv run puts that
+# one first, it has no pip, and the system pip installs to a user site it never reads.
+ENV AGENT_VENV=/agent/.venv
+RUN uv venv --seed --no-cache --python /usr/local/bin/python3 $AGENT_VENV
 WORKDIR /opt/hypothesisloop-agent
 COPY --chown=agent:agent agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
 RUN uv sync --no-dev --locked --no-cache

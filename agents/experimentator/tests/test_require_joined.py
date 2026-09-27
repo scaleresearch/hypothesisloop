@@ -123,7 +123,8 @@ class StartupTest(PlatformCase):
     """core.prepare is what both backends start with."""
 
     def environment(self, **overrides):
-        env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir}
+        env = {"API_URL": self.url, "HL_TOKEN": AGENT_TOKEN, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir,
+               "AGENT_VENV": "/agent/.venv", "PATH": "/usr/bin"}
         env.update(overrides)
         return {k: v for k, v in env.items() if v is not None}
 
@@ -149,6 +150,17 @@ class StartupTest(PlatformCase):
             ("GET", "/explore/rules"),
         ])
         self.assertIn("clone https://github.com/acme/model.git", setup.system_prompt)
+
+    # An agent's `pip install` went to a user site the python3 on its PATH, the harness's, never
+    # read, and three more tries passed before it had a place to install into.
+    def test_prepare_puts_the_agents_own_virtualenv_first_for_everything_it_starts(self):
+        with mock.patch.dict(os.environ, self.environment(VIRTUAL_ENV="/opt/hypothesisloop-agent/.venv"), clear=True), \
+                mock.patch.object(core, "hl_commands", return_value="usage: hl"):
+            core.prepare()
+            self.assertEqual((os.environ["VIRTUAL_ENV"], os.environ["PATH"]), ("/agent/.venv", "/agent/.venv/bin:/usr/bin"))
+        with self.assertRaises(SystemExit) as ctx:
+            self.prepare(AGENT_VENV=None)
+        self.assertIn("AGENT_VENV", str(ctx.exception))
 
     def test_prepare_stops_an_agent_whose_platform_experiment_names_no_repository(self):
         FakePlatform.repository_url = ""

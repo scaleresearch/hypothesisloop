@@ -110,11 +110,23 @@ def git_identity(cfg: config.Config) -> dict[str, str]:
     return {"GIT_AUTHOR_NAME": name, "GIT_COMMITTER_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_COMMITTER_EMAIL": email}
 
 
+def own_python() -> None:
+    """Puts the agent's virtualenv (AGENT_VENV, made with pip in the image) first on PATH for
+    everything this process starts. uv run put the harness's own there, which has no pip: an
+    agent's `pip install` went to a site the python3 on its PATH never read."""
+    venv = os.environ.get("AGENT_VENV")
+    if not venv:
+        raise SystemExit("agent: missing required env var: AGENT_VENV, the virtualenv the agent installs into")
+    os.environ["VIRTUAL_ENV"] = venv
+    os.environ["PATH"] = os.path.join(venv, "bin") + os.pathsep + os.environ["PATH"]
+
+
 def prepare() -> RunSetup:
-    """Shared startup: logging, config, workdir, platform client, prompt."""
+    """Shared startup: logging, config, the agent's Python, workdir, platform client, prompt."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     cfg = config.Config()
+    own_python()
 
     client = api_client.PlatformClient(cfg.api_url, cfg.token)
     if config.coordinates(cfg):

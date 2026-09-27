@@ -35,7 +35,8 @@ class StartupTest(PlatformCase):
         self.addCleanup(shutil.rmtree, self.workdir)
 
     def prepare(self):
-        env = {**LAUNCH_ENV, "API_URL": self.url, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir}
+        env = {**LAUNCH_ENV, "API_URL": self.url, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir,
+               "AGENT_VENV": "/agent/.venv", "PATH": "/usr/bin"}
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(core, "hl_commands", return_value="usage: hl") as commands:
             setup = core.prepare()
