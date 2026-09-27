@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
-# Local development's auth, and the one place its values live: the signing secret every local
-# process is started with, the key the local control plane verifies a person's JWT against, and
-# hl-admin for tokens and cluster registration against the compose stack's postgres.
-
+# Local development's auth, and the one place its values come from: the signing secret every
+# local process is started with, the key the local control plane verifies a person's JWT against,
+# and hl-admin for tokens and cluster registration against the compose stack's postgres.
 LIB_AUTH_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export HYPOTHESISLOOP_SIGNING_SECRET="${HYPOTHESISLOOP_SIGNING_SECRET:-local-development-signing-secret-do-not-deploy}"
+
+# The signing secret every local process is started with is made on this machine by the first
+# render and never leaves it. It has one source, the file: a value from the caller's environment
+# is not used. A new one ends every hls_ token derived so far (agents', jobs', runtimes', staff).
+# A second machine that mints tokens for this one's control plane (a node's install.sh) needs a
+# copy of this file, mode 600.
+HL_SIGNING_SECRET_FILE="${LIB_AUTH_REPO}/localdev/.run/signing-secret"
+lib_signing_secret() {
+  if [[ ! -r "${HL_SIGNING_SECRET_FILE}" ]]; then
+    echo "auth: cannot read the signing secret at ${HL_SIGNING_SECRET_FILE}: make render-settings makes it when it is missing" >&2
+    return 1
+  fi
+  HYPOTHESISLOOP_SIGNING_SECRET="$(<"${HL_SIGNING_SECRET_FILE}")"
+  if (( ${#HYPOTHESISLOOP_SIGNING_SECRET} < 32 )); then
+    echo "auth: the signing secret at ${HL_SIGNING_SECRET_FILE} is shorter than 32 characters: delete it and run make render-settings" >&2
+    return 1
+  fi
+  export HYPOTHESISLOOP_SIGNING_SECRET
+}
+unset HYPOTHESISLOOP_SIGNING_SECRET
+if [[ -e "${HL_SIGNING_SECRET_FILE}" ]]; then
+  lib_signing_secret || return 1 2>/dev/null || exit 1
+fi
 
 # Who signs people in on the local stack. The first is always a key made on this machine by the
 # first render, which never leaves it: the e2e suite and the browser run sign their users with it.
@@ -67,6 +88,11 @@ fi
 # in, and the git host: the GitHub App's section when there is one, the local git server otherwise.
 lib_render_settings() {
   local host_address="$1" output="$2" coordinate providers project issuer keys rendered
+  if [[ ! -e "${HL_SIGNING_SECRET_FILE}" ]]; then
+    mkdir -p "$(dirname "${HL_SIGNING_SECRET_FILE}")"
+    (umask 077 && openssl rand -hex 32 > "${HL_SIGNING_SECRET_FILE}")
+  fi
+  lib_signing_secret || return 1
   if [[ ! -f "${HL_DEV_JWT_KEY}" ]]; then
     (umask 077 && openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${HL_DEV_JWT_KEY}")
   fi
@@ -145,6 +171,7 @@ lib_fresh_settings() {
 }
 
 lib_hl_admin() {
+  lib_signing_secret || return 1
   lib_fresh_settings || return 1
   (cd "${LIB_AUTH_REPO}" && go run ./controlplane/cmd/hl-admin "$@")
 }
