@@ -14,21 +14,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Repositories reaches GitHub through the installations a project's org connected.
-// *accounts.Repositories satisfies it. What either call refuses is returned as the API answers it.
-type Repositories interface {
-	// Reachable returns the repository as GitHub names it, when an installation the org of the
-	// project connected covers it.
-	Reachable(ctx context.Context, projectID, repository string) (string, error)
-	// ExperimentBase returns the repository's experiment file.
-	ExperimentBase(ctx context.Context, projectID, repository string) ([]byte, error)
-	// Create makes a private repository of that name for a platform experiment that names none,
-	// on the GitHub account named or the only one the org of the project connected, and returns
-	// it. It returns nothing on a deployment with no GitHub App, where a platform experiment
-	// needs no repository.
-	Create(ctx context.Context, projectID, account, name, description string) (string, error)
-}
-
 // RepositoryName is the name of the repository the platform creates for a platform experiment:
 // what the experiment is called, cut short, and its id, which keeps two of one name apart.
 func RepositoryName(pe *domain.PlatformExperiment) string {
@@ -62,13 +47,17 @@ func (h *PlatformExperimentsHandler) provideRepository(named, account string) fu
 			}
 			named = created
 		}
-		pe.Repository, pe.RepositoryURL = named, domain.RepositoryURL(named)
+		// A deployment with no GitHub App creates none, and the experiment has no repository.
+		if named == "" {
+			return nil
+		}
+		pe.Repository, pe.RepositoryURL = named, h.repos.URL(named)
 		return nil
 	}
 }
 
 // repositoryOf checks what a request says of its repository: the one it names must be reachable
-// and is returned as GitHub names it, and an account is said only for one to be created.
+// and is returned as the git host names it, and an account is said only for one to be created.
 func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
 	if repository == "" {
 		return "", nil
@@ -103,7 +92,7 @@ func (r CreatePlatformExperimentRequest) missing() []string {
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.
 func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	data, err := h.repos.ExperimentBase(ctx, req.ProjectID, req.Repository)
+	data, err := h.repos.File(ctx, req.ProjectID, req.Repository, domain.ExperimentFile)
 	if err != nil {
 		return req, err
 	}
@@ -138,7 +127,7 @@ func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	data, err := h.repos.ExperimentBase(ctx, projectID, named)
+	data, err := h.repos.File(ctx, projectID, named, domain.ExperimentFile)
 	if err != nil {
 		return nil, err
 	}

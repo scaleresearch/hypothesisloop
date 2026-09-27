@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 const experimentBase = `
@@ -112,7 +113,17 @@ func (f *fakeRepositories) Reachable(_ context.Context, projectID, repository st
 	return testRepository, nil
 }
 
-func (f *fakeRepositories) ExperimentBase(_ context.Context, projectID, repository string) ([]byte, error) {
+func (f *fakeRepositories) URL(repository string) string {
+	return "https://github.com/" + repository + ".git"
+}
+
+func (f *fakeRepositories) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
+	panic("the handler asked for a git credential")
+}
+
+func (f *fakeRepositories) Serves(string, string, string, string) bool { return false }
+
+func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ string) ([]byte, error) {
 	f.asked = append(f.asked, projectID+" "+repository)
 	if f.refusal != nil {
 		return nil, f.refusal

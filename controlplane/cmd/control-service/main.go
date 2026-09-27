@@ -29,6 +29,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
@@ -140,9 +141,11 @@ func main() {
 		}
 		githubApp = client
 	}
-	repos := accounts.NewRepositories(db.NewAccountsStore(pool), db.NewPlatformExperimentsStore(pool), githubApp, gate.access, logger)
+	accountsStore := db.NewAccountsStore(pool)
+	gitHost := accounts.NewGitHubHost(accountsStore, githubApp, logger)
+	repos := accounts.NewRepositories(accountsStore, db.NewPlatformExperimentsStore(pool), githubApp, gitHost, gate.access, logger)
 
-	apiServer := newAPIServer(runCtx, gate, repos, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -171,7 +174,7 @@ type apiGate struct {
 	access        *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -197,7 +200,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		AcceleratorTypes: acceleratorTypeInfos,
 		JobImages:        pcfg.OfferedJobImages(),
 	}
-	peHandler := quota.NewPlatformExperimentsHandler(peSvc, repos, logger).
+	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, logger).
 		WithCatalog(resourceCatalog).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).
 		WithAgentLaunch(quota.AgentLaunch{

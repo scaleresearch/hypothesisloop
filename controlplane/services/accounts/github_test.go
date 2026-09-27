@@ -211,6 +211,7 @@ type githubWorld struct {
 	experiments   experiments
 	app           *fakeApp
 	svc           *Repositories
+	host          *GitHubHost
 }
 
 // newGitHubWorld is the accounts world with the GitHub routes on it. Platform experiment pe-a,
@@ -220,13 +221,14 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}}
-	w.experiments = experiments{"pe-a": {w.orgA, "Acme/Model"}, "pe-bare": {w.orgA, ""}, "pe-b": {w.orgB, "Acme/Model"}}
+	w.experiments = experiments{"pe-a": {w.projectA, "Acme/Model"}, "pe-bare": {w.projectA, ""}, "pe-b": {w.projectB, "Acme/Model"}}
 	var app GitHubApp
 	if withApp {
 		app = w.app
 	}
 	access := auth.NewAccess(placement{memStore: w.store})
-	w.svc = NewRepositories(w.installations, w.experiments, app, access, zap.NewNop())
+	w.host = NewGitHubHost(w.installations, app, zap.NewNop())
+	w.svc = NewRepositories(w.installations, w.experiments, app, w.host, access, zap.NewNop())
 	w.callers["agent-bare"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgA}, ProjectID: w.projectA, PlatformExperimentID: "pe-bare", AgentID: "agent-2"}
 	w.callers["agent-other-org"] = auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{w.orgB}, ProjectID: w.projectB, PlatformExperimentID: "pe-b", AgentID: "agent-b"}
 	for _, kind := range []string{"agent", "coordinator", "job"} {
@@ -581,7 +583,7 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 			t.Errorf("%s: got = %d %s, want = %d", name, rec.Code, rec.Body, tc.want)
 		}
 	}
-	if _, err := w.svc.Reachable(context.Background(), w.projectA, "acme/model"); statusOf(err) != 503 {
+	if _, err := w.host.Reachable(context.Background(), w.projectA, "acme/model"); statusOf(err) != 503 {
 		t.Errorf("Reachable with no App: %v, want 503", err)
 	}
 }
@@ -756,7 +758,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 	w.connect(w.orgA, acme)
 	w.connect(w.orgB, rival)
 	ctx := context.Background()
-	named, err := w.svc.Reachable(ctx, w.projectA2, "ACME/model")
+	named, err := w.host.Reachable(ctx, w.projectA2, "ACME/model")
 	if err != nil || named != "Acme/Model" || len(w.app.mints) != 1 || w.app.mints[0] != (minted{100, "Acme/Model", github.Read}) {
 		t.Fatalf("Reachable = %q, %v, minted %+v, want the name as GitHub spells it, checked with one read token", named, err, w.app.mints)
 	}
@@ -772,7 +774,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 		"a path out of the api":                              {w.projectA, "acme/../../app", 422, ReasonInvalidRepository},
 		"a project that does not exist":                      {"prj-missing", "acme/model", 404, ReasonNotFound},
 	} {
-		named, err := w.svc.Reachable(ctx, tc.project, tc.repository)
+		named, err := w.host.Reachable(ctx, tc.project, tc.repository)
 		if named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
 			t.Errorf("%s: Reachable = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 		}
@@ -781,7 +783,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 		t.Fatalf("a token was minted for a repository that is not reachable: %+v", w.app.mints)
 	}
 	delete(w.app.covers, 100)
-	if _, err := w.svc.Reachable(ctx, w.projectA, "acme/model"); statusOf(err) != 422 || reasonOf(err) != ReasonInstallationGone {
+	if _, err := w.host.Reachable(ctx, w.projectA, "acme/model"); statusOf(err) != 422 || reasonOf(err) != ReasonInstallationGone {
 		t.Errorf("with the App removed on GitHub: %v, want 422 installation_gone", err)
 	}
 }
@@ -789,28 +791,28 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
 	bare := newGitHubWorld(t, false)
-	if named, err := bare.svc.Create(ctx, bare.projectA, "", "sweep-1a2b3c4d", ""); named != "" || err != nil {
+	if named, err := bare.host.Create(ctx, bare.projectA, "", "sweep-1a2b3c4d", ""); named != "" || err != nil {
 		t.Fatalf("on a deployment with no GitHub App: Create = %q, %v, want none made and no refusal", named, err)
 	}
 	w := newGitHubWorld(t, true)
-	if named, err := w.svc.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
+	if named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonGitHubNotConnected {
 		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
 	}
 	w.connect(w.orgA, acme)
 	w.connect(w.orgB, rival)
-	named, err := w.svc.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "")
+	named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "")
 	if err != nil || named != "Acme/sweep-1a2b3c4d" || len(w.app.created) != 1 || w.app.created[0] != "100 sweep-1a2b3c4d" {
 		t.Fatalf("Create = %q, %v (created %v), want it made through the org's own installation", named, err, w.app.created)
 	}
 	// With two accounts connected the request says which, and nothing is made on a guess.
 	w.connect(w.orgA, rival)
-	if named, err := w.svc.Create(ctx, w.projectA, "", "ambiguous", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
+	if named, err := w.host.Create(ctx, w.projectA, "", "ambiguous", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
 		t.Fatalf("with two accounts and none named: Create = %q, %v, want 422 repository_account_required listing them", named, err)
 	}
-	if named, err := w.svc.Create(ctx, w.projectA, "RIVAL", "on-rival", ""); err != nil || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
+	if named, err := w.host.Create(ctx, w.projectA, "RIVAL", "on-rival", ""); err != nil || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
 		t.Fatalf("naming the account: Create = %q, %v (created %v), want it made through that account's installation", named, err, w.app.created)
 	}
-	if named, err := w.svc.Create(ctx, w.projectA, "elsewhere", "nowhere", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonInstallationNotConnected || len(w.app.created) != 2 {
+	if named, err := w.host.Create(ctx, w.projectA, "elsewhere", "nowhere", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonInstallationNotConnected || len(w.app.created) != 2 {
 		t.Fatalf("naming an account the org did not connect: Create = %q, %v, want 422 installation_not_connected", named, err)
 	}
 	for name, tc := range map[string]struct {
@@ -825,7 +827,7 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
 	} {
 		w.app.createErr = tc.createErr
-		if named, err := w.svc.Create(ctx, tc.project, "acme", "another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
+		if named, err := w.host.Create(ctx, tc.project, "acme", "another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
 			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 		}
 	}
@@ -836,7 +838,7 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 	w.connect(w.orgA, acme)
 	w.app.file = "name: from the repository\n"
 	ctx := context.Background()
-	data, err := w.svc.ExperimentBase(ctx, w.projectA, "acme/model")
+	data, err := w.host.File(ctx, w.projectA, "acme/model", domain.ExperimentFile)
 	want := "ghs_minted_1@Acme/Model::" + domain.ExperimentFile
 	if err != nil || string(data) != w.app.file || len(w.app.files) != 1 || w.app.files[0] != want {
 		t.Fatalf("base = %q, %v, read as %v, want the file at the head of the default branch with a token for that repository", data, err, w.app.files)
@@ -856,14 +858,14 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 		"something unplanned": {errors.New("unexpected " + leak), 500, ""},
 	} {
 		w.app.fileErr = tc.err
-		_, err := w.svc.ExperimentBase(ctx, w.projectA, "acme/model")
+		_, err := w.host.File(ctx, w.projectA, "acme/model", domain.ExperimentFile)
 		if statusOf(err) != tc.status || reasonOf(err) != tc.reason || strings.Contains(err.Error(), leak) {
 			t.Errorf("%s: %v, want %d %s without the failure's text", name, err, tc.status, tc.reason)
 		}
 	}
 	w.app.fileErr = nil
 	read := len(w.app.files)
-	if _, err := w.svc.ExperimentBase(ctx, w.projectA, "rival/secret"); reasonOf(err) != ReasonInstallationNotConnected || len(w.app.files) != read {
+	if _, err := w.host.File(ctx, w.projectA, "rival/secret", domain.ExperimentFile); reasonOf(err) != ReasonInstallationNotConnected || len(w.app.files) != read {
 		t.Errorf("a repository the org does not reach: %v, read %d files, want installation_not_connected and none read", err, len(w.app.files)-read)
 	}
 }

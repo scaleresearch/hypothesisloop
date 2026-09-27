@@ -17,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 const agentsTestSecret = "a-signing-secret-only-this-test-knows"
@@ -35,9 +36,17 @@ func (f *rosterStore) Reachable(_ context.Context, _, repository string) (string
 	return repository, nil
 }
 
-func (f *rosterStore) ExperimentBase(context.Context, string, string) ([]byte, error) {
+func (f *rosterStore) URL(string) string { return "" }
+
+func (f *rosterStore) File(context.Context, string, string, string) ([]byte, error) {
 	return nil, nil
 }
+
+func (f *rosterStore) Credential(context.Context, string, string, bool) (*githost.Credential, error) {
+	return nil, nil
+}
+
+func (f *rosterStore) Serves(string, string, string, string) bool { return false }
 
 func (f *rosterStore) Create(context.Context, string, string, string, string) (string, error) {
 	return "", nil

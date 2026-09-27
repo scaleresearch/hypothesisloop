@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/github"
 )
 
@@ -39,28 +40,30 @@ type InstallationStore interface {
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
 }
 
-// ExperimentRepositories says which repository a platform experiment names and whose org it is
-// in. *db.PlatformExperimentsStore satisfies it.
+// ExperimentRepositories says which repository a platform experiment names and which project
+// it is in. *db.PlatformExperimentsStore satisfies it.
 type ExperimentRepositories interface {
-	PlatformExperimentRepository(ctx context.Context, id string) (orgID, repository string, err error)
+	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, err error)
 }
 
-// Repositories reaches GitHub for the orgs that connected it: which installations an org holds,
-// what they cover, and a token for the one repository a platform experiment names.
+// Repositories serves the GitHub installations orgs connect and what they cover, and the git
+// credential for the one repository a platform experiment names on the deployment's git host.
 type Repositories struct {
 	store       InstallationStore
 	experiments ExperimentRepositories
 	github      GitHubApp
+	host        githost.Provider
 	logger      *zap.Logger
 	access      *auth.Access
 }
 
-// NewRepositories takes the App's client, or nil for a deployment that has no GitHub App.
-func NewRepositories(store InstallationStore, experiments ExperimentRepositories, app GitHubApp, access *auth.Access, logger *zap.Logger) *Repositories {
-	if store == nil || experiments == nil || access == nil || logger == nil {
-		panic("accounts.NewRepositories: the stores, an access check and a logger are required")
+// NewRepositories takes the App's client, or nil for a deployment that has no GitHub App, and
+// the git host credentials are minted on.
+func NewRepositories(store InstallationStore, experiments ExperimentRepositories, app GitHubApp, host githost.Provider, access *auth.Access, logger *zap.Logger) *Repositories {
+	if store == nil || experiments == nil || host == nil || access == nil || logger == nil {
+		panic("accounts.NewRepositories: the stores, a git host, an access check and a logger are required")
 	}
-	return &Repositories{store: store, experiments: experiments, github: app, logger: logger, access: access}
+	return &Repositories{store: store, experiments: experiments, github: app, host: host, logger: logger, access: access}
 }
 
 // Repository is a repository an org can name on a platform experiment.
@@ -77,8 +80,8 @@ type GitCredential struct {
 	Host      string    `json:"host"`
 	Path      string    `json:"path" doc:"The path asked for, which names the one repository the password works on."`
 	Username  string    `json:"username"`
-	Password  string    `json:"password" doc:"A GitHub installation token minted for this call. It is stored nowhere."`
-	ExpiresAt time.Time `json:"expires_at"`
+	Password  string    `json:"password" doc:"What the git host takes for the repository. On GitHub an installation token minted for this call and stored nowhere."`
+	ExpiresAt time.Time `json:"expires_at,omitzero" doc:"Absent for a password that does not run out."`
 }
 
 // The reasons a client tells a refusal about GitHub apart by.
@@ -125,7 +128,7 @@ var errNoInstallation = errors.New("the org has connected no GitHub account")
 // status of a repository the org's installations do not reach: 422 where a request names it,
 // 409 where a platform experiment already does. Anything else is the platform's or GitHub's
 // failure: it is logged and answered without its text.
-func (r *Repositories) refusal(op string, err error, gone int) error {
+func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var status huma.StatusError
 	switch {
 	case errors.As(err, &status):
@@ -161,13 +164,13 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 	case errors.Is(err, github.ErrFileTooLarge):
 		return invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
 	case errors.Is(err, github.ErrRateLimited):
-		r.logger.Warn("github is rate limiting the platform", zap.String("operation", op))
+		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
 		return api.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")
 	case errors.Is(err, github.ErrAppCredentials):
-		r.logger.Error("github refused the App's credentials", zap.String("operation", op), zap.Error(err))
+		logger.Error("github refused the App's credentials", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonUnavailable, "the platform could not authenticate to GitHub")
 	default:
-		return auth.Internal(r.logger, "github request failed", err, zap.String("operation", op))
+		return auth.Internal(logger, "github request failed", err, zap.String("operation", op))
 	}
 }
 
@@ -272,119 +275,6 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	return out, nil
 }
 
-// token mints a token for a repository through the installation the org connected on the
-// account that owns it.
-func (r *Repositories) token(ctx context.Context, orgID, repository string, access github.Access) (*github.Token, error) {
-	app, err := r.app()
-	if err != nil {
-		return nil, err
-	}
-	if err := github.ValidRepository(repository); err != nil {
-		return nil, err
-	}
-	owner, _, _ := strings.Cut(repository, "/")
-	installation, err := r.store.GitHubInstallationOfAccount(ctx, orgID, owner)
-	if err != nil {
-		return nil, err
-	}
-	if installation == nil {
-		return nil, errNotConnected
-	}
-	return app.Token(ctx, installation.InstallationID, repository, access)
-}
-
-// tokenForProject is token for the org a project belongs to.
-func (r *Repositories) tokenForProject(ctx context.Context, projectID, repository string) (*github.Token, error) {
-	project, err := r.store.GetProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if project == nil {
-		return nil, notFound("project")
-	}
-	return r.token(ctx, project.OrgID, repository, github.Read)
-}
-
-// Reachable returns a repository as GitHub names it when an installation the org of the project
-// connected covers it, and the refusal the API answers a request that names it with when none
-// does.
-func (r *Repositories) Reachable(ctx context.Context, projectID, repository string) (string, error) {
-	token, err := r.tokenForProject(ctx, projectID, repository)
-	if err != nil {
-		return "", r.refusal("check-repository", err, http.StatusUnprocessableEntity)
-	}
-	return token.Repository, nil
-}
-
-// Create makes a private repository for a platform experiment that names none and returns it as
-// GitHub names it. It is made on the GitHub account named, one the org of the project connected,
-// or with none named on the only one it connected: with several, which one is the request's to
-// say. On a deployment that has no GitHub App it makes none and returns nothing: there a
-// platform experiment needs no repository. A refusal is returned as the API answers it.
-func (r *Repositories) Create(ctx context.Context, projectID, account, name, description string) (string, error) {
-	const op = "create-repository"
-	if r.github == nil {
-		return "", nil
-	}
-	project, err := r.store.GetProject(ctx, projectID)
-	if err != nil {
-		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
-	}
-	if project == nil {
-		return "", notFound("project")
-	}
-	installations, err := r.store.ListGitHubInstallations(ctx, project.OrgID)
-	if err != nil {
-		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
-	}
-	if len(installations) == 0 {
-		return "", r.refusal(op, errNoInstallation, http.StatusUnprocessableEntity)
-	}
-	var chosen *domain.OrgGitHubInstallation
-	logins := []string{}
-	for _, one := range installations {
-		logins = append(logins, one.AccountLogin)
-		if strings.EqualFold(one.AccountLogin, account) || (account == "" && len(installations) == 1) {
-			chosen = one
-		}
-	}
-	switch {
-	case chosen == nil && account == "":
-		return "", invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
-	case chosen == nil:
-		return "", r.refusal(op, errNotConnected, http.StatusUnprocessableEntity)
-	}
-	created, err := r.github.CreateRepository(ctx, chosen.InstallationID, name, description)
-	if err != nil {
-		return "", r.refusal(op, err, http.StatusUnprocessableEntity)
-	}
-	r.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", project.OrgID))
-	return created.FullName, nil
-}
-
-// ExperimentBase reads domain.ExperimentFile at the head of the default branch of a repository
-// the org of the project reaches. A refusal the caller can act on is returned as the API answers
-// it.
-func (r *Repositories) ExperimentBase(ctx context.Context, projectID, repository string) ([]byte, error) {
-	const op = "read-experiment-file"
-	token, err := r.tokenForProject(ctx, projectID, repository)
-	if err != nil {
-		return nil, r.refusal(op, err, http.StatusUnprocessableEntity)
-	}
-	data, err := r.github.File(ctx, token, "", domain.ExperimentFile)
-	if err != nil {
-		return nil, r.refusal(op, err, http.StatusUnprocessableEntity)
-	}
-	return data, nil
-}
-
-// servedPath reports whether a path git asks a credential for is the repository's: owner/name
-// with or without .git, or its LFS endpoint under it.
-func servedPath(asked, repository string) bool {
-	asked = strings.TrimSuffix(strings.Trim(asked, "/"), "/info/lfs")
-	return strings.EqualFold(strings.TrimSuffix(asked, ".git"), repository)
-}
-
 // credential mints the caller's git credential. It goes only to what the platform launched into
 // a platform experiment, for the repository that experiment names and for no other address: an
 // agent may push, a coordinator and a job read. Nothing is minted for a run that is over, though
@@ -394,10 +284,10 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 	if !ok {
 		return nil, auth.Unauthenticated("the request carries no principal")
 	}
-	access := github.Read
+	write := false
 	switch p.Kind {
 	case auth.KindAgent:
-		access = github.Write
+		write = true
 	case auth.KindCoordinator, auth.KindJob:
 	default:
 		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "a "+string(p.Kind)+" token has no repository of its own: a git credential goes to an agent, a coordinator or a job")
@@ -405,23 +295,23 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 	if p.RunOver {
 		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "the run of this "+string(p.Kind)+" token in platform experiment "+p.PlatformExperimentID+" is over, and no git credential is handed out for it")
 	}
-	orgID, repository, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
+	projectID, repository, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
 	if err != nil {
 		return nil, err
 	}
 	if repository == "" {
 		return nil, api.Refuse(http.StatusNotFound, ReasonNoRepository, "platform experiment "+p.PlatformExperimentID+" names no repository")
 	}
-	if protocol != "https" || !strings.EqualFold(host, domain.GitHubHost) || !servedPath(path, repository) {
-		return nil, api.Refuse(http.StatusNotFound, ReasonNotFound, "no git credential for that address: this token's is for "+domain.RepositoryURL(repository)+" only")
+	if !r.host.Serves(repository, protocol, host, path) {
+		return nil, api.Refuse(http.StatusNotFound, ReasonNotFound, "no git credential for that address: this token's is for "+r.host.URL(repository)+" only")
 	}
-	token, err := r.token(ctx, orgID, repository, access)
+	minted, err := r.host.Credential(ctx, projectID, repository, write)
 	if err != nil {
 		return nil, err
 	}
 	return &GitCredential{
-		Protocol: "https", Host: domain.GitHubHost, Path: strings.Trim(path, "/"),
-		Username: "x-access-token", Password: token.Value, ExpiresAt: token.ExpiresAt,
+		Protocol: protocol, Host: strings.ToLower(host), Path: strings.Trim(path, "/"),
+		Username: minted.Username, Password: minted.Password, ExpiresAt: minted.ExpiresAt,
 	}, nil
 }
 
@@ -470,7 +360,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	}) (*struct{ Body *domain.OrgGitHubInstallation }, error) {
 		installation, err := r.connect(ctx, in.ID, in.Body.Code, in.Body.RedirectURI, in.Body.InstallationID)
 		if err != nil {
-			return nil, r.refusal("create-github-installation", err, http.StatusUnprocessableEntity)
+			return nil, refusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
 		}
 		return &struct{ Body *domain.OrgGitHubInstallation }{Body: installation}, nil
 	})
@@ -498,7 +388,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		}
 		installations, err := r.store.ListGitHubInstallations(ctx, in.ID)
 		if err != nil {
-			return nil, r.refusal(op, err, http.StatusConflict)
+			return nil, refusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &installationsPage{TotalCount: len(installations), Body: pageOf(installations, limit, offset)}, nil
 	})
@@ -518,7 +408,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			return nil, err
 		}
 		if err := r.store.DisconnectGitHubInstallation(ctx, in.ID, in.InstallationID); err != nil {
-			return nil, r.refusal("delete-github-installation", err, http.StatusConflict)
+			return nil, refusal(r.logger, "delete-github-installation", err, http.StatusConflict)
 		}
 		return &struct{}{}, nil
 	})
@@ -550,7 +440,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		}
 		found, err := r.repositories(ctx, in.ID, in.Q)
 		if err != nil {
-			return nil, r.refusal(op, err, http.StatusConflict)
+			return nil, refusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &repositoriesPage{TotalCount: len(found), Body: pageOf(found, limit, offset)}, nil
 	})
@@ -579,7 +469,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	}) (*credentialCreated, error) {
 		credential, err := r.credential(ctx, in.Body.Protocol, in.Body.Host, in.Body.Path)
 		if err != nil {
-			return nil, r.refusal("create-git-credential", err, http.StatusConflict)
+			return nil, refusal(r.logger, "create-git-credential", err, http.StatusConflict)
 		}
 		return &credentialCreated{CacheControl: "no-store", Body: *credential}, nil
 	})

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
@@ -31,12 +32,12 @@ type PlatformExperimentsHandler struct {
 	// baseline reads what a proposal's baseline job did; readBaseline unless a test sets another.
 	baseline baselineReader
 
-	// repos reaches the repositories a project's org connected on GitHub.
-	repos Repositories
+	// repos is the git host platform experiments keep their code on.
+	repos githost.Provider
 }
 
 // NewPlatformExperimentsHandler constructs the handler.
-func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos Repositories, logger *zap.Logger) *PlatformExperimentsHandler {
+func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, logger *zap.Logger) *PlatformExperimentsHandler {
 	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: DefaultPlanning}
 	h.baseline = h.readBaseline
 	return h
