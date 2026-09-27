@@ -134,6 +134,7 @@ type rolesStagesStore struct {
 	competitors []string
 	cut         []string
 	completedBy []string
+	inFlightBy  []string
 }
 
 func (f *rolesStagesStore) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
@@ -156,10 +157,17 @@ func (f *rolesStagesStore) CompletedJobIDs(context.Context, string) (map[string]
 	return nil, nil
 }
 
-func (f *rolesStagesStore) AgentsWithCompletedJob(context.Context, string) (map[string]bool, error) {
-	agents := make(map[string]bool, len(f.completedBy))
+func (f *rolesStagesStore) AgentJobsByAgent(context.Context, string) (map[string]db.AgentJobs, error) {
+	agents := make(map[string]db.AgentJobs)
 	for _, agentID := range f.completedBy {
-		agents[agentID] = true
+		jobs := agents[agentID]
+		jobs.Completed = true
+		agents[agentID] = jobs
+	}
+	for _, agentID := range f.inFlightBy {
+		jobs := agents[agentID]
+		jobs.InFlight = true
+		agents[agentID] = jobs
 	}
 	return agents, nil
 }
@@ -252,40 +260,89 @@ func TestBoundaryWithFourCompetitorsAndThreeNonCompetitorsCutsNobody(t *testing.
 	assertCut(t, kept, "c1", "c2", "c3", "c4")
 }
 
-// Only a completed job ranks. When every survivor's jobs were stopped short there is nothing to
-// compare and never will be, so the boundary resolves with the field whole instead of waiting on
-// the metrics store for values no job is left to send.
-func TestBoundaryWhereNoSurvivorCompletedAJobAdvancesWithNobodyCut(t *testing.T) {
-	store := &rolesStagesStore{
-		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5", "baseline"},
-		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
-		// A non-competitor's completed job gives the survivors nothing to be ranked on.
-		completedBy: []string{"baseline"},
+// With no ranking value for anyone standing, the boundary waits only for what can still produce
+// one: the metrics store coming back, or a job in flight in a field where none has completed.
+// Everything else resolves at once with the field whole.
+func TestBoundaryWithNoRankingValueWaitsOnlyForWhatCanStillRank(t *testing.T) {
+	field := []string{"c1", "c2", "c3", "c4", "c5"}
+	cases := []struct {
+		name        string
+		completedBy []string
+		inFlightBy  []string
+		observed    fakeObserved
+		// wantPending is the postponement for a job in flight, wantStoreErr the failed pass that
+		// retries the read.
+		wantPending  bool
+		wantStoreErr bool
+	}{
+		{
+			name: "every job was stopped short: advance",
+			// A non-competitor's jobs give the survivors nothing to be ranked on or to wait for.
+			completedBy: []string{"baseline"},
+			inFlightBy:  []string{"baseline"},
+		},
+		{
+			name:        "nobody completed and a job is in flight: postpone",
+			inFlightBy:  []string{"c2"},
+			wantPending: true,
+		},
+		{
+			name:        "completed jobs reported no ranking value: advance",
+			completedBy: []string{"c3"},
+		},
+		{
+			name:        "completed without a value beside a job in flight: advance",
+			completedBy: []string{"c3"},
+			inFlightBy:  []string{"c4"},
+		},
+		{
+			name:         "the metrics store fails with nothing left to rank: retry",
+			observed:     fakeObserved{failOn: "BestPerAgentOnMetric"},
+			wantStoreErr: true,
+		},
 	}
-	pe, stage := rankedPE(50)
-	// No metrics store on purpose: the jobs table alone decides this, and reaching a metric read
-	// would mean the decision was left to what the metrics store happened to answer.
-	kept, cut, err := rolesController(store, nil).computeCut(context.Background(), pe, stage)
-	if err != nil {
-		t.Fatalf("computeCut err = %v, want nil", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &rolesStagesStore{
+				quotaAgents: append([]string{"baseline"}, field...),
+				competitors: field,
+				completedBy: tc.completedBy,
+				inFlightBy:  tc.inFlightBy,
+			}
+			pe, stage := rankedPE(50)
+			kept, cut, err := rolesController(store, tc.observed).computeCut(context.Background(), pe, stage)
+			if tc.wantPending || tc.wantStoreErr {
+				if err == nil || errors.Is(err, ErrStageRankingPending) != tc.wantPending {
+					t.Fatalf("computeCut err = %v, want pending=%v store error=%v", err, tc.wantPending, tc.wantStoreErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("computeCut err = %v, want nil", err)
+			}
+			if len(cut) != 0 {
+				t.Fatalf("cut = %v, want %v", cut, []string{})
+			}
+			assertCut(t, kept, field...)
+		})
 	}
-	if len(cut) != 0 {
-		t.Fatalf("cut = %v, want %v", cut, []string{})
-	}
-	assertCut(t, kept, "c1", "c2", "c3", "c4", "c5")
 }
 
-// A survivor completed a job, so there is something to rank, and the metrics store has no value
-// for it yet. That is a wait for data, and an empty answer must never pass for an empty field.
-func TestBoundaryWhereACompletedJobHasNoMetricValueYetIsPostponed(t *testing.T) {
+// A ranking value settles the boundary whatever else is still running: the field is cut as it
+// stands, and the job in flight is not waited for.
+func TestBoundaryWithARankingValueCutsWhileOtherJobsAreInFlight(t *testing.T) {
+	observed := bestPerAgent(map[string]float64{"c1": 50, "c2": 40})
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5"},
 		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
-		completedBy: []string{"c3"},
+		completedBy: []string{"c1", "c2"},
+		inFlightBy:  []string{"c3", "c4", "c5"},
 	}
-	pe, stage := rankedPE(50)
-	_, _, err := rolesController(store, fakeObserved{}).computeCut(context.Background(), pe, stage)
-	if !errors.Is(err, ErrStageMetricsUnavailable) {
-		t.Fatalf("computeCut err = %v, want %v", err, ErrStageMetricsUnavailable)
+	pe, stage := rankedPE(60)
+	kept, cut, err := rolesController(store, observed).computeCut(context.Background(), pe, stage)
+	if err != nil {
+		t.Fatalf("computeCut err = %v, want nil", err)
 	}
+	assertCut(t, cut, "c3", "c4", "c5")
+	assertCut(t, kept, "c1", "c2")
 }

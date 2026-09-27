@@ -11,10 +11,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// ErrStageMetricsUnavailable signals that survivors completed jobs and no ranking metric has a
-// value for any of them, so the cut cannot be trusted this cycle. Callers must postpone the
-// boundary rather than cut.
-var ErrStageMetricsUnavailable = errors.New("stages: no metric produced usable ranking data")
+// ErrStageRankingPending signals that no survivor has a ranking value yet and a job that can
+// still produce one is in flight. Callers must postpone the boundary rather than cut.
+var ErrStageRankingPending = errors.New("stages: ranking data still to come from a job in flight")
 
 // minSurvivorsForCut is the roster size below which a boundary cuts nobody, and
 // minSurvivorsAfterCut the floor a cut may never take the field below. Guardrails: a ladder
@@ -47,24 +46,12 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 		return survivors, nil, nil
 	}
 
-	// Only a completed job ranks, so a field in which nobody completed one is a field with nothing
-	// to compare: it is kept whole, like any other all-tied field. The jobs table decides this,
-	// because the metrics store answers the same way for values it has not received yet.
-	completedBy, err := c.stagesStore.AgentsWithCompletedJob(ctx, pe.ID)
+	// Read before the metrics store: a job that completes between the two reads then counts as in
+	// flight here and the boundary waits a tick, where the other order would take its absence from
+	// the ranking for a field with nothing to rank.
+	jobsBy, err := c.stagesStore.AgentJobsByAgent(ctx, pe.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("stages: agents with a completed job: %w", err)
-	}
-	anyCompleted := false
-	for _, agentID := range survivors {
-		if completedBy[agentID] {
-			anyCompleted = true
-			break
-		}
-	}
-	if !anyCompleted {
-		c.logger.Info("stages: no surviving competitor completed a job, advancing with nobody cut",
-			zap.String("platform_experiment", pe.ID), zap.Int("stage", pe.CurrentStage))
-		return survivors, nil, nil
+		return nil, nil, fmt.Errorf("stages: jobs by agent: %w", err)
 	}
 
 	// cutCount[agent] counts the metrics on which the agent fell below the line. An agent is
@@ -74,8 +61,8 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	for _, metric := range rankingMetrics {
 		// A cut is irreversible and is decided on every healthy metric at once, so a metric that
 		// failed to read is not a metric with no data — dropping it would cut agents on evidence
-		// the boundary was never supposed to be judged by. Postpone instead; the next reconcile
-		// tick re-reads.
+		// the boundary was never supposed to be judged by. The error fails this pass and the next
+		// reconcile tick re-reads.
 		cutOnMetric, hadData, err := c.cutOnMetric(ctx, pe, metric, stage, survivors)
 		if err != nil {
 			return nil, nil, fmt.Errorf("stages: ranking metric %q: %w", metric.Key, err)
@@ -89,7 +76,24 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 		}
 	}
 	if healthyMetrics == 0 {
-		return nil, nil, ErrStageMetricsUnavailable
+		// The metrics store answered and has no ranking value for anyone standing. The boundary
+		// waits only for what can still produce one: a job in flight in a field where none has
+		// completed. Its wait ends with that job. A completed job that reported no ranking value
+		// never will, so it is nothing to wait for.
+		anyCompleted, anyInFlight := false, false
+		for _, agentID := range survivors {
+			anyCompleted = anyCompleted || jobsBy[agentID].Completed
+			anyInFlight = anyInFlight || jobsBy[agentID].InFlight
+		}
+		if !anyCompleted && anyInFlight {
+			return nil, nil, ErrStageRankingPending
+		}
+		reason := "stages: no surviving competitor has a job that can still rank, advancing with nobody cut"
+		if anyCompleted {
+			reason = "stages: surviving competitors completed jobs without a ranking value, advancing with nobody cut"
+		}
+		c.logger.Info(reason, zap.String("platform_experiment", pe.ID), zap.Int("stage", pe.CurrentStage))
+		return survivors, nil, nil
 	}
 
 	var kept, cut []string

@@ -130,20 +130,38 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 	return completed, nil
 }
 
-// AgentsWithCompletedJob returns the agents that have at least one COMPLETED job in a platform
-// experiment: the ones a stage boundary has something to rank.
-func (s *ExperimentsStore) AgentsWithCompletedJob(ctx context.Context, platformExpID string) (map[string]bool, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT DISTINCT agent_id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED'`, platformExpID)
+// AgentJobs is what one agent's jobs in a platform experiment can still give a stage boundary to
+// rank on.
+type AgentJobs struct {
+	// Completed is at least one COMPLETED job, the only kind whose metrics rank.
+	Completed bool
+	// InFlight is at least one admitted job that has not ended, SUBMITTED or RUNNING.
+	InFlight bool
+}
+
+// AgentJobsByAgent returns, for every agent with a job in a platform experiment, whether it has a
+// completed job and whether it has one in flight. One statement, so both answers describe the
+// same moment.
+func (s *ExperimentsStore) AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]AgentJobs, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id,
+       bool_or(status = 'COMPLETED'),
+       bool_or(status IN ('SUBMITTED', 'RUNNING'))
+FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformExpID)
 	if err != nil {
-		return nil, fmt.Errorf("experiments_store.AgentsWithCompletedJob: %w", err)
+		return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("experiments_store.AgentsWithCompletedJob: %w", err)
+	defer rows.Close()
+	agents := make(map[string]AgentJobs)
+	for rows.Next() {
+		var agentID string
+		var jobs AgentJobs
+		if err := rows.Scan(&agentID, &jobs.Completed, &jobs.InFlight); err != nil {
+			return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
+		}
+		agents[agentID] = jobs
 	}
-	agents := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		agents[id] = true
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
 	}
 	return agents, nil
 }
