@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -182,9 +183,15 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			return fmt.Errorf("scheduler: read signup: %w", err)
 		}
 		if signup == nil || signup.Role != domain.SignupRoleBaseline {
+			// What the caller does next is the platform experiment's status_reason, worded for
+			// whoever asks, and is said there alone.
+			reader, _ := auth.FromContext(ctx)
+			if err := s.quota.Describe(ctx, pe, reader); err != nil {
+				return fmt.Errorf("scheduler: describe platform experiment: %w", err)
+			}
 			return &AdmissionError{
 				Reason:  "experiment_not_started",
-				Message: fmt.Sprintf("platform experiment %s has not started; until it runs it accepts only the job of an agent of role baseline, which measures its baseline", pe.ID),
+				Message: fmt.Sprintf("platform experiment %s has not started (%s). %s", pe.ID, pe.StatusReason.Reason, pe.StatusReason.Message),
 			}
 		}
 	case domain.PlatformExpDraft:

@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -64,6 +65,9 @@ type QuotaService interface {
 	// compute a dimensionless cost-efficiency term (see domain.AgentQuota.DominantCostFraction).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
+	// Describe sets on an open platform experiment why it is not running yet and what reader does
+	// about it (StatusReason): the one wording of it, which a refused submit repeats.
+	Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error
 }
 
 // NoveltyDetector computes the novelty of a hypothesis relative to existing experiments.

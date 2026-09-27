@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -253,6 +254,7 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: domain.DefaultAgentFlavor}
 	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}
 	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, Flavor: domain.PlannerFlavor}
+	caller := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1"})
 	for name, store := range map[string]unstartedStore{
 		"a draft's planner":           {status: domain.PlatformExpDraft, signup: planner},
 		"an open one's researcher":    {status: domain.PlatformExpOpen, signup: researcher},
@@ -261,15 +263,19 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 		"nobody of the open one":      {status: domain.PlatformExpOpen},
 		"a draft's baseline agent":    {status: domain.PlatformExpDraft, signup: baseline},
 	} {
-		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
 
 		// An incomplete spec too: the start is what the agent must wait for, before any field.
 		incomplete := humanIdeaSubmission()
 		incomplete.Theory = ""
 		for _, exp := range []*domain.Experiment{humanIdeaSubmission(), incomplete} {
 			var admission *AdmissionError
-			if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
+			if err := s.Submit(caller, exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
 				t.Fatalf("%s: got = %v, want a message saying it has not started", name, err)
+			}
+			// The refusal of an open one is its status_reason as it is worded for the caller.
+			if said := strings.Contains(admission.Message, "(baseline_required). step of agent agent-1, then why it waits"); said != (store.status == domain.PlatformExpOpen) {
+				t.Errorf("%s: the refusal carries the status_reason worded for its caller = %v: %s", name, said, admission.Message)
 			}
 		}
 	}
@@ -278,6 +284,14 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)
 	}
+}
+
+// waitingQuota words an open platform experiment's status_reason as quota does, for whoever reads.
+type waitingQuota struct{ QuotaService }
+
+func (waitingQuota) Describe(_ context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
+	pe.StatusReason = &domain.StatusReason{Reason: "baseline_required", Message: "step of " + string(reader.Kind) + " " + reader.AgentID + ", then why it waits"}
+	return nil
 }
 
 type finishedJobStore struct {
