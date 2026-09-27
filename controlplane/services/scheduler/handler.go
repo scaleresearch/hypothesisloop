@@ -67,6 +67,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. " +
 			"metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 estimate_required where it measured none. " +
 			"metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. " +
+			"job.image is the name of one of the platform's job images (GET /resource-catalog/capacity, job_images), stored as that image's whole address, or the whole address of another image, registry host first: 422 unknown_job_image for anything else, such as a bare name of an image on a public registry, with the names that are valid. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
 			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {

@@ -31,6 +31,30 @@ func (s *Service) codeInRepository(pe *domain.PlatformExperiment, codeRef string
 	return &AdmissionError{Reason: ReasonCodeRefNotInRepository, Message: fmt.Sprintf("code_ref must be a commit of the platform experiment's repository, %s@<commit-sha>, and it names another address: push your commit there and submit from your clone with code_ref left empty, which fills it in", pe.RepositoryURL)}
 }
 
+// ReasonUnknownJobImage refuses a job whose image is neither a job image the platform offers
+// nor a whole registry address.
+const ReasonUnknownJobImage = "unknown_job_image"
+
+// resolveImage writes the address of the image the job names into its spec (domain.ResolveJobImage),
+// so that everything after admission reads one form. A job that names none is left as it is.
+func (s *Service) resolveImage(job *domain.JobSpec) error {
+	if job.Image == "" {
+		return nil
+	}
+	address, ok := domain.ResolveJobImage(s.jobImages, job.Image)
+	if !ok {
+		names := make([]string, len(s.jobImages))
+		for i, image := range s.jobImages {
+			names[i] = image.Name
+		}
+		return &AdmissionError{Reason: ReasonUnknownJobImage, Message: fmt.Sprintf(
+			"job.image %q is no job image of this platform and no whole registry address: name one of the platform's job images (%s; hl capacity says what each carries and which accelerator types it suits), or state the whole address of another image, registry host first, as in registry.example.com/team/image:tag",
+			job.Image, strings.Join(names, ", "))}
+	}
+	job.Image = address
+	return nil
+}
+
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
@@ -106,6 +130,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
+		return err
+	}
+	if err := s.resolveImage(&exp.Job); err != nil {
 		return err
 	}
 

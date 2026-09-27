@@ -335,6 +335,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	noveltyDetector := dedup.New()
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
+		WithJobImages(pcfg.OfferedJobImages()).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, jwc, grace, logger).

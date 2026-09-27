@@ -115,7 +115,7 @@ func humanIdeaSubmission() *domain.Experiment {
 		HypothesisID: "h-human", Theory: "t", EstimatedDurationHours: 1, AcceleratorCount: 1,
 		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40),
 		Job: domain.JobSpec{
-			Image: "img", AcceleratorType: h100, AcceleratorCount: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
+			Image: "registry.test/job:1", AcceleratorType: h100, AcceleratorCount: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
 		},
 	}
 }
@@ -443,6 +443,37 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 	}
 	if strings.Contains(refused.Message, "the-secret-value") {
 		t.Fatalf("the refusal repeats the secret: %s", refused.Message)
+	}
+}
+
+// A bare name is pulled from whatever registry a runtime defaults to, which is how a job naming
+// "python" ran in Docker Hub's image without the platform's tools. A job names one of the
+// platform's job images, stored as its address, or states a whole address.
+func TestAJobImageIsStoredAsAnAddressAndABareNameIsRefused(t *testing.T) {
+	offered := []domain.JobImage{{Name: "python", Image: "registry.test/platform/job:7"}, {Name: "pytorch-cuda", Image: "registry.test/platform/job-pytorch:7"}}
+	s := (&Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}).WithJobImages(offered)
+	for stated, want := range map[string]string{
+		"python":                       "registry.test/platform/job:7",
+		"registry.test/platform/job:7": "registry.test/platform/job:7",
+		"ghcr.io/someone/mine:1":       "ghcr.io/someone/mine:1",
+		"":                             "",
+	} {
+		exp := humanIdeaSubmission()
+		exp.Job.Image = stated
+		if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) || exp.Job.Image != want {
+			t.Errorf("job.image %q: got = %v with image %q, want it taken as %q", stated, err, exp.Job.Image, want)
+		}
+	}
+	for _, stated := range []string{"python:3.13", "pytorch/pytorch:2.4.0", "tensorflow"} {
+		exp := humanIdeaSubmission()
+		exp.Job.Image = stated
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonUnknownJobImage || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+			t.Fatalf("job.image %q: got = %v, want a 422 %s", stated, err, ReasonUnknownJobImage)
+		}
+		if !strings.Contains(refused.Message, "python, pytorch-cuda") {
+			t.Errorf("job.image %q: the refusal names no valid image: %s", stated, refused.Message)
+		}
 	}
 }
 

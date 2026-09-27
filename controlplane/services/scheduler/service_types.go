@@ -91,11 +91,13 @@ type CodeHost interface {
 
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
-	store        Store
-	quota        QuotaService
-	novelty      NoveltyDetector
-	hypotheses   HypothesisStore
-	codeHost     CodeHost
+	store      Store
+	quota      QuotaService
+	novelty    NoveltyDetector
+	hypotheses HypothesisStore
+	codeHost   CodeHost
+	// jobImages is the images the deployment offers a job to run in, which a job names by name.
+	jobImages    []domain.JobImage
 	weights      domain.SchedulingWeights
 	credits      domain.QuotaConfig
 	loop         Triggerable
@@ -143,6 +145,12 @@ func NewService(
 // WithQuotaConfig sets the quota constants (rates, limits) used by the scheduler.
 func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	s.credits = cfg
+	return s
+}
+
+// WithJobImages sets the images the deployment offers a job to run in.
+func (s *Service) WithJobImages(images []domain.JobImage) *Service {
+	s.jobImages = images
 	return s
 }
 
