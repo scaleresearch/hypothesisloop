@@ -170,7 +170,6 @@ type RegisteredCluster struct {
 	MetricsURL   string         `json:"metrics_url" doc:"The address this cluster's agents send metrics to."`
 	Registry     string         `json:"registry" doc:"The registry this cluster's nodes pull the agents' images from."`
 	ImageTag     string         `json:"image_tag" doc:"The tag of the agents' images."`
-	JobImage     string         `json:"job_image" doc:"The platform's job image, published beside the agents' images: where a job that names no image runs on this cluster once its agent is started with it."`
 	Attach       AttachCommands `json:"attach_commands" doc:"The command that attaches the cluster, for each kind of runtime, built from the fields above. It asks for runtime_token."`
 }
 
@@ -539,7 +538,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		registered := RegisteredCluster{
 			ClusterView: viewOf(cluster, in.ID), RuntimeToken: token, APIURL: h.runtimes.APIURL, MetricsURL: h.runtimes.MetricsURL,
 			Registry: h.runtimes.Registry, ImageTag: h.runtimes.ImageTag,
-			JobImage: h.runtimes.Registry + "/hypothesisloop-job:" + h.runtimes.ImageTag,
 		}
 		registered.Attach = attachCommands(registered)
 		return &struct{ Body RegisteredCluster }{Body: registered}, nil

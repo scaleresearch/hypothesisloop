@@ -108,15 +108,11 @@ type Executor interface {
 	// execution time.
 	SupportsMultiNodeJobs() bool
 
-	// JobImage is the image a job that names none runs in on this runtime, or empty for a
-	// runtime that has none. Like SupportsMultiNodeJobs it is a fact reported with capacity: the
-	// control plane places a job that names no image only where there is one.
-	JobImage() string
-
-	// JobImageIsDefault says this runtime starts a job in whatever image the job names, so
-	// JobImage is only where a job that names none runs. False for a runtime that boots one
-	// image and can run no other; the control plane then sends it no job that names another.
-	JobImageIsDefault() bool
+	// OnlyImage is the one image this runtime runs, or empty for a runtime that runs whatever
+	// image a job names. Like SupportsMultiNodeJobs it is a fact reported with capacity. The
+	// control plane decides each job's image from it and writes it into the job's desired
+	// state, and the runtime runs exactly that one.
+	OnlyImage() string
 
 	// GetClusterID returns a stable fingerprint for this cluster that the runtime derives live
 	// and never persists itself: the kube-system namespace UID on k8s, /etc/machine-id on bare

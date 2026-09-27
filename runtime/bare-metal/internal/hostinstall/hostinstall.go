@@ -36,8 +36,6 @@ type Settings struct {
 	ClusterName string
 	APIURL      string
 	Token       string
-	// JobImage is optional: the image a job that names none runs in on this node.
-	JobImage string
 }
 
 func (s Settings) envFile() ([]byte, error) {
@@ -52,12 +50,6 @@ func (s Settings) envFile() ([]byte, error) {
 		// systemd reads a double-quoted value with backslash escapes and expands nothing in it.
 		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(pair[1])
 		fmt.Fprintf(&out, "%s=\"%s\"\n", pair[0], escaped)
-	}
-	if strings.ContainsAny(s.JobImage, "\n\r\"\\") {
-		return nil, fmt.Errorf("JOB_IMAGE %q is not an image reference", s.JobImage)
-	}
-	if s.JobImage != "" {
-		fmt.Fprintf(&out, "JOB_IMAGE=\"%s\"\n", s.JobImage)
 	}
 	return []byte(out.String()), nil
 }
@@ -79,7 +71,7 @@ func ReadSettings(host Host) (settings Settings, installed bool, err error) {
 		}
 		values[key] = strings.NewReplacer(`\\`, `\`, `\"`, `"`).Replace(quoted[1 : len(quoted)-1])
 	}
-	settings = Settings{ClusterName: values["CLUSTER_NAME"], APIURL: values["API_URL"], Token: values["RUNTIME_TOKEN"], JobImage: values["JOB_IMAGE"]}
+	settings = Settings{ClusterName: values["CLUSTER_NAME"], APIURL: values["API_URL"], Token: values["RUNTIME_TOKEN"]}
 	if settings.ClusterName == "" || settings.APIURL == "" || settings.Token == "" {
 		return Settings{}, false, fmt.Errorf("%s does not hold CLUSTER_NAME, API_URL and RUNTIME_TOKEN", EnvPath)
 	}

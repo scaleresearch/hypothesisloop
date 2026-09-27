@@ -12,8 +12,6 @@
 //	API_URL               — base URL of the control-plane API
 //	                        (must also be reachable from *inside* a workload container)
 //	RUNTIME_TOKEN         — the cluster's runtime token
-//	JOB_IMAGE             — the image a job that names none runs in; set, the node also takes
-//	                        those jobs
 //	SCRATCH_DIR           — a directory measured as this node's storage in place of the engine's store,
 //	                        for an engine whose store is not on this host (default: the engine's store)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
@@ -66,7 +64,7 @@ func main() {
 	// agentloop.DefaultLogTailLines (100) applies when unset.
 	logTailLines := agentloop.OptionalIntEnv(binaryName, "LOG_TAIL_LINES")
 
-	exec, err := newExecutor(clusterName, apiURL, os.Getenv("JOB_IMAGE"))
+	exec, err := newExecutor(clusterName, apiURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bare-agent: %v\n", err)
 		os.Exit(1)
@@ -122,10 +120,9 @@ func main() {
 	}
 }
 
-func newExecutor(clusterName, apiURL, jobImage string) (*podexec.Executor, error) {
+func newExecutor(clusterName, apiURL string) (*podexec.Executor, error) {
 	return podexec.New(podexec.Config{
 		ClusterName: clusterName,
-		JobImage:    jobImage,
 		APIURL:      apiURL,
 		StorageDir:  os.Getenv("SCRATCH_DIR"),
 		NodeLabels:  parseNodeLabels(os.Getenv("NODE_LABELS")),

@@ -403,8 +403,8 @@ func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
 
 Registers the cluster name for the org and prints the one command that attaches it, complete:
-the addresses its agent reaches the platform at, the registry and tag of its images and the
-platform's job image, where a job that names no image runs. Below the command it prints the
+the addresses its agent reaches the platform at and the registry and tag of its images. A
+cluster attached this way runs the image each job names. Below the command it prints the
 cluster's runtime token, which the command asks for when it runs, so the token is in no shell
 history and the machine needs neither hl nor an API key. Adding a name the org already has
 prints the same again. A cluster takes its own org's jobs only.

@@ -443,15 +443,13 @@ sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -
   sh 'oci://registry.example.com/hypothesisloop/charts/hypothesisloop-cluster-agent' '0.1.0+the-tag-that-was-pushed' \
   --set-string 'clusterName=my-cluster' \
   --set-string 'apiURL=https://your-control-plane:8081' --set-string 'metricsURL=https://your-control-plane:8084' \
-  --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed' \
-  --set-string 'jobImage=registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
+  --set-string 'images.registry=registry.example.com/hypothesisloop' --set-string 'images.tag=the-tag-that-was-pushed'
 ```
 
 The command is complete and holds no token. It asks for the token, without echo, and hands it to
 helm on standard input, so the token is in no shell history and no process's arguments, and the
-machine needs neither `hl` nor an API key. `jobImage` is the platform's job image, where a job
-that names no image runs; name another image there, or leave the value out for a cluster that
-takes only jobs that name their image.
+machine needs neither `hl` nor an API key. The cluster runs the image each job names: a job
+placed there names one, and `hl capacity` lists the images the deployment offers.
 
 `make images REGISTRY=...` pushes the chart beside the images, under `charts/` and at a version
 that carries their tag, so the command needs no checkout. It installs the release into the
@@ -496,9 +494,6 @@ a PriorityClass among them. Chart values (`runtime/k8s/infra/chart/values.yaml`)
   workload of the cluster. `true` lets them evict pods of lower priority.
 - `nodeAgent.nodeSelector` (default empty): the node labels the node-agent DaemonSet is limited
   to, for a cluster where only some nodes run jobs.
-- `jobImage` (default empty): the image a job that names none runs in, which every node must
-  pull. Set, the cluster also takes the jobs that name no image; it keeps taking every job that
-  names its own. A bare-metal node takes the same as `--job-image` on `bare-agent install`.
 - `detachOnUninstall` (default `true`): see below.
 
 To detach the cluster, `make cluster-agent-down` (`helm uninstall hypothesisloop-cluster-agent
@@ -514,9 +509,8 @@ newer (amd64 or arm64). `hl cluster add my-node --bare-metal`, or the UI's bare-
 shows the command to run on the node and below it the cluster's runtime token.
 
 ```bash
-sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"' \
-  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed' \
-  'registry.example.com/hypothesisloop/hypothesisloop-job:the-tag-that-was-pushed'
+sudo sh -c 'engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"' \
+  sh 'my-node' 'https://your-control-plane:8081' 'registry.example.com/hypothesisloop/hypothesisloop-bare-agent:the-tag-that-was-pushed'
 ```
 
 The node's engine copies the agent's binary out of the image that carries it; no container is

@@ -1,7 +1,6 @@
 package podexec
 
 import (
-	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -145,6 +144,9 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	if group.CPU == "" || group.Memory == "" || group.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return containerSpec{}, fmt.Errorf("podexec: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
+	if spec.Image == "" {
+		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no image in desired state", exp.ID)
+	}
 	// Defense-in-depth: see k8sexec.BuildJobs' identical check. Reaching here with a literal
 	// "max" means the scheduler admitted this experiment without resolving it — a control-plane
 	// bug, not something this runtime should compile into a nonsense podman resource request.
@@ -212,7 +214,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	command, args := workloadenv.Command(spec, group)
 	cs := containerSpec{
 		Name:           containerName(exp.ID),
-		Image:          cmp.Or(spec.Image, e.jobImage),
+		Image:          spec.Image,
 		Command:        command,
 		Args:           args,
 		Env:            env,
@@ -306,8 +308,5 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 // BuildContainerSpec, which is an admission-time answer given at execution time.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
 
-// JobImage is the image a job that names none runs in here, when the node was given one.
-func (e *Executor) JobImage() string { return e.jobImage }
-
-// JobImageIsDefault is true: a container runs in the image its job names, whatever it is.
-func (e *Executor) JobImageIsDefault() bool { return true }
+// OnlyImage is empty: a container runs in the image its job's desired state names, whatever it is.
+func (e *Executor) OnlyImage() string { return "" }

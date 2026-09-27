@@ -317,8 +317,8 @@ tt-start:
 # a job naming latest keeps running whatever latest was when that node first pulled it. It is
 # written only by a push to the dev registry: the tests pull from there, and a publish to another
 # registry would otherwise pin them to a tag the dev registry may not hold.
-# job is the image a job that names none runs in. Registering a cluster names it at the tag of
-# the agents' images (hl cluster add), so it is pushed wherever they are.
+# job is the bare image the deployment offers a job to run in (job_images) and the one a cloud
+# runtime boots, at the tag of the agents' images, so it is pushed wherever they are.
 IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:. \
 	metrics-service:controlplane/build/Dockerfile.metrics-service:. \
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \

@@ -169,25 +169,23 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// The platform image is the only one a job here runs in, so a job may name it or name none.
-func TestAJobNamingThePlatformImageOrNoneRunsInIt(t *testing.T) {
+// An instance boots the image desired state names, which is the one image this cluster runs.
+// Any other, and none, is a job it does not rent for.
+func TestAnInstanceBootsExactlyTheImageDesiredStateNames(t *testing.T) {
 	e, p := newTestExecutor(t)
-	named := job(t, "exp-1", 0, 0)
-	named.ResolvedJob.Image = testImage
-	unnamed := on(job(t, "exp-2", 0, 0), "h100-0")
-	unnamed.ResolvedJob.Image = ""
-	mustCreate(t, e, named)
-	mustCreate(t, e, unnamed)
+	mustCreate(t, e, job(t, "exp-1", 0, 0))
 	for _, name := range p.Names() {
 		if p.Spec(name).Image != testImage {
 			t.Errorf("%s boots %q", name, p.Spec(name).Image)
 		}
 	}
-	other := on(job(t, "exp-3", 0, 0), "h100-1")
-	other.ResolvedJob.Image = "docker.io/library/python:3.12"
-	err := e.CreateWorkload(context.Background(), other)
-	if err == nil || !strings.Contains(err.Error(), "docker.io/library/python:3.12") || !strings.Contains(err.Error(), testImage) {
-		t.Fatalf("err = %v, want both images named", err)
+	for _, image := range []string{"docker.io/library/python:3.12", ""} {
+		other := on(job(t, "exp-3", 0, 0), "h100-1")
+		other.ResolvedJob.Image = image
+		err := e.CreateWorkload(context.Background(), other)
+		if err == nil || !strings.Contains(err.Error(), `"`+image+`"`) || !strings.Contains(err.Error(), testImage) {
+			t.Fatalf("image %q: err = %v, want both images named", image, err)
+		}
 	}
 }
 
@@ -526,14 +524,14 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 // vendor that refuses a create is not that: the same job may be rented on the next pass.
 func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testing.T) {
 	e, p := newTestExecutor(t)
-	if e.JobImage() != testImage {
-		t.Fatalf("JobImage() = %q, want the image every instance boots", e.JobImage())
+	if e.OnlyImage() != testImage {
+		t.Fatalf("OnlyImage() = %q, want the image every instance boots", e.OnlyImage())
 	}
 	for name, c := range map[string]struct {
 		spoil func(*domain.JobSpec)
 		says  string
 	}{
-		"another image": {func(s *domain.JobSpec) { s.Image = "registry.test/mine:1" }, `names image "registry.test/mine:1"`},
+		"another image": {func(s *domain.JobSpec) { s.Image = "registry.test/mine:1" }, `to run in image "registry.test/mine:1"`},
 		"host mounts":   {func(s *domain.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
 		"no command":    {func(s *domain.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
 		"two nodes":     {func(s *domain.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
@@ -549,10 +547,6 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 	if p.Calls("Create") != 0 {
 		t.Fatalf("rented %d instances for jobs that cannot run", p.Calls("Create"))
 	}
-
-	noImage := job(t, "exp-no-image", 0, 0)
-	noImage.ResolvedJob.Image = ""
-	mustCreate(t, e, noImage)
 
 	p.Fail = func(method, _ string) error {
 		if method == "Create" {

@@ -257,14 +257,13 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         r"""--namespace hypothesisloop --create-namespace --take-ownership --set-file runtimeToken=/dev/stdin "\$@"' sh """
         r"'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' '0\.1\.0\+([^' ]+)' "
         rf"--set-string 'clusterName={name}' --set-string 'apiURL=(http://\S+:8081)' --set-string 'metricsURL=(http://\S+:8084)' "
-        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)' --set-string 'jobImage=([^' ]+)'\n"
+        r"--set-string 'images\.registry=([^' ]+)' --set-string 'images\.tag=([^' ]+)'\n"
         rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)
     assert match, f"hl cluster add printed {printed!r}"
     command = printed.split("\n", 1)[0]
     assert "hls_" not in command and "hl cluster token" not in command, "the command holds the runtime token or needs hl on the machine"
-    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, job_image, shown_token = match.groups()
+    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, shown_token = match.groups()
     assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"
-    assert job_image == f"{registry}/hypothesisloop-job:{image_tag}", "the job image named is the platform's, pushed beside the agents' images"
     token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
     assert shown_token == token, "the token shown below the command is the cluster's"

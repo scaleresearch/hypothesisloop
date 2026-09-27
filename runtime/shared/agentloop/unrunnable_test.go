@@ -121,14 +121,18 @@ func TestARefusedCreateIsNotReportedOverAWorkloadThatExists(t *testing.T) {
 	}
 }
 
-func TestTheReconcileReportCarriesTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
+// A runtime that runs any image reports none, and no runtime says an image is only a default.
+func TestTheReconcileReportCarriesTheOneImageTheRuntimeRuns(t *testing.T) {
 	for _, image := range []string{"registry.test/platform-job:7", ""} {
 		cp := &controlPlane{desired: `[]`}
-		if err := newTestAgent(cp.serve(t), &captureExecutor{jobImage: image}).reconcileOnce(context.Background()); err != nil {
+		if err := newTestAgent(cp.serve(t), &captureExecutor{onlyImage: image}).reconcileOnce(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if got := cp.reconcile[0]["job_image"]; got != image {
 			t.Fatalf("job_image = %v, want %q", got, image)
+		}
+		if _, sent := cp.reconcile[0]["job_image_default"]; sent {
+			t.Fatal("the report carries job_image_default")
 		}
 	}
 }

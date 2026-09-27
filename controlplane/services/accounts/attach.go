@@ -34,7 +34,7 @@ func kubernetesCommand(registered RegisteredCluster) string {
 	return fmt.Sprintf("sh -c %s sh %s %s", shellQuote(kubernetesScript),
 		shellQuote("oci://"+registered.Registry+"/charts/hypothesisloop-cluster-agent"), shellQuote("0.1.0+"+registered.ImageTag)) +
 		set("clusterName", registered.Name) + set("apiURL", registered.APIURL) + set("metricsURL", registered.MetricsURL) +
-		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag) + set("jobImage", registered.JobImage)
+		set("images.registry", registered.Registry) + set("images.tag", registered.ImageTag)
 }
 
 // helmValue writes text as one value of helm's --set-string, which splits on commas and reads a
@@ -47,15 +47,15 @@ func helmValue(text string) string {
 // that carries it, with no container started, and the agent installs itself: it knows its own
 // unit and settings file, and asks for the runtime token on standard input. It is staged
 // beside its place because a running agent's binary cannot be written over. $1 is the cluster
-// name, $2 the API address, $3 the image that carries the agent and $4 the job image.
+// name, $2 the API address and $3 the image that carries the agent.
 const bareMetalScript = `engine="$(command -v docker || command -v podman)" || { echo "docker or podman is needed on this node" >&2; exit 1; }; ` +
 	`staged="$("$engine" create "$3")" && "$engine" cp "$staged:/usr/local/bin/bare-agent" /usr/local/bin/bare-agent.new && "$engine" rm "$staged" >/dev/null && ` +
-	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2" --job-image "$4"`
+	`exec /usr/local/bin/bare-agent.new install --cluster "$1" --api-url "$2"`
 
 // bareMetalCommand installs the agent of a bare-metal node and holds no token.
 func bareMetalCommand(registered RegisteredCluster) string {
-	return fmt.Sprintf("sudo sh -c %s sh %s %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
-		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag), shellQuote(registered.JobImage))
+	return fmt.Sprintf("sudo sh -c %s sh %s %s %s", shellQuote(bareMetalScript), shellQuote(registered.Name), shellQuote(registered.APIURL),
+		shellQuote(registered.Registry+"/hypothesisloop-bare-agent:"+registered.ImageTag))
 }
 
 // shellQuote writes text as one word of a POSIX shell command, whatever it holds.

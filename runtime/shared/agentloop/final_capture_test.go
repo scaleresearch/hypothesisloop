@@ -33,18 +33,17 @@ type captureExecutor struct {
 	drifted bool
 	// uncreatable is what creating a job answers, by job, for the ones that cannot be created.
 	uncreatable map[string]error
-	// jobImage is the one image the runtime runs every job in.
-	jobImage string
-	mu       sync.Mutex
-	deleted  []string
-	created  int
+	// onlyImage is the one image the runtime runs.
+	onlyImage string
+	mu        sync.Mutex
+	deleted   []string
+	created   int
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
 
 func (e *captureExecutor) SupportsMultiNodeJobs() bool { return true }
-func (e *captureExecutor) JobImage() string            { return e.jobImage }
-func (e *captureExecutor) JobImageIsDefault() bool     { return false }
+func (e *captureExecutor) OnlyImage() string           { return e.onlyImage }
 
 // The same set as ListManagedJobs here: these tests never exercise the delete-and-recreate window
 // the two lists exist to differ across, and leaving it on the embedded nil Executor made every

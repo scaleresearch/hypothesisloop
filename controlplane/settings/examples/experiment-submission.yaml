@@ -25,9 +25,9 @@
 
 job:
   # --- What to run -------------------------------------------------------------------
-  # Leave image out to run in the platform's own job image: the job is then placed only on a
-  # cluster that runs every job in one image (hl capacity shows it as job_image). A job that
-  # names an image is placed only where that image can run. hl capacity also lists the images
+  # Leave image out and the job is placed only on a cluster that runs one image and no other
+  # (hl capacity shows it as only_job_image), in that image. A job that names an image is
+  # placed only where that image can run. hl capacity also lists the images
   # the deployment offers with a framework installed (job_images) and which suit each
   # accelerator type: name one of those before installing a framework yourself.
   image: myregistry.example.com/my-training-image:latest

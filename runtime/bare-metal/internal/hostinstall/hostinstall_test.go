@@ -209,21 +209,3 @@ func TestARemovedClustersAgentKeepsItselfFromStartingAgain(t *testing.T) {
 		t.Error("the node still reads as attached")
 	}
 }
-
-func TestANodesJobImageIsKeptWithItsSettingsAndLeftOutWhenItHasNone(t *testing.T) {
-	host := newFakeHost()
-	with := settings
-	with.JobImage = "registry.example/images/job:abc1234"
-	if err := Install(host, []byte("b"), with, passes("docker")); err != nil {
-		t.Fatal(err)
-	}
-	if read, _, err := ReadSettings(host); err != nil || read != with {
-		t.Fatalf("settings read back = %+v, err = %v", read, err)
-	}
-	if err := Install(host, []byte("b"), settings, passes("docker")); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(host.files[EnvPath], "JOB_IMAGE") {
-		t.Fatalf("a node given no job image has one in its settings:\n%s", host.files[EnvPath])
-	}
-}

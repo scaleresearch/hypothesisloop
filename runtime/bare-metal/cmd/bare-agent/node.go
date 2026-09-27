@@ -19,8 +19,7 @@ import (
 )
 
 const usage = `usage: bare-agent                                          run the agent (what the installed unit does)
-       bare-agent install --cluster NAME --api-url URL [--job-image IMAGE]
-                                                           install or upgrade the agent on this node and start it
+       bare-agent install --cluster NAME --api-url URL     install or upgrade the agent on this node and start it
        bare-agent detach                                   remove this node's cluster, stop its jobs, stop the agent
        bare-agent uninstall                                remove the agent from a detached node`
 
@@ -59,7 +58,6 @@ func install(args []string) error {
 	flags := flag.NewFlagSet("bare-agent install", flag.ContinueOnError)
 	cluster := flags.String("cluster", "", "the name this node was registered under")
 	apiURL := flags.String("api-url", "", "the platform's API address, as this node and its job containers reach it")
-	jobImage := flags.String("job-image", "", "the image a job that names none runs in on this node")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -86,7 +84,7 @@ func install(args []string) error {
 	if err != nil {
 		return err
 	}
-	settings := hostinstall.Settings{ClusterName: *cluster, APIURL: *apiURL, JobImage: *jobImage}
+	settings := hostinstall.Settings{ClusterName: *cluster, APIURL: *apiURL}
 	if settings.Token, err = readToken(settings.ClusterName, installed); err != nil {
 		return err
 	}
@@ -99,7 +97,7 @@ func install(args []string) error {
 	}
 
 	err = hostinstall.Install(host, binary, settings, func() (string, error) {
-		executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage)
+		executor, err := newExecutor(settings.ClusterName, settings.APIURL)
 		if err != nil {
 			return "", err
 		}
@@ -219,7 +217,7 @@ func detach(args []string) error {
 	}
 	// With the unit stopped this process is the node's only agent, and the loop that keeps a
 	// node in step is what stops everything a removed cluster's node still runs.
-	executor, err := newExecutor(settings.ClusterName, settings.APIURL, settings.JobImage)
+	executor, err := newExecutor(settings.ClusterName, settings.APIURL)
 	if err != nil {
 		return err
 	}

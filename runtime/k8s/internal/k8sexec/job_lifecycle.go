@@ -932,11 +932,8 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 // runtime.
 func (c *JobWorkloadClient) SupportsMultiNodeJobs() bool { return true }
 
-// JobImage is the image a job that names none runs in here, when the cluster was given one.
-func (c *JobWorkloadClient) JobImage() string { return c.jobImage }
-
-// JobImageIsDefault is true: a pod runs in the image its job names, whatever it is.
-func (c *JobWorkloadClient) JobImageIsDefault() bool { return true }
+// OnlyImage is empty: a pod runs in the image its job's desired state names, whatever it is.
+func (c *JobWorkloadClient) OnlyImage() string { return "" }
 
 // GetClusterID returns the kube-system namespace's UID: created with the cluster, immutable for
 // its life, globally unique, and readable with the credentials the agent already holds. The

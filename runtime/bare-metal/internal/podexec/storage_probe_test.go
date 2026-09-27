@@ -139,23 +139,24 @@ func TestStorageIsMeasuredOnTheEnginesStoreOrNotAtAll(t *testing.T) {
 	}
 }
 
-// A node given a job image tells the control plane, which then sends it the jobs that name no
-// image, and those run in it. A job that names its own keeps its own.
-func TestAJobThatNamesNoImageRunsInTheNodesJobImage(t *testing.T) {
-	e := &Executor{apiURL: "http://example.invalid:8083", jobImage: "registry.example/job:1"}
-	if e.JobImage() != "registry.example/job:1" {
-		t.Fatalf("job image reported = %q", e.JobImage())
+// A container runs in the image its job's desired state names. A job that reaches the node with
+// none is not started: the control plane decides the image, and the node has none to put in.
+func TestAContainerRunsInExactlyTheImageDesiredStateNames(t *testing.T) {
+	e := &Executor{apiURL: "http://example.invalid:8083"}
+	if e.OnlyImage() != "" {
+		t.Fatalf("the node reports it runs only %q, want any image", e.OnlyImage())
 	}
 	named := sizedExperiment()
+	cs, err := e.BuildContainerSpec(named, Placement{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.Image != named.Job.Image {
+		t.Errorf("the container runs in %q, want %q", cs.Image, named.Job.Image)
+	}
 	unnamed := sizedExperiment()
 	unnamed.Job.Image = ""
-	for exp, want := range map[*domain.Experiment]string{named: "example.invalid/workload", unnamed: "registry.example/job:1"} {
-		cs, err := e.BuildContainerSpec(exp, Placement{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cs.Image != want {
-			t.Errorf("job image %q runs in %q, want %q", exp.Job.Image, cs.Image, want)
-		}
+	if _, err := e.BuildContainerSpec(unnamed, Placement{}); err == nil {
+		t.Error("a job with no image in desired state was built")
 	}
 }
