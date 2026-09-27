@@ -136,10 +136,11 @@ const usage = `usage: hl <command> ...
   watch                 [--agent A | --all] [--platform-experiment PE] | --experiment JOB [--until ...] [--follow]
   exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
 
-An ID is positional; --id ID works too. The platform experiment is never an operand: every
-command that works in one takes --platform-experiment PE. --agent and --platform-experiment
-default to the agent and the platform experiment an agent's token names, so an agent writes
-neither, and for another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
+An ID is positional; --id ID works too. The platform experiment is never an operand. A command
+given the ID of a job or a hypothesis takes no --platform-experiment, since an ID is unique on
+the platform; every other command that works in a platform experiment takes it. --agent and
+--platform-experiment default to the agent and the platform experiment an agent's token names,
+so an agent writes neither, and for another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
 has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
