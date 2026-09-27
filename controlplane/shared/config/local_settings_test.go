@@ -31,6 +31,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 		t.Fatalf("render: %v\n%s", err, out)
 	}
 	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
+	t.Setenv("HYPOTHESISLOOP_GIT_PASSWORD", "a-password-only-this-test-knows")
 	cfg, err := Load(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
@@ -38,6 +39,9 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	if providers := cfg.Auth.IdentityProviders; len(providers) != 1 || providers[0].Issuer != "http://localhost/hypothesisloop-dev" ||
 		providers[0].Audience != "hypothesisloop-dev" || len(providers[0].JWTKeys) != 1 || providers[0].JWTKeys[0].Kid != "local-dev" {
 		t.Errorf("identity providers = %+v, want the one key made on this machine", providers)
+	}
+	if want := (GitConfig{Provider: GitProviderPlain, BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop", Password: "a-password-only-this-test-knows"}); cfg.Git != want {
+		t.Errorf("git host = %s at %s, want the git server of this machine", cfg.Git.Provider, cfg.Git.BaseURL)
 	}
 	if cfg.Agents.Launcher == "" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)

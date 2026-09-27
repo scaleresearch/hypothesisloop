@@ -30,7 +30,7 @@ require_cloudflared() {
 # and a rented instance clone from like they call the API.
 read_services() {
   grep -Ev '^\s*(#|$)' "$CONF_FILE"
-  if [[ "${HL_GIT_PROVIDER}" == "plain" ]]; then
+  if [[ "$(lib_git_provider)" == "plain" ]]; then
     echo "git ${HL_GIT_PORT}"
   fi
 }

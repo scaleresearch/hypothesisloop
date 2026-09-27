@@ -167,19 +167,23 @@ func TestTheRuntimeProcessesAreOffUntilEnabled(t *testing.T) {
 	}
 }
 
-// The github section is in no staged file: the chart adds it for a deployment with an App, the
-// ids as values and the two secrets as references both services resolve from the Secret.
-func TestTheGitHubAppReachesTheConfigOnlyWhenTheDeploymentHasOne(t *testing.T) {
-	if cfg := loadRendered(t, charttest.Render(t, charttest.InCluster), charttest.InCluster, configLoaders[0]); cfg.GitHub.Configured() {
-		t.Errorf("in-cluster github = %+v, want no App", cfg.GitHub.AppID)
-	}
+// The staged file names no git host. The chart adds the App of a deployment that has one, the ids
+// as values and the two secrets as references both services resolve from the Secret, and
+// otherwise the plain host of the values with its password from the Secret.
+func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
+	inCluster := charttest.Render(t, charttest.InCluster)
 	release := charttest.Render(t, charttest.External)
 	for _, deployment := range configLoaders {
-		got := loadRendered(t, release, charttest.External, deployment).GitHub
+		plain := loadRendered(t, inCluster, charttest.InCluster, deployment)
+		if want := (config.GitConfig{Provider: config.GitProviderPlain, BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account",
+			Password: charttest.Secret["HYPOTHESISLOOP_GIT_PASSWORD"]}); plain.GitHub.Configured() || plain.Git != want {
+			t.Errorf("%s: in-cluster git host is %s at %s as %s with an App %v, want the values' plain host and the Secret's password", deployment, plain.Git.Provider, plain.Git.BaseURL, plain.Git.Username, plain.GitHub.Configured())
+		}
+		cfg := loadRendered(t, release, charttest.External, deployment)
 		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", ClientID: "Iv23made-up",
 			ClientSecret: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET"], PrivateKey: charttest.Secret["HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY"]}
-		if got != want {
-			t.Errorf("%s: github app %d (%s, %s), or its secrets, are not the values' and the Secret's", deployment, got.AppID, got.AppSlug, got.ClientID)
+		if got := cfg.GitHub; got != want || cfg.Git != (config.GitConfig{Provider: config.GitProviderGitHub}) {
+			t.Errorf("%s: github app %d (%s, %s), or its secrets, are not the values' and the Secret's, or the git host is %q", deployment, got.AppID, got.AppSlug, got.ClientID, cfg.Git.Provider)
 		}
 	}
 }

@@ -115,7 +115,7 @@ render_settings() {
             -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
-    if [[ "${HL_GIT_PROVIDER}" == "plain" ]]; then
+    if [[ "$(lib_git_provider)" == "plain" ]]; then
       hosted+=(-e "s|^  base_url: http://${host}:${HL_GIT_PORT}$|  base_url: ${public_git}|")
       values+=("  base_url: ${public_git}")
     fi
@@ -237,7 +237,7 @@ start_control_plane() {
 
 # The git host of a stack with no GitHub App. A stack with one runs none.
 start_git_server() {
-  if [[ "${HL_GIT_PROVIDER}" != "plain" ]]; then
+  if [[ "$(lib_git_provider)" != "plain" ]]; then
     stop git-server
     return
   fi

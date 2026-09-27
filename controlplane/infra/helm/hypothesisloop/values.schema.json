@@ -454,6 +454,21 @@
           "type": "string"
         }
       }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseURL": {
+          "type": "string"
+        },
+        "allowHTTP": {
+          "type": "boolean"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
     }
   }
 }

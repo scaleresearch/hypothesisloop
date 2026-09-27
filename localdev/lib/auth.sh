@@ -47,12 +47,13 @@ fi
 # names one, and otherwise the git server `make dev` runs on this machine (localdev/local-git).
 # That one serves the bare repositories under HL_GIT_ROOT (make git-repository) to its one
 # credential, whose password is made on this machine by the first use and never leaves it.
-HL_GIT_PROVIDER=github
-if [[ -z "${HL_GITHUB_APP_ID}" ]]; then
-  HL_GIT_PROVIDER=plain
-  HL_GIT_PORT=8085
-  HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
-  HL_GIT_USERNAME=hypothesisloop
+HL_GIT_PORT=8085
+HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
+HL_GIT_USERNAME=hypothesisloop
+lib_git_provider() {
+  if [[ -n "${HL_GITHUB_APP_ID}" ]]; then echo github; else echo plain; fi
+}
+if [[ "$(lib_git_provider)" == "plain" ]]; then
   if [[ ! -s "${LIB_AUTH_REPO}/localdev/.run/git-password" ]]; then
     mkdir -p "${LIB_AUTH_REPO}/localdev/.run"
     (umask 077 && openssl rand -hex 24 > "${LIB_AUTH_REPO}/localdev/.run/git-password")
@@ -109,7 +110,7 @@ lib_render_settings() {
     echo "render-settings: the settings file has a github or git section, and the render would add a second one" >&2
     return 1
   fi
-  if [[ "${HL_GIT_PROVIDER}" == "github" ]]; then
+  if [[ "$(lib_git_provider)" == "github" ]]; then
     # The values are JSON strings, which YAML reads as they are.
     printf '\ngithub:\n  app_id: %d\n  app_slug: "%s"\n  client_id: "%s"\n  client_secret: ${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}\n  private_key: ${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}\n\ngit:\n  provider: github\n' \
       "${HL_GITHUB_APP_ID}" "${HL_GITHUB_APP_SLUG}" "${HL_GITHUB_APP_CLIENT_ID}" >> "${output}"

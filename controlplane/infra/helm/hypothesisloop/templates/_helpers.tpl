@@ -35,6 +35,8 @@ is in no file: both read it from the environment.
 {{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}
 {{- if .Values.github.appId -}}
 {{- $keys = concat $keys (list "HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET" "HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY") -}}
+{{- else if .Values.git.username -}}
+{{- $keys = append $keys "HYPOTHESISLOOP_GIT_PASSWORD" -}}
 {{- end -}}
 {{ include "hypothesisloop.secretEnv" (dict "keys" $keys "root" .) }}
 {{- end -}}

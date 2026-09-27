@@ -39,6 +39,7 @@ install. No value of the chart is a secret, and nothing secret is rendered into 
 | `OBJECT_STORE_ACCESS_KEY_ID`, `OBJECT_STORE_SECRET_ACCESS_KEY` | control-service, metrics-service, and the store as its root user | always |
 | `POSTGRES_PASSWORD` | Postgres | `postgres.enabled` |
 | `HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET`, `HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY` | control-service, metrics-service | `github.appId` |
+| `HYPOTHESISLOOP_GIT_PASSWORD` | control-service, metrics-service | `git.username` |
 | any key in `cloudAgent.secretEnv`, `agentLauncher.secretEnv` | that process only, under the same name | when it is enabled |
 
 The rendered `hypothesisloop.yaml` holds `${NAME}` where a secret belongs, and the services

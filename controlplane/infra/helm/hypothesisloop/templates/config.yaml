@@ -22,17 +22,30 @@ written as ${NAME}: both services replace it from their environment, which the S
 {{- range $set }}
 {{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "section" (index . 0) "key" (index . 1) "value" (index . 2)) }}
 {{- end }}
-{{- /* The staged file has no github section: a deployment with an App gets one here. */ -}}
-{{- if .Values.github.appId }}
-{{- if regexMatch "(?m)^github:" $raw }}
-{{- fail "files/hypothesisloop.yaml has a github section, and github.appId would add a second one" }}
+{{- /*
+The staged file names no git host: the chart adds the GitHub App of a deployment that has one,
+and otherwise the plain host the values name.
+*/ -}}
+{{- if regexMatch "(?m)^(github|git):" $raw }}
+{{- fail "files/hypothesisloop.yaml has a github or git section, and the chart would add a second one" }}
 {{- end }}
-{{- $raw = printf "%s\ngithub:\n  app_id: %s\n  app_slug: %s\n  client_id: %s\n  client_secret: %s\n  private_key: %s\n" (trimSuffix "\n" $raw)
+{{- if .Values.github.appId }}
+{{- if or .Values.git.baseURL .Values.git.allowHTTP .Values.git.username }}
+{{- fail "github.appId and git are set together: a deployment keeps its code on one git host" }}
+{{- end }}
+{{- $raw = printf "%s\ngithub:\n  app_id: %s\n  app_slug: %s\n  client_id: %s\n  client_secret: %s\n  private_key: %s\ngit:\n  provider: github\n" (trimSuffix "\n" $raw)
   (toJson (int64 .Values.github.appId))
   (toJson (required "github.appSlug is required with github.appId: the name in the App's URL" .Values.github.appSlug))
   (toJson (required "github.clientId is required with github.appId: the App's OAuth client id" .Values.github.clientId))
   (toJson "${HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET}")
   (toJson "${HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY}") }}
+{{- else }}
+{{- $raw = printf "%s\ngit:\n  provider: plain\n  base_url: %s\n  allow_http: %s\n" (trimSuffix "\n" $raw)
+  (toJson (required "git.baseURL is required without github.appId: the root the deployment's repositories are cloned from" .Values.git.baseURL))
+  (toJson .Values.git.allowHTTP) }}
+{{- if .Values.git.username }}
+{{- $raw = printf "%s  username: %s\n  password: %s\n" $raw (toJson .Values.git.username) (toJson "${HYPOTHESISLOOP_GIT_PASSWORD}") }}
+{{- end }}
 {{- end }}
 apiVersion: v1
 kind: ConfigMap

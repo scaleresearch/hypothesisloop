@@ -38,6 +38,7 @@ var Secret = map[string]string{
 	"OBJECT_STORE_SECRET_ACCESS_KEY":          "made-up-object-store-secret-key",
 	"HYPOTHESISLOOP_GITHUB_APP_CLIENT_SECRET": "made-up-app-client-secret",
 	"HYPOTHESISLOOP_GITHUB_APP_PRIVATE_KEY":   "-----BEGIN RSA PRIVATE KEY-----\nmade-up: key # one string\n-----END RSA PRIVATE KEY-----\n",
+	"HYPOTHESISLOOP_GIT_PASSWORD":             "made-up-git-password",
 	"VAST_API_KEY":                            "made-up-vast-api-key",
 	"FLY_API_TOKEN":                           "FlyV1 made-up-fly-token",
 	"E2B_API_KEY":                             "made-up-e2b-api-key",

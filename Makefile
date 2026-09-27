@@ -290,7 +290,7 @@ tt-status:
 git-repository:
 	@test -n "$(NAME)" || { echo "make git-repository: NAME is required" >&2; exit 1; }
 	@bash -c '. localdev/lib/auth.sh && \
-	  { test "$$HL_GIT_PROVIDER" = plain || { echo "make git-repository: this stack keeps its code on GitHub (.env names a GitHub App)" >&2; exit 1; }; } && \
+	  { test "$$(lib_git_provider)" = plain || { echo "make git-repository: this stack keeps its code on GitHub (.env names a GitHub App)" >&2; exit 1; }; } && \
 	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
 
 tt-stop:
