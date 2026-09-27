@@ -351,3 +351,5 @@ func TestAnAcceleratorWorkloadIsDecidedTheSameBesideJobsOnCPU(t *testing.T) {
 		t.Errorf("the guaranteed tick exercised too little to compare: %+v", beforeGuaranteed)
 	}
 }
+
+func (*mixedStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -280,4 +281,42 @@ func TestTickLogsASkippedClusterWithItsReasonAndContinues(t *testing.T) {
 
 func (*resilienceStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
 	return nil, nil
+}
+
+func (*resilienceStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+type heldStore struct {
+	resilienceStore
+	// reasonsAtMark is what each job waited for when the held jobs were marked.
+	reasonsAtMark map[string]string
+	minimum       time.Duration
+	marks         int
+}
+
+func (s *heldStore) MarkHeldJobs(_ context.Context, minimum time.Duration) error {
+	s.marks++
+	s.minimum = minimum
+	s.reasonsAtMark = map[string]string{}
+	for id, reason := range s.notAdmitted {
+		s.reasonsAtMark[id] = reason
+	}
+	return nil
+}
+
+// A job told it is held is told why by the reason this pass gave it, so the pass marks the held
+// jobs once, after it judged every one, with the platform's minimum wait.
+func TestATickMarksTheHeldJobsOnceAfterItJudgedTheQueue(t *testing.T) {
+	blocked := queuedJob("exp-a", "pe-live", domain.CapacityGuaranteed)
+	store := &heldStore{resilienceStore: resilienceStore{queued: []*domain.Experiment{blocked}}}
+	loop := resilienceLoop(store).WithHeldJobNotice(5 * time.Minute)
+
+	if err := loop.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.marks != 1 || store.minimum != 5*time.Minute {
+		t.Fatalf("held jobs marked %d times with a minimum of %s, want once with 5m", store.marks, store.minimum)
+	}
+	if reason, _ := domain.SplitQueueReason(store.reasonsAtMark[blocked.ID]); reason != domain.NotAdmittedCapacityUnavailable {
+		t.Errorf("at the mark the blocked job waited for %q, want the reason this pass gave it", store.reasonsAtMark[blocked.ID])
+	}
 }

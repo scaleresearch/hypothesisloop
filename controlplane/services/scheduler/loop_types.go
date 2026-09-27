@@ -38,6 +38,9 @@ type LoopStore interface {
 	// implementation's doc comment for why both must move together.
 	RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error)
 	UpdateNotAdmittedReason(ctx context.Context, id, reason string) error
+	// MarkHeldJobs tells the owner of every job that has waited longer than its estimated
+	// duration and longer than minimum why it is held, once per job.
+	MarkHeldJobs(ctx context.Context, minimum time.Duration) error
 	// HasUnsummarizedCompleted is the summary gate: an agent's queued jobs wait while one of its
 	// COMPLETED jobs has no summary.
 	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
@@ -176,6 +179,8 @@ type Loop struct {
 	// guaranteedFairnessWindow quantizes queued_at for sortGuaranteed's age-bucket fairness
 	// tiebreak — see sortGuaranteed's doc comment.
 	guaranteedFairnessWindow time.Duration
+	// heldJobNotice is the least a job waits in the queue before its owner is told it is held.
+	heldJobNotice time.Duration
 
 	// ticking enforces the single-threaded invariant tick()/preempt() capacity accounting needs.
 	// Unlike cluster-agent's reconcile loop (safe concurrently since it's purely declarative),
@@ -277,6 +282,11 @@ func (l *Loop) WithGuaranteedFairnessWindow(d time.Duration) *Loop {
 	return l
 }
 
+func (l *Loop) WithHeldJobNotice(d time.Duration) *Loop {
+	l.heldJobNotice = d
+	return l
+}
+
 // WithDisbalanceEvictor enables the resource-disbalance evictor (loop_disbalance.go), which
 // terminates running jobs whose CPU/memory/storage request is more than tolerance times their
 // proportionate per-accelerator share while that request is provably stranding idle accelerators
@@ -321,8 +331,8 @@ func (l *Loop) Start(ctx context.Context) {
 	if l.observed == nil {
 		panic("scheduler: Loop started without WithObservedTimeConfig — preemption and disbalance eviction both read observed state")
 	}
-	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 {
-		panic("scheduler: Loop started without WithHeartbeat and WithGuaranteedFairnessWindow")
+	if l.heartbeat <= 0 || l.guaranteedFairnessWindow <= 0 || l.heldJobNotice <= 0 {
+		panic("scheduler: Loop started without WithHeartbeat, WithGuaranteedFairnessWindow and WithHeldJobNotice")
 	}
 	go func() {
 		ticker := time.NewTicker(l.heartbeat)

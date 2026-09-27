@@ -793,3 +793,5 @@ func TestAJobWaitingForASlotHoldsNoOtherSlotAgainstBurst(t *testing.T) {
 		})
 	}
 }
+
+func (*slotStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }

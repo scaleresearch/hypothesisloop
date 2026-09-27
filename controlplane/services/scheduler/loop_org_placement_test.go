@@ -759,3 +759,7 @@ func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
 		t.Errorf("no cluster has it installed: got %q, want %q", got, exceedsClusterCapacityReason(exp))
 	}
 }
+
+func (*orgStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+func (*twoOrgMaxStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }

@@ -342,6 +342,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
+		WithHeldJobNotice(time.Duration(pcfg.Scheduler.HeldJobNoticeSeconds)*time.Second).
 		WithObservedTimeConfig(metricsDBURL, observedGapCap).
 		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
 		WithQuotaSettler(settler).

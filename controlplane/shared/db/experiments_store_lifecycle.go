@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -175,6 +176,20 @@ func (s *ExperimentsStore) MarkUnderperforming(ctx context.Context, id, metricNa
 WHERE id = $1 AND underperforming_metric IS NULL`
 	if _, err := s.pool.pool.Exec(ctx, q, id, metricName); err != nil {
 		return fmt.Errorf("experiments_store.MarkUnderperforming: %w", err)
+	}
+	return nil
+}
+
+// MarkHeldJobs records, on every QUEUED job that has waited since it was queued for longer than
+// its estimated duration and longer than minimum, the queue reason it is held for. Only the
+// first write for a job stands, and that write is what emits job.held (see schema.sql), so the
+// job's owner is told once. A job the scheduler has not judged yet has no reason to tell.
+func (s *ExperimentsStore) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
+	const q = `UPDATE experiments SET held_reason = not_admitted_reason
+WHERE status = 'QUEUED' AND held_reason IS NULL AND not_admitted_reason <> 'awaiting_admission'
+  AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')`
+	if _, err := s.pool.pool.Exec(ctx, q, minimum.Seconds()); err != nil {
+		return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
 	}
 	return nil
 }

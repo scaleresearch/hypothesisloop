@@ -424,6 +424,13 @@ scheduler:
   # equally-entitled jobs.
   guaranteed_fairness_window_seconds: 60
 
+  # The least a job waits in the queue before its agent and its coordinator are told that it is
+  # held and why, with one job.held event per job. A job is told once it has waited longer than
+  # this and longer than its own estimated duration, so a short job is not announced for an
+  # ordinary wait and a long one only when the wait has outlasted the run itself. The job stays
+  # queued: the event carries the queue reason, and what to do about it is its owner's choice.
+  held_job_notice_seconds: 300
+
   # Evict a RUNNING job whose CPU/memory/storage request exceeds this multiple of its
   # proportionate per-accelerator share of the cluster, while that request is provably the only
   # thing keeping a queued job off idle accelerators on the same node. Guards against a job

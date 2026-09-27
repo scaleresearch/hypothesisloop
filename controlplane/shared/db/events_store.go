@@ -80,6 +80,11 @@ const (
 	// live and replayed. The agent decides; the existing cancel-experiment call is the only path
 	// that ever ends the job.
 	EventJobUnderperforming = "job.underperforming"
+	// EventJobHeld says a job has stayed QUEUED for longer than it was to run, and why. A queue
+	// reason that waiting clears is kept from an agent's stream (experiment.blocked), so without
+	// this an agent whose job never starts learns nothing. The job's row records the reason its
+	// owner was told, once, and that write is the event, live and replayed.
+	EventJobHeld = "job.held"
 )
 
 // EventKindDoc describes one kind well enough to subscribe to it without reading this file: what
@@ -131,6 +136,8 @@ var EventKinds = []EventKindDoc{
 		Description: "The brief changed. A description is unbounded and is never copied into an event: re-read it with GET /platform-experiments/{id}."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
+	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
+		Description: "This job has waited in the queue for longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds. detail is the sentence that says why (not_admitted_message): for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job, with the reason it had then."},
 	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
 }
@@ -189,7 +196,7 @@ type EventFilter struct {
 // ones an ExperimentID filter can meaningfully narrow to.
 func isExperimentSubject(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming, EventJobHeld:
 		return true
 	default:
 		return false
@@ -201,7 +208,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventJobUnderperforming:
+	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventJobUnderperforming, EventJobHeld:
 		return true
 	default:
 		return false
@@ -530,10 +537,11 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 
 func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
 	const q = `SELECT id, agent_id, status::text, COALESCE(eviction_reason, ''), COALESCE(not_admitted_reason, ''),
-	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid
+	queued_xid, submitted_xid, status_xid, not_admitted_xid, COALESCE(underperforming_metric, ''), underperforming_xid,
+	COALESCE(held_reason, ''), held_xid
 FROM experiments
 WHERE platform_experiment_id = $1
-  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2)`
+  AND (status_xid >= $2 OR not_admitted_xid >= $2 OR queued_xid >= $2 OR submitted_xid >= $2 OR underperforming_xid >= $2 OR held_xid >= $2)`
 	rows, err := tx.Query(ctx, q, peID, since)
 	if err != nil {
 		return nil, fmt.Errorf("events_store.replayExperiments: %w", err)
@@ -542,10 +550,10 @@ WHERE platform_experiment_id = $1
 
 	var events []Event
 	for rows.Next() {
-		var id, agentID, status, evictionReason, notAdmitted, underperformingMetric string
-		var queuedXid, submittedXid, underperformingXid *int64
+		var id, agentID, status, evictionReason, notAdmitted, underperformingMetric, heldReason string
+		var queuedXid, submittedXid, underperformingXid, heldXid *int64
 		var statusXid, notAdmittedXid int64
-		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid, &underperformingMetric, &underperformingXid); err != nil {
+		if err := rows.Scan(&id, &agentID, &status, &evictionReason, &notAdmitted, &queuedXid, &submittedXid, &statusXid, &notAdmittedXid, &underperformingMetric, &underperformingXid, &heldReason, &heldXid); err != nil {
 			return nil, fmt.Errorf("events_store.replayExperiments: scan: %w", err)
 		}
 		if queuedXid != nil {
@@ -562,6 +570,12 @@ WHERE platform_experiment_id = $1
 			reason, message := domain.SplitQueueReason(notAdmitted)
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: reason, Detail: message,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
+		}
+		// A job that left the queue is held no longer.
+		if heldXid != nil && status == string(domain.StatusQueued) {
+			reason, message := domain.SplitQueueReason(heldReason)
+			events = append(events, Event{Kind: EventJobHeld, Subject: id, Value: reason, Detail: message,
+				PlatformExperimentID: peID, AgentID: agentID, Position: *heldXid})
 		}
 		// An advisory to cancel a job that has ended has nothing left to advise.
 		if underperformingXid != nil && !domain.ExperimentStatus(status).IsTerminal() {

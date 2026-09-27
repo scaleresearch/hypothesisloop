@@ -107,6 +107,10 @@ type SchedulerConfig struct {
 	// steady-submitting agent would otherwise get from pure exact-FIFO. Same shape as every
 	// other *_seconds field here: 0/unset falls back to the default below, not "disabled".
 	GuaranteedFairnessWindowSeconds int `yaml:"guaranteed_fairness_window_seconds"`
+	// HeldJobNoticeSeconds is the least a job waits in the queue before its owner is told, once,
+	// that it is held and why (job.held). A job is told when it has waited longer than this and
+	// longer than its own estimated duration.
+	HeldJobNoticeSeconds int `yaml:"held_job_notice_seconds"`
 	// ResourceDisbalanceTolerance is the multiple of a cluster's per-accelerator CPU/memory/
 	// storage share a running job may request before the scheduler evicts it for stranding idle
 	// accelerators on its own node (see services/scheduler/loop_disbalance.go). Required and

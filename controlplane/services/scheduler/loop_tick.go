@@ -712,6 +712,11 @@ func (l *Loop) tick(ctx context.Context) error {
 
 	backlog.publish(speculativeFootprintByCluster)
 
+	// After both passes, so a job told it is held is told the reason this tick gave it.
+	if err := l.store.MarkHeldJobs(ctx, l.heldJobNotice); err != nil {
+		tickErrs = append(tickErrs, fmt.Errorf("mark held jobs: %w", err))
+	}
+
 	return errors.Join(tickErrs...)
 }
 

@@ -1075,3 +1075,63 @@ func TestACancelledJobIsAnnouncedAsAReadAnswersIt(t *testing.T) {
 		t.Errorf("replayed: got = %+v, want the live event %+v", last.Identity(), live.Identity())
 	}
 }
+
+// An agent's stream leaves out a queue reason that waiting clears, so an agent whose job never
+// started learned nothing. A job that has waited longer than it was to run, and longer than the
+// platform's minimum, is announced once with the reason it has then.
+func TestAJobThatWaitsLongerThanItWasToRunIsAnnouncedAsHeldOnce(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "held", true)
+	experiments := NewExperimentsStore(pool)
+	store := NewEventsStore(pool, noHypothesisEvents{})
+	const sentence = "cluster box-b is short of 1 x tenstorrent.com/chiparch=blackhole, held by 1 job of other platform experiments"
+	queue := func(id, reason string, estimatedHours float64, waited time.Duration) {
+		t.Helper()
+		exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
+        'QUEUED', $5, $6, now() - $7 * interval '1 second', 'AK', 'SK')`, id, agentID, peID, hypothesisID, reason, estimatedHours, waited.Seconds())
+	}
+	queue("held-job-long-wait", "capacity_unavailable: "+sentence, 0.08, 10*time.Minute)
+	queue("held-job-short-wait", "capacity_unavailable: "+sentence, 0.08, 4*time.Minute)
+	queue("held-job-long-run", "capacity_unavailable: "+sentence, 1, 10*time.Minute)
+	queue("held-job-unjudged", "awaiting_admission", 0.08, 10*time.Minute)
+	before := cursorNow(t, pool)
+
+	if err := experiments.MarkHeldJobs(context.Background(), 5*time.Minute); err != nil {
+		t.Fatalf("MarkHeldJobs: %v", err)
+	}
+	if got := awaitEvent(t, events, EventJobHeld, "held-job-long-wait"); got.Value != "capacity_unavailable" || got.Detail != sentence || got.AgentID != agentID {
+		t.Errorf("live held event: got = %+v, want = the code, the sentence and the job's agent", got)
+	}
+
+	// A second pass, and a reason that changed since, announce nothing more.
+	exec(t, pool, `UPDATE experiments SET not_admitted_reason = 'outranked' WHERE id = 'held-job-long-wait'`)
+	if err := experiments.MarkHeldJobs(context.Background(), 5*time.Minute); err != nil {
+		t.Fatalf("MarkHeldJobs: %v", err)
+	}
+	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventJobHeld: true}}
+	replayed, err := store.Replay(context.Background(), filter, before)
+	if err != nil || len(replayed) != 1 || replayed[0].Subject != "held-job-long-wait" || replayed[0].Value != "capacity_unavailable" || replayed[0].Detail != sentence {
+		t.Fatalf("replayed held events: got = %+v, %v, want = the one job that waited past its estimate and the minimum, once", replayed, err)
+	}
+
+	// The job's own agent and whoever steers the run are told, and no other agent.
+	held := replayed[0]
+	if !(EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(held) || !(EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(held) {
+		t.Errorf("a held job is kept from its agent or from its coordinator: %+v", held)
+	}
+	if (EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(held) {
+		t.Errorf("a held job is announced to another agent: %+v", held)
+	}
+
+	// A job that left the queue is held no longer.
+	exec(t, pool, `UPDATE experiments SET status = 'REJECTED', not_admitted_reason = NULL WHERE id = 'held-job-long-wait'`)
+	if replayed, err := store.Replay(context.Background(), filter, before); err != nil || len(replayed) != 0 {
+		t.Errorf("replay once the job left the queue: got = %+v, %v, want = no held event", replayed, err)
+	}
+}

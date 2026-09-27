@@ -776,3 +776,7 @@ func TestTickDoesNotMoveAJobThatRanWhenItsQuotaNoLongerCoversItsType(t *testing.
 		}
 	}
 }
+
+func (*scaleUpWaitingStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+func (*noRunningListStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }

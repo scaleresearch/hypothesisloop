@@ -382,3 +382,5 @@ func TestMaxSharesDoNotGrowAsATickAdmits(t *testing.T) {
 		t.Fatalf("resolved cpu = %q and %q, want the same share of the node for both", store.cpu["first"], store.cpu["second"])
 	}
 }
+
+func (*resolvedCPUStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }

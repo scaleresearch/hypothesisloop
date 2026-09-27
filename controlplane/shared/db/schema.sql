@@ -335,6 +335,10 @@ END $$;
 ALTER TABLE experiments DROP COLUMN IF EXISTS underperforming_notified_at;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS underperforming_metric TEXT;
 
+-- The queue reason the job's owner was told it is held for, written once, when it had waited
+-- longer than it was to run.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS held_reason TEXT;
+
 -- A job holds a cluster only while it is placed. The column once defaulted to the name
 -- 'default', which is no cluster: a queued row carrying it is cleared.
 ALTER TABLE experiments ALTER COLUMN cluster_name SET DEFAULT '';
@@ -668,6 +672,7 @@ ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS status_xid       BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS not_admitted_xid BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS underperforming_xid BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS held_xid BIGINT;
 ALTER TABLE agent_quotas          ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_findings   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE hypothesis_comments   ADD COLUMN IF NOT EXISTS created_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
@@ -722,6 +727,9 @@ BEGIN
     IF TG_OP = 'INSERT' OR NEW.underperforming_metric IS DISTINCT FROM OLD.underperforming_metric THEN
         NEW.underperforming_xid := CASE WHEN NEW.underperforming_metric IS NULL THEN NULL ELSE NEW.updated_xid END;
     END IF;
+    IF TG_OP = 'INSERT' OR NEW.held_reason IS DISTINCT FROM OLD.held_reason THEN
+        NEW.held_xid := CASE WHEN NEW.held_reason IS NULL THEN NULL ELSE NEW.updated_xid END;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -746,6 +754,14 @@ BEGIN
             split_part(NEW.not_admitted_reason, ': ', 1),
             CASE WHEN position(': ' in NEW.not_admitted_reason) > 0
                  THEN substr(NEW.not_admitted_reason, position(': ' in NEW.not_admitted_reason) + 2) ELSE '' END,
+            NEW.platform_experiment_id, NEW.agent_id);
+    END IF;
+    IF NEW.held_reason IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.held_reason IS DISTINCT FROM OLD.held_reason) THEN
+        PERFORM hypothesisloop_notify_event('job.held', NEW.id,
+            split_part(NEW.held_reason, ': ', 1),
+            CASE WHEN position(': ' in NEW.held_reason) > 0
+                 THEN substr(NEW.held_reason, position(': ' in NEW.held_reason) + 2) ELSE '' END,
             NEW.platform_experiment_id, NEW.agent_id);
     END IF;
     IF NEW.underperforming_metric IS NOT NULL
