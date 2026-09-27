@@ -80,7 +80,7 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	}
 }
 
-func TestRepoCheckNamesWhatKeepsACloneFromReady(t *testing.T) {
+func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	clone := emptyClone(t)
 	code, out := repo(t, "check")
 	for _, name := range []string{"readme: README.md is missing", "experiment: " + repotemplate.ExperimentFile + " is missing", "job-spec: " + repotemplate.JobSpec + " is missing"} {
@@ -98,7 +98,10 @@ func TestRepoCheckNamesWhatKeepsACloneFromReady(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
-	if code, out := repo(t, "check"); code != 0 || !strings.HasPrefix(out, "ready: ") || !strings.Contains(out, "Not checked here: whose experiment they describe") {
+	// A baseline agent read "ready" of another experiment's files and went on with them: a pass
+	// says what was checked and what was not, in one line, and never calls the repository ready.
+	if code, out := repo(t, "check"); code != 0 || out != repoChecked+"\n" || strings.Contains(out, "ready") ||
+		!strings.HasPrefix(out, "checked: layout and file validity") || !strings.HasSuffix(out, "Not checked: that the files describe this experiment.\n") {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{

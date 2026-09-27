@@ -18,7 +18,7 @@ import (
 
 var repoCommands = []subcommand{
 	{"init", "add the experiment files this clone lacks", repoInit},
-	{"check", "say what this clone lacks to be a ready experiment repository", repoCheck},
+	{"check", "check that this clone holds the experiment files and each is valid", repoCheck},
 }
 
 const repoFiles = `  README.md                         what is measured, how one trial runs, what to vary, what must not change
@@ -78,19 +78,20 @@ const earlierExperiment = "A file that was already there may describe an earlier
 func repoCheck(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("repo check", `usage: hl repo check
 
-Run in a clone of the experiment's repository. Reads the files as they are in the working tree
-and prints one line for each thing that keeps the repository from being ready, as NAME: what to
-fix. Exits 0 with "ready" when there is none, 1 otherwise.
+Run in a clone of the experiment's repository. Checks two things in the working tree: the
+layout, that each file below is there, and each file's validity. Prints one line for each
+failure, as NAME: what to fix, and exits 1. With none it exits 0 and prints one line saying what
+it checked and what it did not.
 
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
               them ranked
   job-spec    .hypothesisloop/job.yaml states a job, with no REPLACE-WITH left and no secret_env
 
-A ready repository also holds the code the job spec runs and has a completed job submitted from
-that spec at the same commit (the baseline). No file shows those two, so this command does not
-check them: the baseline is checked when it is declared (hl platform-experiments update --baseline-job). Nor does it know whose experiment
-the files describe: those of an earlier experiment in the same repository read as ready.
+Not checked: that the files describe this experiment. Those of an earlier experiment in the
+same repository pass, so read them against the brief. Nor the code the job spec runs or its
+baseline job, which the platform checks when the baseline is declared
+(hl platform-experiments update --baseline-job).
 hl repo init adds a missing file.`, stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
@@ -110,9 +111,11 @@ hl repo init adds a missing file.`, stderr)
 		fmt.Fprintln(stdout, strings.Join(failures, "\n"))
 		return 1
 	}
-	fmt.Fprintln(stdout, "ready: README.md, "+repotemplate.ExperimentFile+" and "+repotemplate.JobSpec+" are filled in. Not checked here: whose experiment they describe (an earlier one's in this repository read as ready too), the code the job spec runs, and its baseline job.")
+	fmt.Fprintln(stdout, repoChecked)
 	return 0
 }
+
+const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + "). Not checked: that the files describe this experiment."
 
 func cloneRoot() (string, error) {
 	root, err := git(".", "rev-parse", "--show-toplevel")
@@ -131,8 +134,8 @@ func sortedPaths(files map[string]string) []string {
 	return paths
 }
 
-// notReady lists what keeps the files of a clone from those of a ready repository, each under
-// the name the checklist gives the item.
+// notReady lists what the files of a clone lack in layout and validity, each under the name the
+// checklist gives the item.
 func notReady(clone iofs.FS) ([]string, error) {
 	var failures []string
 	for _, item := range []struct {
