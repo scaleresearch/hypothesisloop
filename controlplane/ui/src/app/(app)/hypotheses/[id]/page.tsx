@@ -20,7 +20,8 @@ import { acceleratorLabel, formatAccH, relTime } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { Actor, Verdict } from '@/components/actor'
-import { AgentNames } from '@/components/agent-label'
+import { AgentLabel, AgentNames } from '@/components/agent-label'
+import { Branch, Commit } from '@/components/code-ref'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
 
@@ -147,6 +148,36 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
             ))}
           </div>
           <AddLinkForm hypothesis={data} onAdded={() => mutate()} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle note={data.base_ref && <>a new one starts from <span className="font-mono"><Commit codeRef={data.base_ref} /></span></>}>Implementations</CardTitle>
+        </CardHeader>
+        <CardContent scrollX>
+          {data.implementations.length === 0 ? (
+            <EmptyState>No agent has run this hypothesis yet. Each one that does works on a branch of its own.</EmptyState>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Branch</th>
+                  <th>Newest commit run</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.implementations.map(i => (
+                  <tr key={`${i.agent_id}:${i.branch}`}>
+                    <td className="text-xs"><AgentLabel id={i.agent_id} /></td>
+                    <td className="font-mono text-xs"><Branch branch={i.branch} codeRef={i.code_ref} platformExperimentID={data.platform_experiment_id} /></td>
+                    <td className="font-mono text-xs"><Commit codeRef={i.code_ref} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 

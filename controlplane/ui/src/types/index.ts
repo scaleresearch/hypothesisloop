@@ -490,7 +490,18 @@ export interface HypothesisComment {
 // Each list is one bounded page of a set that only grows; the matching *_count is the full
 // size, so a short list and a truncated one are never confused. Page the rest with
 // ?limit/?offset on GET /hypotheses/{id}.
+// One agent's code for a hypothesis: the branch its jobs ran on and the commit the newest of them
+// ran, repository_url@sha.
+export interface Implementation {
+  agent_id: string
+  branch: string
+  code_ref: string
+}
+
 export interface HypothesisWithJobs extends Hypothesis {
+  implementations: Implementation[]
+  /** The commit a new implementation starts from, repository_url@sha. Absent while it would start from a baseline nobody declared. */
+  base_ref?: string
   jobs: Experiment[]
   job_count: number
   findings: HypothesisFinding[]
