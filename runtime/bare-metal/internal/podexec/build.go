@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
@@ -89,10 +90,10 @@ func resolveHostMounts(hostMounts map[string]string) (map[string]string, error) 
 	for containerPath, hostPath := range hostMounts {
 		info, err := os.Stat(hostPath)
 		if err != nil {
-			return nil, fmt.Errorf("podexec: host_mounts[%s]=%q: %w (this node does not have the requested dataset/directory — either it was never populated here, or the job should target a node that has it via node_selector)", containerPath, hostPath, err)
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("host_mounts[%s]=%q: %v (this node does not have the requested dataset/directory — either it was never populated here, or the job should target a node that has it via node_selector)", containerPath, hostPath, err)}
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("podexec: host_mounts[%s]=%q is not a directory", containerPath, hostPath)
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("host_mounts[%s]=%q is not a directory on this node", containerPath, hostPath)}
 		}
 		resolved[containerPath] = hostPath
 	}
@@ -135,7 +136,7 @@ func (e *Executor) BuildContainerSpec(exp *domain.Experiment, placement Placemen
 	// runtime multi-node; they make its refusal consistent — a job it cannot run is rejected for
 	// the reason it cannot run it, not for the syntax it happened to be written in.
 	if spec.Nodes() > 1 {
-		return containerSpec{}, fmt.Errorf("podexec: num_nodes=%d requested but this bare-node runtime executes single-node jobs only", spec.Nodes())
+		return containerSpec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("num_nodes=%d requested but this bare-node runtime executes single-node jobs only", spec.Nodes())}
 	}
 	// A single-node job is one node group of one replica, whose shape is the top-level one for an
 	// ungrouped job and the sole group's for a grouped one. Read through NodeGroups so this

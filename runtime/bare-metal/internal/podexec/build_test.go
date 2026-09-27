@@ -1,12 +1,14 @@
 package podexec
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 func TestResolveHostMounts(t *testing.T) {
@@ -31,8 +33,9 @@ func TestResolveHostMounts(t *testing.T) {
 	t.Run("missing host path fails fast rather than silently mounting nothing", func(t *testing.T) {
 		missing := filepath.Join(t.TempDir(), "does-not-exist")
 		_, err := resolveHostMounts(map[string]string{"/data/dataset": missing})
-		if err == nil {
-			t.Fatal("resolveHostMounts: expected an error for a nonexistent host path, got nil")
+		var unrunnable *agentexec.Unrunnable
+		if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, missing) {
+			t.Fatalf("resolveHostMounts: err = %v, want an Unrunnable naming the nonexistent host path", err)
 		}
 	})
 
@@ -42,8 +45,10 @@ func TestResolveHostMounts(t *testing.T) {
 			t.Fatalf("setup: %v", err)
 		}
 		defer f.Close()
-		if _, err := resolveHostMounts(map[string]string{"/data/dataset": f.Name()}); err == nil {
-			t.Fatal("resolveHostMounts: expected an error for a host path that is a file, got nil")
+		_, err = resolveHostMounts(map[string]string{"/data/dataset": f.Name()})
+		var unrunnable *agentexec.Unrunnable
+		if !errors.As(err, &unrunnable) {
+			t.Fatalf("resolveHostMounts: err = %v, want an Unrunnable for a host path that is a file", err)
 		}
 	})
 }
@@ -241,6 +246,10 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 	_, err := e.BuildContainerSpec(exp, Placement{})
 	if err == nil {
 		t.Fatal("BuildContainerSpec accepted a two-group job on a single-node runtime — it would run one group and drop the rest")
+	}
+	var unrunnable *agentexec.Unrunnable
+	if !errors.As(err, &unrunnable) {
+		t.Fatalf("rejection %q is not an Unrunnable, so the job would wait out the stuck-pending timeout with no reason", err)
 	}
 	if !strings.Contains(err.Error(), "num_nodes=4") || !strings.Contains(err.Error(), "single-node jobs only") {
 		t.Fatalf("rejection was %q, want the existing single-node error naming 4 nodes — groups do not make this runtime multi-node, they make its refusal consistent, so they must not invent a second error for the same condition", err)
