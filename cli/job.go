@@ -326,9 +326,10 @@ func (m machineTag) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strings.TrimSpace(tag + " " + model))
 }
 
-// briefJobs is one compact line per job, ending in env: the settings that differ between these
-// jobs, always present so that a reader can index it. A job listed alone has nothing to differ
-// from, and an empty env there would read as a job that set none, so it shows all of its own.
+// briefJobs is one compact line per job, ending in job.env: the settings that differ between
+// these jobs, always present so that a reader can index it. A job listed alone has nothing to
+// differ from, and an empty env there would read as a job that set none, so it shows all of its
+// own.
 func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 	briefs := make([]jobBrief, len(jobs))
 	envs := make([]map[string]any, len(jobs))
@@ -361,9 +362,15 @@ func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
 		if env, err = compactJSON(env); err != nil {
 			return nil, err
 		}
-		lines[i] = slices.Concat(line[:len(line)-1], []byte(`,"env":`), env, []byte("}"))
+		lines[i] = withJobEnv(line, env)
 	}
 	return lines, nil
+}
+
+// withJobEnv adds env to the object line where the platform's API has a job's: under job.env.
+// Every hl command that prints a job puts it there, so one script reads them all.
+func withJobEnv(line, env []byte) []byte {
+	return slices.Concat(line[:len(line)-1], []byte(`,"job":{"env":`), env, []byte("}}"))
 }
 
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -375,8 +382,9 @@ report a ranking metric as a result, never as a running timer),
 ran_on (the machine: numbers compare only between jobs that share it), reasons (for a QUEUED
 job not_admitted_reason, the code of what it waits for, and not_admitted_message, its
 sentence), theory, cost
-and env, the settings that differ between the listed jobs (all of them for a job listed
-alone). hl job status ID
+and job.env, the settings that differ between the listed jobs (all of them for a job listed
+alone). A job's env is under job.env in everything hl prints of a job, as in the platform's
+API: here, in hl job status, hl hypothesis get and hl results. hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
@@ -435,7 +443,7 @@ func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 
 One line per job, its whole record: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
 EVICTED, REJECTED or CANCELLED), metrics (one value each, as in hl job list), finished_at,
-summary, phase_detail and the spec.
+summary, phase_detail and the spec under job, its settings as job.env.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
 how its process ended (container_failed, oom_killed), when its runtime reported that.
 ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id (the

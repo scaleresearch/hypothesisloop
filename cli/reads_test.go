@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strings"
@@ -37,7 +38,7 @@ func TestQuota(t *testing.T) {
 func TestResultsFlattensStandings(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",
-			"standings": []any{map[string]any{"rank": 1, "agent_id": "a", "best": 0.9}, map[string]any{"rank": 2, "agent_id": "b", "best": 0.8}}}}}
+			"standings": []any{map[string]any{"rank": 1, "agent_id": "a", "best": 0.9, "env": map[string]any{"LR": "0.3"}}, map[string]any{"rank": 2, "agent_id": "b", "best": 0.8}}}}}
 	})
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
 	var stdout, stderr bytes.Buffer
@@ -45,8 +46,8 @@ func TestResultsFlattensStandings(t *testing.T) {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	want := []string{
-		`{"metric":"acc","direction":"maximize","agent_id":"a","best":0.9,"rank":1}`,
-		`{"metric":"acc","direction":"maximize","agent_id":"b","best":0.8,"rank":2}`,
+		`{"metric":"acc","direction":"maximize","agent_id":"a","best":0.9,"rank":1,"job":{"env":{"LR":"0.3"}}}`,
+		`{"metric":"acc","direction":"maximize","agent_id":"b","best":0.8,"rank":2,"job":{"env":{}}}`,
 	}
 	if (*got)[0].Path != "/platform-experiments/pe-1/results" || !reflect.DeepEqual(lines(stdout.String()), want) {
 		t.Fatalf("request %+v, stdout %q", (*got)[0], stdout.String())
@@ -203,6 +204,55 @@ func TestHypothesisQueryTakesCypherFlag(t *testing.T) {
 	}
 }
 
+// A coordinator's script read d['env'] off hl job status after reading it off hl results and
+// died on a KeyError: a job's env is in one place in everything hl prints of a job.
+func TestEveryCommandThatPrintsAJobHasItsEnvUnderJob(t *testing.T) {
+	job := map[string]any{"id": "job-1", "status": "COMPLETED", "job": map[string]any{"image": "i", "env": map[string]any{"LR": "0.3"}}}
+	recordingServer(t, func(_ int, r recorded) any {
+		switch r.Path {
+		case "/experiments":
+			return []any{job}
+		case "/experiments/job-1":
+			return job
+		case "/hypotheses/hyp-1":
+			return map[string]any{"id": "hyp-1", "jobs": []any{job}, "job_count": 1}
+		}
+		return map[string]any{"metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",
+			"standings": []any{map[string]any{"rank": 1, "experiment_id": "job-1", "env": map[string]any{"LR": "0.3"}}}}}}
+	})
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	for _, command := range [][]string{{"job", "status", "job-1"}, {"job", "list"}, {"results"}, {"hypothesis", "get", "hyp-1"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(command, &stdout, &stderr); code != 0 {
+			t.Fatalf("hl %s: exit %d, stderr %s", strings.Join(command, " "), code, stderr.String())
+		}
+		var printed struct {
+			Env  any `json:"env"`
+			Job  jobEnv
+			Jobs []struct{ Job jobEnv }
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &printed); err != nil {
+			t.Fatalf("hl %s printed %q: %v", strings.Join(command, " "), stdout.String(), err)
+		}
+		if len(printed.Jobs) == 1 {
+			printed.Job = printed.Jobs[0].Job
+		}
+		if printed.Job.Env["LR"] != "0.3" || printed.Env != nil {
+			t.Errorf("hl %s printed %s, want the env under job.env and nowhere else", strings.Join(command, " "), stdout.String())
+		}
+	}
+	for _, command := range [][]string{{"job", "list", "-h"}, {"job", "status", "-h"}, {"results", "-h"}, {"hypothesis", "get", "-h"}} {
+		var stdout, stderr bytes.Buffer
+		if run(command, &stdout, &stderr); !strings.Contains(stderr.String(), "job.env") {
+			t.Errorf("hl %s does not say where a job's env is", strings.Join(command, " "))
+		}
+	}
+}
+
+type jobEnv struct {
+	Env map[string]string `json:"env"`
+}
+
 func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVaried(t *testing.T) {
 	job := func(id string, env map[string]any) map[string]any {
 		return map[string]any{"id": id, "agent_id": "a", "hypothesis_id": "hyp-1", "status": "COMPLETED", "hypothesis": "long text",
@@ -223,7 +273,7 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 	})
 	brief := func(id, env string) string {
 		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"COMPLETED","metrics":{"acc":{"value":0.9},"loss":{"value":0.260842,"basis":"per_token"}},` +
-			`"ran_on":"host 16358 RTX 4090","theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","env":` + env + `}`
+			`"ran_on":"host 16358 RTX 4090","theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","job":{"env":` + env + `}}`
 	}
 	both := []string{brief("job-1", `{}`), brief("job-2", `{"LR":"0.3"}`)}
 	var stdout, stderr bytes.Buffer

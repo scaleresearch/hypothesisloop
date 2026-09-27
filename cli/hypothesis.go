@@ -583,8 +583,8 @@ implementations lists the branches it was run on, one per agent that ran it, eac
 agent_id, branch and code_ref, the commit its newest job there ran: a hypothesis is an idea and
 any agent may run its own code for it. base_ref is the commit a new implementation starts from
 (hl hypothesis checkout ID). A job is
-as brief as in hl job list, metrics included, with the env that differs between its jobs (all
-of it for an only job); hl job status ID prints its whole record.`, stderr)
+as brief as in hl job list, metrics included, with under job.env the settings that differ
+between its jobs (all of them for an only job); hl job status ID prints its whole record.`, stderr)
 	limit := fs.Int("limit", 0, "how many of its jobs, findings and comments each (server default 20, max 200)")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {

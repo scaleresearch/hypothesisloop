@@ -68,7 +68,8 @@ func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
 
 The standings on each ranking metric, one line per agent and metric in rank order: its best
-value and the job that set it (experiment_id, code_ref, hypothesis_id, env). Only COMPLETED jobs
+value and the job that set it (experiment_id, code_ref, hypothesis_id and its settings under
+job.env, where every hl command that prints a job has them). Only COMPLETED jobs
 that hold every constraint metric rank (rankable in hl job status). At most one line
 per agent of the platform experiment and metric, so there is nothing to page or limit. A metric
 nobody has a result on yet prints no line, says so on stderr, and exits 0.`, stderr)
@@ -92,9 +93,21 @@ nobody has a result on yet prints no line, says so on stderr, and exits 0.`, std
 	}
 	for _, m := range out.Metrics {
 		for _, s := range m.Standings {
-			if err := printPrefixed(stdout, s, "metric", m.Metric, "direction", m.Direction); err != nil {
-				return fail(stderr, err)
+			var standing struct {
+				Env map[string]string `json:"env"`
 			}
+			if err := json.Unmarshal(s, &standing); err != nil {
+				return fail(stderr, fmt.Errorf("response is not a standing: %w", err))
+			}
+			rest, err := compactJSON(s, "env")
+			if err != nil {
+				return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+			}
+			env, _ := json.Marshal(standing.Env)
+			if standing.Env == nil {
+				env = []byte("{}")
+			}
+			fmt.Fprintf(stdout, "%s\n", withJobEnv(prefixed(rest, "metric", m.Metric, "direction", m.Direction), env))
 		}
 		if len(m.Standings) == 0 {
 			fmt.Fprintf(stderr, "hl: no results yet on %s\n", m.Metric)
@@ -218,6 +231,12 @@ func printPrefixed(stdout io.Writer, raw json.RawMessage, kv ...string) error {
 	if err != nil {
 		return fmt.Errorf("response is not JSON: %w", err)
 	}
+	_, err = fmt.Fprintf(stdout, "%s\n", prefixed(rest, kv...))
+	return err
+}
+
+// prefixed is the compact object rest with the given key and value pairs ahead of its own.
+func prefixed(rest []byte, kv ...string) []byte {
 	var b bytes.Buffer
 	b.WriteByte('{')
 	for i := 0; i < len(kv); i += 2 {
@@ -234,6 +253,5 @@ func printPrefixed(stdout io.Writer, raw json.RawMessage, kv ...string) error {
 	} else {
 		b.WriteByte('}')
 	}
-	_, err = fmt.Fprintf(stdout, "%s\n", b.Bytes())
-	return err
+	return b.Bytes()
 }
