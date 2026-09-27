@@ -212,7 +212,7 @@ class BaselinePromptTest(unittest.TestCase):
     # A chip job that left its storage out was given a share of the node's disk and waited to
     # the run's end for room the disk never had. A submit without it is now refused.
     def test_every_job_states_its_storage(self):
-        self.assertIn("Every job states its scratch space (`storage: 4Gi`) or is refused at submit. `memory` and `max_retries` may be left out",
+        self.assertIn("Every job states the storage it needs, e.g. `storage: 4Gi`, or is refused. `memory` and `max_retries` may be left out",
                       render(baseline_agent())[1])
 
 

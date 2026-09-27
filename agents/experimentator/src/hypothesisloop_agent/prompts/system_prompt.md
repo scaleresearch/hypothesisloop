@@ -57,8 +57,8 @@ outranks this briefing:
      `description` completely, with its `status_reason`, `metrics`, `stages` and
      `current_stage`: the stage advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
-     verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states its
-     scratch space (`storage: 4Gi`) or is refused at submit.
+     verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states the
+     storage it needs, e.g. `storage: 4Gi`, or is refused.
   2. One-time: {workspace}
      On this machine `pip install X` and `uv pip install X` install where `python3` reads.
   3. Catch up before touching anything else, every session until the experiment's

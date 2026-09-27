@@ -51,7 +51,7 @@ class SystemPromptTest(unittest.TestCase):
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())
-        self.assertIn("CPU work: `cpu: N` in its place. Every job states its scratch space (`storage: 4Gi`) or is refused at submit", prompt)
+        self.assertIn("CPU work: `cpu: N` in its place. Every job states the storage it needs, e.g. `storage: 4Gi`, or is refused", prompt)
 
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
