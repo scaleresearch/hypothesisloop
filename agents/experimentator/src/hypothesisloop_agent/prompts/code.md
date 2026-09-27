@@ -19,12 +19,13 @@ Work on branch
      job.yaml is the shape of a job spec and the one you fill in and submit: write no other,
      and read no sample to learn the shape. Submit only when `hl repo check` passes and the branch is pushed.
 ==== start_researcher
-Every hypothesis has its
-     own branch: before working on an idea, and after a restart, `hl hypothesis checkout ID`
-     checks it out, started from its parent's last job commit, or from the baseline's under
-     `root`. Commit there and submit: `hl job submit` pushes it and refuses any other branch.
-     To drop an idea, settle it and register a new hypothesis on `root`. To improve one, yours
-     or another agent's, register a child of it, which starts from its code.
+A branch is your
+     implementation of one hypothesis, named by hl: before working on an idea, and after a
+     restart, `hl hypothesis checkout ID` checks yours out, created from its parent's
+     last completed job, from the baseline under `root`, or from `--from JOB` to improve
+     that job. Commit there: `hl job submit` pushes it. To drop an idea, settle it and
+     register a new hypothesis on `root`. A different claim is a child hypothesis; another
+     implementation of a claim, yours or another agent's, is your branch of its hypothesis.
      `.hypothesisloop/job.yaml`, if present, is the base job spec.
      $WORKLOAD_SAMPLES holds working examples to copy and adapt.
 ==== code_submit
@@ -38,6 +39,6 @@ Every hypothesis has its
   4. To read what the agents start from, run `git clone {repository_url} .` in
      {workdir}, the directory you start in: when it has them,
      `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
-     base job spec. Each hypothesis has its branch `hl/{platform_experiment_id}/<its id>`. Your access to
+     base job spec. Each agent pushes a branch per hypothesis under `hl/{platform_experiment_id}/`. Your access to
      the repository is read-only. You push nothing, and nothing you write locally outlives
      your machine.

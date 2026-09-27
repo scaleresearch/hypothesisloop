@@ -26,10 +26,12 @@ class SystemPromptTest(unittest.TestCase):
             self.assertIn("`git push` needs no setup, git has your credential", flat)
             # Every job of two runs ran the baseline commit and no researcher pushed a branch:
             # the branch was the agent's, so git followed no idea.
-            self.assertIn("before working on an idea, and after a restart, `hl hypothesis checkout ID` checks it out, "
-                          "started from its parent's last job commit, or from the baseline's under `root`", flat)
-            self.assertIn("`hl job submit` pushes it and refuses any other branch", flat)
-            self.assertIn("To improve one, yours or another agent's, register a child of it, which starts from its code", flat)
+            self.assertIn("A branch is your implementation of one hypothesis, named by hl: before working on an idea, and after a "
+                          "restart, `hl hypothesis checkout ID` checks yours out, created from its parent's last "
+                          "completed job, from the baseline under `root`, or from `--from JOB` to improve that job", flat)
+            self.assertIn("`hl job submit` pushes it", flat)
+            self.assertIn("A different claim is a child hypothesis; another implementation of a claim, yours or another "
+                          "agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
             self.assertLess(len(prompt.encode()), 11_000)
@@ -84,8 +86,7 @@ class SystemPromptTest(unittest.TestCase):
                       "builds on it, is registered as a child, so the best result is a node", prompt)
         self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
         self.assertIn("no job in flight or owing its summary and no hypothesis of yours left open", prompt)
-        # A researcher ran a job on another researcher's hypothesis.
-        self.assertIn("test under its id if it is yours, else under a child of it: a job on another agent's hypothesis is refused", prompt)
+        self.assertIn("on a match, test under its id so every trial of a claim stays on one thread", prompt)
 
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
