@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // The notification triggers are the one part of this package whose behaviour is defined by the
@@ -972,5 +974,52 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 		if !whole.Matches(e) {
 			t.Errorf("the whole stream lost %+v, which only the decisions stream leaves out", e)
 		}
+	}
+}
+
+// A job that ends by running is announced with the cause the write that ended it stored, live and
+// replayed alike: a failure with how its process ended, a completion with nothing.
+func TestAFinishedJobIsAnnouncedWithItsCause(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "cause", true)
+	exps := NewExperimentsStore(pool)
+	ctx := context.Background()
+	const cause = "container_failed: command exited with code 1"
+	for jobID, end := range map[string][2]string{
+		"watch-test-job-failed":    {"FAILED", cause},
+		"watch-test-job-completed": {"COMPLETED", ""},
+	} {
+		before := insertJob(t, pool, agentID, peID, hypothesisID, jobID)
+		if ok, err := exps.TransitionStatus(ctx, jobID, domain.StatusRunning, domain.ExperimentStatus(end[0]), end[1]); err != nil || !ok {
+			t.Fatalf("TransitionStatus(%s, %s): got = %v, %v, want true", jobID, end[0], ok, err)
+		}
+		deadline := time.After(5 * time.Second)
+		for announced := false; !announced; {
+			select {
+			case e := <-events:
+				if e.Subject == jobID && e.Value == end[0] {
+					if e.Detail != end[1] {
+						t.Errorf("live %s of %s: detail = %q, want %q", end[0], jobID, e.Detail, end[1])
+					}
+					announced = true
+				}
+			case <-deadline:
+				t.Fatalf("no live %s for %s", end[0], jobID)
+			}
+		}
+		replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx,
+			EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
+		if err != nil {
+			t.Fatalf("replay: got = %v, want = nil", err)
+		}
+		last := replayed[len(replayed)-1]
+		if last.Subject != jobID || last.Value != end[0] || last.Detail != end[1] {
+			t.Errorf("replayed end of %s: got = %+v, want %s with detail %q", jobID, last, end[0], end[1])
+		}
+	}
+	if _, err := exps.TransitionStatus(ctx, "watch-test-job-completed", domain.StatusCompleted, domain.StatusCompleted, cause); err == nil || !strings.Contains(err.Error(), "experiments_reason_of_attempt") {
+		t.Errorf("a completion written with a reason: err = %v, want experiments_reason_of_attempt", err)
 	}
 }

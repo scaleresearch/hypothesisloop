@@ -292,6 +292,27 @@ const (
 	PhaseReasonInstanceStarting = "instance_starting"
 )
 
+// failureCauseDetailRunes bounds the runtime's message in a failure cause: the cause is stored on
+// the job and travels in every update about it.
+const failureCauseDetailRunes = 200
+
+// FailureCause is the reason a job that failed is stored and announced with, in the "code:
+// detail" shape of an eviction reason: how the runtime says its process ended. Empty when the
+// runtime's last word on the job is not about a process that ended.
+func (d PhaseDetail) FailureCause() string {
+	if d.Reason != PhaseReasonContainerFailed && d.Reason != PhaseReasonOOMKilled {
+		return ""
+	}
+	message, _, _ := strings.Cut(d.Message, "\n")
+	if runes := []rune(message); len(runes) > failureCauseDetailRunes {
+		message = string(runes[:failureCauseDetailRunes])
+	}
+	if message == "" {
+		return d.Reason
+	}
+	return d.Reason + ": " + message
+}
+
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
 // their own, however long a job is left SUBMITTED — a scheduler retry or the runtime's
 // own reconcile loop cannot fix a bad image or a malformed config. A job reporting one of these

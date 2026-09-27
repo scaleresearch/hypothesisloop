@@ -133,7 +133,7 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	}
 	summaryDue("while it runs", false)
 
-	if ok, err := exps.TransitionStatus(ctx, id, domain.StatusRunning, domain.StatusCompleted); err != nil || !ok {
+	if ok, err := exps.TransitionStatus(ctx, id, domain.StatusRunning, domain.StatusCompleted, ""); err != nil || !ok {
 		t.Fatalf("TransitionStatus: got = %v, %v, want true", ok, err)
 	}
 	summaryDue("once it completed", true)

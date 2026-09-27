@@ -147,9 +147,9 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 
 	switch phase {
 	case workload.JobPhaseSucceeded:
-		return w.onFinished(ctx, exp, true)
+		return w.onFinished(ctx, exp, domain.StatusCompleted, "")
 	case workload.JobPhaseFailed:
-		return w.onFinished(ctx, exp, false)
+		return w.onFinished(ctx, exp, domain.StatusFailed, domain.PhaseDetail{Reason: reason, Message: message}.FailureCause())
 	case workload.JobPhaseRunning:
 		if exp.Status == domain.StatusRunning {
 			// The cluster agent continuously writes actual accelerator type into the metrics store.

@@ -11,6 +11,8 @@ import (
 
 type lifecycleStore struct {
 	transitioned bool
+	// finished is each status a job was ended with by running, and its reason.
+	finished []string
 	// requeueBudget is what the fake pretends the row's remaining retry budget is: RequeueForRetry
 	// succeeds while it is positive, mirroring the real store's
 	// "attempt_count - infra_requeue_count < max" WHERE clause.
@@ -36,12 +38,14 @@ func (s *lifecycleStore) MarkStarted(context.Context, string) (bool, error) {
 	s.started++
 	return true, nil
 }
-func (s *lifecycleStore) TransitionStatus(context.Context, string, domain.ExperimentStatus, domain.ExperimentStatus) (bool, error) {
+func (s *lifecycleStore) TransitionStatus(_ context.Context, _ string, _, to domain.ExperimentStatus, reason string) (bool, error) {
 	s.transitioned = true
+	s.finished = append(s.finished, string(to)+" "+reason)
 	return true, nil
 }
-func (s *lifecycleStore) TransitionStatusFromNonTerminal(context.Context, string, domain.ExperimentStatus) (bool, error) {
+func (s *lifecycleStore) TransitionStatusFromNonTerminal(_ context.Context, _ string, to domain.ExperimentStatus, reason string) (bool, error) {
 	s.transitioned = true
+	s.finished = append(s.finished, string(to)+" "+reason)
 	return true, nil
 }
 func (s *lifecycleStore) ResolveTermination(_ context.Context, _ string, _, _ domain.ExperimentStatus, reason string) (domain.Termination, error) {
@@ -79,7 +83,7 @@ func TestTerminalObservationRequiresMetricsBeforeLifecycleTransition(t *testing.
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}
 
-	if err := w.onFinished(context.Background(), exp, true); err == nil {
+	if err := w.onFinished(context.Background(), exp, domain.StatusCompleted, ""); err == nil {
 		t.Fatal("onFinished accepted a terminal observation without authoritative metrics")
 	}
 	if store.transitioned {
@@ -106,7 +110,7 @@ func TestFailedGangIsRequeuedWhileRetryBudgetRemains(t *testing.T) {
 	store := &lifecycleStore{requeueBudget: 1}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	if err := w.onFinished(context.Background(), gangExperiment(3, 1), false); err != nil {
+	if err := w.onFinished(context.Background(), gangExperiment(3, 1), domain.StatusFailed, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.requeueCalls) != 1 {
@@ -128,7 +132,7 @@ func TestFailedGangWithNoBudgetLeftSettlesInsteadOfRetrying(t *testing.T) {
 	settler := &countingSettler{}
 	w := NewJobWatcher(store, nil, settler, zap.NewNop())
 
-	if err := w.onFinished(context.Background(), gangExperiment(3, 1), false); err != nil {
+	if err := w.onFinished(context.Background(), gangExperiment(3, 1), domain.StatusFailed, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.requeueCalls) != 1 {
@@ -146,11 +150,14 @@ func TestFailedSingleNodeJobIsNotRequeuedByTheControlPlane(t *testing.T) {
 	store := &lifecycleStore{requeueBudget: 5}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	if err := w.onFinished(context.Background(), gangExperiment(1, 3), false); err != nil {
+	if err := w.onFinished(context.Background(), gangExperiment(1, 3), domain.StatusFailed, "container_failed: command exited with code 1"); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.requeueCalls) != 0 {
 		t.Fatalf("RequeueForRetry called for a single-node job (%d times) — the runtime already retried it", len(store.requeueCalls))
+	}
+	if want := "FAILED container_failed: command exited with code 1"; len(store.finished) != 1 || store.finished[0] != want {
+		t.Fatalf("the job was ended as %q, want %q: its failure is announced without its cause", store.finished, want)
 	}
 }
 
@@ -159,7 +166,7 @@ func TestSucceededGangIsNeverRequeued(t *testing.T) {
 	store := &lifecycleStore{requeueBudget: 5}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
-	if err := w.onFinished(context.Background(), gangExperiment(3, 3), true); err != nil {
+	if err := w.onFinished(context.Background(), gangExperiment(3, 3), domain.StatusCompleted, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.requeueCalls) != 0 {

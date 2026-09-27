@@ -104,7 +104,7 @@ type EventKindDoc struct {
 // failures a hand-kept second list produces the first time a kind is added.
 var EventKinds = []EventKindDoc{
 	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED",
-		Description: "Your job moved. detail carries the eviction reason when there is one; the queue reason is experiment.blocked."},
+		Description: "Your job moved. detail carries why, when the platform knows: the reason a job was evicted, rejected or requeued, or how a FAILED job's process ended (container_failed: command exited with code 1). The queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
 		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
 	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",

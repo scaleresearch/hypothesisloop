@@ -11,30 +11,31 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// TransitionStatus does a CAS update: sets status only if it currently matches `from`.
-// Returns whether the update happened. Used by CancelExperiment to prevent TOCTOU double-refund races.
-func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus) (bool, error) {
+// TransitionStatus ends a job that ran: it sets `to` (COMPLETED or FAILED) only if the status is
+// still `from`, and returns whether it did, so a completion racing an eviction lands once. reason
+// is what the status is stored and announced with: why it failed, or nothing.
+func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error) {
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED requires MarkQueued with a reason")
 	}
-	const q = `UPDATE experiments SET status = $3, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), string(to))
+	const q = `UPDATE experiments SET status = $3, eviction_reason = NULLIF($4, ''), not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
+	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), string(to), reason)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-// TransitionStatusFromNonTerminal moves id to `to` unless already terminal.
+// TransitionStatusFromNonTerminal is TransitionStatus from any status that is not terminal.
 // For callers that can't name the exact prior status (e.g. a watcher unsure if it ever observed
 // RUNNING) without risking overwriting a concurrent terminal write.
-func (s *ExperimentsStore) TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus) (bool, error) {
+func (s *ExperimentsStore) TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatusFromNonTerminal: QUEUED requires MarkQueued with a reason")
 	}
-	const q = `UPDATE experiments SET status = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW()
+	const q = `UPDATE experiments SET status = $2, eviction_reason = NULLIF($3, ''), not_admitted_reason = NULL, updated_at = NOW()
 WHERE id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(to))
+	tag, err := s.pool.pool.Exec(ctx, q, id, string(to), reason)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.TransitionStatusFromNonTerminal: %w", err)
 	}

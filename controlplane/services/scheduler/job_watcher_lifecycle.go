@@ -360,15 +360,13 @@ func (w *JobWatcher) backfillStartedFromObservations(ctx context.Context, exp *d
 	return true, nil
 }
 
-// onFinished handles the RUNNING → COMPLETED/FAILED transition and settles quota.
-func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, succeeded bool) error {
-	status := domain.StatusCompleted
-	if !succeeded {
-		status = domain.StatusFailed
-	}
+// onFinished handles the RUNNING → COMPLETED/FAILED transition and settles quota. reason is what
+// the runtime said of a failed job's process, and is written with the status.
+func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, status domain.ExperimentStatus, reason string) error {
 	w.logger.Info("job_watcher: experiment finished",
 		zap.String("id", exp.ID),
 		zap.String("status", string(status)),
+		zap.String("reason", reason),
 	)
 
 	if exp.Status != domain.StatusRunning {
@@ -379,14 +377,14 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 
 	// A gang with retry budget goes straight back to QUEUED. Writing FAILED first would announce
 	// a terminal status for a job that runs again.
-	if !succeeded && w.retryGang(ctx, exp) {
+	if status == domain.StatusFailed && w.retryGang(ctx, exp) {
 		return nil
 	}
 
 	// If seen as RUNNING, use a conditional transition so a concurrent controller eviction can
 	// only win once; if we lose the race, skip the refund — the controller already issued it.
 	if exp.Status == domain.StatusRunning {
-		updated, err := w.store.TransitionStatus(ctx, exp.ID, domain.StatusRunning, status)
+		updated, err := w.store.TransitionStatus(ctx, exp.ID, domain.StatusRunning, status, reason)
 		if err != nil {
 			w.logger.Error("job_watcher: transition status", zap.String("id", exp.ID), zap.Error(err))
 			return err
@@ -400,7 +398,7 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, suc
 		// terminal transition, but a pod recreation can also land a genuinely-RUNNING job here.
 		// Guard with the non-terminal check, or a late completion from an already-evicted job's
 		// stale pod could resurrect it past a terminal state.
-		updated, err := w.store.TransitionStatusFromNonTerminal(ctx, exp.ID, status)
+		updated, err := w.store.TransitionStatusFromNonTerminal(ctx, exp.ID, status, reason)
 		if err != nil {
 			w.logger.Error("job_watcher: update status", zap.String("id", exp.ID), zap.Error(err))
 			return err

@@ -70,7 +70,10 @@ type Experiment struct {
 	Status                 ExperimentStatus `json:"status"`
 	QueuedAt               *time.Time       `json:"queued_at,omitempty"`
 	SubmittedAt            *time.Time       `json:"submitted_at,omitempty"`
-	EvictionReason         string           `json:"eviction_reason,omitempty"`
+	// EvictionReason says why the job's last attempt ended, as "code" or "code: detail": an
+	// EvictionReason for a job the platform evicted, rejected or requeued, PhaseDetail.FailureCause
+	// for one that FAILED. Empty on a job that is placed or completed.
+	EvictionReason string `json:"eviction_reason,omitempty"`
 	// NotAdmittedReason is the scheduler's current decision explaining why a QUEUED job was
 	// skipped. Overwritten each decision and cleared on admission; not tick history.
 	NotAdmittedReason string `json:"not_admitted_reason,omitempty"`
