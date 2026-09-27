@@ -34,7 +34,7 @@ create it off
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  3. To read what the agents start from, run `git clone {repository_url} .` in
+  4. To read what the agents start from, run `git clone {repository_url} .` in
      {workdir}, the directory you start in: when it has them,
      `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
      base job spec. Each agent pushes its own branch `hl/{platform_experiment_id}/<its id>`. Your access to

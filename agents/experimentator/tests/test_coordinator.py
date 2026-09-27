@@ -84,6 +84,44 @@ class BriefingTest(unittest.TestCase):
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
         self.assertLess(len(prompt.encode()), 9_000)
 
+    # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
+    # that only its own baseline agent could bring.
+    def test_its_first_act_on_an_open_experiment_is_the_baseline_agent(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("3. If `status` is `open` and the roster holds no agent of role `baseline`, add one now, before anything else: "
+                      "`hl platform-experiments agents add --hosted --role baseline`", flat)
+        self.assertIn("An `open` experiment has not started and waits for nothing but this", flat)
+        self.assertIn("The platform starts the run within a minute of a valid baseline being declared. "
+                      "Nobody starts it by hand, and its duration counts from that start", flat)
+        self.assertNotIn("starts_at", flat)
+
+    # One removed the owner's researcher to "match max_agents" and cancelled the baseline
+    # agent's queued job itself.
+    def test_it_changes_nothing_of_the_owners_and_nothing_of_an_agents(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("You remove only an agent you added. One the owner added stays, whatever the mix or the count", flat)
+        self.assertIn("`max_agents` counts researchers alone: baseline agents and you never count, and a researcher that finished still does", flat)
+        self.assertIn("An agent's jobs, hypotheses and branch are the agent's. You cancel, submit and comment on none", flat)
+        self.assertNotIn("agents remove", flat)
+
+    # Three baseline jobs failed for what the brief said of the image before a coordinator
+    # looked at one.
+    def test_a_failed_baseline_job_is_the_agents_to_fix_and_the_briefs_cause_the_coordinators(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("and while it is `open` when a job ends", flat)
+        self.assertIn("A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: "
+                      "if the cause is in the brief (an image, a type, a config that cannot run), fix the brief", flat)
+        self.assertIn("an `image` is a job image name of `hl capacity` or a full address", flat)
+
+    # A run closed under a summary that said it was "waiting for the competitor agent", one
+    # still open was written up as "proceeding", and three turns ended on `echo waiting`.
+    def test_the_last_summary_is_written_before_the_close_and_a_turn_ends_without_a_command(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
+                      "with nothing in it still waiting or under way", flat)
+        self.assertIn("It opens with the `status` that `get` shows now: an `open` experiment waits for its baseline and no run is under way", flat)
+        self.assertIn("Ending a turn takes no command, and an `echo` before it does nothing", flat)
+
     def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
         prompt = self.render()
         self.assertIn("hl platform-experiments summary --file", prompt)
