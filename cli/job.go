@@ -274,6 +274,14 @@ type jobBrief struct {
 	CreatedAt          string          `json:"created_at"`
 }
 
+// jobResult is what hl hypothesis get prints of a job unless told --full.
+type jobResult struct {
+	ID      string       `json:"id"`
+	AgentID string       `json:"agent_id"`
+	Status  string       `json:"status"`
+	Metrics briefMetrics `json:"metrics"`
+}
+
 // briefMetrics prints a job's metrics as name: value, at six significant digits, with the basis
 // when it is not raw. The value is the one the job is read by, which the metric's role decides.
 type briefMetrics []struct {
@@ -326,12 +334,12 @@ func (m machineTag) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strings.TrimSpace(tag + " " + model))
 }
 
-// briefJobs is one compact line per job, ending in job.env: the settings that differ between
+// briefJobs is one compact line per job, the fields of T, ending in job.env: the settings that differ between
 // these jobs, always present so that a reader can index it. A job listed alone has nothing to
 // differ from, and an empty env there would read as a job that set none, so it shows all of its
 // own.
-func briefJobs(jobs []json.RawMessage) ([][]byte, error) {
-	briefs := make([]jobBrief, len(jobs))
+func briefJobs[T any](jobs []json.RawMessage) ([][]byte, error) {
+	briefs := make([]T, len(jobs))
 	envs := make([]map[string]any, len(jobs))
 	for i, raw := range jobs {
 		var spec struct {
@@ -422,7 +430,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	lines, err := briefJobs(jobs)
+	lines, err := briefJobs[jobBrief](jobs)
 	if err != nil {
 		return fail(stderr, err)
 	}

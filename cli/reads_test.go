@@ -221,7 +221,7 @@ func TestEveryCommandThatPrintsAJobHasItsEnvUnderJob(t *testing.T) {
 			"standings": []any{map[string]any{"rank": 1, "experiment_id": "job-1", "env": map[string]any{"LR": "0.3"}}}}}}
 	})
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-	for _, command := range [][]string{{"job", "status", "job-1"}, {"job", "list"}, {"results"}, {"hypothesis", "get", "hyp-1"}} {
+	for _, command := range [][]string{{"job", "status", "job-1"}, {"job", "list"}, {"results"}, {"hypothesis", "get", "hyp-1"}, {"hypothesis", "get", "hyp-1", "--full"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(command, &stdout, &stderr); code != 0 {
 			t.Fatalf("hl %s: exit %d, stderr %s", strings.Join(command, " "), code, stderr.String())
@@ -282,7 +282,7 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 	}
 	stdout.Reset()
 	want := `{"id":"hyp-1","job_count":5,"jobs":[` + strings.Join(both, ",") + "]}\n"
-	if code := run([]string{"hypothesis", "get", "hyp-1"}, &stdout, &stderr); code != 0 || stdout.String() != want {
+	if code := run([]string{"hypothesis", "get", "hyp-1", "--full"}, &stdout, &stderr); code != 0 || stdout.String() != want {
 		t.Fatalf("hypothesis get: exit %d, stdout %q, stderr %s", code, stdout.String(), stderr.String())
 	}
 	if got := stderr.String(); got != "hl: hypothesis get: 3 more jobs; --limit N (max 200) shows them\n" {

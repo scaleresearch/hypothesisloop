@@ -336,7 +336,7 @@ func TestHypothesisGet(t *testing.T) {
 	if (*got)[0].Method != "GET" || (*got)[0].Path != "/hypotheses/hyp-1" {
 		t.Fatalf("request = %+v", (*got)[0])
 	}
-	if stdout.String() != `{"id":"hyp-1","links":{"in":[],"out":[]},"jobs":[]}`+"\n" {
+	if stdout.String() != `{"id":"hyp-1","links":{"out":[],"in":[]},"jobs":[]}`+"\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if code := run([]string{"hypothesis", "get"}, &stdout, &stderr); code != 2 {
@@ -633,5 +633,49 @@ func TestTheOnlyJobOfAHypothesisShowsItsWholeEnvAndSeveralShowWhatDiffers(t *tes
 	jobs = []any{job("job-1", "0.3"), job("job-2", "0.1")}
 	if out := get(); !strings.Contains(out, `"env":{"LR":"0.3"}`) || !strings.Contains(out, `"env":{"LR":"0.1"}`) || strings.Contains(out, "HIDDEN") {
 		t.Errorf("two jobs: %s, want only what differs", out)
+	}
+}
+
+// hl hypothesis get printed 32 KB for a hypothesis with a few jobs and overflowed the reader of
+// the agent that asked: by default it prints what a decision needs, and --full the record.
+func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
+	long := strings.Repeat("ö", commentCut+40)
+	actor := map[string]any{"kind": "agent", "id": "a", "name": "Researcher 1"}
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "hyp-1", "agent_id": "a", "actor": actor, "platform_experiment_id": "pe-1", "text": "bf16 is faster", "status": "open",
+			"links":           map[string]any{"out": []any{map[string]any{"type": "builds_on", "hypothesis_id": "hyp-0", "text": "a long parent text", "status": "confirmed", "actor": actor}}, "in": []any{}},
+			"implementations": []any{map[string]any{"agent_id": "a", "branch": "hl/pe-1/r1/bf16", "code_ref": "u@sha"}}, "base_ref": "u@base",
+			"jobs": []any{map[string]any{"id": "job-1", "agent_id": "a", "status": "COMPLETED", "theory": "a long theory", "created_at": "2026-10-06T00:00:00Z",
+				"metrics": []any{map[string]any{"name": "ips", "value": 1203.68, "basis": "raw"}}, "job": map[string]any{"image": "i", "env": map[string]any{"P": "bf16"}}}},
+			"job_count": 1,
+			"findings":  []any{map[string]any{"id": "f-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "experiment_id": "job-1", "agent_id": "a", "actor": actor, "summary": "bf16 won", "created_at": "2026-10-06T00:01:00Z"}}, "finding_count": 1,
+			"comments": []any{map[string]any{"id": "c-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "agent_id": "b", "actor": actor, "text": long, "created_at": "2026-10-06T00:02:00Z"},
+				map[string]any{"id": "c-2", "agent_id": "b", "text": "short", "created_at": "2026-10-06T00:03:00Z"}}, "comment_count": 2}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hypothesis", "get", "hyp-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"agent_id":"a","base_ref":"u@base","comment_count":2,"finding_count":1,"id":"hyp-1",` +
+		`"implementations":[{"agent_id":"a","branch":"hl/pe-1/r1/bf16","code_ref":"u@sha"}],"job_count":1,"status":"open","text":"bf16 is faster",` +
+		`"links":{"out":[{"type":"builds_on","hypothesis_id":"hyp-0","status":"confirmed"}],"in":[]},` +
+		`"findings":[{"experiment_id":"job-1","agent_id":"a","summary":"bf16 won","created_at":"2026-10-06T00:01:00Z"}],` +
+		`"comments":[{"agent_id":"b","text":"` + strings.Repeat("ö", commentCut) + `…","created_at":"2026-10-06T00:02:00Z"},{"agent_id":"b","text":"short","created_at":"2026-10-06T00:03:00Z"}],` +
+		`"jobs":[{"id":"job-1","agent_id":"a","status":"COMPLETED","metrics":{"ips":{"value":1203.68}},"job":{"env":{"P":"bf16"}}}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %s\nwant     %s", stdout.String(), want)
+	}
+	if got := stderr.String(); got != "hl: hypothesis get: 1 comments cut at 160 characters; --full prints them whole\n" {
+		t.Errorf("stderr = %q", got)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"hypothesis", "get", "hyp-1", "--full"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("--full: exit %d, stderr %s", code, stderr.String())
+	}
+	for _, whole := range []string{long, "a long parent text", "a long theory", `"name":"Researcher 1"`, `"job":{"env":{"P":"bf16"}}`} {
+		if !strings.Contains(stdout.String(), whole) {
+			t.Errorf("--full lacks %q: %s", whole, stdout.String())
+		}
 	}
 }
