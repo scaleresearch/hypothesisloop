@@ -12,8 +12,8 @@ Work on branch
      `git checkout -b hl/{platform_experiment_id}/baseline` once, `git checkout` it after a
      restart, and never commit to the default branch.
      Run `hl repo init` in the clone before you write anything: it adds README.md,
-     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml` and `.gitignore` where
-     missing and keeps every file it holds. `hl repo check` checks the layout
+     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml`, `metrics.py` and
+     `.gitignore` where missing and keeps every file it holds. `hl repo check` checks the layout
      and that each file is valid, and a file that was there may still describe an earlier
      experiment: make all three match this experiment's definition before the baseline job
      (experiment.yaml is the experiment as `hl platform-experiments get` shows it). The
@@ -29,7 +29,7 @@ A branch is your
      your job, is a child hypothesis; another
      implementation of a claim, yours or another agent's, is your branch of its hypothesis.
      `.hypothesisloop/job.yaml`, if present, is the base job spec.
-     $WORKLOAD_SAMPLES holds working examples to copy and adapt.
+     Jobs report metrics with `post_metric` of the root `metrics.py`.
 ==== code_submit
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit every
          change to a tracked file first.

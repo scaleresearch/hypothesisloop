@@ -156,8 +156,10 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
                       "make all three match this experiment's definition before the baseline job", flat)
         self.assertIn("`hl job submit .hypothesisloop/job.yaml` with `--estimated-duration-hours` your guess", flat)
-        self.assertEqual(flat.count("$WORKLOAD_SAMPLES"), 1)
-        self.assertIn("`$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing else there", flat)
+        # The repository template supplies the helper, so no briefing sends an agent to the samples.
+        self.assertNotIn("$WORKLOAD_SAMPLES", flat)
+        self.assertIn("`.hypothesisloop/job.yaml`, `metrics.py` and `.gitignore` where missing", flat)
+        self.assertIn("once more at the end with the `post_metric` of the repository's `metrics.py`: write no other", flat)
 
     # The control was a root hypothesis that stayed open to the end, and in one run the parent
     # of every other: the baseline is the objective's own.

@@ -26,9 +26,8 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
      Only a harness that already measures these metrics on this config runs unchanged: go
      to 3. Otherwise write the smallest working program that measures them: fixed seeds,
      pinned dataset and model revisions, every input fetched by the job itself, the metrics
-     reported as the run goes and once more at the end, the way
-     `$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing
-     else there. Researchers copy and change this code, so keep the part they vary apart from
+     reported as the run goes and once more at the end with the `post_metric` of the
+     repository's `metrics.py`: write no other. Researchers copy and change this code, so keep the part they vary apart from
      the part that measures, and say which is which. A job that ran to the end reports the
      gate with its other metrics and exits 0 whatever the gate says.
   2. The job spec, `.hypothesisloop/job.yaml`: `accelerator_type` as the brief states it and

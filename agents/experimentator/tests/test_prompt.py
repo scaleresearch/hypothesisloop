@@ -30,6 +30,8 @@ class SystemPromptTest(unittest.TestCase):
                           "restart, `hl hypothesis checkout ID` checks yours out, created from its parent's last "
                           "completed job, from the baseline under `root`, or `--from JOB`, refused once yours exists", flat)
             self.assertIn("`hl job submit` pushes it", flat)
+            self.assertIn("Jobs report metrics with `post_metric` of the root `metrics.py`", flat)
+            self.assertNotIn("$WORKLOAD_SAMPLES", flat)
             # --from is refused on a branch that exists, so a second way on from a job is a new idea.
             self.assertIn("A different claim, or a second way to improve your job, is a child hypothesis; another "
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
