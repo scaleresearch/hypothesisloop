@@ -26,6 +26,8 @@ type Store struct {
 
 	// ProgressWrites counts the times a progress marker was written down.
 	ProgressWrites int
+	// Holds is what each launcher's last question left recorded of it holding machines.
+	Holds map[string]bool
 
 	clock    time.Duration
 	askedAt  map[string]time.Duration
@@ -171,4 +173,14 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 		instance.Restarts++
 	}
 	return *instance, true, nil
+}
+
+func (s *Store) SetLauncherHolds(_ context.Context, launcher string, holds bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Holds == nil {
+		s.Holds = map[string]bool{}
+	}
+	s.Holds[launcher] = holds
+	return nil
 }

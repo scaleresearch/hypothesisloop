@@ -1105,6 +1105,9 @@ CREATE TABLE IF NOT EXISTS launchers (
     name       TEXT PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Whether the launcher holds machines, as its last question left it: it listed some, or its
+-- answer asked for some. A launcher is removed only while this is false.
+ALTER TABLE launchers ADD COLUMN IF NOT EXISTS holds_machines BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_platform_experiments_coordinator_launcher ON platform_experiments(coordinator_launcher) WHERE coordinator_hosted;
 UPDATE platform_experiments SET closed_at = updated_at WHERE status = 'closed' AND closed_at IS NULL;
 

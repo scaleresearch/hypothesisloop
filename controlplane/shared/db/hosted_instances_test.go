@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -268,6 +269,32 @@ func TestALaunchersTokenFollowsItsRow(t *testing.T) {
 		if err := pes.RegisterLauncher(ctx, name); err != nil || !known() {
 			t.Fatalf("register: got = %v, known %v", err, known())
 		}
+	}
+	// Its token is what takes its machines down, so it stays while an agent may be given one and
+	// while its last question left it holding any.
+	refused := func(when string, platformExperiments ...string) {
+		t.Helper()
+		var inUse *LauncherInUseError
+		removed, err := pes.RemoveLauncher(ctx, name)
+		if removed || !errors.As(err, &inUse) || !slices.Equal(inUse.PlatformExperiments, platformExperiments) || !known() {
+			t.Fatalf("remove %s: got = %v, %v, still known %v, want refused for %v", when, removed, err, known(), platformExperiments)
+		}
+	}
+	coordinated := createTestPEWithCoordinator(t, pool, name)
+	using := []string{pe, coordinated}
+	slices.Sort(using)
+	refused("with an agent and a coordinator in open platform experiments", using...)
+	setPEStatus(t, pool, coordinated, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
+	refused("with an agent in an open platform experiment", pe)
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown/2)
+	refused("inside the wind-down of its last platform experiment", pe)
+	setPEStatus(t, pool, pe, domain.PlatformExpClosed, domain.AgentWindDown+time.Minute)
+	if err := pes.SetLauncherHolds(ctx, name, true); err != nil {
+		t.Fatal(err)
+	}
+	refused("while its last question listed machines")
+	if err := pes.SetLauncherHolds(ctx, name, false); err != nil {
+		t.Fatal(err)
 	}
 	if removed, err := pes.RemoveLauncher(ctx, name); err != nil || !removed || known() {
 		t.Fatalf("remove: got = %v, %v, still known %v", removed, err, known())

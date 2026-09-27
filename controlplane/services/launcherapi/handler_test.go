@@ -1044,3 +1044,24 @@ func TestProgressOfAnInstanceThatIsNotRunningAndALauncherTooSlowForTheProgressLi
 		t.Fatalf("2 x (10 x 1s + 15s) = 50s against a progress limit of 49s: %d %s", code, raw)
 	}
 }
+
+// A launcher is removed only when it holds nothing, so every question records whether it does
+// once it has acted on the answer: it listed a machine, which it keeps or is about to destroy
+// and has not yet reported gone, or the answer asks it for one.
+func TestEveryQuestionRecordsWhetherTheLauncherHoldsMachines(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
+	asked := mustReconcile(t, store, observed())
+	if len(asked.Instances) != 1 || !store.Holds["main"] {
+		t.Fatalf("asked for %d machines, holds %v, want one and held", len(asked.Instances), store.Holds["main"])
+	}
+	// Its agent's run is long over: the machine is in neither list, and still rented.
+	store.ByLauncher["main"] = nil
+	leftover := mustReconcile(t, store, observed(ObservedInstance{Name: asked.Instances[0].Name, State: stateRunning}))
+	if len(leftover.Instances) != 0 || !store.Holds["main"] {
+		t.Fatalf("answered %d machines, holds %v, want none and still held until it is reported gone", len(leftover.Instances), store.Holds["main"])
+	}
+	mustReconcile(t, store, observed())
+	if store.Holds["main"] {
+		t.Fatal("a launcher that lists nothing and is asked for nothing is recorded as holding machines")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -151,15 +152,73 @@ func (s *PlatformExperimentsStore) RegisterLauncher(ctx context.Context, name st
 	return nil
 }
 
-// RemoveLauncher ends a launcher's token. It reports false for a name that was not registered.
-// The machines it still holds are no longer the platform's to take down: empty it first by
-// naming another launcher in config and waiting for its list to be empty.
+// SetLauncherHolds records whether a launcher holds machines after one question of it: holds is
+// true when it listed any, or its answer asks for any. One that changes nothing writes nothing.
+func (s *PlatformExperimentsStore) SetLauncherHolds(ctx context.Context, name string, holds bool) error {
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE launchers SET holds_machines = $2 WHERE name = $1 AND holds_machines <> $2`, name, holds); err != nil {
+		return fmt.Errorf("platform_experiments_store.SetLauncherHolds: %w", err)
+	}
+	return nil
+}
+
+// LauncherInUseError is a launcher that cannot be removed: its token is what takes its machines
+// down, so it is kept while there is a machine to take down or an agent that may be given one.
+type LauncherInUseError struct {
+	Name string
+	// PlatformExperiments are those not yet closed for domain.AgentWindDown that have a hosted
+	// agent or coordinator of this launcher. With none, the launcher's last question still
+	// listed machines or was answered with some.
+	PlatformExperiments []string
+}
+
+func (e *LauncherInUseError) Error() string {
+	if len(e.PlatformExperiments) > 0 {
+		return fmt.Sprintf("launcher %s runs the hosted agents of platform experiments %s: close them or let them end, then let the launcher take their machines down",
+			e.Name, strings.Join(e.PlatformExperiments, ", "))
+	}
+	return fmt.Sprintf("launcher %s holds machines, by its last question: keep it running until one of its passes lists none", e.Name)
+}
+
+// RemoveLauncher ends a launcher's token. It reports false for a name that was not registered,
+// and refuses with a *LauncherInUseError while the launcher has something to take down: removed
+// then, its machines would be nobody's.
 func (s *PlatformExperimentsStore) RemoveLauncher(ctx context.Context, name string) (bool, error) {
-	tag, err := s.pool.pool.Exec(ctx, `DELETE FROM launchers WHERE name = $1`, name)
+	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var holds bool
+	err = tx.QueryRow(ctx, `SELECT holds_machines FROM launchers WHERE name = $1 FOR UPDATE`, name).Scan(&holds)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: lock launcher: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+SELECT pe.id FROM platform_experiments pe
+WHERE (pe.status <> 'closed' OR pe.closed_at > now() - make_interval(secs => $2))
+  AND (pe.coordinator_hosted AND pe.coordinator_launcher = $1
+       OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.hosted AND s.launcher = $1))
+ORDER BY pe.id`, name, domain.AgentWindDown.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: list platform experiments: %w", err)
+	}
+	using, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: list platform experiments: %w", err)
+	}
+	if len(using) > 0 || holds {
+		return false, &LauncherInUseError{Name: name, PlatformExperiments: using}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM launchers WHERE name = $1`, name); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.RemoveLauncher: commit: %w", err)
+	}
+	return true, nil
 }
 
 // LauncherKnown reports whether a launcher of this name is registered.

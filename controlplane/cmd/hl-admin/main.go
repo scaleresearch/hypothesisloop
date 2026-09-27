@@ -35,8 +35,9 @@ const usage = `usage: hl-admin <command>
   platform-experiment share ID     let every account read a platform experiment and what is in it
   platform-experiment unshare ID   take that back: its own org alone reads it again
   launcher add NAME                register an agent-launcher and print its token
-  launcher remove NAME             end a launcher's token. Empty it first: what it still holds
-                                   is then nobody's to take down
+  launcher remove NAME             end a launcher's token. Refused, with what is in the way, while a
+                                   platform experiment that has not closed has hosted agents on it or
+                                   its last pass still listed machines: its token is what takes them down
   github connect ORG INSTALLATION_ID
                                    connect an installation of the platform's GitHub App to an org, as
                                    an operator who vouches for it. GitHub is asked, as the App, which

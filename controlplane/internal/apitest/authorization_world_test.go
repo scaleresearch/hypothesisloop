@@ -212,6 +212,10 @@ func (noLauncherAgents) EndInstance(context.Context, string, string, string, db.
 	panic("the launcher handler reached its store")
 }
 
+func (noLauncherAgents) SetLauncherHolds(context.Context, string, bool) error {
+	panic("the launcher handler reached its store")
+}
+
 var worldPlanning = quota.Planning{
 	AllowanceAcceleratorHours: 2, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
 	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,

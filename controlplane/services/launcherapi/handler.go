@@ -25,6 +25,7 @@ type Store interface {
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
+	SetLauncherHolds(ctx context.Context, launcher string, holds bool) error
 }
 
 // Settings is what the platform's config decides about hosted machines.
@@ -129,7 +130,8 @@ func (h *Handler) imageOf(agentImage string) string {
 // reconcile records what the launcher observed and evaluates everything else: which agents and
 // coordinators are the launcher's, which of them still run, which have domain.AgentWindDown
 // left, and which get another machine after theirs ended. One that cannot be evaluated is
-// logged and left out and the rest of the list stands.
+// logged and left out and the rest of the list stands. It also records whether the launcher
+// holds machines once it has acted on the answer, which is what its removal waits for.
 func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed) (*Desired, error) {
 	agents, err := h.store.ListLauncherAgents(ctx, launcher, domain.AgentWindDown)
 	if err != nil {
@@ -230,6 +232,11 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 			}
 		}
 		out.Instances = append(out.Instances, instance)
+	}
+	// Written before the answer leaves: a launcher is removed only once a question of it listed
+	// no machine and was answered with none, and an answer it never got asked for nothing.
+	if err := h.store.SetLauncherHolds(ctx, launcher, len(observed.Instances) > 0 || len(out.Instances) > 0); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
