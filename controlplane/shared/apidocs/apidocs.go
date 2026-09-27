@@ -257,13 +257,23 @@ func (d *Doc) refuse(ctx huma.Context, err error) {
 // Register registers a Huma operation and records its metadata for the digest. audience is
 // required (see Audience) — Register panics on an invalid one, so a call site cannot add an
 // operation without classifying who may call it.
+//
+// An error the handler returns with no status is the platform's own failure: huma would answer
+// it as a 500 carrying its text, so it is answered through auth.Internal here.
 func Register[I, O any](d *Doc, audience Audience, op huma.Operation, handler func(context.Context, *I) (*O, error)) {
 	if !validAudience(audience) {
 		panic(fmt.Sprintf("apidocs.Register %s %s: invalid audience %q", op.Method, op.Path, audience))
 	}
 	op.Middlewares = append(op.Middlewares, d.authorize(audience))
 	op.Security = []map[string][]string{{bearerScheme: {}}}
-	huma.Register(d.API, op, handler)
+	huma.Register(d.API, op, func(ctx context.Context, in *I) (*O, error) {
+		out, err := handler(ctx, in)
+		var answered huma.StatusError
+		if err != nil && !errors.As(err, &answered) {
+			return nil, auth.Internal(d.logger, "handler failed", err, zap.String("operation", op.OperationID))
+		}
+		return out, err
+	})
 	d.ops = append(d.ops, opMeta{
 		Method:      op.Method,
 		Path:        op.Path,

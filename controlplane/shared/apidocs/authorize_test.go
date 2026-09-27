@@ -229,3 +229,22 @@ func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
 		t.Fatalf("status = %d body = %s, want 401 with the reason and the message", recorder.Code, recorder.Body)
 	}
 }
+
+func TestAHandlersUnansweredErrorSaysNothingOfWhatFailed(t *testing.T) {
+	r := chi.NewRouter()
+	doc := New(r, "t", "1.0.0", "", everyKind, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	Register(doc, AudienceAgent, huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"},
+		func(context.Context, *struct{}) (*struct{}, error) {
+			return nil, errors.New("pq: database is down at 10.0.0.7")
+		})
+	Register(doc, AudienceAgent, huma.Operation{OperationID: "refuse", Method: "GET", Path: "/refuse"},
+		func(context.Context, *struct{}) (*struct{}, error) {
+			return nil, huma.Error409Conflict("already closed")
+		})
+	if rec := call(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"`+auth.InternalError+`"}` {
+		t.Errorf("an unanswered error: got = %d %s, want a 500 that carries no internal text", rec.Code, rec.Body)
+	}
+	if rec := call(r, "/refuse", "Bearer user"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already closed") {
+		t.Errorf("a refusal: got = %d %s, want the 409 as the handler stated it", rec.Code, rec.Body)
+	}
+}
