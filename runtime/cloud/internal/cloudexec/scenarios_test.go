@@ -331,45 +331,23 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 	}
 }
 
-// Instances outlive a config edit: a shape can be removed or its max_instances lowered while
-// instances of it run. They stay this runtime's to report and delete, and they are in no slot, so
-// the capacity report stays within its totals.
-func TestInstancesInNoConfiguredSlotAreManagedAndCountedNowhere(t *testing.T) {
-	e, p := newTestExecutor(t)
+// Instances outlive a config edit: a shape can be renamed or its max_instances lowered while
+// instances of it run. Such an instance takes no slot, so an agent that started would report
+// every slot free and rent past what the account is meant to hold.
+func TestAnInstanceInNoConfiguredSlotRefusesTheStart(t *testing.T) {
 	ctx := context.Background()
 	for _, name := range []string{"hl-job-t1-exp-old-a0-a100-0", "hl-job-t1-exp-over-a2-h100-5"} {
+		e, p := newTestExecutor(t)
+		mustCreate(t, e, job(t, "exp-1", 0, 1))
+		if err := e.RequireSlots(ctx); err != nil {
+			t.Fatalf("an instance in a configured slot: %v", err)
+		}
 		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
 			t.Fatal(err)
 		}
-		p.Start(name)
-	}
-
-	cpu, cpuTotal, err := e.GetLiveCPUCapacity(ctx)
-	available, total, byNode, labels, acceleratorErr := e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	nodes, nodeErr := e.GetLiveNodeResourceCapacity(ctx)
-	if err != nil || acceleratorErr != nil || nodeErr != nil || cpu != cpuTotal || available[h100] != total[h100] ||
-		len(available) != 1 || len(byNode) != 2 || len(labels) != 3 || len(nodes) != 3 {
-		t.Fatalf("cpu %v/%v, accelerators %v/%v, by node %v, labels %v, nodes %v", cpu, cpuTotal, available, total, byNode, labels, nodes)
-	}
-
-	ids, err := e.ListManagedJobs(ctx)
-	if err != nil || !reflect.DeepEqual(ids, []string{"exp-old", "exp-over"}) {
-		t.Fatalf("managed = %v, %v", ids, err)
-	}
-	if phase, attempt := status(t, e, "exp-over"); phase != workload.JobPhaseRunning || attempt != 2 {
-		t.Fatalf("status = %v attempt %d", phase, attempt)
-	}
-	acceleratorType, node, _, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-old")
-	if err != nil || acceleratorType != "" || node != "a100-0" {
-		t.Fatalf("admitted = %q on %q, %v", acceleratorType, node, err)
-	}
-	for _, id := range ids {
-		if err := e.DeleteWorkload(ctx, id, false); err != nil {
-			t.Fatal(err)
+		if err := e.RequireSlots(ctx); err == nil || !strings.Contains(err.Error(), name) {
+			t.Fatalf("err = %v, want one naming %s", err, name)
 		}
-	}
-	if names := p.Names(); len(names) != 0 {
-		t.Fatalf("still rented: %v", names)
 	}
 }
 

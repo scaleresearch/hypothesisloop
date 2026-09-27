@@ -34,6 +34,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
 		os.Exit(1)
 	}
+	if err := exec.RequireSlots(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "cloud-agent: %v\n", err)
+		os.Exit(1)
+	}
 
 	log := func(format string, args ...any) {
 		fmt.Printf("[cloud-agent] "+format+"\n", args...)
