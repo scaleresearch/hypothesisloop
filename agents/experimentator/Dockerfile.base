@@ -57,8 +57,10 @@ RUN git config --system credential.helper '!hl git-credential' \
 # permission_mode="bypassPermissions" (unrestricted tool use — the whole point of this agent)
 # maps to the CLI's --dangerously-skip-permissions, which refuses to run as root/sudo as a
 # safety guard — confirmed live: "cannot be used with root/sudo privileges". A non-root user is
-# therefore required, not optional, for this container to start at all.
-RUN useradd --create-home --shell /bin/bash agent
+# therefore required, not optional, for this container to start at all. Its home is the directory
+# it works in: with a home of its own, agents ran `cd ~` first and cloned there, and the CLI put
+# their shell back in the working directory, away from the clone.
+RUN useradd --home-dir /agent/workspace --shell /bin/bash agent
 
 # WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every
 # experiment's seed/ (not tests/workloads/, which is test-only fixture code) plus hl-clone. Read,
@@ -85,16 +87,17 @@ RUN uv sync --no-dev --locked
 
 COPY agents/experimentator/src/ src/
 # No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
-RUN mkdir -p /agent/workspace && chown -R agent:agent /agent
-ENV AGENT_WORKDIR=/agent/workspace
 
-# Pre-create ~/.claude owned by agent: bind-mounting a single file into a path whose parent
-# directory doesn't exist yet (e.g. -v ~/.claude/.credentials.json:/home/agent/.claude/...:ro)
-# makes the container runtime auto-create that directory as root:root, which then blocks the
-# CLI's own writes under it (e.g. session-env) with a permission error. Also run with
-# --userns=keep-id (see coordinator/instructions.md) so a bind-mounted host dotfile's owning
-# UID actually matches the agent user inside the container instead of mapping to root.
-RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+# The CLI keeps its own state beside the working directory, not in it. Created here and owned by
+# agent: bind-mounting a single file into a path whose parent directory doesn't exist yet (e.g.
+# -v ~/.claude/.credentials.json:/agent/.claude/.credentials.json:ro) makes the container runtime
+# auto-create that directory as root:root, which then blocks the CLI's own writes under it (e.g.
+# session-env) with a permission error. Also run with --userns=keep-id (see coordinator/setup.md)
+# so a bind-mounted host dotfile's owning UID actually matches the agent user inside the
+# container instead of mapping to root.
+RUN mkdir -p /agent/workspace /agent/.claude && chown -R agent:agent /agent
+ENV AGENT_WORKDIR=/agent/workspace
+ENV CLAUDE_CONFIG_DIR=/agent/.claude
 
 USER agent
 ENTRYPOINT ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
