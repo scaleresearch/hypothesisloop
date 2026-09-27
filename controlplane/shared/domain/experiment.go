@@ -408,8 +408,9 @@ type RanOn struct {
 type JobMachine struct {
 	// InstanceID is the rented instance, which is the job's alone.
 	InstanceID string `json:"instance_id,omitempty"`
-	// HostID is the physical machine, the same for every instance rented on it.
-	HostID           string `json:"host_id,omitempty"`
+	// HostID is the physical machine, the same for every instance rented on it. A vendor may
+	// use the word for something else: vast.ai calls this machine_id and its host_id the owner.
+	HostID           string `json:"host_id,omitempty" doc:"The physical machine, stable across rentals: every instance rented on it reports the same one. It is not the account that owns the machine."`
 	AcceleratorModel string `json:"accelerator_model,omitempty"`
 	CPUModel         string `json:"cpu_model,omitempty"`
 	// PricePerHourUSD is what the whole instance is rented for.

@@ -402,9 +402,9 @@ One line per job, its whole record: status (QUEUED, SUBMITTED, RUNNING, then COM
 EVICTED, REJECTED or CANCELLED), metrics, finished_at, summary, phase_detail and the spec.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
 how its process ended (container_failed, oom_killed), when its runtime reported that.
-ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id,
-accelerator_model, cpu_model and price_per_hour_usd. Two jobs of one spec on different machines
-are not the same measurement.
+ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id (the
+physical machine, stable across rentals), accelerator_model, cpu_model and price_per_hour_usd.
+Two jobs of one spec on different machines are not the same measurement.
 A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
 in no standing: not_rankable_reason names the constraint it broke or did not report.
 While QUEUED, not_admitted_reason says what the job waits for: awaiting_admission for the
