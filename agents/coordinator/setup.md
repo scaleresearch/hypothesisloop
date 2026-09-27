@@ -94,7 +94,7 @@ silently improvise.
    owner's job, in the repository's own settings on GitHub.
    Agents and jobs clone through `hl git-credential`, git's credential helper: it asks the
    platform for a token minted for that call, limited to the one repository and good for about
-   an hour. The agent image and the platform's job image are configured for it. A job that runs
+   an hour. The agent image and the job images `hl capacity` lists are configured for it. A job that runs
    an image of its own needs `hl` in it and these two lines, or its clone of a private
    repository is refused:
 
@@ -114,7 +114,19 @@ silently improvise.
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
    publishes the S3 store (Silo) on `:9000` and creates the bucket; the host address is reachable from the
    control-plane containers as well, so one value serves both.
-4. **Job image** built before agents start (e.g. `make sparse-sdpa-workload-image`), smoke-tested
+4. **Job image.** The control plane decides a job's image when it admits the job, and no
+   runtime puts one in. `hl capacity` ends with the images the deployment offers (`job_image`
+   its name, `image` what `job.image` takes, `carries` what is installed), names on each
+   type's line the ones that suit it (`job_images`), and marks a cluster that runs one image
+   and no other with `only_job_image`. So `seed/job.yaml` names an image from that list that
+   suits the hardware, and leaves `image` out only when the cluster it is meant for shows
+   `only_job_image`. A job that names no image is placed on such a cluster only, and a job
+   that names an image is never placed on a cluster whose `only_job_image` is another one:
+   either stays QUEUED with `not_admitted_reason: no_cluster_for_image`. `make images`
+   builds and pushes the offered image with no framework, `make job-images` the others.
+   An experiment whose seed builds an image of its own names that one, so it needs a cluster
+   without `only_job_image` that can pull it. Build it before agents start (e.g.
+   `make sparse-sdpa-workload-image`) and smoke-test it
    on real hardware (`podman run --device /dev/tenstorrent/0 -v
    /dev/hugepages-1G:/dev/hugepages-1G ...`) — a missing hugepages mount fails with
    `RuntimeError: Querying size for a host channel that does not exist.`, which looks like a
@@ -126,8 +138,8 @@ silently improvise.
    `podman push`) is invisible to every cluster node the same way a typo'd tag is. Build with
    the per-experiment `seed/build_and_push.sh` where one exists (it takes the registry from `localdev/.host-address`, pushes and renders the
    job.yaml's placeholder image ref into `job.rendered.yaml`; push that to the experiment's repository with
-   the rest of `seed/`, and run it again whenever the host address changes), or `make <name>-workload-image` for the platform's
-   own images. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
+   the rest of `seed/`, and run it again whenever the host address changes), or `make sparse-sdpa-workload-image` for
+   sparse-sdpa. Verify with `podman pull --tls-verify=false <host address>:5000/<image>:<tag>` (the address in
    `localdev/.host-address`) from any cluster node before spawning any agents.
 
 ## 2. Create the platform experiment
