@@ -268,6 +268,8 @@ func (l *Loop) tick(ctx context.Context) error {
 	// the next candidate must not consider them running.
 	var running []*domain.Experiment
 	runningLoaded := false
+	// Per cluster of slots, the slots being left that no waiting job has been promised yet.
+	vacating := map[string]map[string]map[string]int64{}
 
 	// Snapshot pre-tick availability so a skip can be classified: capacity_unavailable (no
 	// capacity existed before this tick) vs outranked (capacity existed, but other guaranteed
@@ -449,11 +451,30 @@ func (l *Loop) tick(ctx context.Context) error {
 			// The job fits once the platform jobs already told to stop are gone: earlier requeues
 			// freed its capacity, and taking more victims while their pods terminate takes one
 			// per tick.
-			promised := !scalarFits && domain.Fits(desiredFree[cluster], fp)
+			//
+			// On a cluster of slots both questions are asked per slot, of the resolver that sized
+			// the job: the total is covered by a free slot of another shape, which never takes it.
+			slots := hasSlots(nodeLabels[cluster])
+			totalCovers := scalarFits && !slots
+			promised := !slots && !scalarFits && domain.Fits(desiredFree[cluster], fp)
+			if slots {
+				if vacating[cluster] == nil {
+					claimed, err := resolveCache.loadClaimed(ctx)
+					if err != nil {
+						l.skipExperiment(&tickErrs, exp, fmt.Errorf("list claimed for vacating slots: %w", err))
+						continue
+					}
+					vacating[cluster] = vacatingSlots(cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], claimed)
+				}
+				if node, free, _ := slotFor(exp, cluster, nodeResourcesTotal[cluster], vacating[cluster], nodeLabels[cluster]); free {
+					promised = true
+					delete(vacating[cluster], node)
+				}
+			}
 			var committed bool
 			var err error
 			switch {
-			case scalarFits:
+			case totalCovers:
 				// A preemption here would repeat every tick while its victim's pod terminates:
 				// the total already covers the job, so nothing below reads the capacity as
 				// promised.
@@ -516,7 +537,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
-				reason = notAdmittedReasonFor(fitAtTickStart, scalarFits, shortage)
+				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, shortage)
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))

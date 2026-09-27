@@ -387,6 +387,9 @@ func (s *slotStore) ListQueuedExperiments(context.Context) ([]*domain.Experiment
 func (s *slotStore) ListRunningExperiments(context.Context) ([]*domain.Experiment, error) {
 	return s.running, nil
 }
+func (s *slotStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return append(append([]*domain.Experiment(nil), s.running...), s.submitted...), nil
+}
 func (s *slotStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
 	return &domain.PlatformExperiment{ID: id}, nil
 }
@@ -704,5 +707,28 @@ func TestAGuaranteedJobPreemptsOnTheSmallerShapeWhenBothHaveAVictim(t *testing.T
 	}
 	if !reflect.DeepEqual(store.requeued, []string{"burst-on-small-0"}) {
 		t.Fatalf("preempted %v, want the burst job on the smaller slot", store.requeued)
+	}
+}
+
+// A free slot of the job's accelerator type and another count is not room for it. The only slot
+// of the job's shape is held by a burst job and a slot with two H100 is free: summed over the
+// cluster the free slot covers the job, which read as a layout that does not fit and skipped
+// preemption, so the guaranteed job waited behind the burst one.
+func TestAFreeSlotOfAnotherAcceleratorCountDoesNotStandInForAVictim(t *testing.T) {
+	c := newSlots().add("one-0", 1, size(8000, 32, 100)).add("two-0", 2, size(16000, 64, 200))
+	victim := pinnedTo(sized(t, c, h100Job("burst", "2")), "one-0")
+	victim.Status, victim.ClusterName, victim.EstimatedCostAccH = domain.StatusRunning, rented, 1
+	victim.CreatedAt = time.Now().Add(-time.Hour)
+	c.take("one-0")
+	guaranteed := h100Job("guaranteed", "4")
+	guaranteed.CapacityTier = domain.CapacityGuaranteed
+	store := &slotStore{queued: []*domain.Experiment{guaranteed}, running: []*domain.Experiment{victim}}
+	l, _ := slotLoop(store, c, fakeObserved{node: map[string]string{"burst": "one-0"}})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.requeued, []string{"burst"}) {
+		t.Fatalf("preempted %v (reason %q), want the burst job on the only slot of the job's shape", store.requeued, store.reasons["guaranteed"])
 	}
 }

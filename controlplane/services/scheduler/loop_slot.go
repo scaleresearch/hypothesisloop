@@ -54,20 +54,41 @@ func takesWholeSlot(shape domain.NodeShape, nodeKey string, accelerators, resour
 	return true
 }
 
-// resolveOntoSlot sizes exp's job to the slot it is to hold on a cluster of slots: its cpu,
-// memory and storage become that slot's, whether the job named a quantity or "max".
+// resolveOntoSlot sizes exp's job to the slot it is to hold on a cluster of slots (slotFor): its
+// cpu, memory and storage become that slot's, whether the job named a quantity or "max". Which
+// slot of that size the job lands on is decided when it is claimed.
+func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (resolved *domain.JobSpec, misfit string) {
+	node, _, misfit := slotFor(exp, cluster, sizes, free, labelsByNode)
+	if misfit != "" {
+		return nil, misfit
+	}
+	size := sizes[node]
+	cpu := canonicalQuantityString(domain.NodeResourceCPUMillicores, float64(size[domain.NodeResourceCPUMillicores]))
+	memory := canonicalQuantityString(domain.NodeResourceMemoryBytes, float64(size[domain.NodeResourceMemoryBytes]))
+	storage := canonicalQuantityString(domain.NodeResourceStorageBytes, float64(size[domain.NodeResourceStorageBytes]))
+	out := exp.Job
+	if len(exp.Job.Groups) > 0 {
+		out.Groups = append([]domain.JobGroup(nil), exp.Job.Groups...)
+		out.Groups[0].CPU, out.Groups[0].Memory, out.Groups[0].Storage = cpu, memory, storage
+	} else {
+		out.CPU, out.Memory, out.Storage = cpu, memory, storage
+	}
+	return &out, ""
+}
+
+// slotFor is the one choice of the slot a job is to hold on a cluster of slots.
 //
-// sizes is each slot's whole size and free what each has free: now, or for a preemption once its
-// candidates are gone. The slot is one whose accelerators are exactly the job's, of its type,
-// that carries the job's node selector and is at least as large as every quantity the job named.
-// Of those a free one is taken before a taken one, and the smallest before a larger: a job that
-// must wait or preempt is sized to the least it needs. Which slot of that size the job lands on
-// is decided when it is claimed.
+// sizes is each slot's whole size and free what each has free: now, once the instances that are
+// leaving are gone (vacatingSlots), or for a preemption once its candidates are gone. The slot is
+// one whose accelerators are exactly the job's, of its type, that carries the job's node selector
+// and is at least as large as every quantity the job named. Of those a free one is taken before a
+// taken one, and the smallest before a larger: a job that must wait or preempt is sized to the
+// least it needs. isFree says which of the two the chosen slot is.
 //
 // misfit is the not_admitted_reason when no slot of the cluster takes the job.
-func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (resolved *domain.JobSpec, misfit string) {
+func slotFor(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) (node string, isFree bool, misfit string) {
 	if exp.Job.Nodes() != 1 {
-		return nil, fmt.Sprintf("%s: cluster %s runs a job on one node", domain.NotAdmittedCapacityUnavailable, cluster)
+		return "", false, fmt.Sprintf("%s: cluster %s runs a job on one node", domain.NotAdmittedCapacityUnavailable, cluster)
 	}
 	group := exp.Job.NodeGroups()[0]
 	type slot struct {
@@ -93,7 +114,7 @@ func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[str
 		slots = append(slots, slot{node: node, size: size, free: nodeHasRoom(free[node], size)})
 	}
 	if len(slots) == 0 {
-		return nil, fmt.Sprintf("%s: no instance shape of cluster %s takes this job: a shape takes a job with exactly its accelerators (%d of %s here) whose cpu, memory and storage fit in it",
+		return "", false, fmt.Sprintf("%s: no instance shape of cluster %s takes this job: a shape takes a job with exactly its accelerators (%d of %s here) whose cpu, memory and storage fit in it",
 			domain.NotAdmittedCapacityUnavailable, cluster, group.AcceleratorCount, exp.AcceleratorType)
 	}
 	sort.Slice(slots, func(a, b int) bool {
@@ -107,18 +128,29 @@ func resolveOntoSlot(exp *domain.Experiment, cluster string, sizes, free map[str
 		}
 		return slots[a].node < slots[b].node
 	})
-	size := slots[0].size
-	cpu := canonicalQuantityString(domain.NodeResourceCPUMillicores, float64(size[domain.NodeResourceCPUMillicores]))
-	memory := canonicalQuantityString(domain.NodeResourceMemoryBytes, float64(size[domain.NodeResourceMemoryBytes]))
-	storage := canonicalQuantityString(domain.NodeResourceStorageBytes, float64(size[domain.NodeResourceStorageBytes]))
-	out := exp.Job
-	if len(exp.Job.Groups) > 0 {
-		out.Groups = append([]domain.JobGroup(nil), exp.Job.Groups...)
-		out.Groups[0].CPU, out.Groups[0].Memory, out.Groups[0].Storage = cpu, memory, storage
-	} else {
-		out.CPU, out.Memory, out.Storage = cpu, memory, storage
+	return slots[0].node, slots[0].free, ""
+}
+
+// vacatingSlots is the whole size of every slot of cluster that was taken when the tick began and
+// that no claimed job holds: the job it had is requeued or over and its instance has not left yet.
+// Given to slotFor as what is free, it answers per slot whether a job's capacity is already on
+// its way. The cluster total cannot: a slot of another shape covers the job there and never
+// takes it.
+func vacatingSlots(cluster string, sizes, freeAtTickStart map[string]map[string]int64, labelsByNode map[string]map[string]string, claimed []*domain.Experiment) map[string]map[string]int64 {
+	held := map[string]bool{}
+	for _, exp := range claimed {
+		if exp.ClusterName == cluster {
+			held[exp.EffectiveJob().NodeSelector[domain.NodeSlotLabel]] = true
+		}
 	}
-	return &out, ""
+	vacating := map[string]map[string]int64{}
+	for node, labels := range labelsByNode {
+		if !isSlot(labels) || held[labels[domain.NodeSlotLabel]] || nodeHasRoom(freeAtTickStart[node], sizes[node]) {
+			continue
+		}
+		vacating[node] = sizes[node]
+	}
+	return vacating
 }
 
 // slotCovers reports whether a slot of this size holds the quantity a job named. "max" and no
