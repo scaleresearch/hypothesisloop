@@ -231,7 +231,8 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
 
 def event_line(event: dict, agent_id: str) -> str:
     """One compact line per event: kind, subject, value, detail, the machine an ended job ran on,
-    and who did it when not the agent. The detail of a queue reason is its sentence."""
+    and who did it when not the agent. The detail of a queue reason is its sentence, and that of
+    a job evicted, requeued or failed its reason, as a code or as code: sentence."""
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")

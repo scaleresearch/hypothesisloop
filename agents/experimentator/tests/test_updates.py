@@ -260,6 +260,15 @@ class FormatTest(unittest.TestCase):
                          "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
         self.assertEqual(updates.event_line(held, ""), f"job.held exp-1 capacity_unavailable {sentence} by agent-a")
 
+    def test_an_evicted_or_requeued_job_is_one_line_with_the_reason_code_and_its_sentence(self):
+        evicted = {"kind": "experiment.status", "subject": "exp-1", "value": "EVICTED", "agent_id": "agent-a",
+                   "detail": "no_offer: no machine to rent for shape rtx4090 in 3m0s of asking"}
+        requeued = {"kind": "experiment.status", "subject": "exp-2", "value": "QUEUED", "agent_id": "agent-a",
+                    "detail": "code_unreachable: command exited with code 75: hl-clone: could not fetch the code"}
+        self.assertEqual(updates.message([evicted, requeued], "agent-a"), "Platform updates:\n"
+                         "experiment.status exp-1 EVICTED no_offer: no machine to rent for shape rtx4090 in 3m0s of asking\n"
+                         "experiment.status exp-2 QUEUED code_unreachable: command exited with code 75: hl-clone: could not fetch the code")
+
     def test_a_repeated_event_is_delivered_once(self):
         event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}
         self.assertEqual(updates.message([event, dict(event, position=2), dict(event, position=3)], "agent-a"),
