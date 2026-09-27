@@ -10,8 +10,8 @@ def planner():
 
 
 class PlannerPromptTest(unittest.TestCase):
-    def render(self) -> str:
-        return core.system_prompt(planner(), "RULES\n", "COMMANDS", "")
+    def render(self, repository_url: str = "") -> str:
+        return core.system_prompt(planner(), "RULES\n", "COMMANDS", repository_url)
 
     # The planner has its own briefing: the researchers' one tells an agent to compete, and a
     # planner that competed would optimize a metric nobody had chosen yet.
@@ -31,14 +31,24 @@ class PlannerPromptTest(unittest.TestCase):
             self.assertIn(word, flat)
         self.assertLess(len(prompt.encode()), 11_000)
 
-    # A draft names no repository, so the planner's code goes to the platform like any agent's
-    # there, in the words the researchers' briefing uses.
-    def test_the_planners_code_is_kept_by_the_platform(self):
+    # A planner of a draft with a repository was told to `hl code push`, which answers 409
+    # there, and to `git push` in the next paragraph. It reads where its code goes in the words
+    # the researchers' briefing uses, one way for the draft it is in.
+    def test_the_planners_code_goes_where_the_drafts_code_lives(self):
         flat = " ".join(self.render().split())
+        self.assertIn("Where it is kept: this experiment has no repository. Run `git init` in the directory you start in", flat)
         self.assertIn("`hl code push` stores your committed HEAD with the platform", flat)
         self.assertIn("submit from there with `code_ref` left empty: hl pins the HEAD you pushed", flat)
         for absent in ("git push", "branch `hl/", "{", "===="):
             self.assertNotIn(absent, flat)
+        prompt = self.render("https://github.com/acme/model.git")
+        flat = " ".join(prompt.split())
+        self.assertIn("Where it is kept: clone https://github.com/acme/model.git into the directory you start in", flat)
+        self.assertIn("work on branch `hl/pe-1/ag-planner`", flat)
+        self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
+        for absent in ("hl code push", "git init", "no repository", "{", "===="):
+            self.assertNotIn(absent, flat)
+        self.assertLess(len(prompt.encode()), 11_000)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
@@ -56,7 +66,7 @@ class PlannerPromptTest(unittest.TestCase):
     def test_the_planner_is_listed_the_commands_it_alone_uses(self):
         self.assertIn(["platform-experiments", "decline"], core._HL_HELP_PLANNER)
         self.assertIn(["platform-experiments", "propose"], core._HL_HELP_PLANNER)
-        self.assertIn(["code"], core._HL_HELP_PLANNER)
+        self.assertIn(["job", "submit"], core._HL_HELP_PLANNER)
 
 
 class PlannerStopTest(unittest.TestCase):

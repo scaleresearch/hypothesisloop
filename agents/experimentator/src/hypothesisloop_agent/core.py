@@ -21,8 +21,8 @@ log = logging.getLogger("llm_agent")
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
-# A planner pushes the seed code and proposes, which no other agent does.
-_HL_HELP_PLANNER = ([], ["job"], ["hypothesis"], ["code"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
+# A planner writes the first job spec and proposes, which no other agent does.
+_HL_HELP_PLANNER = ([], ["job"], ["job", "submit"], ["hypothesis"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
@@ -54,7 +54,7 @@ def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url:
                   repository_url=repository_url)
     template, sections = "coordinator.md", ("repository_line", "start_code")
     if config.plans(cfg):
-        template, sections = "planner.md", ("code_submit", "code_access")
+        template, sections = "planner.md", ("workspace", "code_submit", "code_access")
         values.update(agent_id=cfg.agent_id)
     elif not config.coordinates(cfg):
         template, sections = "system_prompt.md", ("workspace", "code_submit", "code_access")

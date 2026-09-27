@@ -60,7 +60,7 @@ outranks this briefing. Roughly:
      advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
      verbatim, available > 0; CPU work: only `cpu: N`.
-{workspace}
+  2. One-time: {workspace}
   3. Catch up before touching anything else, every session: a run spans weeks of restarts and
      each starts with no memory. Read your own hypotheses, the approaches and the branches you may
      work in (settled ones are to read, not retest), the findings worth opening, and the jobs

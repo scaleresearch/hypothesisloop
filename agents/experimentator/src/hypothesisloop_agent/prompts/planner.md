@@ -40,10 +40,8 @@ What you produce, in this order:
      revisions, every input fetched by the job itself, the metrics reported as the run goes
      and once more at the end, the way the examples in $WORKLOAD_SAMPLES do. Researchers copy
      and change this code, so keep the part they vary apart from the part that measures, and
-     say which is which. The draft has no repository: `git init` in the directory you start
-     in, where every command starts again, commit there, and `hl code push` stores your
-     committed HEAD with the platform. After a restart, `hl-clone <code_ref of your job> <dir>`
-     takes it back.
+     say which is which.
+     Where it is kept: {workspace}
   4. The baseline. Pick `accelerator_type` from `hl capacity`, copied verbatim, with
      available > 0. Work that needs no accelerator names none: its job states only `cpu: N`,
      whole cores. Its cost and the budget are then CPU core-hours: 4 cores for an hour cost

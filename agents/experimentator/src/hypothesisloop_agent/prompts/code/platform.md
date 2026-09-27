@@ -3,7 +3,7 @@ placeholder, each opened by a line of ==== and its name. This one is for a platf
 that names none: the platform keeps each pushed commit.
 
 ==== workspace
-  2. One-time: this experiment has no repository. Run `git init` in the directory you start
+this experiment has no repository. Run `git init` in the directory you start
      in, where every command starts again, and commit your work there. `hl code push` stores
      your committed HEAD with the platform: the purge-safe home for your workload code,
      harnesses, job specs and Dockerfiles. To read another agent's code, or after a restart

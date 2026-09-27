@@ -3,7 +3,7 @@ placeholder, each opened by a line of ==== and its name. This one is for a platf
 that names a repository.
 
 ==== workspace
-  2. One-time: clone {repository_url} into the directory you start in, where every command
+clone {repository_url} into the directory you start in, where every command
      starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}` (create it off
      the default branch, or check it out after a restart). Auth is set up, so
      `git push` just works; push that branch and no other. It is the purge-safe home for your
