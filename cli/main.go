@@ -152,20 +152,11 @@ then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, 
 func openNotice(c *apiclient.Client, platformExperiment, agent, baselineJob string) (string, error) {
 	role := ""
 	if agent != "" {
-		var roster struct {
-			Agents []struct {
-				ID   string `json:"agent_id"`
-				Role string `json:"role"`
-			} `json:"agents"`
-		}
-		if err := c.Do("GET", agentsPath(platformExperiment), nil, &roster); err != nil {
+		roles, err := rolesOf(c, platformExperiment)
+		if err != nil {
 			return "", err
 		}
-		for _, signup := range roster.Agents {
-			if signup.ID == agent {
-				role = signup.Role
-			}
-		}
+		role = roles[agent]
 	}
 	switch {
 	case agent != "" && role != "baseline":

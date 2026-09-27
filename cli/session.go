@@ -12,18 +12,19 @@ import (
 )
 
 func agentsSession(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT > session.tar.gz
+	fs := newFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT|coordinator|planner > session.tar.gz
 
-Writes the model session the agent last stored to standard output, byte for byte: what it said
-and saw, as its harness packed it. The platform's own harness packs a gzipped tar, with the
-model's transcript as JSON lines under model-home/:
+Writes the model session last stored to standard output, byte for byte: what its owner said and
+saw, as its harness packed it. AGENT is an agent's id, coordinator the hosted coordinator and
+planner the agent that planned the draft. The platform's own harness packs a gzipped tar, with
+the model's transcript as JSON lines under model-home/:
 
   hl platform-experiments agents session --platform-experiment pe-123 ag-1 | tar -xzf - -C ag-1-session
 
 Read by the agent itself and by the org that owns the platform experiment, while it runs and
-after it has closed. An agent that stored none yet is not found.`, stderr)
+after it has closed. One that stored none yet is not found.`, stderr)
 	named := experimentFlag(fs)
-	agent, err := parseOne(fs, args, "AGENT", "", "agent")
+	who, err := parseOne(fs, args, "AGENT, coordinator or planner", "", "agent")
 	if err != nil {
 		return parseExit(err)
 	}
@@ -31,7 +32,27 @@ after it has closed. An agent that stored none yet is not found.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	if err := copyBytes(c, agentsPath(pe)+"/"+url.PathEscape(agent)+"/session", stdout); err != nil {
+	path := agentsPath(pe) + "/" + url.PathEscape(who) + "/session"
+	switch who {
+	case "coordinator":
+		path = "/platform-experiments/" + url.PathEscape(pe) + "/coordinator/session"
+	case "planner":
+		roles, err := rolesOf(c, pe)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		planner := ""
+		for id, role := range roles {
+			if role == "planner" {
+				planner = id
+			}
+		}
+		if planner == "" {
+			return fail(stderr, fmt.Errorf("platform experiment %s has no planner: only one that began as a draft has", pe))
+		}
+		path = agentsPath(pe) + "/" + url.PathEscape(planner) + "/session"
+	}
+	if err := copyBytes(c, path, stdout); err != nil {
 		return fail(stderr, err)
 	}
 	return 0

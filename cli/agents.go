@@ -15,11 +15,29 @@ var agentsCommands = []subcommand{
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
 	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish},
-	{"session", "the model session an agent last stored, as it is: what it said and saw", agentsSession},
+	{"session", "the model session an agent, the coordinator or the planner last stored: what it said and saw", agentsSession},
 }
 
 func agentsPath(platformExperiment string) string {
 	return "/platform-experiments/" + url.PathEscape(platformExperiment) + "/agents"
+}
+
+// rolesOf is the role of each agent that joined the platform experiment, by agent id.
+func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]string, error) {
+	var roster struct {
+		Agents []struct {
+			ID   string `json:"agent_id"`
+			Role string `json:"role"`
+		} `json:"agents"`
+	}
+	if err := c.Do("GET", agentsPath(platformExperiment), nil, &roster); err != nil {
+		return nil, err
+	}
+	roles := make(map[string]string, len(roster.Agents))
+	for _, signup := range roster.Agents {
+		roles[signup.ID] = signup.Role
+	}
+	return roles, nil
 }
 
 func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
