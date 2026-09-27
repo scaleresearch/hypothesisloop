@@ -100,19 +100,26 @@ class HLError(RuntimeError):
 
 @dataclass(frozen=True)
 class Baseline:
-    """The agent that measured a platform experiment's baseline, the hypothesis that states the
-    control and the job that ran it."""
+    """The agent that measured a platform experiment's baseline and the job that ran it."""
 
     agent: str
-    hypothesis: str
     job: str
+
+
+def branch(pe_id: str, agent_id: str, hypothesis_id: str) -> str:
+    """The branch a job states: the agent's own for the hypothesis, as hl hypothesis checkout
+    names one of a hypothesis with no text, and the baseline's for a job that names none."""
+    if not hypothesis_id:
+        return f"hl/{pe_id}/baseline"
+    return f"hl/{pe_id}/{agent_id}/{hypothesis_id.replace('-', '')[-6:]}"
 
 
 @dataclass
 class JobRequest:
     """A POST /experiments body, mirroring tests/workloads/generic/job.yaml's shape: a full
     {id, metadata, job} document. `job` is loaded from JOB_SPEC_PATH once and overridden per call
-    -- dict -> yaml.safe_dump, never envsubst/.tmpl (tests/improve.md #2.4)."""
+    -- dict -> yaml.safe_dump, never envsubst/.tmpl (tests/improve.md #2.4). An empty hypothesis_id
+    makes it the baseline's job, which names no hypothesis and runs on the baseline's branch."""
 
     id: str
     agent_id: str
@@ -138,12 +145,13 @@ class JobRequest:
         # caller already named acceptable_accelerator_types itself, which wins either way.
         if "accelerator_type" in self.job_overrides and "acceptable_accelerator_types" not in self.job_overrides:
             job.pop("acceptable_accelerator_types", None)
+        tested = {"hypothesis_id": self.hypothesis_id, "theory": "e2e pytest coverage"} if self.hypothesis_id else {}
         metadata = {
             "agent_id": self.agent_id,
             "platform_experiment_id": self.platform_experiment_id,
-            "hypothesis_id": self.hypothesis_id,
-            "theory": "e2e pytest coverage",
+            **tested,
             "code_ref": self.code_ref,
+            "branch": branch(self.platform_experiment_id, self.agent_id, self.hypothesis_id),
             "config_hash": "",
             "data_ref": "",
             "capacity_tier": self.tier,
@@ -449,13 +457,13 @@ class API:
         )
 
     # What declare_baseline left in each platform experiment, for a test that asserts on all of
-    # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
+    # an experiment's agents or jobs to leave out. Shared by every caller.
     baseline_of: dict[str, "Baseline"] = {}
 
     def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, *, job_wait_seconds: float) -> "Baseline":
         """Gives an open platform experiment its baseline as a client does: an agent of role
-        baseline joins, its job runs to the end and gets its finding, and the description that
-        names the job is sent with the declaration.
+        baseline joins, its job, which tests no hypothesis, runs to the end and gets its finding,
+        and the description that names the job is sent with the declaration.
 
         The job reports every metric the experiment declares, on the default accelerator alone.
         job_overrides are laid over it: where it runs, or with command None the image's own
@@ -463,9 +471,8 @@ class API:
         to complete: BASELINE_JOB_WAIT_SECONDS where the test has the default timeout."""
         pe = self.get_json(f"/platform-experiments/{pe_id}")
         agent = self.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]["agent_id"]
-        hypothesis = self.register_hypothesis(pe_id, agent, "the control, unchanged")["id"]
         job = self.submit_job(
-            pe_id, agent, hours=BASELINE_HOURS, hyp_id=hypothesis,
+            pe_id, agent, hours=BASELINE_HOURS, hyp_id="",
             job_overrides=baseline_reporter(pe["metrics"]) | (job_overrides or {}),
         )
         eventually(
@@ -481,7 +488,7 @@ class API:
             brief.write(f"{pe['description']}\n\nBASELINE\n  config: the control, unchanged\n  code_ref: {self.code_ref(pe_id)}\n  measured: {job}\n")
             brief.flush()
             self.hl("platform-experiments", "update", "--platform-experiment", pe_id, "--description-file", brief.name, "--baseline-job", job)
-        self.baseline_of[pe_id] = Baseline(agent=agent, hypothesis=hypothesis, job=job)
+        self.baseline_of[pe_id] = Baseline(agent=agent, job=job)
         return self.baseline_of[pe_id]
 
     def signup_and_start(self, pe_id: str, agents: list[str] | list[tuple]) -> None:
@@ -601,8 +608,8 @@ class API:
         job_id: str | None = None,
         secret_env: dict[str, str] | None = None,
     ) -> str:
-        """Registers a hypothesis for the agent (unless hyp_id names an existing row) and submits
-        the job through the `hl` CLI -- the real submission path an agent uses. secret_env reaches
+        """Registers a hypothesis for the agent (unless hyp_id names an existing row, or is empty
+        for a baseline agent's job, which tests none) and submits the job through the `hl` CLI -- the real submission path an agent uses. secret_env reaches
         `hl` the only way it takes one: in its environment, named by --secret-env."""
         if hyp_id is None:
             hyp_id = self.register_hypothesis(pe_id, agent_id, hyp_text)["id"]

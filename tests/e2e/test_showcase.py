@@ -116,8 +116,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             assert r.status_code == 200, f"a read of the shared platform experiment: {method} {path} answered {r.status_code} {r.text}"
             assert "hls_" not in r.text and "hlk_" not in r.text and "secret_access_key" not in r.text, f"{method} {path} carries a credential: {r.text}"
         assert _call(b.api, "GET", f"/platform-experiments/{pe_id}").json()["shared"] is True
-        control = api.baseline_of[pe_id].hypothesis
-        assert [h["id"] for h in _call(b.api, "GET", listings[0]).json() if h["id"] != control] == [hyp_id]
+        assert [h["id"] for h in _call(b.api, "GET", listings[0]).json()] == [hyp_id]
         assert agent in _call(b.api, "GET", listings[2]).text, "the agents of the shared platform experiment are not listed"
         for path in listings:
             assert _call(b.api, "GET", path).status_code == 200, f"a listing narrowed to the shared platform experiment: {path}"

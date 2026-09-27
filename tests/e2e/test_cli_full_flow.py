@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from conftest import TEST_ACCELERATOR_TYPE, make_agent
-from support.api import workload_image
+from support.api import branch, workload_image
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -115,6 +115,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
             "theory": "e2e scenario coverage",
             "estimated_duration_hours": JOB_HOURS,
             "code_ref": api.code_ref(pe_id),
+            "branch": branch(pe_id, agent, hyp_id),
             "config_hash": "",
             "data_ref": "",
             "capacity_tier": "guaranteed",
