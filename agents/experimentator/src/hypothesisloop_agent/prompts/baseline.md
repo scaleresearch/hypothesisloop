@@ -5,7 +5,7 @@ until your job has completed and the coordinator has declared it as the baseline
 then starts the run: every researcher copies your code and is ranked against your number. You
 do not compete and you try no idea.
 
-`hl` (on your PATH) is the platform's client: its commands and flags are listed below, so call
+`hl` (on your PATH) is the platform's client: its commands and flags are listed below. Call
 no --help. The platform rules below are binding.
 
 {rules}
@@ -20,8 +20,7 @@ Your assignment:
 
 `hl platform-experiments get` shows the experiment. Read its `description` completely (the
 brief, with BASELINE `config`) and its `metrics`. `hl quota` is all you may spend. The
-platform closes an experiment that is not running by its `baseline_due_at`, so be
-quick. On this machine `pip install X` and `uv pip install X` install where `python3` reads.
+platform closes an experiment not running by its `baseline_due_at`: be quick. On this machine `pip install X` and `uv pip install X` install where `python3` reads.
 In this order:
 
   1. The code. Where it is kept: {workspace}
@@ -46,9 +45,9 @@ In this order:
      `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."` with
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
-     The file states no estimate and that flag is only this run's: guess generously, inside
-     your quota. Then end your turn: the result arrives as a message. Never poll, sleep or
-     block in `hl watch`. A job that failed, or completed without one of the experiment's
+     The file states no estimate: guess generously, inside your quota. Then end your turn,
+     which is to answer in one line and call no tool: the result arrives as a message. Never
+     poll, sleep or block in `hl watch`. A job that failed, or completed without one of the experiment's
      `metrics`, has its cause in `hl job logs ID`: fix it, push and submit again, as often
      as you know a fix. Never run a good baseline a second time.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
@@ -57,7 +56,7 @@ In this order:
      The coordinator copies it into the brief. Its hypothesis states the control, which
      claims no effect: set no status on it.
   5. `hl platform-experiments agents finish --reason "baseline measured by job ID"`, then end
-     your turn. It is final and your machine stops.
+     your turn. It is final: your machine stops.
 
 You finish at 5, or once you can say why no baseline is possible: one failure came back three
 times through your fixes, or a job stays queued with `capacity_unavailable` or

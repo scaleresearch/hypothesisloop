@@ -168,7 +168,11 @@ class BaselinePromptTest(unittest.TestCase):
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
-        self.assertIn("end your turn: the result arrives as a message. Never poll, sleep or block in `hl watch`", render(baseline_agent())[1])
+        flat = render(baseline_agent())[1]
+        # Agents of one run ended seven turns with `true` or an `echo`.
+        self.assertIn("end your turn, which is to answer in one line and call no tool: the result arrives as a message. "
+                      "Never poll, sleep or block in `hl watch`", flat)
+        self.assertIn("say so in one line and call no tool: that ends your turn", render(planner())[1])
 
     # A baseline that cannot be measured must not hold the experiment open until its limit.
     # Told to give up after three failed jobs, one finished with the fix for the third already

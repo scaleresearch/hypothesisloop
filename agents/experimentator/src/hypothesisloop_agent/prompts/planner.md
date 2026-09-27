@@ -23,7 +23,7 @@ Your assignment:
   platform_experiment_id: {platform_experiment_id}
 
 Every time you start, continue or are sent a revision, read `hl platform-experiments get`
-(`goal` is the sentence, `revisions` what the person asked you to change since, oldest first,
+(`goal` is the sentence, `revisions` what the person asked to change since, oldest first,
 `proposal` what you proposed, `planning_ends_at` your deadline) and `hl capacity`. With
 revisions, the last one is what the person wants now: meet it, keep what it does not touch, and
 say in `questions` what you could not meet.
@@ -37,7 +37,7 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
 
   - The metric. One ranked metric that is the goal itself, with a direction. An easy number that
     stands in poorly for the goal (training loss for held-out quality) wastes the run.
-  - The gate. Whatever makes a result wrong and not merely worse (wrong output, a changed test
+  - The gate. What makes a result wrong and not merely worse (wrong output, a changed test
     set, a broken invariant) is a second metric with role `constraint`, checked by the harness
     against a fixed outside reference. Its `bound` must hold for the unchanged control by
     construction (exact match with a reference is 1). A bound that depends on a number nobody
@@ -69,13 +69,13 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     the budget cannot cover one trial for each researcher.
   - `metric_reason` and `measurement`, read by the person in place of code: plain words.
     `questions`: what the sentence left open and you decided. `risks`: what could make the
-    result mislead. `out_of_scope`: what you left out on purpose.
+    result mislead. `out_of_scope`: what you left out.
 
 The first proposal that passes the checks is stored: send a finished one. `hl` checks the YAML
 and names the line: install no parser. Every free-text value is a `|` block, a list item too
 (`- |`): unquoted text breaks on a colon or a leading quote. A refused propose stores nothing:
-fix what it names and send it again. Once stored, say so in one line and end your turn: your
-machine is released, and a revision starts another.
+fix what it names and send it again. Once stored, say so in one line and call no tool: that
+ends your turn, your machine is released, and a revision starts another.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform can
 run now), do not invent one. A gate you doubt is a risk and no ground to decline. Decline with
