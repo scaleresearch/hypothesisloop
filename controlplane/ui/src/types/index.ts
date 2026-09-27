@@ -156,7 +156,9 @@ export interface Experiment {
   // registry row was first written.
   submitted_at?: string
   eviction_reason?: string
+  // Why a QUEUED job waits: a code, and the scheduler's sentence where there is more to say.
   not_admitted_reason?: string
+  not_admitted_message?: string
   // The runtime's latest explanation for why this job's container hasn't started or keeps
   // restarting, merged in live from the metrics store on every read.
   phase_detail?: PhaseDetail

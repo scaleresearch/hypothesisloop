@@ -157,7 +157,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       {j.status === 'QUEUED' && j.not_admitted_reason && (
         <Callout tone="accent">
           <strong className="text-accent">Not admitted:</strong>{' '}
-          <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason)}</span>
+          <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}</span>
         </Callout>
       )}
 

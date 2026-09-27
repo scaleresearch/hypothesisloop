@@ -264,7 +264,7 @@ function JobsPageContent() {
                       {j.summary_due && <div className="mt-0.5"><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="mt-0.5 text-2xs text-muted">
-                          {notAdmittedLabel(j.not_admitted_reason)}
+                          {notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}
                         </div>
                       )}
                       {status === 'EVICTED' && j.eviction_reason && (

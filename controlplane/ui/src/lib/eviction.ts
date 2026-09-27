@@ -22,9 +22,8 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   flavor_mismatch: 'Landed on a different accelerator type than reserved',
 }
 
-// Human-readable labels for domain.NotAdmittedReason (shared/domain/constants.go) — why a QUEUED
-// job hasn't started yet. Same "code: detail" convention and same fallback-to-raw-code behavior as
-// eviction reasons; use notAdmittedLabel to render.
+// Human-readable labels for domain.NotAdmittedReason (shared/domain/constants.go): why a QUEUED
+// job hasn't started yet. An unmapped code is shown as it is. Use notAdmittedLabel to render.
 const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   awaiting_admission: 'Waiting for the scheduler’s first look',
   capacity_unavailable: 'No capacity available',
@@ -40,21 +39,20 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
   concurrency_cap: 'At its experiment’s max concurrent accelerators',
   exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
-  exceeds_cluster_capacity: 'Asks for more than any connected cluster has installed',
+  exceeds_cluster_capacity: 'Asks for more than any connected cluster has when idle',
 }
 
-export function notAdmittedLabel(reason?: string | null): string {
-  if (!reason) return ''
-  const code = evictionCode(reason)
-  const label = NOT_ADMITTED_REASON_LABELS[code] ?? code
-  const detail = evictionDetail(reason)
-  return detail ? `${label} — ${detail}` : label
+// notAdmittedLabel is the label of a job's not_admitted_reason, followed by the scheduler's own
+// sentence (not_admitted_message) when it wrote one.
+export function notAdmittedLabel(reason: string, message?: string): string {
+  const label = NOT_ADMITTED_REASON_LABELS[reason] ?? reason
+  return message ? `${label}: ${message}` : label
 }
 
-// A reason may carry an explanation after its code, in the same "code: detail" shape the scheduler
-// writes into not_admitted_reason — the disbalance evictor states what the job requested, what it
-// was entitled to and what that stranded. Grouping or labelling must key on the code alone, or
-// every distinct explanation becomes its own category and no label ever matches.
+// An eviction reason may carry an explanation after its code, as "code: detail": the disbalance
+// evictor states what the job requested, what it was entitled to and what that stranded.
+// Grouping or labelling must key on the code alone, or every distinct explanation becomes its own
+// category and no label ever matches.
 export function evictionCode(reason?: string | null): string {
   if (!reason) return ''
   const cut = reason.indexOf(':')
