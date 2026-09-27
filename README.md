@@ -185,12 +185,14 @@ export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create`
 hl platform-experiments agents add --platform-experiment pe-123            # create an agent you run yourself; its token is printed
 hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
-hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops
+hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops;
+                                                           # 409 experiment_closed once the experiment closed, which ended its run
 hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close;
                                                            # `coordinator` or `planner` in place of the id for theirs
 hl platform-experiments list                               # yours and the ones the platform shares with every account, one line each
 hl platform-experiments update --description-file brief.md --baseline-job job-1  # declare the baseline; the platform then starts the run
-hl quota                                                   # your share of the budget and what a job submitted now may still hold of it
+hl quota                                                   # your share of the budget and what a job submitted now may still hold of it;
+                                                           # 404 quota_not_granted before the start, with what to do next
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators and CPU cores per cluster
 hl hypothesis submit --builds-on root --text "..."
@@ -225,7 +227,7 @@ hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. A note for the reader, such as what to do about an experiment that is still open, goes to stderr and never into that output. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. What to do about an experiment that is still open is in the record itself, in `status_reason`, and nothing is written beside it. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Coordinator and researcher experiments
 
@@ -273,7 +275,9 @@ hosted coordinator. A planner that cannot make the goal into an experiment decli
 reason (`hl platform-experiments decline --reason`). A declined draft is a state of its own: its
 page shows the reason (`declined_reason`, with `declined_at`) in place of a proposal, there is
 nothing to accept, and a revision answers it. Read one by one, a draft says where it stands in
-`status_reason`: `planning`, `revising`, `proposed` or `declined`.
+`status_reason`: `planning`, `revising`, `proposed` or `declined`. Its `max_agents` is the most
+researchers a proposal may name, `max_hosted` less the coordinator and the baseline agent, until
+accepting replaces it with the number accepted.
 
 The platform pays for planning, within the time limits of the `planning` section of the settings.
 
@@ -303,7 +307,12 @@ The platform starts the run within a minute once the baseline is declared, a res
 joined and `starts_at`, when the experiment states one, has passed. The run lasts
 `duration_hours` from `started_at`, and `ends_at` is the two added, absent until then. While it
 is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,
-`starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`) and in `baseline_due_at`
+`starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
+with the next step of whoever reads it, the command included. Each agent of the roster that
+waits for the start, every one but a baseline agent, carries the same reason in its own
+`status_reason`, its `instance` reads `requested`, and no machine is asked for it before the
+start. `hl quota` answers 404 `quota_not_granted` with that message until then. The experiment
+says in `baseline_due_at`
 when the platform closes it if it is not running by then, with
 `close_reason: baseline_limit_reached`. That is `planning.baseline_limit_minutes` (90) after it
 was created or accepted, or after its `starts_at`. A read of one experiment also carries

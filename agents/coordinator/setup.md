@@ -196,7 +196,8 @@ the control, its job is declared as the baseline, and the platform starts the ru
 minute of the declaration. Nobody starts it by hand, and `duration_hours` counts from that
 start (`started_at`). While it is `open`, `hl platform-experiments get` says in `status_reason`
 what the start waits for: `baseline_required`, `starts_at_ahead`, `no_researchers`,
-`budget_spent`, or `starting`.
+`budget_spent`, or `starting`. Its `message` begins with your next step, the command included,
+and nothing else says it.
 
 The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
@@ -372,8 +373,8 @@ the platform after each turn and reads it back before its first turn. Work that 
 is not carried over, so an agent pushes its branch as it goes. After the third restart the agent
 is stopped. `hl platform-experiments agents list` shows each hosted agent's `instance`:
 
-    state        requested (asked for, not reported by the launcher yet), starting, running,
-                 or stopped (no restart left)
+    state        requested (asked for, not reported by the launcher yet, or waiting for the
+                 start), starting, running, or stopped (no restart left)
     progress_at  when the platform last saw the harness's progress marker change
     seen_at      when the launcher first reported this machine
     restarts     how many times the machine was started again, 3 at most
@@ -384,7 +385,9 @@ is stopped. `hl platform-experiments agents list` shows each hosted agent's `ins
                  there is nothing A stopped agent keeps its place and its quota
 and takes no further turn until the platform's operators change the agent image or the
 launcher's settings, which starts it again. There is nothing more to do for a hosted agent than
-to read that list.
+to read that list. While the experiment is `open`, every agent but a baseline agent waits for
+the start: its `instance` reads `requested`, no machine is asked for it yet, and its
+`status_reason` in that list says what the start waits for.
 
 Without `--hosted` you run each agent yourself, which is how an experiment with its own agent
 image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the command prints is
