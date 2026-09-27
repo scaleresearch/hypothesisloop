@@ -41,6 +41,9 @@ type Store interface {
 	CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error)
 	CountHypothesisActivity(ctx context.Context, ids []string) (map[string]db.HypothesisActivity, error)
 	Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error)
+	Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error)
+	LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error)
+	BaselineCodeRef(ctx context.Context, platformExpID string) (string, error)
 }
 
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.
@@ -51,6 +54,7 @@ type Graph interface {
 	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp db.Stamp) (*domain.Hypothesis, bool, error)
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 	Links(ctx context.Context, id string) (domain.HypothesisLinks, error)
+	FirstParent(ctx context.Context, id string) (string, error)
 	ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error)
 	HypothesisStats(ctx context.Context, f graphdb.ListFilter) (*domain.HypothesisStats, error)
 	ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error)

@@ -43,13 +43,16 @@ type hypothesisResponse struct {
 // tell a short list from a truncated one, and page the rest with ?limit/?offset.
 type hypothesisWithJobs struct {
 	*domain.Hypothesis
-	Links        domain.HypothesisLinks      `json:"links"`
-	Jobs         []*domain.Experiment        `json:"jobs"`
-	JobCount     int                         `json:"job_count"`
-	Findings     []*domain.HypothesisFinding `json:"findings"`
-	FindingCount int                         `json:"finding_count"`
-	Comments     []*domain.HypothesisComment `json:"comments"`
-	CommentCount int                         `json:"comment_count"`
+	Links domain.HypothesisLinks `json:"links"`
+	// Implementations and BaseRef are read off the jobs on record: neither is stored.
+	Implementations []domain.Implementation     `json:"implementations" doc:"The branches its jobs ran on, one per agent that ran it: agent_id, branch and code_ref, the commit the newest job on that branch ran."`
+	BaseRef         string                      `json:"base_ref,omitempty" doc:"The commit a new implementation starts from, repository_url@sha: the one the newest completed job of its first builds_on parent ran, whichever agent's. A parent with no completed job passes the question to its own first parent, and the objective answers with the declared baseline job's commit. Absent while that chain ends at the objective and no baseline is declared."`
+	Jobs            []*domain.Experiment        `json:"jobs"`
+	JobCount        int                         `json:"job_count"`
+	Findings        []*domain.HypothesisFinding `json:"findings"`
+	FindingCount    int                         `json:"finding_count"`
+	Comments        []*domain.HypothesisComment `json:"comments"`
+	CommentCount    int                         `json:"comment_count"`
 }
 
 // hypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.
@@ -593,7 +596,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Get a hypothesis with its links, jobs, findings, and comments", Tags: []string{"hypotheses"},
 		Description: "links.out and links.in are its edges, oldest first, at most 200 each way. Each has type, the other " +
 			"end's hypothesis_id, text and status (for the objective: the platform_experiment_id, empty text and status), " +
-			"and the agent_id the link was made for, the actor that made it and its created_at. ?limit (default 20, max 200) and " +
+			"and the agent_id the link was made for, the actor that made it and its created_at. " +
+			"A hypothesis and a branch are two things: any agent may run its own implementation of any hypothesis, and implementations lists " +
+			"them as the jobs show them, {agent_id, branch, code_ref}, code_ref being the commit the newest job on that branch ran. " +
+			"base_ref is the commit a new implementation starts from: the one the newest completed job of the first builds_on parent ran, " +
+			"that parent's own base_ref while it has no completed job, and the declared baseline job's commit where the chain ends at the objective. ?limit (default 20, max 200) and " +
 			"?offset apply to each of jobs, findings and comments alike, oldest first; " +
 			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
@@ -620,6 +627,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
+		implementations, err := h.svc.Implementations(ctx, in.ID)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
+		}
+		baseRef, err := h.svc.BaseRef(ctx, hyp)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
+		}
 		jobFilter := domain.ExperimentFilter{Scope: domain.AllTenants, HypothesisID: in.ID}
 		jobs, err := h.svc.List(ctx, domain.ExperimentFilter{
 			Scope: domain.AllTenants, HypothesisID: in.ID, Limit: in.Limit, Offset: in.Offset,
@@ -641,8 +656,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{
 			Hypothesis: hyp,
-			Links:      links,
-			Jobs:       jobs, JobCount: jobCount,
+			Links:      links, Implementations: implementations, BaseRef: baseRef,
+			Jobs: jobs, JobCount: jobCount,
 			Findings: findings, FindingCount: findingCount,
 			Comments: comments, CommentCount: commentCount,
 		}}, nil

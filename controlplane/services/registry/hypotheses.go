@@ -166,6 +166,48 @@ func (s *Service) GetHypothesisLinks(ctx context.Context, id string) (domain.Hyp
 	return links, nil
 }
 
+// Implementations returns the branches a hypothesis was run on, each with its agent and newest
+// commit.
+func (s *Service) Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error) {
+	implementations, err := s.store.Implementations(ctx, hypothesisID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.Implementations: %w", err)
+	}
+	return implementations, nil
+}
+
+// BaseRef returns the commit a new implementation of h starts from: the one the newest completed
+// job of its first builds_on parent ran, whichever agent's. A parent with no completed job
+// passes the question to its own first parent, and the objective answers with the commit of the
+// declared baseline job. Empty when the chain ends at the objective and no baseline is declared.
+func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, error) {
+	id := h.ID
+	for {
+		parent, err := s.graph.FirstParent(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("registry.BaseRef: %w", err)
+		}
+		if parent == "" {
+			return "", fmt.Errorf("registry.BaseRef: hypothesis %s builds on nothing", id)
+		}
+		if parent == h.PlatformExperimentID {
+			ref, err := s.store.BaselineCodeRef(ctx, parent)
+			if err != nil {
+				return "", fmt.Errorf("registry.BaseRef: %w", err)
+			}
+			return ref, nil
+		}
+		ref, err := s.store.LastCompletedCodeRef(ctx, parent)
+		if err != nil {
+			return "", fmt.Errorf("registry.BaseRef: %w", err)
+		}
+		if ref != "" {
+			return ref, nil
+		}
+		id = parent
+	}
+}
+
 // ListHypotheses returns one page of hypotheses, most recent first, each carrying its place in the
 // graph and its finding/comment counts. Bounded and defaulted by the graph store.
 func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {

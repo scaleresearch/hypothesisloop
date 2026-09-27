@@ -42,6 +42,15 @@ func BaselineBranch(platformExperimentID string) string {
 	return BranchPrefix(platformExperimentID) + "baseline"
 }
 
+// Implementation is one agent's code for a hypothesis: the branch its jobs ran on and the commit
+// the newest of them ran. A hypothesis has as many as there are agents that ran it, and none is
+// stored: they are read off the jobs.
+type Implementation struct {
+	AgentID string `json:"agent_id"`
+	Branch  string `json:"branch"`
+	CodeRef string `json:"code_ref" doc:"The commit the newest job on this branch ran, repository_url@sha."`
+}
+
 // HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
 // wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
 // filterable field instead. Only the agent named in Hypothesis.AgentID may change it (see

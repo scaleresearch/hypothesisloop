@@ -104,8 +104,8 @@ RETURN h`, map[string]any{
 		if err != nil {
 			return nil, err
 		}
-		for _, spec := range n.Links {
-			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, n.AgentID, n.Actor, at, n.Stamp.Position); err != nil {
+		for i, spec := range n.Links {
+			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, i, n.AgentID, n.Actor, at, n.Stamp.Position); err != nil {
 				return nil, err
 			}
 		}
@@ -166,7 +166,7 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 				return nil, err
 			}
 		}
-		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, agentID, actor, at, stamp.Position)
+		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, 0, agentID, actor, at, stamp.Position)
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +246,7 @@ func (s *Store) GetHypothesis(ctx context.Context, id string) (*domain.Hypothesi
 // way. Incoming links only ever come from hypotheses; outgoing builds_on may reach the objective.
 func (s *Store) Links(ctx context.Context, id string) (domain.HypothesisLinks, error) {
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		outgoing, err := linksTx(ctx, tx, `MATCH (:Hypothesis {id: $id})-[r]->(t) RETURN type(r), t, r ORDER BY r.created_at, t.id LIMIT $limit`, id)
+		outgoing, err := linksTx(ctx, tx, `MATCH (:Hypothesis {id: $id})-[r]->(t) RETURN type(r), t, r ORDER BY `+linkOrder+` LIMIT $limit`, id)
 		if err != nil {
 			return nil, err
 		}
@@ -260,6 +260,32 @@ func (s *Store) Links(ctx context.Context, id string) (domain.HypothesisLinks, e
 		return domain.HypothesisLinks{}, fmt.Errorf("graphdb.Links: %w", err)
 	}
 	return out.(domain.HypothesisLinks), nil
+}
+
+// linkOrder is the order of a hypothesis's outgoing links r to t: oldest first, and those one
+// write stated in the order it stated them. A link from before that order was kept has no
+// ordinal and sorts by its target.
+const linkOrder = "r.created_at, coalesce(r.ordinal, 0), t.id"
+
+// FirstParent returns the target of a hypothesis's first builds_on link (linkOrder): a
+// hypothesis id, or the platform experiment id for the objective. Empty when there is none.
+func (s *Store) FirstParent(ctx context.Context, id string) (string, error) {
+	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (:Hypothesis {id: $id})-[r:BUILDS_ON]->(t) RETURN t.id ORDER BY `+linkOrder+` LIMIT 1`, map[string]any{"id": id})
+	})
+	if err != nil {
+		return "", fmt.Errorf("graphdb.FirstParent: %w", err)
+	}
+	records := out.([]*neo4j.Record)
+	if len(records) == 0 {
+		return "", nil
+	}
+	var d decoder
+	parent := d.str(records[0].Values[0])
+	if d.err != nil {
+		return "", fmt.Errorf("graphdb.FirstParent: %w", d.err)
+	}
+	return parent, nil
 }
 
 func (s *Store) outLinks(ctx context.Context, id string) ([]domain.Link, error) {
@@ -601,13 +627,14 @@ MATCH p = (t)-[:BUILDS_ON *BFS]->(f) RETURN count(p)`, map[string]any{"from": fr
 
 // createLink merges one edge from fromID, reporting whether it was new. The relationship type is
 // spliced into the statement because Cypher cannot parameterise it; it only ever comes from
-// relTypes, after validateLinks.
-func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, agentID string, actor domain.Actor, at time.Time, position int64) (bool, error) {
+// relTypes, after validateLinks. ordinal is the link's place among those one write states, which
+// share a created_at: it keeps them in the order stated (linkOrder).
+func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, ordinal int, agentID string, actor domain.Actor, at time.Time, position int64) (bool, error) {
 	records, err := collect(ctx, tx, linkMatch(platformExperimentID, spec)+`
 MERGE (h)-[r:`+relTypes[spec.Type]+`]->(t)
-ON CREATE SET r.agent_id = $agent_id, r.author = '', r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position
+ON CREATE SET r.agent_id = $agent_id, r.author = '', r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position, r.ordinal = $ordinal
 RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID,
-		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "position": position})
+		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "position": position, "ordinal": ordinal})
 	if err != nil {
 		return false, err
 	}

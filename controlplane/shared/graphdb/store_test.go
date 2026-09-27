@@ -1125,3 +1125,29 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		}
 	}
 }
+
+// The first builds_on link is the one a registration stated first, whatever the ids of its
+// targets: a combination of ideas starts from the idea named first.
+func TestFirstParentIsTheBuildsOnLinkStatedFirst(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	older := register(t, s, pe, "agent-1", "older idea", onRoot(pe))
+	newer := register(t, s, pe, "agent-1", "newer idea", onRoot(pe))
+	combined := register(t, s, pe, "agent-1", "combined idea", []domain.LinkSpec{
+		{Type: domain.LinkRelated, To: older.ID}, {Type: domain.LinkBuildsOn, To: newer.ID}, {Type: domain.LinkBuildsOn, To: older.ID}})
+
+	if parent, err := s.FirstParent(ctx, combined.ID); err != nil || parent != newer.ID {
+		t.Errorf("FirstParent of the combination = %q, %v, want %s, stated first", parent, err, newer.ID)
+	}
+	if parent, err := s.FirstParent(ctx, older.ID); err != nil || parent != pe {
+		t.Errorf("FirstParent under the objective = %q, %v, want %s", parent, err, pe)
+	}
+	if parent, err := s.FirstParent(ctx, "no-such-hypothesis"); err != nil || parent != "" {
+		t.Errorf("FirstParent of no hypothesis = %q, %v, want none", parent, err)
+	}
+	links, err := s.Links(ctx, combined.ID)
+	if err != nil || len(links.Out) != 3 || links.Out[0].HypothesisID != older.ID || links.Out[0].Type != domain.LinkRelated || links.Out[1].HypothesisID != newer.ID {
+		t.Errorf("out links = %+v, %v, want them in the order stated", links.Out, err)
+	}
+}

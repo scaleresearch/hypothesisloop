@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -344,4 +346,54 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
 	}
 	return out, nil
+}
+
+// BaselineCodeRef returns the commit the declared baseline job of a platform experiment ran,
+// empty while none is declared.
+func (s *ExperimentsStore) BaselineCodeRef(ctx context.Context, platformExpID string) (string, error) {
+	var codeRef string
+	err := s.pool.pool.QueryRow(ctx,
+		`SELECT e.code_ref FROM platform_experiments pe JOIN experiments e ON e.id = pe.baseline_job_id WHERE pe.id = $1`, platformExpID).Scan(&codeRef)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("experiments_store.BaselineCodeRef: %w", err)
+	}
+	return codeRef, nil
+}
+
+// LastCompletedCodeRef returns the commit the newest completed job testing a hypothesis ran,
+// whichever agent's, empty when none completed.
+func (s *ExperimentsStore) LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error) {
+	var codeRef string
+	err := s.pool.pool.QueryRow(ctx,
+		`SELECT code_ref FROM experiments WHERE hypothesis_id = $1 AND status = 'COMPLETED' ORDER BY created_at DESC, id DESC LIMIT 1`, hypothesisID).Scan(&codeRef)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("experiments_store.LastCompletedCodeRef: %w", err)
+	}
+	return codeRef, nil
+}
+
+// Implementations returns the branches the jobs testing a hypothesis ran on, each with its
+// agent and the commit its newest job ran, oldest branch first. It is read off the jobs: a
+// branch no job ran on is unknown here, and so is a job from before branches were kept.
+func (s *ExperimentsStore) Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error) {
+	const q = `
+SELECT agent_id, branch, code_ref FROM (
+	SELECT DISTINCT ON (agent_id, branch) agent_id, branch, code_ref, MIN(created_at) OVER (PARTITION BY agent_id, branch) AS started_at
+	FROM experiments WHERE hypothesis_id = $1 AND branch <> ''
+	ORDER BY agent_id, branch, created_at DESC, id DESC
+) newest ORDER BY started_at, agent_id, branch`
+	rows, err := s.pool.pool.Query(ctx, q, hypothesisID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.Implementations: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.Implementation{}
+	for rows.Next() {
+		var i domain.Implementation
+		if err := rows.Scan(&i.AgentID, &i.Branch, &i.CodeRef); err != nil {
+			return nil, fmt.Errorf("experiments_store.Implementations: scan: %w", err)
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
 }
