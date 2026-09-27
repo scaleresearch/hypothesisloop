@@ -151,3 +151,15 @@ func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 }
+
+// Before the start a researcher's instance reads waiting, and the roster's help listed
+// requested for it.
+func TestTheRostersHelpNamesEveryInstanceState(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	run([]string{"platform-experiments", "agents", "list", "--help"}, &stdout, &stderr)
+	for _, state := range []string{"waiting", "requested", "starting", "running", "stopped"} {
+		if !strings.Contains(stderr.String(), state) {
+			t.Errorf("the help of the roster does not name instance.state %s", state)
+		}
+	}
+}
