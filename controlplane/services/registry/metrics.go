@@ -122,9 +122,9 @@ const (
 	// job against a sibling that finished or stalled an hour ago — a different phase of the run,
 	// not a fair comparison of "right now."
 	underperformSiblingStaleness = 15 * time.Minute
-	// underperformMinRemaining is how much of the run must be left, at its pace since admission,
-	// for the advisory to be sent: cancelling a job that ends before its agent has read the
-	// advisory saves nothing, and reading it costs the agent a turn.
+	// underperformMinRemaining is how much of the run must be left, at the pace of the progress
+	// the job itself reported, for the advisory to be sent: cancelling a job that ends before its
+	// agent has read the advisory saves nothing, and reading it costs the agent a turn.
 	underperformMinRemaining = 2 * time.Minute
 )
 
@@ -150,10 +150,8 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	if fractionComplete < underperformMinFraction {
 		return
 	}
+	// A requeued job is not placed, and a sample from the workload it left advises nothing.
 	if exp.SubmittedAt == nil {
-		return
-	}
-	if remaining := time.Duration(float64(at.Sub(*exp.SubmittedAt)) * (1 - fractionComplete) / fractionComplete); remaining < underperformMinRemaining {
 		return
 	}
 	// Only evaluate near a checkpoint (see underperformCheckpointWidth) — this is the throttle,
@@ -198,6 +196,22 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 			byTime[p.Timestamp.UnixMilli()] = p.Value
 		}
 		progress[attempt{f.ExperimentID, f.AgentID}] = byTime
+	}
+
+	// The pace is the job's own progress since its earliest sample in the window. Counted from
+	// admission it would include the wait for a machine to start, and a job minutes from its end
+	// would read as having most of its run ahead. A job with no earlier sample has no pace yet.
+	first, from := at, fractionComplete
+	for ms, f := range progress[attempt{exp.ID, exp.AgentID}] {
+		if t := time.UnixMilli(ms); t.Before(first) {
+			first, from = t, f
+		}
+	}
+	if fractionComplete <= from {
+		return
+	}
+	if remaining := time.Duration(float64(at.Sub(first)) * (1 - fractionComplete) / (fractionComplete - from)); remaining < underperformMinRemaining {
+		return
 	}
 
 	score := func(v float64) float64 {

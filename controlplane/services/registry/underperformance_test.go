@@ -48,22 +48,48 @@ func (s underperformStore) GetPlatformExperimentMetrics(_ context.Context, _ str
 	return s.metrics, true, nil
 }
 
-// cohortServer answers the two range queries of the check, value and fraction_complete, with one
-// series per sibling. Each sibling reported at every tenth of its run, the last sample `age` ago,
-// and valueAt gives its value at a fraction.
-func cohortServer(age time.Duration, siblings int, valueAt func(sibling int, fraction float64) float64) *httptest.Server {
-	end := time.Now().UTC().Add(-age).Unix()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// cohort is the metrics store the check reads. reporting is how long ago the job under test
+// reported its first sample, at fraction 0: the pace its remaining run is told from.
+type cohort struct {
+	*httptest.Server
+	reporting time.Duration
+}
+
+type promSeries struct {
+	Metric map[string]string `json:"metric"`
+	Values [][2]interface{}  `json:"values"`
+}
+
+// ownSeries is what the job under test reported before the sample being checked.
+func (c *cohort) ownSeries(fractionQuery bool) promSeries {
+	v := "0.5"
+	if fractionQuery {
+		v = "0"
+	}
+	return promSeries{Metric: map[string]string{"job_id": "exp-1", "agent_id": "agent-1", "metric_name": "acc"},
+		Values: [][2]interface{}{{time.Now().UTC().Add(-c.reporting).Unix(), v}}}
+}
+
+func (c *cohort) serve(series func(fractionQuery bool) []promSeries) *cohort {
+	c.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = r.ParseForm()
 		fractionQuery := strings.Contains(r.Form.Get("query"), metricsdb.ExperimentMetricFraction)
-		type series struct {
-			Metric map[string]string `json:"metric"`
-			Values [][2]interface{}  `json:"values"`
-		}
-		var result []series
+		result := append(series(fractionQuery), c.ownSeries(fractionQuery))
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}})
+	}))
+	return c
+}
+
+// cohortServer answers the two range queries of the check, value and fraction_complete, with one
+// series per sibling and the job's own. Each sibling reported at every tenth of its run, the last
+// sample `age` ago, and valueAt gives its value at a fraction. The job has reported for an hour.
+func cohortServer(age time.Duration, siblings int, valueAt func(sibling int, fraction float64) float64) *cohort {
+	end := time.Now().UTC().Add(-age).Unix()
+	return (&cohort{reporting: time.Hour}).serve(func(fractionQuery bool) []promSeries {
+		var result []promSeries
 		for i := 0; i < siblings; i++ {
-			s := series{Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"}}
+			s := promSeries{Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"}}
 			for tenth := 1; tenth <= 10; tenth++ {
 				fraction := float64(tenth) / 10
 				v := fraction
@@ -74,27 +100,25 @@ func cohortServer(age time.Duration, siblings int, valueAt func(sibling int, fra
 			}
 			result = append(result, s)
 		}
-		body := map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}}
-		enc, _ := json.Marshal(body)
-		_, _ = w.Write(enc)
-	}))
+		return result
+	})
 }
 
 // cohortSeriesServer is a live cohort whose siblings each held one value all run long.
-func cohortSeriesServer(siblingValues []float64) *httptest.Server {
+func cohortSeriesServer(siblingValues []float64) *cohort {
 	return cohortServer(time.Minute, len(siblingValues), func(i int, _ float64) float64 { return siblingValues[i] })
 }
 
 // staleCohortServer is the same cohort with every sibling's last sample well past
 // underperformSiblingStaleness.
-func staleCohortServer(siblingValues []float64) *httptest.Server {
+func staleCohortServer(siblingValues []float64) *cohort {
 	return cohortServer(2*time.Hour, len(siblingValues), func(i int, _ float64) float64 { return siblingValues[i] })
 }
 
-// admittedAgo is the job under test, admitted that long before now.
-func admittedAgo(d time.Duration) *domain.Experiment {
-	at := time.Now().UTC().Add(-d)
-	return &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", SubmittedAt: &at}
+// theJob is the job under test, admitted a day ago: when it was admitted is no part of its pace.
+func theJob() *domain.Experiment {
+	admitted := time.Now().UTC().Add(-24 * time.Hour)
+	return &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: "pe-1", SubmittedAt: &admitted}
 }
 
 func rankingMetric(key, direction string) []domain.MetricDefinition {
@@ -109,14 +133,15 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
 
 	// A run of 3 minutes: 36 s in at 20%, 54 s at 30%, 72 s at 40%, where under 2 minutes are left.
 	for fraction, elapsed := range map[float64]time.Duration{0.2: 36 * time.Second, 0.3: 54 * time.Second, 0.4: 72 * time.Second} {
-		svc.checkUnderperformance(context.Background(), admittedAgo(elapsed), "acc", fraction, 0.84375, time.Now().UTC())
+		server.reporting = elapsed
+		svc.checkUnderperformance(context.Background(), theJob(), "acc", fraction, 0.84375, time.Now().UTC())
 	}
 
 	if len(notifier.events) != 1 {
@@ -136,12 +161,12 @@ func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
 
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (cohort too small)", len(notifier.events))
@@ -156,12 +181,12 @@ func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
 
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.5, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (siblings all stale, cohort too small)", len(notifier.events))
@@ -176,12 +201,12 @@ func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
 
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.05, 0.01, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.05, 0.01, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (below min fraction)", len(notifier.events))
@@ -198,12 +223,12 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
 
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.5, 0.88, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.88, time.Now().UTC())
 
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (2%% gap against a tied cohort is not a real straggler)", len(notifier.events))
@@ -211,26 +236,29 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 }
 
 // A job about to end gives its agent nothing to save by cancelling it: half done after 20 seconds
-// leaves 20 seconds, less than the agent needs to read the advisory. The same half after an hour
-// leaves an hour, and fires.
+// of reporting leaves 20 seconds, less than the agent needs to read the advisory. The same half
+// after an hour leaves an hour, and fires. The pace is the job's own: how long ago it was
+// admitted says nothing, since a job on a rented machine waits minutes for it to start.
 func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
 	server := cohortSeriesServer([]float64{0.9, 0.85, 0.88})
 	defer server.Close()
 
 	for _, tc := range []struct {
-		admitted time.Duration
-		fraction float64
-		want     int
+		reporting time.Duration
+		fraction  float64
+		want      int
 	}{{20 * time.Second, 0.5, 0}, {time.Hour, 0.5, 1}, {10 * time.Minute, 0.9, 0}, {10 * time.Hour, 0.9, 1}} {
 		notifier := &marks{}
+		job := theJob()
 		svc := &Service{
-			store:        underperformStore{exp: admittedAgo(tc.admitted), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+			store:        underperformStore{exp: job, metrics: rankingMetric("acc", "maximize"), marks: notifier},
 			metricsDBURL: server.URL,
 			logger:       zap.NewNop(),
 		}
-		svc.checkUnderperformance(context.Background(), admittedAgo(tc.admitted), "acc", tc.fraction, 0.5, time.Now().UTC())
+		server.reporting = tc.reporting
+		svc.checkUnderperformance(context.Background(), job, "acc", tc.fraction, 0.5, time.Now().UTC())
 		if len(notifier.events) != tc.want {
-			t.Fatalf("admitted %s ago at fraction %v: events = %d, want %d", tc.admitted, tc.fraction, len(notifier.events), tc.want)
+			t.Fatalf("reporting for %s at fraction %v: events = %d, want %d", tc.reporting, tc.fraction, len(notifier.events), tc.want)
 		}
 	}
 }
@@ -249,11 +277,11 @@ func TestUnderperformanceComparesSiblingsAtTheJobsOwnProgress(t *testing.T) {
 	}{{0.3, 0}, {0.1, 1}} {
 		notifier := &marks{}
 		svc := &Service{
-			store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+			store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 			metricsDBURL: server.URL,
 			logger:       zap.NewNop(),
 		}
-		svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.3, tc.value, time.Now().UTC())
+		svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.3, tc.value, time.Now().UTC())
 		if len(notifier.events) != tc.want {
 			t.Fatalf("value %v at 30%%: events = %d, want %d", tc.value, len(notifier.events), tc.want)
 		}
@@ -263,32 +291,30 @@ func TestUnderperformanceComparesSiblingsAtTheJobsOwnProgress(t *testing.T) {
 // A sibling that has not come as far as the job has nothing to be compared at, so a cohort of
 // such siblings is no cohort.
 func TestUnderperformanceLeavesOutSiblingsBehindTheJob(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
+	server := (&cohort{reporting: time.Hour}).serve(func(fractionQuery bool) []promSeries {
 		v := "0.9"
-		if strings.Contains(r.Form.Get("query"), metricsdb.ExperimentMetricFraction) {
+		if fractionQuery {
 			v = "0.2"
 		}
 		ts := time.Now().UTC().Add(-time.Minute).Unix()
-		var result []map[string]any
+		var result []promSeries
 		for i := 0; i < 4; i++ {
-			result = append(result, map[string]any{
-				"metric": map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"},
-				"values": [][2]interface{}{{ts, v}},
+			result = append(result, promSeries{
+				Metric: map[string]string{"job_id": "sib-" + strconv.Itoa(i), "agent_id": "agent-" + strconv.Itoa(i), "metric_name": "acc"},
+				Values: [][2]interface{}{{ts, v}},
 			})
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}})
-	}))
+		return result
+	})
 	defer server.Close()
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: admittedAgo(time.Hour), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
 		metricsDBURL: server.URL,
 		logger:       zap.NewNop(),
 	}
-	svc.checkUnderperformance(context.Background(), admittedAgo(time.Hour), "acc", 0.6, 0.1, time.Now().UTC())
+	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.6, 0.1, time.Now().UTC())
 	if len(notifier.events) != 0 {
 		t.Fatalf("events = %d, want 0 (no sibling has reached 60%%)", len(notifier.events))
 	}
