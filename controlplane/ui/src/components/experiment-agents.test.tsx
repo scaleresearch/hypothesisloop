@@ -4,7 +4,7 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  startPlatformExperiment, createPlatformExperiment,
+  startPlatformExperiment, createPlatformExperiment, updatePlatformExperiment,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
@@ -13,7 +13,7 @@ import type { AgentSignup, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   apiURL: () => 'http://api.test',
-  createPlatformExperiment: vi.fn(),
+  createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
   fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), startPlatformExperiment: vi.fn(),
 }))
@@ -266,10 +266,11 @@ describe('an experiment the create form went on to run, and the API stopped part
     expect(runFailure('pe-1')).toBeUndefined()
     first.unmount()
 
-    vi.mocked(startPlatformExperiment).mockRejectedValueOnce(new Error('no_agents')).mockResolvedValue()
+    vi.mocked(updatePlatformExperiment).mockRejectedValueOnce(new Error('ends_at is in the past'))
+    vi.mocked(startPlatformExperiment).mockResolvedValue()
     await createAndRun('prj_1', {} as never, 0)
     show()
-    await screen.findByText(/starting it failed\. no_agents/)
+    await screen.findByText(/setting its start time failed\. ends_at is in the past/)
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' }))
     await waitFor(() => expect(screen.queryByText(/is not running as asked/)).toBeNull())

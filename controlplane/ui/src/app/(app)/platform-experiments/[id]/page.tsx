@@ -23,6 +23,7 @@ import {
 import type { StagesStatus } from '@/lib/api'
 import type { PlatformExperiment, AgentQuota, Experiment, AgentMetricSeries } from '@/types'
 import { PlatformExperimentStatus } from '@/types'
+import { Baseline } from '@/components/baseline'
 import { DraftView } from '@/components/draft'
 import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker, MetricSelector, useAgentColorMap } from '@/components/experiment-charts'
 import { ExperimentAgents } from '@/components/experiment-agents'
@@ -55,6 +56,7 @@ const CLOSED_BY_THE_PLATFORM: Partial<Record<NonNullable<PlatformExperiment['clo
   end_time_reached: 'reached its end time',
   planning_limit_reached: 'never ran: its planner proposed nothing within the planning limit',
   proposal_expired: 'never ran: nobody took up its planner\'s answer in time',
+  baseline_limit_reached: 'never ran: no baseline was measured and declared in time',
 }
 
 /** Why a closed experiment closed. Nothing for one closed before reasons were kept. */
@@ -278,6 +280,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
       />
 
       <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
+      <Baseline pe={pe} />
 
       {readOnly && (
         <p role="note" className="-mt-3 mb-4 text-xs text-muted">

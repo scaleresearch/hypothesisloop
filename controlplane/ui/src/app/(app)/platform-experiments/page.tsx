@@ -128,7 +128,7 @@ function PlatformExperimentsPageContent() {
         <CardContent className="grid gap-3">
           {clusters && clustersInUse(clusters).online === 0 && (
             <Callout tone="warning" className="mb-0">
-              No cluster this org can use is online, so a plan&apos;s baseline job would wait. <TextLink href="/cluster">Compute resources</TextLink> shows what is connected.
+              No cluster this org can use is online, so no experiment can be planned or run. <TextLink href="/cluster">Compute resources</TextLink> shows what is connected.
             </Callout>
           )}
           <GoalInput projectID={project.id} onCreated={open} />

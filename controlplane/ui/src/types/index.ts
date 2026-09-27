@@ -215,12 +215,15 @@ export interface PlatformExperiment {
   agent_image?: string
   // Absent when the platform runs no coordinator for it.
   coordinator?: HostedCoordinator
+  // The completed job that measured the baseline. Absent until one is declared, and no
+  // experiment starts without it.
+  baseline_job_id?: string
   // Staff shared it with every account: listed in every project, read by all, written by its own org alone.
   shared: boolean
   // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
   // closed before reasons were kept.
   closed_at?: string
-  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired'
+  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached'
   closed_by?: Actor
   created_at: string
 }

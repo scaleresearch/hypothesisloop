@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/lib/api'
@@ -102,6 +102,39 @@ describe('a shared platform experiment of another org', () => {
         expect(params).toMatchObject({ project_id: 'prj_platform', platform_experiment_id: 'pe-x' })
       }
     }
+  })
+})
+
+// An accepted experiment showed an empty page for as long as its planner's baseline had taken
+// before. No experiment starts without a baseline now, and its page says which side of that it is.
+describe('the baseline of a platform experiment', () => {
+  it('is being prepared while the experiment is open without one, and is the job with what it reported once declared', async () => {
+    const first = show('project=prj_1', {})
+    expect(await screen.findByText(/Preparing the baseline\. No researcher starts/)).toBeTruthy()
+    first.unmount()
+    cleanup()
+
+    const point = (name: string, value: number, basis = 'raw') => ({ experiment_id: 'job-base', fraction_complete: 1, metric_name: name, metric_value: value, metric_basis: basis })
+    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
+    vi.mocked(api.fetchExperimentMetrics).mockResolvedValue([point('val_loss', 2.1), point('val_loss', 1.8), point('exact_match', 1), point('val_loss', 0.2, 'scaled')] as never)
+    show('project=prj_1', {
+      status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-base',
+      metrics: [{ key: 'val_loss', direction: 'minimize' }, { key: 'exact_match', direction: 'maximize', role: 'constraint', bound: 1 }],
+    })
+    const link = await screen.findByRole('link', { name: 'job job-base' })
+    expect(link.getAttribute('href')).toMatch(/\/jobs\/job-base/)
+    await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job job-base: val_loss 1.8, exact_match 1.'))
+    expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
+  })
+
+  it('is not asked for on a running or closed experiment that never had one, and a close for want of one says so', async () => {
+    const first = show('project=prj_1', { status: PlatformExperimentStatus.RUNNING })
+    await screen.findByRole('heading', { name: 'Vision benchmark' })
+    expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
+    first.unmount()
+    cleanup()
+    show('project=prj_1', { status: PlatformExperimentStatus.CLOSED, close_reason: 'baseline_limit_reached' })
+    expect(await screen.findByText('never ran: no baseline was measured and declared in time')).toBeTruthy()
   })
 })
 

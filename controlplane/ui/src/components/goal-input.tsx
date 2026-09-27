@@ -37,7 +37,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
     <div className="grid gap-2">
       <FormField
         label="What do you want to find out?"
-        hint="One sentence is enough. The platform works out how to measure it, runs a baseline and proposes the experiment in about half an hour. Nothing is spent on the run until you accept."
+        hint="One sentence is enough. The platform works out how to measure it and proposes the experiment in a few minutes. Nothing runs and nothing is spent until you accept."
       >
         <Textarea
           rows={3}

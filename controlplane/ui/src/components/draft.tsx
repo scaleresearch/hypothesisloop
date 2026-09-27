@@ -2,42 +2,30 @@
 
 import { useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { fetchExperimentMetrics, fetchPlatformExperimentAgents } from '@/lib/api'
+import { fetchPlatformExperimentAgents } from '@/lib/api'
 import { formatAccH, formatDate, relTime } from '@/lib/format'
-import { abandonDraft, acceptAndStart, draftState, reviseDraft } from '@/lib/planning'
+import { abandonDraft, acceptDraft, draftState, reviseDraft } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
-import type { MetricDataPoint, MetricDefinition } from '@/types'
+import type { MetricDefinition } from '@/types'
 import { actorLabel } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'
-import { Link } from '@/components/ui/link'
 import { PageHeader } from '@/components/ui/page-header'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Pill } from '@/components/ui/text'
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** The last raw value a job reported for each metric key. */
-export function lastReported(points: MetricDataPoint[]): Map<string, number> {
-  const last = new Map<string, number>()
-  for (const point of points) {
-    if (!point.metric_basis || point.metric_basis === 'raw') last.set(point.metric_name, point.metric_value)
-  }
-  return last
-}
-
-function metricLine(metric: MetricDefinition, baseline: Map<string, number> | undefined): string {
-  const value = baseline?.get(metric.key)
-  const measured = value === undefined ? '' : `, baseline ${value}`
+function metricLine(metric: MetricDefinition): string {
   if (metric.role === 'constraint') {
-    return `${metric.key} must stay ${metric.direction === 'minimize' ? 'at or below' : 'at or above'} ${metric.bound}${measured}`
+    return `${metric.key} must stay ${metric.direction === 'minimize' ? 'at or below' : 'at or above'} ${metric.bound}`
   }
-  return `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}${measured}`
+  return `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}`
 }
 
 function Sentences({ title, items }: { title: string; items?: string[] }) {
@@ -52,11 +40,8 @@ function Sentences({ title, items }: { title: string; items?: string[] }) {
   )
 }
 
-/** What the planner proposed, in the order a person decides by: what is measured, on what evidence, at what cost. */
+/** What the planner proposed, in the order a person decides by: what is measured, how, at what cost. Nothing has run. */
 function ProposalCard({ proposal }: { proposal: Proposal }) {
-  // Read from the job itself: the proposal carries no number of its own to trust.
-  const { data: points } = useSWR(['draft-baseline', proposal.baseline_job_id], () => fetchExperimentMetrics(proposal.baseline_job_id))
-  const baseline = points && lastReported(points)
   const metrics = proposal.experiment.metrics ?? []
   return (
     <Card>
@@ -68,7 +53,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           <div className="mb-2 flex flex-wrap gap-2">
             {metrics.map(metric => (
               <Pill key={metric.key} tone={metric.role === 'constraint' ? 'warning' : 'success'} active={metric.role !== 'constraint' && metric.role !== 'attribute'}>
-                {metricLine(metric, baseline)}
+                {metricLine(metric)}
               </Pill>
             ))}
           </div>
@@ -78,8 +63,7 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           <Eyebrow className="mb-1 block">How it is measured</Eyebrow>
           <p className="text-sm">{proposal.measurement}</p>
           <p className="mt-1 text-xs text-muted">
-            The baseline was measured by <Link href={`/jobs/${proposal.baseline_job_id}`} className="text-accent hover:underline">job {proposal.baseline_job_id}</Link>
-            {` on ${proposal.accelerator_type}.`}
+            Nothing has run yet. Once you accept, the baseline is measured on {proposal.accelerator_type} before any researcher starts.
           </p>
         </div>
         <Sentences title="What could mislead" items={proposal.risks} />
@@ -111,8 +95,7 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
     // The researchers proposed keep their flavors; one added beyond them is a generalist.
     const agents = Array.from({ length: count }, (_, i) => proposal.agents[i] ?? {})
     try {
-      // A start the API refused is left to the platform, which starts an accepted draft itself.
-      await acceptAndStart(draft.id, { budget_accelerator_hours: Number(budget), duration_hours: Number(hours), agents })
+      await acceptDraft(draft.id, { budget_accelerator_hours: Number(budget), duration_hours: Number(hours), agents })
       onDone()
     } catch (e) {
       setError(said(e))
@@ -126,7 +109,7 @@ function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal;
       <CardContent className="grid gap-3">
         <p className="text-sm text-muted">
           These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
-          for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the budget caps everything the run spends, with what planning already spent and burst hours included.
+          for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
         </p>
         {proposal.sizing_reason && (
           <div>
@@ -203,7 +186,7 @@ function Planning({ draft, revising }: { draft: Draft; revising: boolean }) {
   return (
     <Callout tone="info">
       <span role="status">
-        {revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this and running a baseline.'} {machine}{' '}
+        {revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this.'} {machine}{' '}
         It has until {formatDate(draft.planning_ends_at)}; a draft with no proposal by then is closed. This page updates by itself.
       </span>
     </Callout>

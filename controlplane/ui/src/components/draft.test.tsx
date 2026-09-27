@@ -2,13 +2,13 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiSend, fetchExperimentMetrics, fetchPlatformExperimentAgents, startPlatformExperiment } from '@/lib/api'
-import { DraftView, lastReported } from '@/components/draft'
+import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
+import { DraftView } from '@/components/draft'
 import { formatDate } from '@/lib/format'
 import { draftState } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, MetricDataPoint } from '@/types'
+import type { AgentSignup } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -16,7 +16,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams('project=prj_1'),
 }))
 vi.mock('@/lib/api', () => ({
-  apiSend: vi.fn(), fetchExperimentMetrics: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), startPlatformExperiment: vi.fn(),
+  apiSend: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
 }))
 
 const proposal: Proposal = {
@@ -32,17 +32,13 @@ const proposal: Proposal = {
   budget_accelerator_hours: 6,
   duration_hours: 4,
   agents: [{ flavor: 'hyperparameter-search' }, {}],
-  baseline_job_id: 'job-base',
   accelerator_type: 'rtx-4090',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
-  sizing_reason: 'The baseline cost 0.1 and took 6 minutes, so 30 trials each for 2 researchers is 6.',
+  sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 researchers is 6.',
   questions: ['Is 4 hours enough?'],
   risks: ['One seed only.'],
 }
-
-const point = (name: string, value: number, basis = 'raw'): MetricDataPoint =>
-  ({ experiment_id: 'job-base', fraction_complete: 1, metric_name: name, metric_value: value, metric_basis: basis }) as MetricDataPoint
 
 function draft(more: Partial<Draft> = {}): Draft {
   return {
@@ -57,8 +53,6 @@ function show(d: Draft) {
 
 beforeEach(() => {
   vi.mocked(apiSend).mockReset().mockResolvedValue({})
-  vi.mocked(startPlatformExperiment).mockReset().mockResolvedValue(undefined)
-  vi.mocked(fetchExperimentMetrics).mockResolvedValue([point('val_loss', 2.1), point('val_loss', 1.8), point('exact_match', 1), point('val_loss', 0.2, 'scaled')])
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
     { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
   ])
@@ -68,7 +62,7 @@ describe('a draft being planned', () => {
   it('says what the planner and its machine are doing and offers nothing to accept', async () => {
     show(draft())
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/working out how to measure this and running a baseline\. Its machine is starting/))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/working out how to measure this\. Its machine is starting/))
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
   })
@@ -83,22 +77,24 @@ describe('a draft being planned', () => {
 describe('a proposed draft', () => {
   const proposed = () => draft({ proposal, proposed_at: '2026-10-05T12:10:00Z' })
 
-  it('shows what is measured with the baseline the job itself reported, and the planner\'s questions first', async () => {
+  // A proposal once waited for a baseline job and showed its numbers. Nothing has run when a
+  // person reads one now, and the page says so in place of a number nobody measured.
+  it('shows what is measured with no value, says nothing has run, and puts the planner\'s questions first', async () => {
     show(proposed())
-    expect(await screen.findByText('val_loss, lower is better, baseline 1.8')).toBeTruthy()
-    expect(screen.getByText('exact_match must stay at or above 1, baseline 1')).toBeTruthy()
+    expect(await screen.findByText('val_loss, lower is better')).toBeTruthy()
+    expect(screen.getByText('exact_match must stay at or above 1')).toBeTruthy()
+    expect(screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090 before any researcher starts/)).toBeTruthy()
+    expect(screen.getByText(/the figures are an estimate, since nothing has run, and the budget is a cap/)).toBeTruthy()
+    expect(screen.queryByText(/baseline 1/)).toBeNull()
     expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()
     expect(within(screen.getByText('Why this size').parentElement!).getByText(/30 trials each for 2 researchers is 6/)).toBeTruthy()
     expect(screen.getByText('Validation loss on held-out text is the goal itself.')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'job job-base' }).getAttribute('href')).toMatch(/\/jobs\/job-base/)
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('reads the last raw value of each key', () => {
-    expect(Array.from(lastReported([point('a', 1), point('a', 2), point('a', 9, 'scaled'), point('b', 3)]))).toEqual([['a', 2], ['b', 3]])
-  })
-
-  it('accepts at the cost the person states, keeps the proposed flavors, and starts it', async () => {
+  // The page once started the experiment right after accepting it. The platform starts it,
+  // once its baseline is declared: accepting is the one call.
+  it('accepts at the cost the person states, keeps the proposed flavors, and starts nothing', async () => {
     show(proposed())
     const budget = screen.getByLabelText('Budget (accelerator-hours)')
     expect(budget).toHaveProperty('value', '6')
@@ -111,15 +107,13 @@ describe('a proposed draft', () => {
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
       budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}, {}],
     })
-    await waitFor(() => expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1'))
   })
 
-  it('does not start what the API refused to accept, and says why', async () => {
+  it('says why the API refused to accept', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('agents: propose between 1 and 24 researchers, got 30'))
     show(proposed())
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/between 1 and 24/)
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
   })
 
   it('asks for a change in a sentence', async () => {

@@ -1,4 +1,4 @@
-import { apiSend, startPlatformExperiment } from '@/lib/api'
+import { apiSend } from '@/lib/api'
 import type { Actor, MetricDefinition, PlatformExperiment } from '@/types'
 
 /** One researcher of a proposal or of an acceptance. */
@@ -21,7 +21,6 @@ export interface Proposal {
   budget_accelerator_hours: number
   duration_hours: number
   agents: ProposedAgent[]
-  baseline_job_id: string
   // The type the jobs are sized for: an accelerator, or CPU cores (units.CPU_TYPE) for work that needs none.
   accelerator_type: string
   metric_reason: string
@@ -74,18 +73,11 @@ export function reviseDraft(id: string, message: string): Promise<Draft> {
 }
 
 /**
- * Accepts a draft's proposal and starts the experiment. Accepted, it is an open experiment with
- * its coordinator and researchers, which the platform also starts by itself within its sweep,
- * so a start that fails here is reported and loses nothing.
+ * Accepts a draft's proposal. Accepted, it is an open experiment with its coordinator and
+ * researchers, which the platform starts by itself once its baseline is measured and declared.
  */
-export async function acceptAndStart(id: string, acceptance: Acceptance): Promise<{ startFailure?: string }> {
+export async function acceptDraft(id: string, acceptance: Acceptance): Promise<void> {
   await apiSend<Draft>('POST', `/platform-experiments/${id}/accept`, acceptance)
-  try {
-    await startPlatformExperiment(id)
-  } catch (error) {
-    return { startFailure: error instanceof Error ? error.message : String(error) }
-  }
-  return {}
 }
 
 /** What a draft is waiting for. */

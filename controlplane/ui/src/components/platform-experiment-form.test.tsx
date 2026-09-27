@@ -111,7 +111,7 @@ describe('a repository that brings its own experiment', () => {
 })
 
 describe('a new platform experiment with hosted agents', () => {
-  it('is created with its repository and a hosted coordinator, given its researchers and started', async () => {
+  it('is created with its repository and a hosted coordinator, given its researchers and its start time', async () => {
     show()
     await essentials({ repository: 'acme/widgets' })
     await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
@@ -129,7 +129,9 @@ describe('a new platform experiment with hosted agents', () => {
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].max_agents).toBe(3)
     expect(new Date(vi.mocked(createPlatformExperiment).mock.calls[0][1].ends_at!).getTime()).toBeLessThan(Date.now() + 3 * 86_400_000)
     expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(3)
-    expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new')
+    // The platform starts it, once its coordinator declared a baseline.
+    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new', { starts_at: expect.any(String) })
+    expect(startPlatformExperiment).not.toHaveBeenCalled()
   })
 
   // Hosting needed a repository named, so a person with an idea and no repository could not start.
