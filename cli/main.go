@@ -100,6 +100,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdHypothesis(client, rest, stdout, stderr)
 	case "job":
 		return runGroup("job", jobCommands, client, rest, stdout, stderr)
+	case "repo":
+		return runGroup("repo", repoCommands, client, rest, stdout, stderr)
 	case "org":
 		return runGroup("org", orgCommands, client, rest, stdout, stderr)
 	case "project":
@@ -126,6 +128,7 @@ const usage = `usage: hl <command> ...
   git-credential        git's credential helper for your experiment's repository; git runs it
   hypothesis            submit | link | comment | status | list | get | query
   job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
+  repo                  init | check: the files every experiment's repository holds
   org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
   project               list | create NAME | rename NAME
   api-key               create NAME | list | revoke ID
