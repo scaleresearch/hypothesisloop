@@ -223,7 +223,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			MaxPerDayPerOrg:           pcfg.Planning.MaxPerDayPerOrg,
 		})
 
-	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentRouter := newSchedulerParts(runCtx, gate, gitHost, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see services/registry/watch.go.
@@ -311,7 +311,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the pieces newAPIServer mounts: the handler goes on the shared API doc, the cluster-agent
 // router under its own prefix.
-func newSchedulerParts(runCtx context.Context, gate apiGate, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
+func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, chi.Router) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	// jwc is workload.Backend; swap this line to plug in a different scheduling mechanism
@@ -342,7 +342,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, pool *db.Pool, stor
 		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
 	}
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, graph, settler, grace, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, jwc, noveltyDetector, graph, gitHost, settler, grace, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 

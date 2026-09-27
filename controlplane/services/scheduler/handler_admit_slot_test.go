@@ -75,7 +75,7 @@ func (w *admitWorkload) CreateWorkload(_ context.Context, exp *domain.Experiment
 }
 
 func admitHandler(store *admitStore, workload *admitWorkload) *Handler {
-	return NewHandler(admissionsUnrecorded(NewService(store, nil, workload, nil, nil, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop())).WithLoop(noopLoop{}))
+	return NewHandler(admissionsUnrecorded(NewService(store, nil, workload, nil, nil, testCodeHost{}, noopSettler{}, testGraceLimits, "http://metrics.invalid", zap.NewNop())).WithLoop(noopLoop{}))
 }
 
 func queued(exp *domain.Experiment) *domain.Experiment {

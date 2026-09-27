@@ -84,7 +84,7 @@ func (poolOnlyStore) GetRunningAndQueued(_ context.Context) ([]*domain.Experimen
 }
 
 func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning}, nil
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
 }
 func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
@@ -105,6 +105,13 @@ type oneHypothesis struct {
 
 func (s oneHypothesis) GetHypothesis(_ context.Context, _ string) (*domain.Hypothesis, error) {
 	return s.h, nil
+}
+
+// testCodeHost serves each repository under https://example.com/.
+type testCodeHost struct{}
+
+func (testCodeHost) Serves(repository, protocol, host, path string) bool {
+	return protocol+"://"+host+path == "https://example.com/"+repository
 }
 
 func humanIdeaSubmission() *domain.Experiment {
@@ -132,7 +139,7 @@ func humanHypothesis(platformExperimentID string) oneHypothesis {
 // fights the pool's dedup and splits one claim's evidence across two rows, so the binding must
 // admit a job against a human row exactly as it does against an agent's.
 func TestSubmitAdmitsAnAgentsJobAgainstAHumanSubmittedHypothesis(t *testing.T) {
-	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 
 	err := s.Submit(context.Background(), humanIdeaSubmission())
 	if !errors.Is(err, errReachedScoring) {
@@ -140,11 +147,44 @@ func TestSubmitAdmitsAnAgentsJobAgainstAHumanSubmittedHypothesis(t *testing.T) {
 	}
 }
 
+type bareStore struct{ poolOnlyStore }
+
+func (bareStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning}, nil
+}
+
+// A job runs a commit of its platform experiment's repository. A code_ref that names any other
+// address used to be stored as it was, and the job then cloned whatever it named.
+func TestSubmitRefusesACodeRefThatIsNotTheExperimentsRepository(t *testing.T) {
+	sha := "@" + strings.Repeat("a", 40)
+	for name, address := range map[string]string{
+		"another repository of the host": "https://example.com/other.git",
+		"another host":                   "https://elsewhere.example/repo.git",
+		"another scheme":                 "git://example.com/repo.git",
+		"a credential in the address":    "https://agent:secret@example.com/repo.git",
+		"no address of any host":         "git://hypothesisloop",
+	} {
+		s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+		exp := humanIdeaSubmission()
+		exp.CodeRef = address + sha
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonCodeRefNotInRepository ||
+			!strings.Contains(refused.Message, "https://example.com/repo.git@<commit-sha>") || strings.Contains(refused.Message, "secret") {
+			t.Errorf("%s: got = %v, want %s naming the repository", name, err, ReasonCodeRefNotInRepository)
+		}
+	}
+	s := &Service{codeHost: testCodeHost{}, store: bareStore{}, hypotheses: humanHypothesis("pe-1")}
+	var refused *AdmissionError
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != ReasonCodeRefNotInRepository {
+		t.Errorf("an experiment from before every one had a repository: got = %v, want %s", err, ReasonCodeRefNotInRepository)
+	}
+}
+
 // Quota is debited from, and standings are ranked by, the experiment's own agent_id. Nothing
 // about the hypothesis reaches those paths except its text, so a human author cannot acquire a
 // budget or a placement by having an agent run its idea — the run is the agent's.
 func TestSubmitAgainstAHumanHypothesisLeavesTheRunningAgentAsTheJobsOnlyOwner(t *testing.T) {
-	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 
 	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
@@ -162,7 +202,7 @@ func TestSubmitAgainstAHumanHypothesisLeavesTheRunningAgentAsTheJobsOnlyOwner(t 
 // belong to the job's own platform experiment, or a job could point at another program's idea
 // pool and contaminate that program's scope and ranking.
 func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t *testing.T) {
-	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-other")}
+	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-other")}
 
 	err := s.Submit(context.Background(), humanIdeaSubmission())
 	var admission *AdmissionError
@@ -183,7 +223,7 @@ func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string
 // A job that completed during the agent's turn is unknown to it, so the submit is not refused: it
 // goes on to be queued, saying at once what holds it.
 func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
-	s := &Service{store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{codeHost: testCodeHost{}, store: unsummarizedStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 
 	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
@@ -201,7 +241,7 @@ func (openStore) GetPlatformExperiment(_ context.Context, id string) (*domain.Pl
 }
 
 func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
-	s := &Service{store: openStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{codeHost: testCodeHost{}, store: openStore{}, hypotheses: humanHypothesis("pe-1")}
 
 	// An incomplete spec too: the start is what the agent must wait for, before any field.
 	incomplete := humanIdeaSubmission()
@@ -245,7 +285,7 @@ func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, false},
 	} {
 		store := &finishedJobStore{}
-		s := &Service{store: store, hypotheses: oneHypothesis{h: &tc.h}}
+		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
 		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {
 			t.Fatalf("%+v: the finding was filed by %+v, want the credential that sent it", tc.h, store.filedBy)
@@ -281,7 +321,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 		"cut agent":                  {cutStore{}, "agent_held"},
 		"finished agent":             {finishedStore{}, "agent_finished"},
 	} {
-		s := &Service{store: tc.store, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{codeHost: testCodeHost{}, store: tc.store, hypotheses: humanHypothesis("pe-1")}
 		var admission *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != tc.reason {
 			t.Errorf("%s: got = %v, want a refusal with reason %s", name, err, tc.reason)
@@ -294,7 +334,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 func TestSubmitAnswersAHypothesisElsewhereAsItDoesAnAbsentOne(t *testing.T) {
 	refusal := func(hypotheses oneHypothesis) *AdmissionError {
 		t.Helper()
-		s := &Service{store: poolOnlyStore{}, hypotheses: hypotheses}
+		s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: hypotheses}
 		var admission *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &admission) {
 			t.Fatalf("got = %v, want an AdmissionError", err)
@@ -332,7 +372,7 @@ func (n *recordingNovelty) ComputeNovelty(_ context.Context, _ string, existing 
 // another's jobs may be another org's.
 func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {
 	novelty := &recordingNovelty{}
-	s := &Service{store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
+	s := &Service{codeHost: testCodeHost{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novelty}
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("Submit: got = %v, want it to reach novelty scoring", err)
 	}
@@ -344,7 +384,7 @@ func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing
 // Everything after Submit's first line reads exp.Job: the store that writes job_spec, the answer
 // of POST /experiments, the events of the job. The secret has to be off it by then.
 func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
-	s := &Service{store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
 
@@ -383,7 +423,7 @@ func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, expe
 // A job has one summary. A second one is the caller's to stop sending, so it is a 409 with a
 // reason to branch on and none of the store's text.
 func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
-	s := &Service{store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
+	s := &Service{codeHost: testCodeHost{}, store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
 	_, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, "again")
 	refusal := admissionStatusError(err)
 	if refusal == nil || refusal.GetStatus() != http.StatusConflict {

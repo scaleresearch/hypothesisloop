@@ -105,6 +105,12 @@ type HypothesisStore interface {
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
 }
 
+// CodeHost is the deployment's git host as admission asks it (githost.Provider): whether an
+// address is that of a repository it knows by name.
+type CodeHost interface {
+	Serves(repository, protocol, host, path string) bool
+}
+
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
 	store        Store
@@ -112,6 +118,7 @@ type Service struct {
 	workload     WorkloadClient
 	novelty      NoveltyDetector
 	hypotheses   HypothesisStore
+	codeHost     CodeHost
 	weights      domain.SchedulingWeights
 	credits      domain.QuotaConfig
 	loop         Triggerable
@@ -137,6 +144,7 @@ func NewService(
 	workload WorkloadClient,
 	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
+	codeHost CodeHost,
 	settler QuotaSettler,
 	grace domain.GraceLimits,
 	metricsDBURL string,
@@ -145,8 +153,8 @@ func NewService(
 	if settler == nil {
 		panic("scheduler: NewService requires a quota settler — it is the only path terminal usage is written by")
 	}
-	if metricsDBURL == "" || logger == nil {
-		panic("scheduler: NewService requires the metrics store URL and a logger")
+	if codeHost == nil || metricsDBURL == "" || logger == nil {
+		panic("scheduler: NewService requires the git host, the metrics store URL and a logger")
 	}
 	return &Service{
 		store:        store,
@@ -154,6 +162,7 @@ func NewService(
 		workload:     workload,
 		novelty:      novelty,
 		hypotheses:   hypotheses,
+		codeHost:     codeHost,
 		settler:      settler,
 		grace:        grace,
 		metricsDBURL: metricsDBURL,

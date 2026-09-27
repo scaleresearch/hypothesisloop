@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -11,6 +12,24 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
+
+// ReasonCodeRefNotInRepository refuses a job whose code is not a commit of its platform
+// experiment's repository.
+const ReasonCodeRefNotInRepository = "code_ref_not_in_repository"
+
+// codeInRepository checks that a code_ref, already shaped <address>@<sha>, names the repository
+// of its platform experiment as the git host serves it, with no credential in the address: a
+// code_ref is stored and shown.
+func (s *Service) codeInRepository(pe *domain.PlatformExperiment, codeRef string) error {
+	address := codeRef[:strings.LastIndex(codeRef, "@")]
+	if pe.Repository == "" {
+		return &AdmissionError{Reason: ReasonCodeRefNotInRepository, Message: fmt.Sprintf("platform experiment %s names no repository, so it has no code a job could run: create a platform experiment, which has one", pe.ID)}
+	}
+	if u, err := url.Parse(address); err == nil && u.User == nil && s.codeHost.Serves(pe.Repository, u.Scheme, u.Host, u.Path) {
+		return nil
+	}
+	return &AdmissionError{Reason: ReasonCodeRefNotInRepository, Message: fmt.Sprintf("code_ref must be a commit of the platform experiment's repository, %s@<commit-sha>, and it names another address: push your commit there and submit from your clone with code_ref left empty, which fills it in", pe.RepositoryURL)}
+}
 
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
@@ -53,6 +72,9 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 
 	// 2. Structural validation.
 	if err := ValidateExperiment(exp, s.credits); err != nil {
+		return err
+	}
+	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
 		return err
 	}
 

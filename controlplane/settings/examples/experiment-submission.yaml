@@ -162,8 +162,10 @@ metadata:
   hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
   theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
 
-  # code_ref: required, and format-validated (<git-remote-url>@<40-hex-commit-sha>) — the
-  # reproducibility pointer every lineage/summary read relies on.
+  # code_ref: required: the platform experiment's repository at a commit,
+  # <repository_url>@<40-hex-commit-sha>, the reproducibility pointer every lineage/summary read
+  # relies on. Any other address is refused (code_ref_not_in_repository). hl job submit fills it
+  # from the clone it is run in when it is left out.
   # config_hash/data_ref: optional reproducibility pointers — not resource specs, just references
   # the training code already knows how to resolve (a hash of the resolved hyperparameter config,
   # wherever the input dataset actually lives). Pure bookkeeping: stored and returned verbatim,
