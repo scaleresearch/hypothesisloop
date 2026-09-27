@@ -3,10 +3,10 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 {start} the start_ section of the agent's role.
 
 ==== workspace
-clone {repository_url} into {workdir}, the directory you start in, where
-     every command starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}`: {start}
-     `git push` is authorized: push that branch and no other. It is the purge-safe home for
-     your workload code, harnesses, job specs and Dockerfiles.
+run `git clone {repository_url} .` in {workdir}, the directory you start
+     in and every command starts in again, and work on branch `hl/{platform_experiment_id}/{agent_id}`: {start}
+     `git push` needs no setup, git has your credential: push that branch and no other. It is
+     the purge-safe home for your code, harnesses and job specs.
 ==== start_planner
 create it off
      the default branch, check it out after a restart, and never commit to the default branch.
@@ -34,8 +34,8 @@ create it off
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  3. To read what the agents start from, clone {repository_url} into {workdir},
-     the directory you start in: when it has them,
+  3. To read what the agents start from, run `git clone {repository_url} .` in
+     {workdir}, the directory you start in: when it has them,
      `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
      base job spec. Each agent pushes its own branch `hl/{platform_experiment_id}/<its id>`. Your access to
      the repository is read-only. You push nothing, and nothing you write locally outlives

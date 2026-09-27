@@ -74,7 +74,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_renders_with_the_rules_the_commands_and_its_assignment(self):
         prompt = self.render()
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
-        self.assertIn("clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", " ".join(prompt.split()))
+        self.assertIn("run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", " ".join(prompt.split()))
         self.assertIn("(:Objective {id:'pe-1'})", prompt)
         self.assertIsNone(re.search(r"\{[a-z_]+\}", prompt), "a placeholder was left unfilled")
 

@@ -35,7 +35,7 @@ class PlannerPromptTest(unittest.TestCase):
     def test_the_planners_code_goes_to_the_drafts_repository(self):
         prompt = self.render()
         flat = " ".join(prompt.split())
-        self.assertIn("Where it is kept: clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", flat)
+        self.assertIn("Where it is kept: run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
         self.assertIn("work on branch `hl/pe-1/ag-planner`: create it off the default branch", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
         # What a researcher is told of the others' branches is not true of a planner, whose

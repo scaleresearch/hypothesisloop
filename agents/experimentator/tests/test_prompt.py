@@ -20,8 +20,11 @@ class SystemPromptTest(unittest.TestCase):
             flat = " ".join(prompt.split())
             # Five of six hosted agents cloned into /tmp and then fought the working directory
             # every command starts in.
-            self.assertIn("clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", flat)
+            self.assertIn("run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
             self.assertIn("work on branch `hl/pe-1/agent-a`", flat)
+            # One agent cloned into a subdirectory and one into the workspace, so their paths
+            # differed, and one set up a credential helper the image already has.
+            self.assertIn("`git push` needs no setup, git has your credential", flat)
             # Told to branch off the default branch, a researcher never met the planner's seed,
             # and the `hl-clone` a brief sent it to leaves a directory with no origin to push to.
             self.assertIn("create it off the commit after `@` in the description's BASELINE `code_ref` "
