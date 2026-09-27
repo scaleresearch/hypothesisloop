@@ -65,3 +65,29 @@ func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {
 		t.Errorf("pre-existing fields regressed: message=%q restart_count=%d", row.Message, row.RestartCount)
 	}
 }
+
+// PhaseReportedSince asks for the first row of one attempt under one reason, and an attempt that
+// never reported the reason, which the store answers with a null, is not found.
+func TestPhaseReportedSinceIsTheFirstReportOfTheReasonInTheAttempt(t *testing.T) {
+	answer := `[[1791288271695]]`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		sql := r.Form.Get("sql")
+		for _, want := range []string{"MIN(ts)", "experiment_id = 'exp-1'", "cluster_name = 'cluster-a'", "attempt = 2", "reason = 'instance_starting'"} {
+			if !strings.Contains(sql, want) {
+				t.Errorf("query lacks %q: %s", want, sql)
+			}
+		}
+		_, _ = fmt.Fprintf(w, `{"output":[{"records":{"schema":{"column_schemas":[{"name":"min(job_phase_detail.ts)"}]},"rows":%s}}]}`, answer)
+	}))
+	defer server.Close()
+
+	since, found, err := PhaseReportedSince(context.Background(), server.URL, "exp-1", "cluster-a", 2, "instance_starting")
+	if err != nil || !found || !since.Equal(time.UnixMilli(1791288271695)) {
+		t.Fatalf("since = %v, found = %v, err = %v, want the first report's time", since, found, err)
+	}
+	answer = `[[null]]`
+	if _, found, err := PhaseReportedSince(context.Background(), server.URL, "exp-1", "cluster-a", 2, "instance_starting"); err != nil || found {
+		t.Fatalf("found = %v, err = %v, want not found for a reason never reported", found, err)
+	}
+}

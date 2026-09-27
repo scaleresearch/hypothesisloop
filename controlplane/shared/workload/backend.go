@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -27,6 +28,10 @@ type Backend interface {
 	// (scheduledNodes, schedulingReason — autoscaler.md). found=false means no runtime has
 	// reported one yet.
 	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
+
+	// PhaseReportedSince is when exp's current attempt first reported reason as its phase detail.
+	// found=false means it never did.
+	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
 
 	// GetAdmittedAcceleratorType reports which accelerator type the job actually ran on. Backends that can
 	// substitute a different flavor than requested should read that back here.

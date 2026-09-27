@@ -117,8 +117,14 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// Not for a RUNNING job: its placement is over, and the deadline counts from submitted_at, so
 	// a pod being recreated hours in would evict it at once.
 	bound := found && scheduledNodes >= int32(exp.Job.Nodes())
+	// What a job that has not landed waits for, in its runtime's word. A landed job waits for
+	// nothing the stuck-pending deadline counts from.
+	waitingFor := ""
+	if !bound {
+		waitingFor = reason
+	}
 	if exp.Status != domain.StatusRunning && !bound {
-		evicted, err := w.checkScaleUpDeadline(ctx, exp, schedulingReason, autoscalerEnabled, clusterIDs)
+		evicted, err := w.checkScaleUpDeadline(ctx, exp, waitingFor, schedulingReason, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
 		}
@@ -138,7 +144,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// A bound job is past the placement deadline above, and a cluster that stops reporting
 		// never yields a phase to act on, so the admission deadline is its only bound.
 		if exp.Status != domain.StatusRunning && bound {
-			if deadlineErr := w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionStuckPending); deadlineErr != nil {
+			if deadlineErr := w.evictIfStuckPending(ctx, exp, waitingFor, clusterIDs, domain.EvictionStuckPending); deadlineErr != nil {
 				return deadlineErr
 			}
 		}
@@ -175,7 +181,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, triedClusterID)
 			return nil
 		case runningTypeUnobservable:
-			return w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionAcceleratorTypeUnobservable)
+			return w.evictIfStuckPending(ctx, exp, waitingFor, clusterIDs, domain.EvictionAcceleratorTypeUnobservable)
 		default:
 			return fmt.Errorf("unknown running outcome %d", outcome)
 		}
@@ -190,12 +196,12 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// Gone keeps its own existing handling, unchanged: the placement-deadline check above
 		// only fires while scheduledNodes < Nodes(), so a fully-bound job that then vanishes
 		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
-		return w.evictIfStuckPending(ctx, exp, clusterIDs, domain.EvictionStuckPending)
+		return w.evictIfStuckPending(ctx, exp, waitingFor, clusterIDs, domain.EvictionStuckPending)
 	case workload.JobPhasePending:
 		// An unbound job is under the placement deadline above. A bound one the runtime reports
 		// as pending is starting, which includes pulling its image, and gets the start timeout.
 		if exp.Status != domain.StatusRunning && bound {
-			return w.evictIfPastDeadline(ctx, exp, w.startTimeout, domain.EvictionStuckPending)
+			return w.evictIfPastDeadline(ctx, exp, waitingFor, w.startTimeout, domain.EvictionStuckPending)
 		}
 		return nil
 	default:

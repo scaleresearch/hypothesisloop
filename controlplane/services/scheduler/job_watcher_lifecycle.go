@@ -26,11 +26,35 @@ func startOverdue(exp *domain.Experiment) time.Duration {
 	return time.Since(*exp.SubmittedAt) - time.Duration(window)*time.Second
 }
 
+// stuckPendingOverdue is how far past timeout the wait of a job that has not landed has run.
+// waitingFor is what its runtime reports it waits for, and the wait counts from the runtime's
+// first report of that in this attempt: a runtime that rents machines says first that it waits
+// for one and then that the one it rented is starting, each a wait of its own, and a deadline
+// counted from admission through both ends a machine that was found late while it starts. The
+// first report of a reason never moves, so a job gets one timeout for each thing it waits for,
+// however it goes between them. A runtime that reports no reason is judged from admission.
+//
+// The first report is read only for a job already past the deadline counted from admission.
+func (w *JobWatcher) stuckPendingOverdue(ctx context.Context, exp *domain.Experiment, waitingFor string, timeout time.Duration) (time.Duration, error) {
+	overdue := startOverdue(exp) - timeout
+	if overdue <= 0 || waitingFor == "" {
+		return overdue, nil
+	}
+	since, found, err := w.backend.PhaseReportedSince(ctx, exp, waitingFor)
+	if err != nil {
+		return 0, fmt.Errorf("first report of %s: %w", waitingFor, err)
+	}
+	if !found {
+		return overdue, nil
+	}
+	return min(overdue, time.Since(since)-timeout), nil
+}
+
 // evictIfPastDeadline evicts a job that has stayed pre-RUNNING for longer than timeout, with the
 // reason naming what actually failed to resolve. Called only for experiments still in SUBMITTED,
 // from the one place that has just observed why the lifecycle could not advance, so none of those
 // states can hold a reservation indefinitely.
-func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experiment, timeout time.Duration, reason domain.EvictionReason) error {
+func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experiment, waitingFor string, timeout time.Duration, reason domain.EvictionReason) error {
 	if timeout <= 0 {
 		return nil
 	}
@@ -40,7 +64,11 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 		// skipping is what makes a job immortal — surface it instead.
 		return fmt.Errorf("experiment %s is %s with no submission time", exp.ID, exp.Status)
 	}
-	if startOverdue(exp) <= timeout {
+	overdue, err := w.stuckPendingOverdue(ctx, exp, waitingFor, timeout)
+	if err != nil {
+		return err
+	}
+	if overdue <= 0 {
 		return nil
 	}
 	w.logger.Warn("job_watcher: admission deadline passed, evicting",
@@ -85,7 +113,7 @@ func (w *JobWatcher) stuckPendingTimeoutFor(ctx context.Context, exp *domain.Exp
 // timeout. A timeout that cannot be read is an error and no eviction: the global value might
 // evict a job its cluster gives longer to. A cluster that reports no id this pass is no error,
 // the decision waits for a pass in which it does.
-func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experiment, clusterIDs map[string]string, reason domain.EvictionReason) error {
+func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experiment, waitingFor string, clusterIDs map[string]string, reason domain.EvictionReason) error {
 	timeout, err := w.stuckPendingTimeoutFor(ctx, exp, clusterIDs)
 	if errors.Is(err, errClusterNotReporting) {
 		return nil
@@ -93,7 +121,7 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 	if err != nil {
 		return fmt.Errorf("stuck-pending timeout: %w", err)
 	}
-	return w.evictIfPastDeadline(ctx, exp, timeout, reason)
+	return w.evictIfPastDeadline(ctx, exp, waitingFor, timeout, reason)
 }
 
 // checkScaleUpDeadline evicts exp if its gang has not fully bound (called only while
@@ -105,9 +133,10 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 // scale_up_timeout — an infrastructure fault like any other: the job is requeued on its
 // infrastructure allowance and the cluster goes into its tried list, so it is placed elsewhere
 // next and cannot go round slow clusters for ever. On every other cluster (or when this deployment never called WithScaleUpTimeout), the
-// deadline is that cluster's stuck-pending timeout (stuckPendingTimeoutFor) and the reason is
+// deadline is that cluster's stuck-pending timeout (stuckPendingTimeoutFor), counted from when
+// the wait the runtime reports began (stuckPendingOverdue), and the reason is
 // EvictionStuckPending.
-func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
+func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, waitingFor, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
 	if exp.SubmittedAt == nil {
 		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
@@ -163,7 +192,16 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	if timeout <= 0 {
 		return false, nil
 	}
-	if startOverdue(exp) <= timeout {
+	overdue := startOverdue(exp) - timeout
+	if !onAutoscalerCluster {
+		var err error
+		if overdue, err = w.stuckPendingOverdue(ctx, exp, waitingFor, timeout); err != nil {
+			w.logger.Warn("job_watcher: start of the reported wait unreadable, placement deadline not judged this pass",
+				zap.String("id", exp.ID), zap.Error(err))
+			return false, nil
+		}
+	}
+	if overdue <= 0 {
 		return false, nil
 	}
 	w.logger.Warn("job_watcher: placement deadline passed, evicting",

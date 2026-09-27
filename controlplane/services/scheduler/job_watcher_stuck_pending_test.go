@@ -104,6 +104,40 @@ func TestAClustersOwnStuckPendingTimeoutReplacesTheGlobalOne(t *testing.T) {
 	}
 }
 
+// A runtime that rents machines reports first that the job waits for one and then that the one
+// it rented is starting. Each is a wait of its own under the cluster's timeout, counted from the
+// runtime's first report of it, so a machine found late is given its time to start. Going back
+// to a wait already reported does not start it again.
+func TestAStuckPendingDeadlineCountsFromTheWaitTheRuntimeReports(t *testing.T) {
+	const timeout = 5 * time.Minute
+	ago := func(d time.Duration) time.Time { return time.Now().Add(-d) }
+	for name, tc := range map[string]struct {
+		reason        string
+		firstReported map[string]time.Time
+		phase         workload.JobPhase
+		evicted       bool
+	}{
+		"machine rented late and starting":          {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhasePending, false},
+		"its machine is being replaced":             {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhaseGone, false},
+		"starting for longer than the timeout":      {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(6 * time.Minute)}, workload.JobPhasePending, true},
+		"back to a wait first reported long ago":    {domain.PhaseReasonWaitingForOffer, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhasePending, true},
+		"no reason reported: counts from admission": {"", map[string]time.Time{"": ago(time.Minute)}, workload.JobPhasePending, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &settingsStore{lifecycleStore: &lifecycleStore{}}
+			backend := &scaleUpBackend{phase: tc.phase, scheduledNodes: 0, clusterIDs: clusterA, reason: tc.reason, firstReported: tc.firstReported}
+			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(timeout)
+
+			if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 8*time.Minute), nil, clusterA); err != nil {
+				t.Fatal(err)
+			}
+			if evicted := len(store.terminalReasons) == 1; evicted != tc.evicted {
+				t.Fatalf("terminalReasons = %v, want evicted=%v", store.terminalReasons, tc.evicted)
+			}
+		})
+	}
+}
+
 // The scale-up deadline of an autoscaler cluster is a separate setting with its own failover. A
 // stuck-pending override on the same cluster does not stretch it.
 func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {

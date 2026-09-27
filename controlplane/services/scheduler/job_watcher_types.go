@@ -72,6 +72,9 @@ type JobBackendClient interface {
 	// domain.PhaseDetail), plus the gang-readiness facts checkScaleUpDeadline needs.
 	// found=false means no runtime has reported one yet.
 	PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
+	// PhaseReportedSince is when exp's current attempt first reported reason. found=false means
+	// it never did.
+	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)
 	// GetAutoscalerCapability reports, per cluster (by cluster_name), whether it sits behind a
 	// native autoscaler — see queuebackend.Backend.GetAutoscalerCapability.
 	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
@@ -91,6 +94,8 @@ type JobWatcher struct {
 	// stuckPendingTimeout bounds how long a job may stay SUBMITTED without reporting
 	// RUNNING before it is evicted with reason stuck_pending and fully refunded. It is the global
 	// value; a cluster with its own in the cluster's settings is judged by that, see stuckPendingTimeoutFor.
+	// For a job that has not landed it counts from when the wait its runtime reports began, see
+	// stuckPendingOverdue.
 	stuckPendingTimeout time.Duration
 	// startTimeout bounds how long a placed job the runtime reports as pending may take to start.
 	startTimeout time.Duration

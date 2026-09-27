@@ -83,6 +83,11 @@ func (b *Backend) PollPhaseDetail(ctx context.Context, exp *domain.Experiment) (
 	return row.Reason, row.Message, row.RestartCount, row.ScheduledNodes, row.SchedulingReason, true, nil
 }
 
+// PhaseReportedSince is when exp's current attempt on its cluster first reported reason.
+func (b *Backend) PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (time.Time, bool, error) {
+	return metricsdb.PhaseReportedSince(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount, reason)
+}
+
 // GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.
 //
 // The lookback is clamped to the time since submitted_at, which Postgres rewrites on every

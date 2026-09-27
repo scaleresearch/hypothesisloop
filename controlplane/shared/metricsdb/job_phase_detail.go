@@ -105,6 +105,32 @@ func GetLatestPhaseDetailFull(ctx context.Context, dbURL, experimentID, clusterN
 	return phaseDetailRowFromColumns(rows[0]), true, nil
 }
 
+// PhaseReportedSince is when experimentID's attempt on clusterName first reported reason. Every
+// status push adds a row, so the first one under a reason is when the runtime began to say it,
+// and a job that goes back and forth between two reasons does not move either's beginning.
+// found=false means the attempt never reported it.
+func PhaseReportedSince(ctx context.Context, dbURL, experimentID, clusterName string, attempt int, reason string) (time.Time, bool, error) {
+	if experimentID == "" {
+		return time.Time{}, false, fmt.Errorf("metricsdb.PhaseReportedSince: experiment_id is required")
+	}
+	querySQL := fmt.Sprintf(
+		`SELECT MIN(ts) FROM job_phase_detail WHERE experiment_id = %s AND cluster_name = %s AND attempt = %d AND reason = %s`,
+		sqlQuote(experimentID), sqlQuote(clusterName), attempt, sqlQuote(reason),
+	)
+	rows, err := querySQLRows(ctx, dbURL, querySQL)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("metricsdb.PhaseReportedSince: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) != 1 || rows[0][0] == nil {
+		return time.Time{}, false, nil
+	}
+	millis, ok := rows[0][0].(float64)
+	if !ok {
+		return time.Time{}, false, fmt.Errorf("metricsdb.PhaseReportedSince: unexpected timestamp %v", rows[0][0])
+	}
+	return time.UnixMilli(int64(millis)).UTC(), true, nil
+}
+
 // PhaseDetailRow is one experiment's latest reported phase detail, as returned by
 // GetLatestPhaseDetailBatch.
 type PhaseDetailRow struct {
