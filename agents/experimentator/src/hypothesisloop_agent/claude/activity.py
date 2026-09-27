@@ -4,12 +4,23 @@ import json
 import re
 from datetime import datetime, timezone
 
-from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+from claude_agent_sdk import (
+    AssistantMessage,
+    RateLimitEvent,
+    SystemMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
 
 from hypothesisloop_agent import updates
 
 WIDTH = 200
 _TOOL_INPUT_KEYS = ("command", "file_path", "pattern", "url", "query", "description")
+# A model call that answers later than this is said: one took 397 s for 669 tokens and another
+# 649 s for 548, each a single request, and showed only as silence.
+SLOW_CALL_S = 60
 
 
 def _one_line(text: str) -> str:
@@ -46,11 +57,29 @@ def event_lines(events: list[dict], agent: str, now: datetime | None = None) -> 
     return [f"{_stamp(now)} {agent} event {_one_line(updates.event_line(e, agent))}" for e in events]
 
 
-def lines(message, agent: str, now: datetime | None = None) -> list[str]:
-    """One human-readable line per meaningful action in a Claude stream message."""
+def _retry(data: dict) -> str:
+    return (f"model call failed ({data.get('error_status') or 'no status'} {data.get('error')}): "
+            f"attempt {data.get('attempt')} of {data.get('max_retries')} in {(data.get('retry_delay_ms') or 0) / 1000:.0f} s")
+
+
+def _limit(info) -> str:
+    resets = f", resets {_stamp(datetime.fromtimestamp(info.resets_at, timezone.utc))}" if info.resets_at else ""
+    return f"rate limit {info.status} ({info.rate_limit_type}){resets}"
+
+
+def lines(message, agent: str, now: datetime | None = None, waited: float = 0.0) -> list[str]:
+    """One human-readable line per meaningful action in a Claude stream message, and one for
+    what delayed it: a model call the CLI retries, a rate limit, an answer awaited for waited
+    seconds."""
     stamp = _stamp(now)
     entries = []
-    if isinstance(message, AssistantMessage):
+    if isinstance(message, SystemMessage) and message.subtype == "api_retry":
+        entries.append(("retry", _retry(message.data)))
+    elif isinstance(message, RateLimitEvent) and message.rate_limit_info.status != "allowed":
+        entries.append(("limit", _limit(message.rate_limit_info)))
+    elif isinstance(message, AssistantMessage):
+        if waited >= SLOW_CALL_S:
+            entries.append(("slow", f"model call answered after {waited:.0f} s with {(message.usage or {}).get('output_tokens')} output tokens"))
         for block in message.content:
             if isinstance(block, TextBlock) and block.text.strip():
                 entries.append(("say", block.text))

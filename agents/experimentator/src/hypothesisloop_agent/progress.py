@@ -35,6 +35,10 @@ class Progress:
         """No turn is in flight."""
         self._awaiting_since = None
 
+    def waited(self) -> float:
+        """How long the turn in flight has awaited its next message, 0 with none in flight."""
+        return 0.0 if self._awaiting_since is None else self._clock() - self._awaiting_since
+
     def healthy(self) -> bool:
         return self._awaiting_since is None or self._clock() - self._awaiting_since <= self._quiet_limit_s
 

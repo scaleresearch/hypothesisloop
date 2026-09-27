@@ -53,7 +53,7 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
 
 def _log_message(message, agent: str) -> None:
     """Prints the activity lines to stdout and logs the rest."""
-    for line in activity.lines(message, agent):
+    for line in activity.lines(message, agent, waited=_progress.waited()):
         print(line, flush=True)
     if isinstance(message, ResultMessage):
         log.info(

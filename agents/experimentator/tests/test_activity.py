@@ -1,7 +1,16 @@
 import unittest
 from datetime import datetime, timezone
 
-from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+from claude_agent_sdk import (
+    AssistantMessage,
+    RateLimitEvent,
+    RateLimitInfo,
+    SystemMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
 
 from hypothesisloop_agent.claude import activity
 
@@ -60,6 +69,25 @@ class ActivityLinesTest(unittest.TestCase):
     def test_successful_result_is_not_logged(self):
         message = UserMessage(content=[ToolResultBlock(tool_use_id="t", content="ok", is_error=False)])
         self.assertEqual(activity.lines(message, "a", NOW), [])
+
+    # A model call took 397 s for 669 tokens and nothing in the agent's log said a call was out.
+    def test_a_model_call_that_answered_late_is_said_once_with_its_tokens(self):
+        message = AssistantMessage(content=[TextBlock(text="done")], model="m", usage={"output_tokens": 669})
+        self.assertEqual(activity.lines(message, "a", NOW, waited=397.2), [
+            "2026-10-02T06:21:30Z a slow  model call answered after 397 s with 669 output tokens",
+            "2026-10-02T06:21:30Z a say   done"])
+        self.assertEqual(len(activity.lines(message, "a", NOW, waited=activity.SLOW_CALL_S - 1)), 1)
+
+    def test_a_retried_model_call_and_a_rate_limit_are_each_one_line(self):
+        retry = SystemMessage(subtype="api_retry", data={"attempt": 2, "max_retries": 10, "retry_delay_ms": 4200,
+                                                         "error_status": 529, "error": "overloaded"})
+        self.assertEqual(activity.lines(retry, "a", NOW),
+                         ["2026-10-02T06:21:30Z a retry model call failed (529 overloaded): attempt 2 of 10 in 4 s"])
+        limited = RateLimitEvent(RateLimitInfo(status="rejected", resets_at=1791094890, rate_limit_type="five_hour"), "u", "s")
+        self.assertEqual(activity.lines(limited, "a", NOW),
+                         ["2026-10-02T06:21:30Z a limit rate limit rejected (five_hour), resets 2026-10-04T06:21:30Z"])
+        self.assertEqual(activity.lines(RateLimitEvent(RateLimitInfo(status="allowed"), "u", "s"), "a", NOW), [])
+        self.assertEqual(activity.lines(SystemMessage(subtype="init", data={}), "a", NOW), [])
 
 
 if __name__ == "__main__":
