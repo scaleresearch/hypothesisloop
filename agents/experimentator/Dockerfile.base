@@ -33,6 +33,10 @@ RUN find /samples -mindepth 2 -maxdepth 2 ! -name seed ! -name .hypothesisloop -
 	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete \
 	&& find /samples -type d -empty -delete
 
+# A stage of its own: a pull that fails here says why, and one that fails inside COPY --from
+# reads as "no stage or image found with that name".
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
 FROM python:3.13-slim
 
 # git: the agent pushes the exact code each job runs to its branch in the project's repository
@@ -40,7 +44,7 @@ FROM python:3.13-slim
 # that is the trace from a submitted job back to its source.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 # Non-interactive git auth, baked so the agent never handles credentials: git asks `hl
 # git-credential` (the hl copied in below) on whichever host it talks to, which asks the platform
@@ -87,27 +91,30 @@ COPY --from=hl-builder /out/hl /usr/local/bin/hl
 
 # The harness lives outside the agent's home: a home with src/ and pyproject.toml in it looks
 # like the place to work.
+# The agent owns it and installs into it as itself, so the environment is one layer that changes
+# only with uv.lock: a chown after the install would write every file of it a second time.
+RUN mkdir -p /agent/workspace /agent/.claude /agent/.harness /opt/hypothesisloop-agent \
+ && chown -R agent:agent /agent /opt/hypothesisloop-agent
+USER agent
 WORKDIR /opt/hypothesisloop-agent
-COPY agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
-RUN uv sync --no-dev --locked
+COPY --chown=agent:agent agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
+RUN uv sync --no-dev --locked --no-cache
 
-COPY agents/experimentator/src/ src/
+COPY --chown=agent:agent agents/experimentator/src/ src/
 # No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
 
 # /agent/workspace is where the agent clones and works, and nothing else is ever written there:
 # what a tool keeps under ~ (.cache, .claude, .local) and what the harness keeps (AGENT_STATE_DIR)
 # lies beside it, so none of it can become an untracked file of the agent's repository.
-# ~/.claude is created here and owned by agent: bind-mounting a single file into a path whose
+# ~/.claude is created above and owned by agent: bind-mounting a single file into a path whose
 # parent directory doesn't exist yet (e.g. -v ~/.claude/.credentials.json:/agent/.claude/...:ro)
 # makes the container runtime auto-create that directory as root:root, which then blocks the
 # CLI's own writes under it (e.g. session-env) with a permission error. Also run with
 # --userns=keep-id (see coordinator/setup.md) so a bind-mounted host dotfile's owning UID
 # actually matches the agent user inside the container instead of mapping to root.
-RUN mkdir -p /agent/workspace /agent/.claude /agent/.harness && chown -R agent:agent /agent /opt/hypothesisloop-agent
 ENV AGENT_WORKDIR=/agent/workspace
 ENV AGENT_STATE_DIR=/agent/.harness
 
-USER agent
 ENTRYPOINT ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
 # A per-experiment overlay that needs to install/clone as root (e.g. tt-metal source) must
 # `USER root` for that layer and switch back to `USER agent` itself afterwards -- ENTRYPOINT is
