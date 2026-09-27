@@ -97,3 +97,33 @@ func TestLiveStoreEnforcesTheJobKeyPolicy(t *testing.T) {
 		t.Fatal("listing another platform experiment succeeded, want 403")
 	}
 }
+
+func TestLiveStoreRefusesADeletedKey(t *testing.T) {
+	root := liveStore(t)
+	pe := "pe-" + uuid.New().String()[:8]
+	key, err := NewDataKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := root.CreateAgentDataKey(context.Background(), key, pe, "agent"); err != nil {
+		t.Fatalf("CreateAgentDataKey: %v", err)
+	}
+	agent, err := New(root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := AgentPrefix(pe, "agent") + "note"
+	t.Cleanup(func() { storeStatus(t, root, http.MethodDelete, object, nil) })
+	if got := putStatus(t, agent, object); got != http.StatusOK {
+		t.Fatalf("write with a live key: status %d, want 200", got)
+	}
+	if err := root.DeleteDataKey(context.Background(), key.AccessKeyID); err != nil {
+		t.Fatalf("DeleteDataKey: %v", err)
+	}
+	if got := putStatus(t, agent, object); got != http.StatusForbidden {
+		t.Fatalf("write with a deleted key: status %d, want 403", got)
+	}
+	if err := root.DeleteDataKey(context.Background(), key.AccessKeyID); err != nil {
+		t.Fatalf("DeleteDataKey of a key already deleted: %v", err)
+	}
+}

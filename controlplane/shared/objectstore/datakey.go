@@ -19,8 +19,9 @@ import (
 )
 
 // NewDataKey draws a fresh key for a job or an agent. A job's is created in the store once at
-// submission, an agent's on its first request; either is stored and never rotated or deleted, so a
-// restarted pod or agent starts with the same working key. The store bounds access keys to 3..20 characters and secrets to
+// submission, an agent's on its first request; either is stored and never rotated, so a
+// restarted pod or agent starts with the same working key. An agent's is deleted when the agent is
+// removed from its platform experiment. The store bounds access keys to 3..20 characters and secrets to
 // 8..40; 12 and 25 random bytes encode to exactly 20 and 40.
 func NewDataKey() (domain.DataKey, error) {
 	access := make([]byte, 12)
@@ -35,7 +36,10 @@ func NewDataKey() (domain.DataKey, error) {
 	return domain.DataKey{AccessKeyID: enc.EncodeToString(access), SecretAccessKey: enc.EncodeToString(secret)}, nil
 }
 
-const addServiceAccountPath = "/minio/admin/v3/add-service-account"
+const (
+	addServiceAccountPath    = "/minio/admin/v3/add-service-account"
+	deleteServiceAccountPath = "/minio/admin/v3/delete-service-account"
+)
 
 type addServiceAccountRequest struct {
 	Policy      json.RawMessage `json:"policy"`
@@ -62,6 +66,26 @@ func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, pla
 		return err
 	}
 	return c.createKey(ctx, key, policy, "agent "+AgentPrefix(platformExperimentID, agentID))
+}
+
+// DeleteDataKey takes a key CreateDataKey or CreateAgentDataKey registered out of the store, after
+// which it opens nothing. A key the store no longer has is deleted already, so a removal whose
+// first attempt lost the store's answer can be repeated.
+func (c *Client) DeleteDataKey(ctx context.Context, accessKeyID string) error {
+	req, err := c.signedRequest(ctx, http.MethodDelete, deleteServiceAccountPath, map[string]string{"accessKey": accessKeyID}, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("objectstore: delete data key %s: %w", accessKeyID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("objectstore: delete data key %s: status %d: %s", accessKeyID, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
 }
 
 func (c *Client) createKey(ctx context.Context, key domain.DataKey, policy Policy, description string) error {

@@ -218,7 +218,7 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-	err = s.store.RemoveAgent(ctx, platformExpID, agentID)
+	err = s.store.RemoveAgent(ctx, platformExpID, agentID, s.dataStore.DeleteDataKey)
 	switch {
 	case errors.Is(err, db.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)

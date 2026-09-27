@@ -71,3 +71,44 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 		t.Fatalf("after close: err = %v, want ErrPlatformExperimentClosed", err)
 	}
 }
+
+func TestRemovingAnAgentDeletesItsDataKeyBeforeItsSignup(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	agent, pe := "agentkey-agent-"+suffix, "agentkey-pe-"+suffix
+	createTestAgent(t, pool, agent)
+	createTestPE(t, pool, pe, 10)
+	store := NewPlatformExperimentsStore(pool)
+	if ok, err := store.Signup(ctx, pe, domain.AgentSignup{AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !ok {
+		t.Fatalf("signup = %v %v", ok, err)
+	}
+	key, err := store.AgentDataKey(ctx, pe, agent, func(context.Context) (domain.DataKey, error) {
+		return domain.DataKey{AccessKeyID: "AK-" + suffix, SecretAccessKey: "SK"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refused := errors.New("store refused")
+	if err := store.RemoveAgent(ctx, pe, agent, func(context.Context, string) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("remove with a key the store kept: err = %v, want the store's refusal", err)
+	}
+	if in, err := store.IsSignedUp(ctx, pe, agent); err != nil || !in {
+		t.Fatalf("signed up after a failed removal = %v %v, want true", in, err)
+	}
+
+	var deleted []string
+	if err := store.RemoveAgent(ctx, pe, agent, func(_ context.Context, accessKeyID string) error {
+		deleted = append(deleted, accessKeyID)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 1 || deleted[0] != key.AccessKeyID {
+		t.Fatalf("deleted keys %v, want %s", deleted, key.AccessKeyID)
+	}
+	if in, err := store.IsSignedUp(ctx, pe, agent); err != nil || in {
+		t.Fatalf("signed up after removal = %v %v, want false", in, err)
+	}
+}

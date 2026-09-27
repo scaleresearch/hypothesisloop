@@ -9,6 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"go.uber.org/zap"
 )
 
@@ -55,7 +56,7 @@ type PlatformExperimentsStore interface {
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, limits db.DraftLimits, prepare func(context.Context, *domain.PlatformExperiment) error) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
-	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
+	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
 	// FinishAgent records that an agent has nothing left to do: db.ErrNotSignedUp,
 	// db.ErrSignupClosed when the experiment is not running, db.ErrWorkUnfinished.
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
@@ -109,6 +110,13 @@ type PlatformExperimentsService struct {
 	// what "how long did this run" means, or the same job's cost changes depending on which code
 	// path is asked — visibly jumping the moment it settles.
 	observedGapCap time.Duration
+	dataStore      *objectstore.Client
+}
+
+// WithDataStore wires the store a removed agent's key is deleted from.
+func (s *PlatformExperimentsService) WithDataStore(client *objectstore.Client) *PlatformExperimentsService {
+	s.dataStore = client
+	return s
 }
 
 // NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance

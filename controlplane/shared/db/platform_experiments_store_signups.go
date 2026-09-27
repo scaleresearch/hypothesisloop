@@ -174,8 +174,10 @@ func nonNilObject(m map[string]any) map[string]any {
 // once it has, ErrNotSignedUp when the agent is not in it. Only its place goes: the agent itself
 // stays in its org however it came to be, as every agent that ever joined does, and can be added
 // again by its id. The experiment row is locked as in
-// enrol, so a removal and a start cannot both believe they came first.
-func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpID, agentID string) error {
+// enrol, so a removal and a start cannot both believe they came first. The signup holds the only
+// record of the agent's object-store key, so deleteDataKey takes that key out of the store before
+// the row goes, and a key that could not be deleted keeps the signup.
+func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: begin tx: %w", err)
@@ -192,12 +194,23 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 	if status != string(domain.PlatformExpOpen) {
 		return ErrSignupClosed
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
+	var accessKeyID string
+	err = tx.QueryRow(ctx, `
+SELECT data_access_key_id FROM experiment_signups
+WHERE platform_experiment_id=$1 AND agent_id=$2 FOR UPDATE`, platformExpID, agentID).Scan(&accessKeyID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotSignedUp
+	}
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: read signup: %w", err)
+	}
+	if accessKeyID != "" {
+		if err := deleteDataKey(ctx, accessKeyID); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: delete data key: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: commit: %w", err)
