@@ -20,6 +20,8 @@ type containerInfo struct {
 	Names  []string
 	Labels map[string]string
 	State  string // "running", "exited", "created", ...
+	// WrittenBytes is the size of the container's writable layer, read only when asked for.
+	WrittenBytes int64
 }
 
 func (c containerInfo) name() string {
@@ -36,8 +38,15 @@ func (c containerInfo) name() string {
 // touch each other's jobs. A container that carries no cluster at all was started before
 // containers were scoped: it is nobody's to stop on a guess, so it is left alone and named once.
 func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, error) {
+	return e.listContainers(ctx, false)
+}
+
+// listContainers measures each container's writable layer when written is set. The engine walks
+// the layer's files to answer, so only the storage reading asks.
+func (e *Executor) listContainers(ctx context.Context, written bool) ([]containerInfo, error) {
 	summaries, err := e.docker.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
+		Size:    written,
 		Filters: client.Filters{}.Add("label", LabelManagedBy+"="+ManagedByValue),
 	})
 	if err != nil {
@@ -54,10 +63,11 @@ func (e *Executor) listManagedContainers(ctx context.Context) ([]containerInfo, 
 			continue
 		}
 		out = append(out, containerInfo{
-			ID:     s.ID,
-			Names:  trimSlashPrefix(s.Names),
-			Labels: s.Labels,
-			State:  string(s.State),
+			ID:           s.ID,
+			Names:        trimSlashPrefix(s.Names),
+			Labels:       s.Labels,
+			State:        string(s.State),
+			WrittenBytes: s.SizeRw,
 		})
 	}
 	return out, nil

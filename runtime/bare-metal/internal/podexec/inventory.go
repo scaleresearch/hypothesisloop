@@ -53,16 +53,14 @@ func engineStore(dir string) (string, error) {
 	return dir, nil
 }
 
-// storageCapacityBytes statfs's the directory this node's storage is measured on: the engine's
+// storageFreeBytes statfs's the directory this node's storage is measured on: the engine's
 // store, which is where a job's writes land (see Config.StorageDir).
-func storageCapacityBytes(dir string) (total, available int64, err error) {
+var storageFreeBytes = func(dir string) (int64, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(dir, &stat); err != nil {
-		return 0, 0, fmt.Errorf("podexec: statfs %s: %w", dir, err)
+		return 0, fmt.Errorf("podexec: statfs %s: %w", dir, err)
 	}
-	total = int64(stat.Blocks) * int64(stat.Bsize)
-	available = int64(stat.Bavail) * int64(stat.Bsize)
-	return total, available, nil
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
 
 // acceleratorDevice is one physical accelerator discovered on this node: its host device path

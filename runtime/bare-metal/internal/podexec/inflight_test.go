@@ -26,6 +26,8 @@ type fakeContainer struct {
 	host   *container.HostConfig
 	state  string
 	exit   int
+	// written is the size of the writable layer, reported only to a list that asks for sizes.
+	written int64
 }
 
 // fakeEngine is a container engine whose pulls, creates and stops block until the test lets
@@ -125,15 +127,19 @@ func (f *fakeEngine) devices(experimentID string) []string {
 	return out
 }
 
-func (f *fakeEngine) ContainerList(ctx context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
+func (f *fakeEngine) ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error) {
 	f.sawDeadline(ctx, "list")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out client.ContainerListResult
 	for name, c := range f.containers {
-		out.Items = append(out.Items, container.Summary{
+		summary := container.Summary{
 			ID: name, Names: []string{"/" + name}, Labels: c.labels, State: container.ContainerState(c.state),
-		})
+		}
+		if options.Size {
+			summary.SizeRw = c.written
+		}
+		out.Items = append(out.Items, summary)
 	}
 	return out, nil
 }

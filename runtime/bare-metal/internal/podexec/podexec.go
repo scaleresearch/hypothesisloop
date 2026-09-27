@@ -192,7 +192,7 @@ func New(cfg Config) (*Executor, error) {
 			return nil, err
 		}
 	}
-	if _, _, err := storageCapacityBytes(storageDir); err != nil {
+	if _, err := storageFreeBytes(storageDir); err != nil {
 		return nil, err
 	}
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*engineCallTimeout)

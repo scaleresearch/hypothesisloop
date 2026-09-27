@@ -7,10 +7,12 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/moby/moby/client"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
 // runningRequests sums the resource requests recorded (as labels, at creation time) on every
@@ -32,6 +34,10 @@ func (e *Executor) sumRunningRequests(ctx context.Context) (runningRequests, err
 	if err != nil {
 		return runningRequests{}, err
 	}
+	return sumRequests(ops, containers), nil
+}
+
+func sumRequests(ops map[string]operation, containers []containerInfo) runningRequests {
 	claims := make([]containerInfo, 0, len(ops)+len(containers))
 	for id, op := range ops {
 		if op.labels != nil {
@@ -64,7 +70,7 @@ func (e *Executor) sumRunningRequests(ctx context.Context) (runningRequests, err
 		out.memoryBytes += memoryBytes
 		out.storageBytes += storageBytes
 	}
-	return out, nil
+	return out
 }
 
 // requestLabel parses a resource request recorded on a managed container.
@@ -107,27 +113,63 @@ func (e *Executor) GetLiveRAMCapacity(ctx context.Context) (available, total int
 	return available, total, nil
 }
 
+// storageReading is one look at the disk jobs write to.
+type storageReading struct{ available, total int64 }
+
+// readStorage reports total as what jobs can be given when none runs: what the filesystem has
+// free now plus what this cluster's containers have written, which comes back when they are
+// removed. The filesystem's own size is never free, so a job sized between the two was accepted
+// and queued for good. available is the smaller of two independent limits: what no running job
+// has reserved, and what the filesystem physically still has, which image layers and exited
+// containers also take from.
+func (e *Executor) readStorage(ctx context.Context) (storageReading, error) {
+	ops := e.operations()
+	containers, err := e.listContainers(ctx, true)
+	if err != nil {
+		return storageReading{}, err
+	}
+	free, err := storageFreeBytes(e.storageDir)
+	if err != nil {
+		return storageReading{}, err
+	}
+	total := free
+	for _, c := range containers {
+		total += c.WrittenBytes
+	}
+	available := max(min(free, total-sumRequests(ops, containers).storageBytes), 0)
+	return storageReading{available: available, total: total}, nil
+}
+
+// passExecutor answers every storage question of one pass from one reading. Free space moves
+// between two readings, and the control plane refuses a report whose available exceeds its total.
+type passExecutor struct {
+	*Executor
+	storage func() (storageReading, error)
+}
+
+func (e *Executor) ForPass(ctx context.Context) (agentexec.Executor, error) {
+	return e.forPass(ctx), nil
+}
+
+func (e *Executor) forPass(ctx context.Context) *passExecutor {
+	return &passExecutor{Executor: e, storage: sync.OnceValues(func() (storageReading, error) { return e.readStorage(ctx) })}
+}
+
 func (e *Executor) GetLiveStorageCapacity(ctx context.Context) (available, total int64, err error) {
-	requests, err := e.sumRunningRequests(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	total, free, err := storageCapacityBytes(e.storageDir)
-	if err != nil {
-		return 0, 0, err
-	}
-	// Two independent limits, so the smaller is what is actually available: what nothing has
-	// reserved yet, and what the filesystem physically still has. Reporting only the first
-	// ignores everything running jobs write — image layers, checkpoints, container logs — so a
-	// node with a full disk kept advertising room and admitted jobs that could not write.
-	available = total - requests.storageBytes
-	if free < available {
-		available = free
-	}
-	if available < 0 {
-		available = 0
-	}
-	return available, total, nil
+	return e.forPass(ctx).GetLiveStorageCapacity(ctx)
+}
+
+func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	return e.forPass(ctx).GetLiveNodeResourceCapacity(ctx)
+}
+
+func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	return e.forPass(ctx).GetNodeTotalCapacity(ctx)
+}
+
+func (p *passExecutor) GetLiveStorageCapacity(context.Context) (available, total int64, err error) {
+	storage, err := p.storage()
+	return storage.available, storage.total, err
 }
 
 // GetLiveAcceleratorCapacitySnapshot returns aggregate and per-node actual accelerator state.
@@ -197,20 +239,20 @@ func splitLabel(s string) (key, value string, ok bool) {
 
 // GetLiveNodeResourceCapacity reports this node's free CPU/memory/storage. There is exactly one
 // node, so this is the per-node view of the same numbers the cluster-wide collectors report.
-func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
-	cpuAvail, _, err := e.GetLiveCPUCapacity(ctx)
+func (p *passExecutor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	cpuAvail, _, err := p.GetLiveCPUCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ramAvail, _, err := e.GetLiveRAMCapacity(ctx)
+	ramAvail, _, err := p.GetLiveRAMCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	storageAvail, _, err := e.GetLiveStorageCapacity(ctx)
+	storageAvail, _, err := p.GetLiveStorageCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]map[string]int64{e.nodeName: {
+	return map[string]map[string]int64{p.nodeName: {
 		domain.NodeResourceCPUMillicores: int64(cpuAvail * 1000),
 		domain.NodeResourceMemoryBytes:   ramAvail,
 		domain.NodeResourceStorageBytes:  storageAvail,
@@ -221,27 +263,23 @@ func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]
 // same per-node shape GetLiveNodeResourceCapacity returns, but total rather than free. There is
 // exactly one node here too.
 //
-// Unlike the k8s backend, this is the raw installed total with nothing subtracted: a bare-metal
-// node onboarded via the tt-bare-metal-node flow is dedicated to HypothesisLoop and runs no
-// DaemonSet, CNI, monitoring agent, or any other permanently-resident non-platform process (see
-// onboard-tt-bare-metal-node's "no always-on DaemonSet/service" requirement) — there is nothing
-// non-platform here to exclude. sumRunningRequests already accounts for this runtime's own
-// managed containers via the free-capacity views; there is no separate "OS baseline" concept
-// modeled here.
-func (e *Executor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
-	_, cpuTotal, err := e.GetLiveCPUCapacity(ctx)
+// Cores and memory are the installed total with nothing subtracted: a bare-metal node onboarded
+// via the tt-bare-metal-node flow is dedicated to HypothesisLoop and runs no permanently-resident
+// non-platform process. Storage is what readStorage finds jobs can be given.
+func (p *passExecutor) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]int64, error) {
+	_, cpuTotal, err := p.GetLiveCPUCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	_, ramTotal, err := e.GetLiveRAMCapacity(ctx)
+	_, ramTotal, err := p.GetLiveRAMCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	_, storageTotal, err := e.GetLiveStorageCapacity(ctx)
+	_, storageTotal, err := p.GetLiveStorageCapacity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]map[string]int64{e.nodeName: {
+	return map[string]map[string]int64{p.nodeName: {
 		domain.NodeResourceCPUMillicores: int64(cpuTotal * 1000),
 		domain.NodeResourceMemoryBytes:   ramTotal,
 		domain.NodeResourceStorageBytes:  storageTotal,
