@@ -1,7 +1,9 @@
-FROM node:20-alpine AS builder
+# The build's output is JavaScript, the same for every platform, so it is built on the build host
+# and building for another platform does not emulate it.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 WORKDIR /ui
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 # Next.js compiles NEXT_PUBLIC_* into the browser bundle, so the API address the browser calls
 # and the Supabase project that signs people in are fixed here and cannot be changed when the
@@ -13,13 +15,25 @@ ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
+
+# What the image runs with: the production packages, of which Next.js's compiler is a binary per
+# platform. npm takes the target's here, on the build host, and the test fails the build if it
+# did not.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS packages
+ARG TARGETARCH
+WORKDIR /ui
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm set -e; \
+    case "$TARGETARCH" in amd64) cpu=x64 ;; arm64) cpu=arm64 ;; *) echo "no Next.js compiler for $TARGETARCH" >&2; exit 1 ;; esac; \
+    npm ci --omit=dev --os=linux --cpu="$cpu"; \
+    test -f "node_modules/@next/swc-linux-$cpu-musl/next-swc.linux-$cpu-musl.node"
 
 FROM node:20-alpine
 WORKDIR /ui
 ENV NODE_ENV=production
 COPY --from=builder /ui/package.json /ui/next.config.mjs ./
-COPY --from=builder /ui/node_modules ./node_modules
+COPY --from=packages /ui/node_modules ./node_modules
 COPY --from=builder /ui/.next ./.next
 USER node
 EXPOSE 3000
