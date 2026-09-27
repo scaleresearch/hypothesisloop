@@ -538,10 +538,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiment-quotas", Method: "GET", Path: "/platform-experiments/{id}/quotas",
 		Summary: "List per-agent quotas for a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Guaranteed/burst accelerator-hours, used vs available, per signed-up agent.",
+		Description: "Each signed-up agent's share of the budget, what it has used and what a job submitted now may still reserve. Guaranteed and burst jobs spend the same share: burst gives no hours on top of it.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
-	}) (*struct{ Body []*domain.AgentQuota }, error) {
+	}) (*struct{ Body []*AgentQuotaView }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
@@ -552,10 +552,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "list platform experiment quotas", err, zap.String("id", in.ID))
 		}
-		if quotas == nil {
-			quotas = []*domain.AgentQuota{}
-		}
-		return &struct{ Body []*domain.AgentQuota }{Body: quotas}, nil
+		return &struct{ Body []*AgentQuotaView }{Body: quotas}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -565,18 +562,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
-	}) (*struct{ Body *domain.AgentQuota }, error) {
+	}) (*struct{ Body *AgentQuotaView }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		aq, err := peh.svc.GetAgentQuota(ctx, in.AgentID, in.ID)
+		aq, err := peh.svc.QuotaView(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 		}
 		if aq == nil {
 			return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID + ": quota is granted when the experiment starts, to the agents signed up to it")
 		}
-		return &struct{ Body *domain.AgentQuota }{Body: aq}, nil
+		return &struct{ Body *AgentQuotaView }{Body: aq}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{

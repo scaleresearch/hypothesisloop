@@ -101,9 +101,50 @@ func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, 
 	return aq, nil
 }
 
-// ListQuotas returns every agent's allocation and current usage for a platform experiment,
-// merging the allocation (Postgres) with consumption (metrics DB) in one batched usage query.
-func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
+// AgentQuotaView is an agent's quota as the quota reads answer it.
+type AgentQuotaView struct {
+	ID                         string    `json:"id"`
+	AgentID                    string    `json:"agent_id"`
+	PlatformExperimentID       string    `json:"platform_experiment_id"`
+	ShareAcceleratorHours      float64   `json:"share_accelerator_hours" doc:"All the agent may spend, on guaranteed and burst jobs together: its part of the budget released so far."`
+	GuaranteedAcceleratorHours float64   `json:"guaranteed_accelerator_hours" doc:"How much of the share may run at guaranteed priority."`
+	BurstAcceleratorHours      float64   `json:"burst_accelerator_hours" doc:"How much of the share may run at burst priority, on idle capacity. Burst hours are part of the share and never on top of it."`
+	UsedGuaranteedAccH         float64   `json:"used_guaranteed_acch" doc:"Spent at guaranteed priority, with a job that has not started at its estimate and a running one at what it has spent so far."`
+	UsedBurstAccH              float64   `json:"used_burst_acch" doc:"The same at burst priority."`
+	RemainingGuaranteed        float64   `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
+	RemainingBurst             float64   `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
+	CreatedAt                  time.Time `json:"created_at"`
+}
+
+// QuotaView returns one agent's quota view, nil when it has none.
+func (s *PlatformExperimentsService) QuotaView(ctx context.Context, agentID, platformExpID string) (*AgentQuotaView, error) {
+	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.QuotaView: %w", err)
+	}
+	if aq == nil {
+		return nil, nil
+	}
+	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.QuotaView: get platform experiment: %w", err)
+	}
+	if pe == nil {
+		return nil, fmt.Errorf("platform_experiments.QuotaView: platform experiment %s not found", platformExpID)
+	}
+	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+		return nil, fmt.Errorf("platform_experiments.QuotaView: populate usage: %w", err)
+	}
+	views, err := s.quotaViews(ctx, pe, []*domain.AgentQuota{aq})
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.QuotaView: %w", err)
+	}
+	return views[0], nil
+}
+
+// ListQuotas returns every agent's quota view for a platform experiment, with consumption read
+// from the metrics store in one batched query.
+func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExpID string) ([]*AgentQuotaView, error) {
 	quotas, err := s.store.ListAgentQuotas(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: %w", err)
@@ -118,13 +159,38 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 	if err := metricsdb.PopulateUsage(ctx, s.usage.URL(), pe.CreatedAt, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: populate usage: %w", err)
 	}
-	if err := s.store.AddDesiredQuotaUsage(ctx, platformExpID, quotas); err != nil {
-		return nil, fmt.Errorf("platform_experiments.ListQuotas: desired usage: %w", err)
+	views, err := s.quotaViews(ctx, pe, quotas)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.ListQuotas: %w", err)
+	}
+	return views, nil
+}
+
+// quotaViews turns quotas that carry observed consumption into views. What remains is read
+// where the quotas hold what admission counts, every job that has not ended at its whole
+// estimate, and what is used after a running job's estimate gives way to what it has spent.
+func (s *PlatformExperimentsService) quotaViews(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) ([]*AgentQuotaView, error) {
+	if err := s.store.AddDesiredQuotaUsage(ctx, pe.ID, quotas); err != nil {
+		return nil, fmt.Errorf("desired usage: %w", err)
+	}
+	views := make([]*AgentQuotaView, len(quotas))
+	for i, q := range quotas {
+		views[i] = &AgentQuotaView{
+			ID: q.ID, AgentID: q.AgentID, PlatformExperimentID: q.PlatformExperimentID, CreatedAt: q.CreatedAt,
+			ShareAcceleratorHours:      q.Share(),
+			GuaranteedAcceleratorHours: q.GuaranteedAcceleratorHours,
+			BurstAcceleratorHours:      min(q.BurstAcceleratorHours, q.Share()),
+			RemainingGuaranteed:        q.Remaining(domain.CapacityGuaranteed),
+			RemainingBurst:             q.Remaining(domain.CapacityBurst),
+		}
 	}
 	if err := s.correctRunningCosts(ctx, pe, quotas); err != nil {
-		return nil, fmt.Errorf("platform_experiments.ListQuotas: running cost correction: %w", err)
+		return nil, fmt.Errorf("running cost correction: %w", err)
 	}
-	return quotas, nil
+	for i, q := range quotas {
+		views[i].UsedGuaranteedAccH, views[i].UsedBurstAccH = q.UsedGuaranteedAccH, q.UsedBurstAccH
+	}
+	return views, nil
 }
 
 type insufficientQuotaError struct{ message string }

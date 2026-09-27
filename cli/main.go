@@ -121,7 +121,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 const usage = `usage: hl <command> ...
 
   platform-experiments  [list] | get | create [FILE] | start | update --description-file F | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish
-  quota                 your share of the budget and what remains of it, guaranteed and burst together; --all for every agent
+  quota                 your share of the budget and what a job submitted now may still hold of it; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
   data-key              your S3 key to the experiment's data: eval "$(hl data-key)"

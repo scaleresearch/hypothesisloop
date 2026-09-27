@@ -236,3 +236,49 @@ func TestARequeuedJobRunningAgainIsChargedOnceForItsSettledStint(t *testing.T) {
 		t.Errorf("usage = %v, want %v: the settled stint is counted twice", got, lifetime)
 	}
 }
+
+type reservingStore struct {
+	runningExpStore
+}
+
+func (f *reservingStore) AddDesiredQuotaUsage(_ context.Context, _ string, quotas []*domain.AgentQuota) error {
+	for _, q := range quotas {
+		for _, job := range f.running {
+			q.UsedGuaranteedAccH += job.EstimatedCostAccH
+		}
+	}
+	return nil
+}
+
+// A researcher read 0.016 used of 0.029 while two of its jobs ran, beside 0.057 burst hours, and
+// was refused a job of 0.0075 at both priorities: a submit holds a running job's whole estimate,
+// and burst is spent from the share. The view answers what a submit would.
+func TestTheQuotaViewLeavesWhatASubmitWouldAndShowsNoBurstHoursBeyondTheShare(t *testing.T) {
+	now := time.Now().UTC()
+	srv := aliveServer(t, now, 30*time.Second, 2*time.Minute)
+	defer srv.Close()
+	running := []*domain.Experiment{{
+		ID: "job-1", AgentID: "a", PlatformExperimentID: "pe-1", Status: domain.StatusRunning, CapacityTier: domain.CapacityGuaranteed,
+		AcceleratorType: "h100", AcceleratorCount: 1, EstimatedDurationHours: 0.1, EstimatedCostAccH: 0.015, CreatedAt: now.Add(-3 * time.Minute),
+	}}
+	svc := NewPlatformExperimentsService(&reservingStore{runningExpStore{running: running}}, domain.QuotaConfig{}, zap.NewNop(), srv.URL, 3*time.Minute)
+	quota := &domain.AgentQuota{AgentID: "a", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 0.028608, BurstAcceleratorHours: 0.057216}
+	views, err := svc.quotaViews(context.Background(), &domain.PlatformExperiment{ID: "pe-1", CreatedAt: now.Add(-time.Hour)}, []*domain.AgentQuota{quota})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := views[0]
+	if view.UsedGuaranteedAccH >= 0.015 || view.UsedGuaranteedAccH <= 0 {
+		t.Errorf("used = %g, want what the running job has spent so far, under its estimate of 0.015", view.UsedGuaranteedAccH)
+	}
+	held := *quota
+	held.UsedGuaranteedAccH = 0.015
+	for tier, got := range map[domain.CapacityTier]float64{domain.CapacityGuaranteed: view.RemainingGuaranteed, domain.CapacityBurst: view.RemainingBurst} {
+		if want := held.Remaining(tier); got != want || got > 0.0137 {
+			t.Errorf("remaining %s = %g, want %g: the share less the whole estimate, as admission counts it", tier, got, want)
+		}
+	}
+	if view.ShareAcceleratorHours != 0.028608 || view.BurstAcceleratorHours != 0.028608 {
+		t.Errorf("share %g, burst %g, want both 0.028608: burst hours are part of the share", view.ShareAcceleratorHours, view.BurstAcceleratorHours)
+	}
+}

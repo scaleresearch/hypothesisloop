@@ -209,16 +209,11 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 		return AdmitRejected, "", fmt.Errorf("admit experiment: desired usage: %w", err)
 	}
 
-	usedAcc, limitAcc := observed.UsedBurstAccH+desiredBurstAcc, allocation.BurstAcceleratorHours
-	if exp.CapacityTier == domain.CapacityGuaranteed {
-		usedAcc, limitAcc = observed.UsedGuaranteedAccH+desiredGuaranteedAcc, allocation.GuaranteedAcceleratorHours
-	}
-	// Burst hours are inside the agent's share of the budget, so a job at either priority is
-	// held to what is left of the share as well as of its own priority's hours.
-	spent := observed.Used() + desiredGuaranteedAcc + desiredBurstAcc
-	if exp.EstimatedCostAccH > 0 && (usedAcc+exp.EstimatedCostAccH > limitAcc || spent+exp.EstimatedCostAccH > allocation.Share()) {
+	allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
+	allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
+	if remaining := allocation.Remaining(exp.CapacityTier); exp.EstimatedCostAccH > remaining {
 		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s",
-			exp.CapacityTier, exp.EstimatedCostAccH, max(0, min(limitAcc-usedAcc, allocation.Share()-spent)), heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
+			exp.CapacityTier, exp.EstimatedCostAccH, remaining, heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err

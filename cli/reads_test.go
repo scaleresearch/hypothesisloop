@@ -11,7 +11,7 @@ import (
 func TestQuota(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
 		row := map[string]any{"id": "q", "agent_id": "a", "platform_experiment_id": "pe-1",
-			"guaranteed_accelerator_hours": 0.028608, "burst_accelerator_hours": 0.057216, "used_guaranteed_acch": 0.015, "created_at": "t"}
+			"share_accelerator_hours": 0.8, "used_guaranteed_acch": 0.1, "remaining_burst_accelerator_hours": 0, "created_at": "t"}
 		if strings.HasSuffix(r.Path, "/quotas") {
 			return []any{row, row}
 		}
@@ -23,10 +23,9 @@ func TestQuota(t *testing.T) {
 	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	// A researcher shown 0.057 burst hours beside 0.029 guaranteed wrote a burst spec for the
-	// room, and was refused: burst is spent from the share, which is what the line leads with.
-	if want := `{"agent_id":"a","share_accelerator_hours":0.028608,"remaining_accelerator_hours":0.013608,"guaranteed_accelerator_hours":0.028608,` +
-		`"burst_accelerator_hours":0.057216,"used_guaranteed_acch":0.015,"used_burst_acch":0}` + "\n"; (*got)[0].Path != "/platform-experiments/pe-1/quotas/a" || stdout.String() != want {
+	// What the platform answers is printed as it is, a remaining of 0 included: hl computes no
+	// figure of its own that could differ from what a submit counts.
+	if want := `{"agent_id":"a","remaining_burst_accelerator_hours":0,"share_accelerator_hours":0.8,"used_guaranteed_acch":0.1}` + "\n"; (*got)[0].Path != "/platform-experiments/pe-1/quotas/a" || stdout.String() != want {
 		t.Fatalf("request %+v, stdout %q", (*got)[0], stdout.String())
 	}
 	stdout.Reset()

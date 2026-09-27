@@ -34,11 +34,11 @@ IDLE_PROMPT = (
 )
 
 
-def watch_env(api_url: str, token: str, workdir: str) -> dict[str, str]:
+def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
     """The environment hl watch needs: the API, the token, which says to hl who is watching, and
     a state dir that outlives the process."""
     return {**os.environ, "API_URL": api_url, "HL_TOKEN": token,
-            "HL_STATE_DIR": os.path.join(os.path.abspath(workdir), ".hl-state")}
+            "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), ".hl-state")}
 
 
 def _agent(env: dict[str, str]) -> str:
@@ -112,7 +112,8 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     for q in _events(stdout):
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
-            f"{q['remaining_accelerator_hours']:.3g} remaining for guaranteed and burst jobs together")})
+            f"room for a job of {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
+            f"or {q['remaining_burst_accelerator_hours']:.3g} burst")})
     return events
 
 

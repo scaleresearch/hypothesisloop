@@ -35,6 +35,18 @@ func (q *AgentQuota) Used() float64 {
 	return q.UsedGuaranteedAccH + q.UsedBurstAccH
 }
 
+// Remaining is what one more job at tier may reserve, when q's used hours are what admission
+// counts: observed consumption plus the whole estimate of every job that has not ended. It is the
+// lesser of what is left of the tier's hours and of the share, since burst hours are spent from
+// the share. Admission decides on it and the quota view shows it, so the two cannot disagree.
+func (q *AgentQuota) Remaining(tier CapacityTier) float64 {
+	limit, used := q.BurstAcceleratorHours, q.UsedBurstAccH
+	if tier == CapacityGuaranteed {
+		limit, used = q.GuaranteedAcceleratorHours, q.UsedGuaranteedAccH
+	}
+	return max(0, min(limit-used, q.Share()-q.Used()))
+}
+
 // DominantUtilization is used/guaranteed AccH — the fairness signal scheduler.sortBurst orders
 // on. Always reads the *guaranteed* columns, even for burst-tier ordering: an agent's standing
 // under its guaranteed allocation is the fairness signal both passes use — burst's own usage is

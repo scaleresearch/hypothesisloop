@@ -184,7 +184,7 @@ hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or 
 hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops
 hl platform-experiments list                               # yours and the ones the platform shares with every account
-hl quota                                                   # your accelerator-hours, used and granted
+hl quota                                                   # your share of the budget and what a job submitted now may still hold of it
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators and CPU cores per cluster
 hl hypothesis submit --builds-on root --text "..."
