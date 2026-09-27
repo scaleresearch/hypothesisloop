@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"sync"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
@@ -69,13 +70,98 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 	return query, nil
 }
 
+// held is the one place an offer is handed out from: the offers this process is renting right
+// now and the ones its own instances hold. The vendor's search goes on listing an offer whose GPU
+// is rented, ours included, for as long as the instance lives, so without it every job of a pass
+// is sent to the same few offers and all but one are refused.
+//
+// It saves requests and nothing else. A process that starts without it asks for an offer one of
+// its instances holds, is told the offer is taken and passes over it.
+type held struct {
+	mu     sync.Mutex
+	offers map[int64]holder
+}
+
+// holder is who has an offer: the instance rented from it, or none yet while the rent is under
+// way. listed says a read of the account has shown that instance.
+type holder struct {
+	instance string
+	listed   bool
+}
+
+// claim takes id for one rental. It is false when the offer is already claimed or held.
+func (h *held) claim(id int64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, taken := h.offers[id]; taken {
+		return false
+	}
+	h.offers[id] = holder{}
+	return true
+}
+
+// settle ends the claim on id: the offer is held by instance, or free again when the rent
+// failed and instance is empty.
+func (h *held) settle(id int64, instance string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if instance == "" {
+		delete(h.offers, id)
+		return
+	}
+	h.offers[id] = holder{instance: instance}
+}
+
+// release frees the offer instance was rented from, once the instance is destroyed.
+func (h *held) release(instance string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, holder := range h.offers {
+		if holder.instance == instance {
+			delete(h.offers, id)
+		}
+	}
+}
+
+// keep is told the account's instances after each read of them, and frees the offer of one that
+// was listed before and is gone: an instance the vendor removed frees its offer without a
+// Destroy. One not listed yet keeps its offer, since the list trails a rent.
+func (h *held) keep(onAccount map[string]bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, holder := range h.offers {
+		switch {
+		case holder.instance == "":
+		case onAccount[holder.instance]:
+			holder.listed = true
+			h.offers[id] = holder
+		case holder.listed:
+			delete(h.offers, id)
+		}
+	}
+}
+
+// free returns the offers nobody in this process has.
+func (h *held) free(offers []offer) []offer {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var open []offer
+	for _, candidate := range offers {
+		if _, taken := h.offers[candidate.ID]; !taken {
+			open = append(open, candidate)
+		}
+	}
+	return open
+}
+
 // candidates returns the offers one Create tries, in the order it tries them: the cheapest offer
-// of each of the offerCandidates cheapest machines that fit the spec, shuffled.
+// of each of the offerCandidates cheapest machines that fit the spec and that this process does
+// not already hold, shuffled.
 //
 // Always taking the cheapest offer sent every retry of a job to the same machine, and a machine
 // that cannot start a container stays the cheapest because nobody keeps it. Nothing the vendor
 // shows before renting tells such a machine apart (the one met was verified, with a reliability
-// of 0.998), and the adapter remembers nothing between calls, so the choice is spread over a few
+// of 0.998), and the adapter remembers no machine's failures, so the choice is spread over a few
 // machines. A retry is then unlikely to meet the same machine again; it still can.
 func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer, error) {
 	query, err := p.offerQuery(spec)
@@ -91,7 +177,11 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 	if len(found.Offers) == 0 {
 		return nil, fmt.Errorf("vast: %w %q within the configured filters", provider.ErrNoOffer, spec.Name)
 	}
-	chosen := cheapestPerMachine(found.Offers, offerCandidates)
+	open := p.held.free(found.Offers)
+	if len(open) == 0 {
+		return nil, fmt.Errorf("vast: %w %q: this agent's own instances hold all %d offers within the configured filters", provider.ErrNoOffer, spec.Name, len(found.Offers))
+	}
+	chosen := cheapestPerMachine(open, offerCandidates)
 	p.shuffle(chosen)
 	return chosen, nil
 }

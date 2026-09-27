@@ -23,9 +23,11 @@ reconcile_interval_seconds: 10
 status_interval_seconds: 30
 log_tail_lines: 100
 # How long a job may wait for a machine to rent before it fails here as no_offer, and how long
-# a rented machine may take to start the job before it is destroyed and another rented. Both
-# are kept under the control plane's stuck-pending timeout (300 seconds unless the cluster sets
-# its own), which requeues a job that is not running by then, so that the job reads why.
+# a rented machine may take to start the job before it is destroyed and another rented. The
+# control plane requeues a job that is not running when its stuck-pending timeout has passed
+# since the job's admission (300 seconds unless the cluster's settings give
+# stuck_pending_timeout_seconds), so that clock runs through both waits: give the cluster at
+# least their sum, or a job that found its machine late is requeued while the machine starts.
 offer_wait_seconds: 180
 startup_seconds: 240
 

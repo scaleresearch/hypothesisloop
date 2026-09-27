@@ -35,6 +35,7 @@ const (
 
 func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
 	listed := []provider.Instance{}
+	onAccount := map[string]bool{}
 	token := ""
 	for {
 		query := url.Values{"limit": {strconv.Itoa(listPageSize)}}
@@ -49,6 +50,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			return nil, err
 		}
 		for _, found := range page.Instances {
+			onAccount[strconv.FormatInt(found.ID, 10)] = true
 			if found.Label == nil {
 				continue
 			}
@@ -72,6 +74,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			})
 		}
 		if page.NextToken == nil || *page.NextToken == "" {
+			p.held.keep(onAccount)
 			return listed, nil
 		}
 		token = *page.NextToken
@@ -151,6 +154,7 @@ func (p *Provider) Destroy(ctx context.Context, id string) error {
 		}
 	}
 	if isGone(err) {
+		p.held.release(id)
 		return nil
 	}
 	if err != nil {
@@ -159,5 +163,6 @@ func (p *Provider) Destroy(ctx context.Context, id string) error {
 	if !destroyed.Success {
 		return fmt.Errorf("vast: destroying instance %s was refused: %s", id, destroyed.Message)
 	}
+	p.held.release(id)
 	return nil
 }

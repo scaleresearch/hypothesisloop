@@ -3,6 +3,7 @@ package vast
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -276,19 +277,66 @@ func TestCreatePassesOverAnOfferTakenBetweenSearchAndRent(t *testing.T) {
 	}
 }
 
-func TestCreateFailsWhenEveryOfferFoundWasTaken(t *testing.T) {
+// conflicting is the vendor's answer for an offer it still lists while its GPU is rented, as it
+// answered for the offers this account's own instances held.
+const conflicting = `{"success":false,"error":"invalid_args","msg":"error 400/3763: GPU conflict: requesting already rented gpus {59011}"}`
+
+func TestCreateFindsNoOfferWhenEveryOfferFoundWasTaken(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31},{"id":7002,"machine_id":2,"dph_total":0.32}]}`))
 	api.on(http.MethodPut, rentPath, answer(400, taken))
-	api.on(http.MethodPut, "/api/v0/asks/7002/", answer(400, taken))
+	api.on(http.MethodPut, "/api/v0/asks/7002/", answer(400, conflicting))
 	p := newTestProvider(t, api, gpuSettings())
 
 	_, err := p.Create(context.Background(), gpuSpec())
-	if err == nil || !strings.Contains(err.Error(), "every one of the 2 offers tried") || !strings.Contains(err.Error(), "no_such_ask") {
-		t.Fatalf("err = %v, want every offer taken with the vendor's reason", err)
+	if !errors.Is(err, provider.ErrNoOffer) || !strings.Contains(err.Error(), "every one of the 2 offers tried") || !strings.Contains(err.Error(), "already rented") {
+		t.Fatalf("err = %v, want no offer, every one taken, with the vendor's reason", err)
 	}
 	if api.total() != 3 {
 		t.Errorf("requests = %d, want the search and two refused rents: nothing was rented, nothing is left", api.total())
+	}
+}
+
+// The search goes on listing an offer this account has rented. Jobs rented one after another
+// are each given an offer no instance of this process holds, and an offer is given out again
+// once its instance is destroyed or gone from the account.
+func TestCreatesOfOneProcessNeverAskForAnOfferItsOwnInstancesHold(t *testing.T) {
+	api := newFakeAPI(t)
+	ctx := context.Background()
+	api.on(http.MethodPost, searchPath, offersOn(11, 12))
+	api.on(http.MethodPut, rentPath, answer(200, `{"success":true,"new_contract":9001}`))
+	api.on(http.MethodPut, "/api/v0/asks/7002/", answer(200, `{"success":true,"new_contract":9002}`))
+	api.on(http.MethodDelete, "/api/v0/instances/9001/", answer(200, `{"success":true}`))
+	both := instancesPage("", instanceJSON(9001, "hl-exp1-a2", ""), instanceJSON(9002, "hl-exp2-a0", ""))
+	api.on(http.MethodGet, listPath, answer(200, both))
+	p := newTestProvider(t, api, gpuSettings())
+	create := func(name string) (string, error) {
+		spec := gpuSpec()
+		spec.Name = name
+		return p.Create(ctx, spec)
+	}
+	asked := func(offer string) int { return len(api.sent(http.MethodPut, "/api/v0/asks/"+offer+"/")) }
+
+	first, firstErr := create("hl-exp1-a2")
+	second, secondErr := create("hl-exp2-a0")
+	if firstErr != nil || secondErr != nil || first != "9001" || second != "9002" || asked("7001") != 1 {
+		t.Fatalf("rented %q %v and %q %v asking for the held offer %d times, want one instance from each offer", first, firstErr, second, secondErr, asked("7001"))
+	}
+	if _, err := create("hl-exp3-a0"); !errors.Is(err, provider.ErrNoOffer) || asked("7001")+asked("7002") != 2 {
+		t.Fatalf("a third job: err = %v after %d rents, want no offer and nothing asked of the vendor", err, asked("7001")+asked("7002"))
+	}
+
+	if err := p.Destroy(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(9001, "hl-exp3-a0", ""))))
+	if _, err := create("hl-exp3-a0"); err != nil || asked("7001") != 2 {
+		t.Fatalf("after the destroy: %v, offer 7001 asked for %d times, want it rented again", err, asked("7001"))
+	}
+	// Instance 9002 left the account without a Destroy, and the read above showed it gone.
+	api.on(http.MethodGet, listPath, answer(200, both))
+	if _, err := create("hl-exp2-a0"); err != nil || asked("7002") != 2 {
+		t.Fatalf("after its instance left the account: %v, offer 7002 asked for %d times, want it rented again", err, asked("7002"))
 	}
 }
 
