@@ -65,7 +65,8 @@ What you produce, in this order:
      also what lets researchers try many ideas. When you have nothing to do until it ends, end
      your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`. If
      it fails, read its logs, fix the code and run it again. When it has COMPLETED, file its
-     summary with `hl job summary`: what ran, on what, and the numbers.
+     summary with `hl job summary`: what ran, on what, and the numbers. Its hypothesis states
+     the control, which claims no effect: set no status on it.
      A job holds its whole estimate of its agent's quota from submit until it ends, so the
      file's `estimated_duration_hours` decides how many trials a researcher runs side by
      side. Compare it with the baseline's `observed_hours` in `hl job cost`: when the estimate

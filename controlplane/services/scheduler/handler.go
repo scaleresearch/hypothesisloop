@@ -336,6 +336,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
 			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
+			"A draft's job is its planner's baseline, the control that verdicts are given against: its hypothesis takes none and the answer names neither. " +
 			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`

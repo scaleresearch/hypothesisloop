@@ -256,13 +256,18 @@ func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
 
 type finishedJobStore struct {
 	poolOnlyStore
-	filed int
+	status domain.PlatformExperimentStatus
+	filed  int
 	// filedBy is whose credential filed each finding.
 	filedBy []domain.Actor
 }
 
 func (*finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
 	return &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}, nil
+}
+
+func (s *finishedJobStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: s.status}, nil
 }
 
 func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _ string, actor domain.Actor, _ string) (*domain.HypothesisFinding, error) {
@@ -273,18 +278,21 @@ func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _
 
 // The summary is where an agent has the evidence in hand, so its reply names the hypothesis
 // whose verdict that agent may set, open or already given: its own or a human's, never another
-// agent's.
+// agent's. A planner told the verdict of its baseline's hypothesis was its to set tried confirmed
+// against the baseline itself, which no rule allows: a draft's job is the control and names none.
 func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 	for _, tc := range []struct {
-		h    domain.Hypothesis
-		want bool
+		h      domain.Hypothesis
+		status domain.PlatformExperimentStatus
+		want   bool
 	}{
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, true},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, false},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.PlatformExpRunning, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, domain.PlatformExpRunning, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, domain.PlatformExpRunning, true},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, domain.PlatformExpRunning, false},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.PlatformExpDraft, false},
 	} {
-		store := &finishedJobStore{}
+		store := &finishedJobStore{status: tc.status}
 		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
 		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {

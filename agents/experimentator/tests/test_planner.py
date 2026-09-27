@@ -68,6 +68,11 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("A refused propose stores nothing: fix what it names and send it again", flat)
         self.assertIn("a colon in unquoted text is not valid YAML", flat)
 
+    # One planner tried confirmed against the baseline itself and was refused, another forced it
+    # with --despite: a baseline is the control and has no verdict.
+    def test_the_baselines_hypothesis_takes_no_verdict(self):
+        self.assertIn("Its hypothesis states the control, which claims no effect: set no status on it", " ".join(self.render().split()))
+
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         self.assertIn("end your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`", " ".join(self.render().split()))
