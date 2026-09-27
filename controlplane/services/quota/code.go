@@ -27,12 +27,14 @@ type CodeStore interface {
 // CodeRoster says who may still push code. *PlatformExperimentsService is the one in use.
 type CodeRoster interface {
 	Joined(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// Repository returns the repository the platform experiment names, empty when it names none.
+	// Repository returns the address of the repository the platform experiment names, empty when
+	// it names none.
 	Repository(ctx context.Context, platformExpID string) (string, error)
 	RequireActive(ctx context.Context, platformExpID, agentID string) error
 }
 
-// Repository returns the repository the platform experiment names, empty when it names none.
+// Repository returns the address of the repository the platform experiment names, empty when
+// it names none.
 func (s *PlatformExperimentsService) Repository(ctx context.Context, platformExpID string) (string, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -41,7 +43,7 @@ func (s *PlatformExperimentsService) Repository(ctx context.Context, platformExp
 	if pe == nil {
 		return "", ErrPlatformExperimentNotFound
 	}
-	return pe.Repository, nil
+	return pe.RepositoryURL, nil
 }
 
 // Joined reports whether the agent is in the platform experiment.
@@ -135,7 +137,7 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		if repository != "" {
-			return nil, api.Refuse(http.StatusConflict, "code_in_repository", "platform experiment "+in.ID+" keeps its code in "+domain.RepositoryURL(repository)+": commit on your branch and `git push` it there. The platform stores code only for a platform experiment that names no repository")
+			return nil, api.Refuse(http.StatusConflict, "code_in_repository", "platform experiment "+in.ID+" keeps its code in "+repository+": commit on your branch and `git push` it there. The platform stores code only for a platform experiment that names no repository")
 		}
 		if !bundleHolds(in.RawBody, in.SHA) {
 			return nil, api.Refuse(http.StatusUnprocessableEntity, "not_a_bundle", "the body is not a git bundle whose tip is "+in.SHA+": make it with `git bundle create <file> HEAD`, or push with `hl code push`")

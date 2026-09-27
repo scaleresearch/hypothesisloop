@@ -138,17 +138,6 @@ func MetricDefinitionsEqual(a, b []MetricDefinition) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// GitHubHost is where every repository lives.
-const GitHubHost = "github.com"
-
-// RepositoryURL is the HTTPS address a repository named owner/name is cloned from, empty for none.
-func RepositoryURL(repository string) string {
-	if repository == "" {
-		return ""
-	}
-	return "https://" + GitHubHost + "/" + repository + ".git"
-}
-
 // MaxAgentImageLength bounds an image reference.
 const MaxAgentImageLength = 512
 
@@ -214,11 +203,11 @@ type PlatformExperiment struct {
 	CoordinatorHosted bool               `json:"coordinator_hosted"`
 	Coordinator       *HostedCoordinator `json:"coordinator,omitempty"`
 
-	// Repository is the code the platform experiment works on, owner/name on GitHub, and
-	// RepositoryURL the address it is cloned from. AgentImage is the image its hosted agents and
+	// Repository is the code the platform experiment works on, as the deployment's git host
+	// names it, and RepositoryURL the address it is cloned from. AgentImage is the image its hosted agents and
 	// coordinator run, empty for the platform's own. All fixed at creation.
 	Repository    string `json:"repository,omitempty"`
-	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone, derived from repository."`
+	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone."`
 	AgentImage    string `json:"agent_image,omitempty"`
 
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform

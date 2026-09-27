@@ -1124,6 +1124,11 @@ END $$;
 -- fixed at creation.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository  TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS agent_image TEXT NOT NULL DEFAULT '';
+-- The address the repository is cloned from, as the deployment's git host gave it at creation.
+-- Every repository named before the column was on GitHub.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository_url TEXT NOT NULL DEFAULT '';
+UPDATE platform_experiments SET repository_url = 'https://github.com/' || repository || '.git'
+WHERE repository <> '' AND repository_url = '';
 
 
 COMMIT;

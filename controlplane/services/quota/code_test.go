@@ -38,7 +38,7 @@ func (m *memoryCode) GetCode(_ context.Context, pe, agent, sha string, _ int64) 
 type codeRoster struct {
 	joined map[string]bool
 	closed bool
-	// repository is the one pe-1 names, empty when it names none.
+	// repository is the address of the one pe-1 names, empty when it names none.
 	repository string
 }
 
@@ -154,7 +154,7 @@ func TestCodeIsRefusedWhenItIsNoBundleOfThatCommitTooLargeOrLate(t *testing.T) {
 	if code, out := codeCall(t, store, closed, agentOne, "PUT", codePath, codeBundle); code != http.StatusConflict {
 		t.Errorf("after the close: %d %s, want 409", code, out)
 	}
-	inGit := codeRoster{joined: everyone.joined, repository: "acme/model"}
+	inGit := codeRoster{joined: everyone.joined, repository: "https://github.com/acme/model.git"}
 	if code, out := codeCall(t, store, inGit, agentOne, "PUT", codePath, codeBundle); code != http.StatusConflict || !strings.Contains(string(out), "code_in_repository") || !strings.Contains(string(out), "git push") {
 		t.Errorf("for an experiment that names a repository: %d %s, want 409 code_in_repository saying git push", code, out)
 	}

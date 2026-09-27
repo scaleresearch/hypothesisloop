@@ -115,7 +115,6 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 		Coordinator:               req.coordinator,
 		MaxHosted:                 req.maxHosted,
 		Repository:                req.Repository,
-		RepositoryURL:             domain.RepositoryURL(req.Repository),
 		AgentImage:                req.AgentImage,
 		Actor:                     req.createdBy,
 	}

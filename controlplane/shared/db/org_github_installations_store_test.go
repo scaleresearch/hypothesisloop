@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -88,5 +90,51 @@ func TestTheSchemaNoLongerHoldsAProjectsRepository(t *testing.T) {
 	var exists bool
 	if err := pool.pool.QueryRow(context.Background(), `SELECT to_regclass('project_repos') IS NOT NULL`).Scan(&exists); err != nil || exists {
 		t.Fatalf("project_repos exists = %v, %v, want the table dropped", exists, err)
+	}
+}
+
+func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	now := time.Now().UTC()
+	create := func(repository, address string) string {
+		t.Helper()
+		pe := &domain.PlatformExperiment{
+			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "with code", BudgetAcceleratorHours: 10,
+			MaxAgents: 10, StartsAt: now, EndsAt: now.Add(time.Hour), Status: domain.PlatformExpOpen,
+			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
+			Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now,
+			Repository: repository, RepositoryURL: address,
+		}
+		if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		return pe.ID
+	}
+	address := func(id string) string {
+		t.Helper()
+		got, err := pes.GetPlatformExperiment(ctx, id)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		return got.RepositoryURL
+	}
+
+	elsewhere := create("group/model", "https://git.example/experiments/group/model")
+	before := create("Acme/Model", "")
+	bare := create("", "")
+	applyTestSchema(t, pool)
+	for name, tc := range map[string][2]string{
+		"an address stored at creation":            {elsewhere, "https://git.example/experiments/group/model"},
+		"a repository from before the column":      {before, "https://github.com/Acme/Model.git"},
+		"a platform experiment with no repository": {bare, ""},
+	} {
+		if got := address(tc[0]); got != tc[1] {
+			t.Errorf("%s: repository_url = %q, want %q", name, got, tc[1])
+		}
+	}
+	if project, repository, err := pes.PlatformExperimentRepository(ctx, elsewhere); err != nil || project != "default" || repository != "group/model" {
+		t.Fatalf("PlatformExperimentRepository = %q, %q, %v, want the project and the name", project, repository, err)
 	}
 }
