@@ -10,6 +10,8 @@ const (
 	ExperimentFile = ".hypothesisloop/experiment.yaml"
 	JobSpec        = ".hypothesisloop/job.yaml"
 	Gitignore      = ".gitignore"
+	// MetricsHelper is the one way a job reports a metric, so no agent writes its own.
+	MetricsHelper = "metrics.py"
 
 	// Placeholder marks what a file of the template leaves to be filled in.
 	Placeholder = "REPLACE-WITH"
@@ -24,10 +26,12 @@ var (
 	jobSpec string
 	//go:embed files/.gitignore
 	gitignore string
+	//go:embed files/metrics.py
+	metricsHelper string
 )
 
 // Files is the template: what a repository the platform creates starts from and what hl repo
 // init adds to one that lacks it, by path.
 func Files() map[string]string {
-	return map[string]string{Readme: readme, ExperimentFile: experimentFile, JobSpec: jobSpec, Gitignore: gitignore}
+	return map[string]string{Readme: readme, ExperimentFile: experimentFile, JobSpec: jobSpec, Gitignore: gitignore, MetricsHelper: metricsHelper}
 }

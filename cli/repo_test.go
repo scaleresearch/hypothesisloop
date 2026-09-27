@@ -48,7 +48,7 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	write(t, clone, "README.md", "ours\n")
 	write(t, clone, "train.py", "print(1)\n")
 	code, out := repo(t, "init")
-	if code != 0 || !strings.Contains(out, "kept   README.md") || !strings.Contains(out, "added  "+repotemplate.JobSpec) || !strings.Contains(out, "added  "+repotemplate.ExperimentFile) || !strings.Contains(out, "added  "+repotemplate.Gitignore) {
+	if code != 0 || !strings.Contains(out, "kept   README.md") || !strings.Contains(out, "added  "+repotemplate.JobSpec) || !strings.Contains(out, "added  "+repotemplate.ExperimentFile) || !strings.Contains(out, "added  "+repotemplate.Gitignore) || !strings.Contains(out, "added  "+repotemplate.MetricsHelper) {
 		t.Fatalf("hl repo init = %d\n%s", code, out)
 	}
 	if kept, _ := os.ReadFile(filepath.Join(clone, "README.md")); string(kept) != "ours\n" {
@@ -83,7 +83,7 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	clone := emptyClone(t)
 	code, out := repo(t, "check")
-	for _, name := range []string{"readme: README.md is missing", "experiment: " + repotemplate.ExperimentFile + " is missing", "job-spec: " + repotemplate.JobSpec + " is missing"} {
+	for _, name := range []string{"readme: README.md is missing", "experiment: " + repotemplate.ExperimentFile + " is missing", "job-spec: " + repotemplate.JobSpec + " is missing", "metrics: metrics.py is missing: hl repo init adds it"} {
 		if code != 1 || !strings.Contains(out, name) {
 			t.Fatalf("an empty clone: hl repo check = %d, want %q in\n%s", code, name, out)
 		}
@@ -98,6 +98,14 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
+	// A baseline agent retyped the metrics helper from a sample: a clone without it is told.
+	if err := os.Remove(filepath.Join(clone, repotemplate.MetricsHelper)); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := repo(t, "check"); code != 1 || out != "metrics: metrics.py is missing: hl repo init adds it\n" {
+		t.Fatalf("a clone with no metrics helper: hl repo check = %d\n%s", code, out)
+	}
+	repo(t, "init")
 	// A baseline agent read "ready" of another experiment's files and went on with them: a pass
 	// says what was checked and what was not, in one line, and never calls the repository ready.
 	if code, out := repo(t, "check"); code != 0 || out != repoChecked+"\n" || strings.Contains(out, "ready") ||

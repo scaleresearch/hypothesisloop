@@ -12,6 +12,7 @@ A job runs the code of one commit, which `hl job submit` pushes on its branch.
 | `README.md` | this page |
 | `.hypothesisloop/experiment.yaml` | the experiment: its name, the brief researchers read, its metrics |
 | `.hypothesisloop/job.yaml` | the base job spec, submitted unedited for every trial |
+| `metrics.py` | how a job reports a metric: `from metrics import post_metric`, then `post_metric(fraction_complete, value, "key")` as it runs and once at the end |
 | `.gitignore` | keeps bytecode caches, virtual environments and editor files out of a commit |
 
 `hl repo init` adds whichever of these a clone lacks, and `hl repo check` says what is left to

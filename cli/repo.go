@@ -24,6 +24,7 @@ var repoCommands = []subcommand{
 const repoFiles = `  README.md                         what is measured, how one trial runs, what to vary, what must not change
   .hypothesisloop/experiment.yaml   the experiment: name, description (the brief researchers read), metrics
   .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial
+  metrics.py                        how a job reports a metric: post_metric(fraction_complete, value, "key")
   .gitignore                        bytecode caches, virtual environments and editor files, kept out of a commit`
 
 func repoInit(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -89,6 +90,8 @@ it checked and what it did not.
               them ranked
   job-spec    .hypothesisloop/job.yaml states a job and its storage as a quantity, in each
               group of a grouped job, with no REPLACE-WITH left and no secret_env
+  metrics     metrics.py is there: a job reports each metric with its post_metric, as it runs
+              and once at the end
 
 Not checked: that the files describe this experiment. Those of an earlier experiment in the
 same repository pass, so read them against the brief. Nor the code the job spec runs or its
@@ -117,7 +120,7 @@ hl repo init adds a missing file.`, stderr)
 	return 0
 }
 
-const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + "). Not checked: that the files describe this experiment."
+const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + ", " + repotemplate.MetricsHelper + "). Not checked: that the files describe this experiment."
 
 func cloneRoot() (string, error) {
 	root, err := git(".", "rev-parse", "--show-toplevel")
@@ -147,6 +150,7 @@ func notReady(clone iofs.FS) ([]string, error) {
 		{"readme", repotemplate.Readme, nil},
 		{"experiment", repotemplate.ExperimentFile, experimentGap},
 		{"job-spec", repotemplate.JobSpec, jobSpecGap},
+		{"metrics", repotemplate.MetricsHelper, nil},
 	} {
 		data, err := iofs.ReadFile(clone, item.path)
 		var gap string
