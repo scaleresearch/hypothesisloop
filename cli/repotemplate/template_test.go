@@ -11,8 +11,8 @@ import (
 // from_repo must not take an example for an experiment: the experiment file states nothing.
 func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *testing.T) {
 	files := Files()
-	if len(files) != 3 {
-		t.Fatalf("the template holds %d files, want README.md, the experiment file and the job spec", len(files))
+	if len(files) != 4 || !strings.Contains(files[Gitignore], "__pycache__/") {
+		t.Fatalf("the template holds %d files, want README.md, the experiment file, the job spec and a .gitignore for bytecode caches", len(files))
 	}
 	var spec struct {
 		Job map[string]any `yaml:"job"`

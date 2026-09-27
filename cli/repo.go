@@ -23,7 +23,8 @@ var repoCommands = []subcommand{
 
 const repoFiles = `  README.md                         what is measured, how one trial runs, what to vary, what must not change
   .hypothesisloop/experiment.yaml   the experiment: name, description (the brief researchers read), metrics
-  .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial`
+  .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial
+  .gitignore                        bytecode caches, virtual environments and editor files, kept out of a commit`
 
 func repoInit(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("repo init", `usage: hl repo init

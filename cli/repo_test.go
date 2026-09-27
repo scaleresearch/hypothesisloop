@@ -41,14 +41,14 @@ const (
 	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n"
 )
 
-// An empty repository gets all three files, and one with code keeps what it has: a file that is
+// An empty repository gets every file of the template, and one with code keeps what it has: a file that is
 // there is never written, whatever it holds. Nothing is staged or committed.
 func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	clone := emptyClone(t)
 	write(t, clone, "README.md", "ours\n")
 	write(t, clone, "train.py", "print(1)\n")
 	code, out := repo(t, "init")
-	if code != 0 || !strings.Contains(out, "kept   README.md") || !strings.Contains(out, "added  "+repotemplate.JobSpec) || !strings.Contains(out, "added  "+repotemplate.ExperimentFile) {
+	if code != 0 || !strings.Contains(out, "kept   README.md") || !strings.Contains(out, "added  "+repotemplate.JobSpec) || !strings.Contains(out, "added  "+repotemplate.ExperimentFile) || !strings.Contains(out, "added  "+repotemplate.Gitignore) {
 		t.Fatalf("hl repo init = %d\n%s", code, out)
 	}
 	if kept, _ := os.ReadFile(filepath.Join(clone, "README.md")); string(kept) != "ours\n" {

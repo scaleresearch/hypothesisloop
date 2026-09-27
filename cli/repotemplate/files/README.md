@@ -10,6 +10,7 @@ of one pushed commit.
 | `README.md` | this page |
 | `.hypothesisloop/experiment.yaml` | the experiment: its name, the brief researchers read, its metrics |
 | `.hypothesisloop/job.yaml` | the base job spec, submitted unedited for every trial |
+| `.gitignore` | keeps bytecode caches, virtual environments and editor files out of a commit |
 
 `hl repo init` adds whichever of these a clone lacks, and `hl repo check` says what is left to
 fill in.

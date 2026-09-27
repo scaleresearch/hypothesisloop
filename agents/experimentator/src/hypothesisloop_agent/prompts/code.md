@@ -11,8 +11,8 @@ clone {repository_url} into {workdir}, the directory you start in, where
 create it off
      the default branch, check it out after a restart, and never commit to the default branch.
      Run `hl repo init` in the clone before you write anything: it adds README.md,
-     `.hypothesisloop/experiment.yaml` and `.hypothesisloop/job.yaml` where the repository has
-     none and keeps every file it holds. The job.yaml is the shape of a job spec and the one
+     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml` and `.gitignore` where the
+     repository has none and keeps every file it holds. The job.yaml is the shape of a job spec and the one
      you fill in and submit: write no other, and read no sample to learn the shape. Fill in
      the other two as well (experiment.yaml is the `experiment` you propose), and propose only
      when `hl repo check` passes.
