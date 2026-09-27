@@ -176,13 +176,14 @@ def _closed_because(setup: RunSetup) -> str:
 def stop_cause(setup: RunSetup) -> tuple[str | None, str]:
     """run_ended at this moment, None when the platform could not be asked, and the sentence that
     tells the agent why its machine is being stopped. A cause the platform does not give is said
-    to be unknown, never inferred."""
+    to be unknown, never inferred. An agent that finished is told nothing: it stops by itself."""
     try:
         ended = run_ended(setup)
         if ended == "closed":
             return ended, _closed_because(setup)
+        if ended == "finished":
+            return ended, ""
         return ended, {
-            "finished": "You are being stopped because you said you have nothing left to do.",
             "cut": "You are being stopped because you were cut from the platform experiment at a stage boundary.",
             "planned": "You are being stopped because your planning is over: the platform has your answer to the draft.",
             "": ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "

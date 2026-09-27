@@ -163,7 +163,8 @@ _TURN_SILENCE_TIMEOUT_S = 900
 
 # On a stop a turn in flight is interrupted and the agent, working or idle, gets one turn of this
 # length to write down what it already knows. `podman stop` must allow for it: -t 90. Jobs still
-# in flight are left running and without a summary: nothing of theirs can be written yet.
+# in flight are left running and without a summary: nothing of theirs can be written yet. An agent
+# that finished is neither interrupted nor given that turn.
 _SHUTDOWN_TURN_S = 60
 _SHUTDOWN_PROMPT = (
     "This is your last turn, about a minute long. Start nothing new and "
@@ -182,9 +183,12 @@ _COORDINATOR_SHUTDOWN_PROMPT = (
 _PLANNED_SHUTDOWN_PROMPT = "This is your last turn. Start nothing new. You owe nothing more: end your turn."
 
 
-def _shutdown_prompt(setup: core.RunSetup) -> str:
-    """The last turn's instruction, opened with why the machine stops as the platform has it now."""
+def _shutdown_prompt(setup: core.RunSetup) -> str | None:
+    """The last turn's instruction, opened with why the machine stops as the platform has it now.
+    None for an agent that finished: the platform took its word only with nothing owed."""
     ended, cause = core.stop_cause(setup)
+    if ended == "finished":
+        return None
     if config.coordinates(setup.cfg):
         return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
     return f"{cause} {_PLANNED_SHUTDOWN_PROMPT if ended == 'planned' else _SHUTDOWN_PROMPT}"
@@ -316,18 +320,29 @@ def _restore_session(setup: core.RunSetup) -> None:
         log.info("resuming session %s on a new machine", _load_resume_id(setup) or "from its handoff")
 
 
-async def _interrupt_on_stop(client, stopped) -> None:
-    """Interrupts the turn in flight as soon as stopped() is true."""
+async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
+    """Interrupts the turn in flight as soon as stopped() is true. The turn of an agent that
+    finished is its last by its own word and ends by itself."""
     while not stopped():
         await asyncio.sleep(1)
+    if core.stop_cause(setup)[0] == "finished":
+        log.info("stop requested after the agent finished: its turn runs to its own end")
+        return
     try:
         await client.interrupt()
     except Exception as e:
         log.warning("could not interrupt the turn (%s): it runs to its own end", e)
 
 
-async def _last_turn(client, agent: str, watch_env: dict[str, str], events: list[dict], prompt: str) -> None:
-    """The shutdown turn, opened with events and whatever else finished since the last delivery."""
+async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], events: list[dict]) -> None:
+    """The shutdown turn, opened with events and whatever else finished since the last delivery.
+    An agent that finished gets none."""
+    prompt = _shutdown_prompt(setup)
+    if prompt is None:
+        log.info("stopping: the agent finished, no last turn")
+        return
+    log.info("stopping: one last turn to file what is owed")
+    agent = setup.cfg.agent_id
     events = [*events, *await updates.drain(watch_env)]
     for line in activity.event_lines(events, agent):
         print(line, flush=True)
@@ -430,7 +445,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             got_result = False
             turn_is_error = False
             context_tokens = 0
-            interrupter = asyncio.ensure_future(_interrupt_on_stop(client, stopped))
+            interrupter = asyncio.ensure_future(_interrupt_on_stop(client, setup, stopped))
             try:
                 async for message in _receive_turn(client):
                     _seen_session(setup, message)
@@ -459,8 +474,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 await _store_session(setup)
 
             if stopped() and got_result and not rate_limited_resets_at:
-                log.info("stopping: turn interrupted, one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, [], _shutdown_prompt(setup))
+                await _last_turn(client, setup, watch_env, [])
                 await _store_session(setup)
                 return None, False
 
@@ -521,8 +535,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             # hypotheses and hand it over on the same connection.
             events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
             if stopped():
-                log.info("stopping: one last turn to file what is owed")
-                await _last_turn(client, cfg.agent_id, watch_env, events, _shutdown_prompt(setup))
+                await _last_turn(client, setup, watch_env, events)
                 await _store_session(setup)
                 return None, False
             if events:

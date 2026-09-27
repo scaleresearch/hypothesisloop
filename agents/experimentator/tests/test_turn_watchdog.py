@@ -101,6 +101,33 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.queries, ["Begin.", LAST])
         self.assertTrue(client.disconnected)
 
+    # A researcher that had just finished was interrupted in its closing message and given a
+    # turn to file summaries the platform had already checked it did not owe.
+    async def test_a_stop_after_the_agent_finished_lets_its_turn_end_and_gives_no_other(self):
+        stop_flag = [False]
+        asked = asyncio.Event()
+
+        def signup(*_):
+            asked.set()
+            return {"ended": "finished"}
+
+        class FinishingClient(StoppableClient):
+            async def receive_response(self):
+                yield AssistantMessage(content=[TextBlock(text="finished, closing words")], model="m")
+                await asked.wait()
+                yield _result()
+
+        setup = _setup()
+        setup.client.get_signup = signup
+        with mock.patch.object(run, "ClaudeSDKClient", FinishingClient), \
+                mock.patch.object(run.asyncio, "sleep", mock.AsyncMock(side_effect=lambda _: stop_flag.__setitem__(0, True))), \
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, 0.0, stop_flag), timeout=5)
+        client = HangingClient.instances[-1]
+        self.assertFalse(client.interrupted.is_set())
+        self.assertEqual(client.queries, ["Begin."])
+        self.assertTrue(client.disconnected)
+
 
 class IdleClient(StoppableClient):
     """Ends every turn at once."""

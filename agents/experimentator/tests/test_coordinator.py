@@ -144,7 +144,6 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({"status": "closed", "planning_ends_at": "2026-01-01T02:48:00Z", "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
-            ({"status": "running"}, {"ended": "finished"}, "generalist", "you said you have nothing left to do"),
             ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
         ):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
