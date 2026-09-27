@@ -817,10 +817,13 @@ func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, s
 	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [FILE|-]
 
 For the planner of a draft. A proposal defines the experiment and runs nothing: no job, no
-code. FILE is YAML of this shape, with every field shown required unless it says optional:
+code. FILE is YAML of this shape, with every field shown required unless it says optional.
+Every free-text value is a | block, a list item too (- |): unquoted text breaks on a colon or
+a leading quote.
 
   experiment:
-    name: short title
+    name: |
+      short title
     description: |
       the brief, the only thing researchers read. Its BASELINE block states the control:
         config: the exact control configuration
@@ -839,15 +842,25 @@ code. FILE is YAML of this shape, with every field shown required unless it says
   agents:                              # one entry per researcher
     - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
       hyperparameters:                 #   data-search or hyperparameter-search. The direction you
-        direction: what this one tries #   give a researcher goes in hyperparameters, any keys.
+        direction: |                   #   give a researcher goes in hyperparameters, any keys.
+          what this one tries
     - {}
-  metric_reason: why this metric is the goal, in plain words
-  measurement: how it is measured, in plain words
-  sizing_reason: why this budget, duration and number of researchers are the least that reach
-    the goal, worded as the estimate it is
-  out_of_scope: [optional sentences]
-  risks: [optional sentences]
-  questions: [optional sentences]
+  metric_reason: |
+    why this metric is the goal, in plain words
+  measurement: |
+    how it is measured, in plain words
+  sizing_reason: |
+    why this budget, duration and number of researchers are the least that reach the goal,
+    worded as the estimate it is
+  out_of_scope:                        # optional, and so are risks and questions
+    - |
+      what you left out
+  risks:
+    - |
+      what could make the result mislead
+  questions:
+    - |
+      what the goal left open and you decided
 
 The proposal is checked before it is stored, and a refusal names what to fix. One that passes is
 stored at once, replaces the one before, releases your machine and is what the person is asked
