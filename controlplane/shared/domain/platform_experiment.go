@@ -286,7 +286,7 @@ type PlatformExperiment struct {
 	// ProposedAt, or with ProposedAt absent, is not answered by a proposal yet.
 	Revisions []PlanningRequest `json:"revisions,omitempty"`
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
-	// absent when the platform did at ClosesAt. Carried by a read of one platform experiment.
+	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
 	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`

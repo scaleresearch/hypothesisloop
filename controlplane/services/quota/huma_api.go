@@ -251,7 +251,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "The caller's own platform experiments, within ?project_id when given, and with them the ones " +
 			"staff shared with every account: those are in every project's listing, marked shared, read like the " +
 			"caller's own and written by their own org alone. ?shared=true keeps only the shared ones, ?shared=false " +
-			"leaves them out. A token bound to one platform experiment lists that one. " +
+			"leaves them out. A token bound to one platform experiment lists that one. A closed one carries closed_at and close_reason. " +
 			"Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
 			"?sort selects order: created_at, starts_at, name, or status, optionally prefixed with " +
 			"- for descending (default -created_at). Total match count is returned in the " +

@@ -98,3 +98,27 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 		t.Fatalf("closed: got = ends %v, %s, %v, want the run's end kept and end_time_reached", closed.EndsAt, closed.CloseReason, err)
 	}
 }
+
+func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	if err := pes.ClosePlatformExperiment(ctx, pe, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpClosed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, one := range listed {
+		if one.ID == pe {
+			if one.CloseReason != domain.CloseByRequest || one.ClosedAt == nil {
+				t.Fatalf("listed: close_reason %q at %v, want closed_by_request and when", one.CloseReason, one.ClosedAt)
+			}
+			return
+		}
+	}
+	t.Fatalf("%s is not among the closed ones listed", pe)
+}

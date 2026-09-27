@@ -343,7 +343,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.stages, pe.current_stage, pe.summary,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        pe.coordinator_hosted, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.baseline_job_id,
-       pe.duration_hours, pe.started_at,
+       pe.duration_hours, pe.started_at, pe.closed_at, pe.close_reason,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
 LEFT JOIN experiment_signups es ON es.platform_experiment_id = pe.id
@@ -373,7 +373,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &pe.ProposedAt, &pe.BaselineJobID,
-			&pe.DurationHours, &startedAt,
+			&pe.DurationHours, &startedAt, &pe.ClosedAt, &pe.CloseReason,
 			&pe.SignupCount,
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)
