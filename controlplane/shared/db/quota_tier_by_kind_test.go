@@ -50,6 +50,9 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 	}
 }
 
+// oneStage is the ladder these starts store: none of them is about the ladder.
+var oneStage = []domain.Stage{{LengthPct: 100}}
+
 // allocateStartQuotas mirrors services/quota.PlatformExperimentsService.Start's per-dimension
 // allocation, without pulling in the whole service (no metrics dependency needed for this path)
 // — the same domain.AllocateQuota + domain.ResolveQuotaTier/ApplyQuotaTier sequence production runs.
@@ -87,8 +90,8 @@ func TestStartGivesEveryParticipantGuaranteedQuotaRegardlessOfKind(t *testing.T)
 		t.Fatalf("signup agent: got = %v, want = nil", err)
 	}
 
-	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
-		return allocateStartQuotas(pe, 4, participants), nil // 4 = budget * stage-1 explore fraction, arbitrary here
+	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return allocateStartQuotas(pe, 4, participants), oneStage, nil // 4 = budget * stage-1 explore fraction, arbitrary here
 	})
 	if err != nil || !started {
 		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
@@ -130,8 +133,8 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 		t.Fatalf("signup human with burst_only override: got = %v, want = nil", err)
 	}
 
-	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
-		return allocateStartQuotas(pe, 4, participants), nil
+	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return allocateStartQuotas(pe, 4, participants), oneStage, nil
 	})
 	if err != nil || !started {
 		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
@@ -170,8 +173,8 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
-	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
-		return allocateStartQuotas(pe, 4, participants), nil
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return allocateStartQuotas(pe, 4, participants), oneStage, nil
 	})
 	if err != nil || !started {
 		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)
@@ -220,8 +223,8 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
-	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
-		return allocateStartQuotas(pe, 4, participants), nil
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return allocateStartQuotas(pe, 4, participants), oneStage, nil
 	})
 	if err != nil || !started {
 		t.Fatalf("start: got = (%v, %v), want = (true, nil)", started, err)

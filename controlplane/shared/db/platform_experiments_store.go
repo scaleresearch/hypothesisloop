@@ -548,7 +548,9 @@ type StageRedistribution struct {
 // StartParticipant is one signed-up agent and everything the allocation needs to know about it,
 // resolved inside the start transaction.
 type StartParticipant struct {
-	AgentID     string
+	AgentID string
+	// Role says whether the agent is a researcher, which the run's ladder is sized by.
+	Role        domain.SignupRole
 	AgentExists bool
 	HasTop3     bool
 	// QuotaTierOverride is what domain.ResolveQuotaTier needs to decide which column this
@@ -559,7 +561,7 @@ type StartParticipant struct {
 }
 
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
-// participating agent's quota in one transaction. The run's clock starts here: started_at is
+// participating agent's quota and the ladder the run has (domain.RunStages) in one transaction. The run's clock starts here: started_at is
 // now and ends_at duration_hours later, so nothing of the time it was open is taken from it. quotasFor is called with the signup set read
 // inside that transaction; returning an error rolls the whole thing back, leaving the experiment
 // open and the call safe to retry.
@@ -572,7 +574,7 @@ type StartParticipant struct {
 // or fails.
 //
 // Returns started=false when the experiment was not open.
-func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
+func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: begin tx: %w", err)
@@ -597,7 +599,7 @@ WHERE id=$1 AND status='open'`, id)
 	// transaction is open: several concurrent starts would each hold a connection and wait for
 	// another from the same pool, which is a deadlock rather than a slow path.
 	rows, err := tx.Query(ctx, `
-SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id),
+SELECT s.agent_id, s.role, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id),
        s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
@@ -609,7 +611,7 @@ ORDER BY s.agent_id`, id)
 	var participants []StartParticipant
 	for rows.Next() {
 		var p StartParticipant
-		if err := rows.Scan(&p.AgentID, &p.AgentExists, &p.HasTop3, &p.QuotaTierOverride); err != nil {
+		if err := rows.Scan(&p.AgentID, &p.Role, &p.AgentExists, &p.HasTop3, &p.QuotaTierOverride); err != nil {
 			rows.Close()
 			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
 		}
@@ -620,9 +622,19 @@ ORDER BY s.agent_id`, id)
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
 	}
 
-	quotas, err := quotasFor(participants)
+	quotas, stages, err := quotasFor(participants)
 	if err != nil {
 		return false, nil, err
+	}
+	if err := domain.ValidateStages(stages); err != nil {
+		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: %w", err)
+	}
+	stagesJSON, err := json.Marshal(stages)
+	if err != nil {
+		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: marshal stages: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET stages=$2 WHERE id=$1`, id, stagesJSON); err != nil {
+		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: store stages: %w", err)
 	}
 	for _, q := range quotas {
 		if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...); err != nil {

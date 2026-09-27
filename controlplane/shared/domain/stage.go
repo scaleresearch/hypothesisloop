@@ -68,6 +68,22 @@ func ValidateStages(stages []Stage) error {
 	return nil
 }
 
+// MinResearchersForCut is the field size below which a boundary cuts nobody: a ladder that
+// eliminates its way down to one agent has stopped comparing anything.
+const MinResearchersForCut = 5
+
+// RunStages is the ladder a run of researchers competitors is started with. A field no boundary
+// can cut from has one stage, so each researcher holds its whole share from the start: staged,
+// the ladder only withheld budget and selected nobody. The one stage keeps the job-length cap of
+// the ladder's last, the stage that follows every cut. The field only shrinks after the start,
+// so what is decided here holds for the whole run.
+func RunStages(stages []Stage, researchers int) []Stage {
+	if researchers >= MinResearchersForCut || len(stages) == 0 {
+		return stages
+	}
+	return []Stage{{LengthPct: 100, MaxJobHours: stages[len(stages)-1].MaxJobHours}}
+}
+
 // StageProgress is max(budget consumed, time elapsed of the run) as a fraction, at most 1 — the single monotonic
 // clock driving every boundary, so whichever runs out first advances the ladder. consumedAccH
 // must exclude reservations, or a large queued job could trip a boundary.

@@ -137,3 +137,19 @@ func TestCurrentMaxJobHours(t *testing.T) {
 		}
 	}
 }
+
+func TestRunStagesIsOneStageWhereNoBoundaryCanCut(t *testing.T) {
+	ladder := []Stage{{LengthPct: 40, EvictPct: 75, MaxJobHours: 1}, {LengthPct: 60, MaxJobHours: 6}}
+	for researchers := 0; researchers < MinResearchersForCut; researchers++ {
+		got := RunStages(ladder, researchers)
+		if len(got) != 1 || got[0] != (Stage{LengthPct: 100, MaxJobHours: 6}) {
+			t.Errorf("%d researchers: stages %+v, want one stage of the whole run with the last stage's job cap", researchers, got)
+		}
+		if err := ValidateStages(got); err != nil {
+			t.Errorf("%d researchers: %v", researchers, err)
+		}
+	}
+	if got := RunStages(ladder, MinResearchersForCut); len(got) != 2 || got[0] != ladder[0] || got[1] != ladder[1] {
+		t.Errorf("%d researchers: stages %+v, want the ladder as declared", MinResearchersForCut, got)
+	}
+}

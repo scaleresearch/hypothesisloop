@@ -74,7 +74,7 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 	}
 
 	before := time.Now().Add(-time.Second)
-	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, func([]StartParticipant) ([]*domain.AgentQuota, error) { return nil, nil })
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
 	if err != nil || !started {
 		t.Fatalf("start: got = %v, %v, want started", started, err)
 	}

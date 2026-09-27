@@ -354,7 +354,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 
 	// Started, the budget is shared among the researchers: the planner and the baseline agent
 	// take no share, and the baseline agent keeps the quota it measured against.
-	started, quotas, err := pes.StartPlatformExperimentTx(ctx, id, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
+	started, quotas, err := pes.StartPlatformExperimentTx(ctx, id, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		var out []*domain.AgentQuota
 		for _, p := range participants {
 			if p.AgentID == planner || p.AgentID == baseline.ID {
@@ -362,7 +362,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 			}
 			out = append(out, &domain.AgentQuota{ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: id, GuaranteedAcceleratorHours: 1, CreatedAt: time.Now().UTC()})
 		}
-		return out, nil
+		return out, oneStage, nil
 	})
 	if err != nil || !started || len(quotas) != 3 {
 		t.Fatalf("start: started %v with %d quotas, %v, want the 3 researchers'", started, len(quotas), err)

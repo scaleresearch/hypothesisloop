@@ -15,13 +15,9 @@ import (
 // still produce one is in flight. Callers must postpone the boundary rather than cut.
 var ErrStageRankingPending = errors.New("stages: ranking data still to come from a job in flight")
 
-// minSurvivorsForCut is the roster size below which a boundary cuts nobody, and
-// minSurvivorsAfterCut the floor a cut may never take the field below. Guardrails: a ladder
-// that eliminates its way down to one agent has stopped comparing anything.
-const (
-	minSurvivorsForCut   = 5
-	minSurvivorsAfterCut = 2
-)
+// minSurvivorsAfterCut is the floor a cut may never take the field below, beside
+// domain.MinResearchersForCut, the field size below which a boundary cuts nobody.
+const minSurvivorsAfterCut = 2
 
 // computeCut ranks survivors on each metric independently — worst-first by their best value,
 // bottom k = floor(evict% × survivors) cut — and returns (survivors, cut). Surviving on any one
@@ -42,7 +38,7 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	// A stage that cuts nobody, an unrankable field (no ranking metrics — constraint/attribute
 	// metrics never cut), and a field already at the guardrail floor all mean the same thing
 	// here: advance, cut no one.
-	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < minSurvivorsForCut {
+	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < domain.MinResearchersForCut {
 		return survivors, nil, nil
 	}
 

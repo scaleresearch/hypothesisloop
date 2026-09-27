@@ -124,3 +124,27 @@ type wholeBudget struct{ QuotaService }
 func (wholeBudget) RunBudget(_ context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	return pe.BudgetAcceleratorHours, nil
 }
+
+// A run started with fewer researchers than a cut needs has one stage (domain.RunStages). No
+// boundary is ahead of it, so nothing is advanced and no stage.boundary event, which a stage
+// advance alone writes, is sent, though its whole window has elapsed.
+func TestASingleStageRunCrossesNoBoundary(t *testing.T) {
+	srv := emptyVectorServer(t)
+	defer srv.Close()
+	now := time.Now().UTC()
+	store := &everyPEStagesStore{advanced: map[string]bool{}, running: []*domain.PlatformExperiment{{
+		ID: "pe-1", Status: domain.PlatformExpRunning,
+		Metrics:      []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}},
+		Stages:       domain.RunStages([]domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60}}, 2),
+		CurrentStage: 1,
+		CreatedAt:    now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour),
+	}}}
+
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL)
+	if err := c.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile err = %v, want nil", err)
+	}
+	if len(store.advanced) != 0 {
+		t.Fatalf("advanced %v, want no boundary crossed in a run of one stage", store.advanced)
+	}
+}

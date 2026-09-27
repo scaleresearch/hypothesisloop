@@ -66,7 +66,7 @@ type PlatformExperimentsStore interface {
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
-	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error)
+	StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
 	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
 	// the whole roster.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,6 +28,8 @@ type startStore struct {
 	// baselines are the agents of role baseline, which take no share and whose spend is taken
 	// from the budget before the shares are carved.
 	baselines []string
+	// stages is the ladder the start stored.
+	stages []domain.Stage
 }
 
 func (f *startStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
@@ -52,11 +55,18 @@ func (f *startStore) GetPlatformExperiment(ctx context.Context, id string) (*dom
 }
 
 func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string,
-	quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
-	quotas, err := quotasFor(f.participants)
+	quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
+	participants := slices.Clone(f.participants)
+	for i := range participants {
+		if participants[i].Role == "" {
+			participants[i].Role = domain.SignupRoleCompetitor
+		}
+	}
+	quotas, stages, err := quotasFor(participants)
 	if err != nil {
 		return false, nil, err
 	}
+	f.stages = stages
 	return true, quotas, nil
 }
 
@@ -272,7 +282,7 @@ func (f *sweptStore) ListPlatformExperimentsByStatus(context.Context, domain.Pla
 	return []*domain.PlatformExperiment{f.pe}, nil
 }
 
-func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
+func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	if f.lost {
 		return false, nil, nil
 	}
@@ -280,22 +290,52 @@ func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, q
 	return f.startStore.StartPlatformExperimentTx(ctx, id, quotasFor)
 }
 
-// Only the first stage's share is released at the start; the rest is released at the boundaries
-// the ladder reaches. Allocating the whole budget up front lets one participant spend it all
-// before anyone has been cut.
-// The participant here is a human, so its share stays where AllocateQuota put it and the released
-// figure can be read off the guaranteed column directly. Burst is headroom derived from it
-// (BurstFraction), not a second slice of the budget, so it is deliberately not counted.
-func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
-	byAgent := startWith(t, participant("human-1", ""))
-
-	if got, want := byAgent["human-1"].GuaranteedAcceleratorHours, 100.0*0.5; got != want {
-		t.Errorf("sole participant's guaranteed = %v, want the first stage's share (%v) of a 100-hour budget — releasing more lets one agent spend the whole run's budget before anyone is cut", got, want)
+// A field a boundary can cut from is started on the ladder: only the first stage's share is
+// released, and the rest at the boundaries, or one researcher spends the budget before anyone is
+// cut. A smaller field is cut by no boundary, where the ladder only withheld budget: two
+// researchers stopped on a first share minutes before the boundary released the rest. It has one
+// stage and each researcher its whole share from the start.
+// The participants here are human, so each share stays where AllocateQuota put it and is read
+// off the guaranteed column. Burst is headroom derived from it, not a second slice of the budget.
+func TestStartReleasesTheWholeShareUnlessABoundaryCanCut(t *testing.T) {
+	ladder := []domain.Stage{{LengthPct: 50, EvictPct: 50, MaxJobHours: 1}, {LengthPct: 50, EvictPct: 0, MaxJobHours: 4}}
+	field := func(researchers int, others ...db.StartParticipant) *startStore {
+		store := &startStore{participants: others, pe: &domain.PlatformExperiment{
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline", Stages: slices.Clone(ladder),
+		}}
+		for i := range researchers {
+			store.participants = append(store.participants, participant(fmt.Sprintf("human-%d", i+1), ""))
+		}
+		return store
+	}
+	reviewer := participant("reviewer-1", "")
+	reviewer.Role = domain.SignupRoleReviewer
+	for name, c := range map[string]struct {
+		store  *startStore
+		share  float64
+		stages []domain.Stage
+	}{
+		"five researchers":             {field(domain.MinResearchersForCut), 10, ladder},
+		"one researcher":               {field(1), 100, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
+		"four researchers, a reviewer": {field(4, reviewer), 20, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
+	} {
+		quotas, err := newSignupTestService(t, c.store).start(context.Background(), c.store.pe, time.Now().UTC())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, q := range quotas {
+			if q.GuaranteedAcceleratorHours != c.share {
+				t.Errorf("%s: %s is given %v, want %v", name, q.AgentID, q.GuaranteedAcceleratorHours, c.share)
+			}
+		}
+		if !slices.Equal(c.store.stages, c.stages) {
+			t.Errorf("%s: the run is stored with stages %+v, want %+v", name, c.store.stages, c.stages)
+		}
 	}
 
 	// What measuring the baseline cost counts toward the budget: the shares are carved from what
 	// it left, and a budget the baseline spent whole starts nothing.
-	for spent, want := range map[float64]float64{20: 40, 100: 0} {
+	for spent, want := range map[float64]float64{20: 80, 100: 0} {
 		metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"resource_type":"accelerator_hours","tier":"guaranteed"},"value":[1,"%v"]}]}}`, spent)
@@ -315,7 +355,7 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 			continue
 		}
 		if err != nil || len(quotas) != 1 || quotas[0].GuaranteedAcceleratorHours != want {
-			t.Errorf("start after the baseline spent %v of 100: quotas = %+v, %v, want a first share of %v", spent, quotas, err, want)
+			t.Errorf("start after the baseline spent %v of 100: quotas = %+v, %v, want a share of %v", spent, quotas, err, want)
 		}
 	}
 }

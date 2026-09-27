@@ -520,15 +520,22 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 	if err != nil {
 		return nil, err
 	}
-	// Only the first stage's share of the budget is released now; each later stage releases its
-	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
-	// exhausting the whole budget before the ladder has cut anyone.
-	exploreFrac := pe.Stages[0].LengthPct / 100.0
-
-	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {
+	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		if len(participants) == 0 {
-			return nil, noResearchers(pe.ID)
+			return nil, nil, noResearchers(pe.ID)
 		}
+		researchers := 0
+		for _, p := range participants {
+			if p.Role == domain.SignupRoleCompetitor {
+				researchers++
+			}
+		}
+		// The ladder is decided here, from the roster the start transaction reads, and stored
+		// with the start. Only its first stage's share of the budget is released now; each later
+		// stage releases its own at the boundary it starts (see controller.applyCut), which stops
+		// one agent exhausting the budget before the ladder has cut anyone.
+		stages := domain.RunStages(pe.Stages, researchers)
+		exploreFrac := stages[0].LengthPct / 100.0
 		// Every signed-up agent participates or the start fails. Skipping the ones that could not
 		// be resolved used to mean a transient database error permanently disinherited an agent:
 		// the experiment started without it, and there is no second allocation pass.
@@ -536,7 +543,7 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 		totalBonusFraction := 0.0
 		for i, p := range participants {
 			if !p.AgentExists {
-				return nil, fmt.Errorf("platform_experiments.start: agent %s is signed up but does not exist", p.AgentID)
+				return nil, nil, fmt.Errorf("platform_experiments.start: agent %s is signed up but does not exist", p.AgentID)
 			}
 			if p.HasTop3 {
 				bonuses[i] = s.cfg.Top3BonusFraction
@@ -563,7 +570,7 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 				CreatedAt:                  now,
 			})
 		}
-		return allocated, nil
+		return allocated, stages, nil
 	})
 	if err != nil {
 		return nil, err

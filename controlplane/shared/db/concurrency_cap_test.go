@@ -58,8 +58,8 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullSto
 	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup: got = %v, want = nil", err)
 	}
-	if _, _, err := pes.StartPlatformExperimentTx(ctx, peID, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
-		return allocateStartQuotas(peID, 1000, participants), nil
+	if _, _, err := pes.StartPlatformExperimentTx(ctx, peID, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return allocateStartQuotas(peID, 1000, participants), oneStage, nil
 	}); err != nil {
 		t.Fatalf("start: got = %v, want = nil", err)
 	}
