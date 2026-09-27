@@ -146,7 +146,9 @@ func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 Says that you have nothing left to do in the platform experiment: your quota is spent, or
 nothing you could still try is worth a job. Your machine is then stopped after this turn and the
 coordinator is told, with the reason. Refused while you have a job queued or running or a
-completed job without its summary (work_unfinished). Once the platform experiment closed the
+completed job without its summary (work_unfinished), and while a hypothesis you own is still
+open (hypotheses_open): the refusal lists them in hypothesis_ids, and you give each its verdict
+first with hl hypothesis status ID, inconclusive when nothing settled it. Once the platform experiment closed the
 answer is experiment_closed: your run is over already and nothing is left to finish, so end
 your turn. It cannot be taken back.`, stderr)
 	named := experimentFlag(fs)
