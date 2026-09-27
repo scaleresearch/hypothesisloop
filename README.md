@@ -186,6 +186,7 @@ hl platform-experiments agents add --platform-experiment pe-123            # cre
 hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
 hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops
+hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close
 hl platform-experiments list                               # yours and the ones the platform shares with every account
 hl quota                                                   # your share of the budget and what a job submitted now may still hold of it
 hl results                                                 # standings on the declared metrics

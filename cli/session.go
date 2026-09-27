@@ -1,0 +1,66 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+)
+
+func agentsSession(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT > session.tar.gz
+
+Writes the model session the agent last stored to standard output, byte for byte: what it said
+and saw, as its harness packed it. The platform's own harness packs a gzipped tar, with the
+model's transcript as JSON lines under model-home/:
+
+  hl platform-experiments agents session --platform-experiment pe-123 ag-1 | tar -xzf - -C ag-1-session
+
+Read by the agent itself and by the org that owns the platform experiment, while it runs and
+after it has closed. An agent that stored none yet is not found.`, stderr)
+	named := experimentFlag(fs)
+	agent, err := parseOne(fs, args, "AGENT", "", "agent")
+	if err != nil {
+		return parseExit(err)
+	}
+	pe, err := namedExperiment(fs, c, *named)
+	if err != nil {
+		return parseExit(err)
+	}
+	if err := copyBytes(c, agentsPath(pe)+"/"+url.PathEscape(agent)+"/session", stdout); err != nil {
+		return fail(stderr, err)
+	}
+	return 0
+}
+
+// copyBytes streams an answer that is no JSON to out.
+func copyBytes(c *apiclient.Client, path string, out io.Writer) error {
+	if c.BaseURL == "" {
+		return errors.New("no API URL given (set API_URL)")
+	}
+	if c.Token == "" {
+		return errors.New("no token given (set HL_TOKEN)")
+	}
+	req, err := http.NewRequest("GET", strings.TrimRight(c.BaseURL, "/")+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		refusal, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return &apiclient.HTTPError{Method: "GET", Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(refusal))}
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("GET %s: reading response: %w", path, err)
+	}
+	return nil
+}

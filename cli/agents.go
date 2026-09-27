@@ -15,6 +15,7 @@ var agentsCommands = []subcommand{
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
 	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish},
+	{"session", "the model session an agent last stored, as it is: what it said and saw", agentsSession},
 }
 
 func agentsPath(platformExperiment string) string {
