@@ -37,7 +37,7 @@ var watchTenancy = authtest.Placement{
 	Agents: map[string]string{"agent-1": "org-a", "agent-2": "org-a", "agent-9": "org-b"},
 }
 
-func watchServerAs(t *testing.T, principal auth.Principal) (*httptest.Server, *WatchHandler) {
+func watchServerAs(t *testing.T, principal auth.Principal) *httptest.Server {
 	t.Helper()
 	source := newFakeEvents()
 	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
@@ -50,7 +50,7 @@ func watchServerAs(t *testing.T, principal auth.Principal) (*httptest.Server, *W
 		server.Close()
 		cancel()
 	})
-	return server, handler
+	return server
 }
 
 func watchStatus(t *testing.T, server *httptest.Server, query string, protocols ...string) int {
@@ -73,7 +73,7 @@ func watchStatus(t *testing.T, server *httptest.Server, query string, protocols 
 // The upgrade is refused with 400 once a request is let through, since these are plain GETs. A
 // 401, 403 or 404 before that is the access decision under test.
 func TestWatchTakesItsTokenFromTheSubprotocolOnly(t *testing.T) {
-	server, _ := watchServerAs(t, auth.Principal{Kind: auth.KindStaff})
+	server := watchServerAs(t, auth.Principal{Kind: auth.KindStaff})
 	query := "platform_experiment_id=pe-1"
 	for name, tc := range map[string]struct {
 		protocols []string
@@ -122,7 +122,7 @@ func TestWatchKeepsToTheCallersScope(t *testing.T) {
 		"job token":                         {auth.Principal{Kind: auth.KindJob, ExperimentID: "exp-1", PlatformExperimentID: "pe-1", OrgIDs: orgA}, "experiment_id=exp-1", http.StatusForbidden},
 		"runtime token":                     {auth.Principal{Kind: auth.KindRuntime, ClusterName: "c", OrgIDs: orgA}, "platform_experiment_id=pe-1", http.StatusForbidden},
 	} {
-		server, _ := watchServerAs(t, tc.principal)
+		server := watchServerAs(t, tc.principal)
 		if got := watchStatus(t, server, tc.query, offer); got != tc.want {
 			t.Errorf("%s: got = %d, want = %d", name, got, tc.want)
 		}
@@ -131,7 +131,7 @@ func TestWatchKeepsToTheCallersScope(t *testing.T) {
 
 // An agent's subscription is its own whatever it asks for: the agent filter comes from the token.
 func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
-	server, handler := watchServerAs(t, auth.Principal{Kind: auth.KindAgent, AgentID: "agent-a", PlatformExperimentID: "pe-1", OrgIDs: []string{"org-a"}})
+	server := watchServerAs(t, auth.Principal{Kind: auth.KindAgent, AgentID: "agent-a", PlatformExperimentID: "pe-1", OrgIDs: []string{"org-a"}})
 	for _, asked := range []string{"agent-b", ""} {
 		query := url.Values{"platform_experiment_id": {"pe-1"}}
 		if asked != "" {
@@ -143,9 +143,6 @@ func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
 			t.Errorf("asking for agent %q: subscribed as %q, want agent-a", asked, got)
 		}
 		client.conn.Close()
-	}
-	if got := handler.hub.list("pe-1", "agent-b"); len(got) != 0 {
-		t.Errorf("subscriptions narrowed to agent-b: got = %d, want = 0", len(got))
 	}
 }
 

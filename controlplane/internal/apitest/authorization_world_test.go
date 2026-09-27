@@ -276,7 +276,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, nil, worldRepositories{}, contractSettler{}, "http://metrics.invalid", logger).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, worldGraph{world: w}, logger, "http://metrics.invalid", nil), logger))
-	registry.RegisterWatchHuma(doc, watch)
+	registry.RegisterWatchHuma(doc)
 
 	mint := func(scope string) string {
 		token, err := auth.Mint(worldSecret, scope)

@@ -125,7 +125,6 @@ def _list_reads(t: Tenant) -> list[str]:
         f"/hypotheses?project_id={t.project_id}",
         f"/hypotheses?agent_id={t.agent}",
         f"/hypotheses/stats?platform_experiment_id={t.pe_id}",
-        f"/watch/subscriptions?platform_experiment_id={t.pe_id}",
     ]
 
 

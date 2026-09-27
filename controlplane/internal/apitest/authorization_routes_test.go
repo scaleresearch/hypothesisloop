@@ -263,7 +263,6 @@ var routes = []route{
 	// ---- watch ----
 	{method: "GET", path: "/watch", request: "/watch?platform_experiment_id=<pe>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/watch/kinds", rule: listed(agentAudience, http.StatusOK)},
-	{method: "GET", path: "/watch/subscriptions", request: "/watch/subscriptions?platform_experiment_id=<pe>", rule: listed(agentAudience, http.StatusOK)},
 
 	// ---- agents ----
 	{method: "POST", path: "/agents", body: `{"id":"agent-new","org_id":"<org>"}`, rule: inOrgOf(coordinatorAudience, reached)},

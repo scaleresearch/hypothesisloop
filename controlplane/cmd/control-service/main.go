@@ -291,7 +291,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	registry.RegisterHuma(doc, registryHandler)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.
-	registry.RegisterWatchHuma(doc, watchHandler)
+	registry.RegisterWatchHuma(doc)
 	// /explore is the agent-only digest: nothing an agent isn't permitted to call.
 	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view, and
 	// /explore/rules the rules alone, which a research agent's system prompt carries.

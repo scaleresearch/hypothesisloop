@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -97,35 +96,6 @@ func (h *hub) filterOf(sub *subscriber) db.EventFilter {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return sub.filter
-}
-
-// list describes every connection open on this process right now. It is a read of the live sockets
-// themselves — the map is exactly the set of open connections, and an entry disappears the instant
-// its socket does — so it adds no state and cannot be written to. Nothing about a client that is
-// not connected exists here to be listed.
-func (h *hub) list(platformExperimentID, agentID string) []WatchSubscription {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := []WatchSubscription{}
-	for sub := range h.subs {
-		if platformExperimentID != "" && sub.filter.PlatformExperimentID != platformExperimentID {
-			continue
-		}
-		if agentID != "" && sub.filter.AgentID != agentID {
-			continue
-		}
-		out = append(out, describe(sub.filter, sub.since))
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].PlatformExperimentID != out[j].PlatformExperimentID {
-			return out[i].PlatformExperimentID < out[j].PlatformExperimentID
-		}
-		if out[i].AgentID != out[j].AgentID {
-			return out[i].AgentID < out[j].AgentID
-		}
-		return out[i].ExperimentID < out[j].ExperimentID
-	})
-	return out
 }
 
 // WatchSubscription is what one live connection is subscribed to. It is derived from the filter
@@ -588,7 +558,7 @@ var knownKinds = func() map[string]bool {
 //
 // The body is db.EventKinds itself, the same slice parseWatchQuery validates against, so this
 // cannot describe a stream the server does not serve.
-func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
+func RegisterWatchHuma(doc *apidocs.Doc) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
@@ -616,37 +586,6 @@ func RegisterWatchHuma(doc *apidocs.Doc, watch *WatchHandler) {
 	}, func(context.Context, *struct{}) (*struct{ Body []db.EventKindDoc }, error) {
 		return &struct{ Body []db.EventKindDoc }{Body: db.EventKinds}, nil
 	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "list-watch-subscriptions", Method: "GET", Path: "/watch/subscriptions",
-		Summary: "List the /watch connections open right now", Tags: []string{"watch"},
-		Description: "What every /watch socket open on this process is subscribed to: its scope, the kinds in force, " +
-			"and the cursor it opened at. Narrow it with `platform_experiment_id` and `agent`.\n\n" +
-			"This is a read of the live connections themselves and of nothing else. There is no stored subscription " +
-			"here and there cannot be one: a subscription that outlived its socket would have nowhere to deliver to, " +
-			"and `since=<cursor>` already makes a reconnect lossless. So an entry appears when a socket opens and is " +
-			"gone the moment it closes — if your watcher died, it is not listed, and that is the answer.",
-	}, func(ctx context.Context, in *listWatchSubscriptionsInput) (*struct{ Body []WatchSubscription }, error) {
-		within, restricted, err := doc.Access.PlatformExperimentIDs(ctx, "")
-		if err != nil {
-			return nil, err
-		}
-		if restricted {
-			visible := []WatchSubscription{}
-			for _, sub := range watch.hub.list(in.PlatformExperimentID, in.AgentID) {
-				if slices.Contains(within, sub.PlatformExperimentID) {
-					visible = append(visible, sub)
-				}
-			}
-			return &struct{ Body []WatchSubscription }{Body: visible}, nil
-		}
-		return &struct{ Body []WatchSubscription }{Body: watch.hub.list(in.PlatformExperimentID, in.AgentID)}, nil
-	})
-}
-
-type listWatchSubscriptionsInput struct {
-	PlatformExperimentID string `query:"platform_experiment_id" doc:"only connections scoped to this platform experiment"`
-	AgentID              string `query:"agent_id" doc:"only connections narrowed to this agent"`
 }
 
 func parseWatchQuery(r *http.Request) (db.EventFilter, int64, error) {

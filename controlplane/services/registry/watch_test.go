@@ -1014,49 +1014,6 @@ func TestAControlFrameNamingAnUnknownKindIsRefusedAndLeavesTheFilterAlone(t *tes
 	}
 }
 
-// Listing subscriptions reads the live connections and nothing else. That is what keeps it from
-// being a subscriber registry: an entry exists for exactly as long as its socket does, so a
-// watcher that died is not listed — which is the true answer, not a missing one.
-func TestListingSubscriptionsReportsTheLiveConnectionsAndForgetsThemWhenTheyClose(t *testing.T) {
-	source := newFakeEvents()
-	handler := NewWatchHandler(source,
-		&lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	handler.Start(ctx)
-	<-source.listening
-	server := httptest.NewServer(http.HandlerFunc(handler.ServeHTTP))
-	defer server.Close()
-
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent_id":               {"agent-a"},
-		"kinds":                  {"experiment.status"},
-	})
-	client.sendText(t, "{}")
-	readSubscription(t, client)
-
-	listed := handler.hub.list("pe-1", "agent-a")
-	if len(listed) != 1 {
-		t.Fatalf("live subscriptions for agent-a: got = %v, want = %v", len(listed), 1)
-	}
-	if len(listed[0].Kinds) != 1 || listed[0].Kinds[0] != db.EventExperimentStatus {
-		t.Errorf("listed kinds: got = %v, want = [experiment.status]", listed[0].Kinds)
-	}
-	if got := handler.hub.list("pe-1", "agent-b"); len(got) != 0 {
-		t.Errorf("live subscriptions for an agent with none: got = %v, want = %v", len(got), 0)
-	}
-
-	client.conn.Close()
-	deadline := time.Now().Add(3 * time.Second)
-	for len(handler.hub.list("pe-1", "agent-a")) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("live subscriptions after the socket closed: got = %v, want = %v", len(handler.hub.list("pe-1", "agent-a")), 0)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // The default subscription is the one every agent will use, so the scoping rule has to hold on it
 // and not only on the hand-written filters it was first tested with. An agent whose default
 // subscription carried a rival's job status or quota would be reading a competitor's timeline, and
