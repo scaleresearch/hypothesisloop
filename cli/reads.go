@@ -22,7 +22,10 @@ submitted now is admitted with: every job that has not ended holds its whole est
 are less than the share minus what is used while jobs run. Burst gives no hours on top of the
 share: burst_accelerator_hours is how much of it may run at burst priority, on idle capacity.
 Used counts a job that has not started at its estimate and a running one at what it has spent.
-In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.`, stderr)
+In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.
+For one agent, where the platform sets a ceiling: data_bytes is what it holds under its data
+prefix and max_data_bytes the ceiling. At or over it every submit is refused with
+data_quota_exceeded until some is deleted.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent, else $AGENT_ID)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")

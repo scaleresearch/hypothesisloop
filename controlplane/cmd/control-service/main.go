@@ -201,7 +201,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// or the same job's cost depends on which of them is asked.
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore)
+	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		AllowanceAcceleratorHours: pcfg.Planning.AllowanceAcceleratorHours,
 		Limit:                     time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,

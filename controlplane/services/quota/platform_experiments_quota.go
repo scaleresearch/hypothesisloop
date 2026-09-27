@@ -8,6 +8,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // GetAgentQuota returns an agent's allocation and current usage for a platform experiment, merging
@@ -113,6 +114,8 @@ type AgentQuotaView struct {
 	UsedBurstAccH              float64   `json:"used_burst_acch" doc:"The same at burst priority."`
 	RemainingGuaranteed        float64   `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
 	RemainingBurst             float64   `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
+	DataBytes                  *int64    `json:"data_bytes,omitempty" doc:"What the agent holds under its data prefix in this platform experiment, read from the object store as admission reads it. On a read of one agent's quota, where the platform sets a ceiling."`
+	MaxDataBytes               int64     `json:"max_data_bytes,omitempty" doc:"The ceiling on data_bytes: a submit is refused with data_quota_exceeded once data_bytes is at or over it. Absent where the platform sets none."`
 	CreatedAt                  time.Time `json:"created_at"`
 }
 
@@ -138,6 +141,13 @@ func (s *PlatformExperimentsService) QuotaView(ctx context.Context, agentID, pla
 	views, err := s.quotaViews(ctx, pe, []*domain.AgentQuota{aq})
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.QuotaView: %w", err)
+	}
+	if s.maxDataBytesPerAgent > 0 {
+		held, err := s.dataStore.TotalBytes(ctx, objectstore.AgentPrefix(platformExpID, agentID))
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.QuotaView: measure durable data: %w", err)
+		}
+		views[0].DataBytes, views[0].MaxDataBytes = &held, s.maxDataBytesPerAgent
 	}
 	return views[0], nil
 }

@@ -112,11 +112,15 @@ type PlatformExperimentsService struct {
 	// path is asked — visibly jumping the moment it settles.
 	observedGapCap time.Duration
 	dataStore      *objectstore.Client
+	// maxDataBytesPerAgent is the durable-data ceiling admission refuses a submit on, 0 for none.
+	maxDataBytesPerAgent int64
 }
 
-// WithDataStore wires the store a removed agent's key is deleted from.
-func (s *PlatformExperimentsService) WithDataStore(client *objectstore.Client) *PlatformExperimentsService {
+// WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
+// ceiling an agent's quota is answered with.
+func (s *PlatformExperimentsService) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *PlatformExperimentsService {
 	s.dataStore = client
+	s.maxDataBytesPerAgent = maxBytesPerAgent
 	return s
 }
 

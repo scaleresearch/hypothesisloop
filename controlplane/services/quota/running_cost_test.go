@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 )
 
 // aliveServer answers ObserveSpan with a job observed continuously from `ago` ago until now —
@@ -280,5 +281,46 @@ func TestTheQuotaViewLeavesWhatASubmitWouldAndShowsNoBurstHoursBeyondTheShare(t 
 	}
 	if view.ShareAcceleratorHours != 0.028608 || view.BurstAcceleratorHours != 0.028608 {
 		t.Errorf("share %g, burst %g, want both 0.028608: burst hours are part of the share", view.ShareAcceleratorHours, view.BurstAcceleratorHours)
+	}
+}
+
+type grantedStore struct {
+	reservingStore
+}
+
+func (*grantedStore) GetAgentQuota(_ context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+	return &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID, GuaranteedAcceleratorHours: 1}, nil
+}
+
+func (*grantedStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, CreatedAt: time.Now().Add(-time.Hour)}, nil
+}
+
+// A submit refused with data_quota_exceeded was the only place an agent learned what it holds.
+func TestAnAgentsQuotaSaysWhatDataItHoldsAgainstTheCeiling(t *testing.T) {
+	metrics := aliveServer(t, time.Now().UTC(), 30*time.Second, 2*time.Minute)
+	defer metrics.Close()
+	objects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if prefix := r.URL.Query().Get("prefix"); prefix != objectstore.AgentPrefix("pe-1", "a") {
+			t.Errorf("listed %q, want the agent's own prefix", prefix)
+		}
+		_, _ = w.Write([]byte(`<ListBucketResult><Contents><Key>k1</Key><Size>700</Size></Contents><Contents><Key>k2</Key><Size>300</Size></Contents></ListBucketResult>`))
+	}))
+	defer objects.Close()
+	client, err := objectstore.New(objects.URL, "us-east-1", "hl-data", "root", "root-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewPlatformExperimentsService(&grantedStore{}, domain.QuotaConfig{}, zap.NewNop(), metrics.URL, 3*time.Minute)
+
+	if view, err := svc.QuotaView(context.Background(), "a", "pe-1"); err != nil || view.DataBytes != nil || view.MaxDataBytes != 0 {
+		t.Fatalf("with no ceiling: got %+v, %v, want no data figures and no read of the store", view, err)
+	}
+	view, err := svc.WithDataStore(client, 4096).QuotaView(context.Background(), "a", "pe-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.DataBytes == nil || *view.DataBytes != 1000 || view.MaxDataBytes != 4096 {
+		t.Errorf("got data_bytes %v of %d, want 1000 of 4096", view.DataBytes, view.MaxDataBytes)
 	}
 }

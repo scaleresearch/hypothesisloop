@@ -559,7 +559,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agent_id}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent.",
+		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
+			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
