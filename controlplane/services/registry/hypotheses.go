@@ -350,9 +350,9 @@ func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinitio
 			continue
 		}
 		if cur := best[job.HypothesisID]; cur != nil {
-			better := job.Metric.Best > cur.Metric.Best
+			better := job.Metric.Value > cur.Metric.Value
 			if primary.Direction == "minimize" {
-				better = job.Metric.Best < cur.Metric.Best
+				better = job.Metric.Value < cur.Metric.Value
 			}
 			if !better {
 				continue

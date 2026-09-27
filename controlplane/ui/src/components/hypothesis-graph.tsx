@@ -35,7 +35,7 @@ export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
       <span className={COUNT} title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
       {item.best_job && (
         <span className={clsx(COUNT, 'text-accent')} title={`Best ${item.best_job.metric.name} of its jobs`}>
-          {item.best_job.metric.best.toFixed(4)}
+          {item.best_job.metric.value.toFixed(4)}
         </span>
       )}
     </span>

@@ -137,7 +137,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
-			"Each carries metrics: its best and last value on each declared metric it reported, and metric, the one on the first ranking metric. " +
+			"Each carries metrics: its one value on each declared metric it reported, which the metric's role decides (its best in the metric's direction on a ranking metric, its last on a constraint or an attribute), and metric, the one on the first ranking metric. " +
 			"Each also carries agent_name, what its agent is called now, and summary_due: true for a completed one no summary was filed for, the set ?needs_summary lists. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
@@ -292,7 +292,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Get one experiment", Tags: []string{"experiments"},
 		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED, and is CANCELLED once somebody cancelled the job, whether or not it ran. " +
 			"Carries phase_detail: the runtime's latest reason a job hasn't started or is restarting, " +
-			"and metrics: its best and last value on each declared metric it reported, with metric the one on the first ranking metric. " +
+			"and metrics: its one value on each declared metric it reported, which the metric's role decides (its best in the metric's direction on a ranking metric, its last on a constraint or an attribute), with metric the one on the first ranking metric. " +
 			"A COMPLETED job of a platform experiment with a constraint metric carries rankable, and when that is false not_rankable_reason: " +
 			"such a job is in no standing.",
 	}, func(ctx context.Context, in *struct {

@@ -171,7 +171,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                         <span className="font-semibold"><Actor actor={f.actor} agentID={f.agent_id} /></span>
                         <TextLink href={`/jobs/${f.experiment_id}`}>{f.experiment_id.slice(0, 8)}…</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span title={`This job's best ${job.metric.name}`}>{job.metric.best.toFixed(4)}</span>}
+                        {job?.metric && <span title={`This job's best ${job.metric.name}`}>{job.metric.value.toFixed(4)}</span>}
                       </span>
                       <span className="font-mono text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
@@ -256,7 +256,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                       {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
                     </td>
                     <td className={num}>
-                      {j.metric ? j.metric.best.toFixed(4) : <span className="text-muted">—</span>}
+                      {j.metric ? j.metric.value.toFixed(4) : <span className="text-muted">—</span>}
                     </td>
                     <td className={quiet}>{relTime(j.submitted_at ?? j.created_at)}</td>
                   </LinkTr>

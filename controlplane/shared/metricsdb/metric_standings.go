@@ -30,8 +30,9 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 }
 
 // UnrankableJobs gives, for each job of completed that ranks nowhere, the first constraint
-// metric of pe it does not hold and how. A constraint is judged per job, on the last
-// "raw"-basis value the job reported for it, the one the proposal check reads of a baseline. A
+// metric of pe it does not hold and how. A constraint is judged per job, on the "raw"-basis
+// value the job is read by on it (domain.MetricDefinition.JobValueRule), its last, the one the
+// proposal check reads of a baseline. A
 // job that reported none, or whose value violates the bound, ran to the end and found its
 // result wrong: it stays a completed trial and none of its values rank.
 //
@@ -45,8 +46,8 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
-			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+			metric.JobValueRule(), ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 		samples, err := QueryVector(ctx, dbURL, promQL)
 		if err != nil {
 			return nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
@@ -113,10 +114,7 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 	if err != nil {
 		return nil, nil, err
 	}
-	agg := "max"
-	if metric.Direction == "minimize" {
-		agg = "min"
-	}
+	agg := metric.JobValueRule()
 	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis, job_id) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
 		agg, agg, ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 	samples, err := QueryVector(ctx, dbURL, promQL)

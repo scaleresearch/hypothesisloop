@@ -292,7 +292,7 @@ function JobsPageContent() {
                       {j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}
                     </td>
                     <td className={num}>
-                      {j.metric ? j.metric.best.toFixed(4) : '—'}
+                      {j.metric ? j.metric.value.toFixed(4) : '—'}
                       {j.metric && <div className="mt-0.5 truncate text-2xs text-muted" title={j.metric.name}>{j.metric.name}</div>}
                     </td>
                     <td className={clsx(num, 'whitespace-nowrap')}>

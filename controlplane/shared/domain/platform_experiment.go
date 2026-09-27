@@ -91,6 +91,27 @@ func (d MetricDefinition) Holds(value float64) bool {
 	return value >= *d.Bound
 }
 
+// The ways the values one job reported on a metric become the one value it is read by.
+const (
+	JobValueMax  = "max"
+	JobValueMin  = "min"
+	JobValueLast = "last"
+)
+
+// JobValueRule says how the values one job reported on the metric become the one it is read by,
+// everywhere a job's value is shown, ranked or judged. A ranking metric is read by the job's
+// best in the metric's direction, which standings and stage cuts rank. A constraint is read by
+// the last value, which its bound is held against, and so is an attribute, which nothing judges.
+func (d MetricDefinition) JobValueRule() string {
+	switch {
+	case d.EffectiveRole() != MetricRoleRanking:
+		return JobValueLast
+	case d.Direction == "minimize":
+		return JobValueMin
+	}
+	return JobValueMax
+}
+
 // ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream
 // (stage cuts, standings) needs to defend against a malformed one. Fail-fast per important.md #1.
 func ValidateMetricDefinitions(defs []MetricDefinition) error {
@@ -193,6 +214,9 @@ type PlatformExperiment struct {
 	PlanningEndsAt    time.Time                `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time                `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
 	Status            PlatformExperimentStatus `json:"status"`
+	// StatusReason is why an open platform experiment is not running yet. Worked out when one is
+	// read and stored nowhere.
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"On an open platform experiment, read one by one: why it is not running yet. reason is baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing and the platform starts it within a minute."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
@@ -295,6 +319,13 @@ func (p *PlatformExperiment) SetClosesAt(at time.Time) {
 	default:
 		p.PlanningEndsAt = at
 	}
+}
+
+// StatusReason says why a platform experiment is in its status: a stable code and a sentence for
+// whoever reads it.
+type StatusReason struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget

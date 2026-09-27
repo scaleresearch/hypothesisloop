@@ -108,11 +108,11 @@ interface PhaseDetail {
   restart_count?: number
 }
 
-// Mirrors domain.JobMetric (shared/domain/metrics.go). best follows the metric's direction.
+// Mirrors domain.JobMetric (shared/domain/metrics.go). value is the one figure the job is read
+// by: its best in the metric's direction on a ranking metric, its last on any other.
 export interface JobMetric {
   name: string
-  best: number
-  last: number
+  value: number
   basis: string
 }
 

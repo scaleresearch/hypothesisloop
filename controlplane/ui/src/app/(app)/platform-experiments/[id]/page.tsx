@@ -218,7 +218,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   // Best result first; a hypothesis whose jobs reported no metric comes last.
   const bestFirst = primaryStandings?.direction === 'minimize' ? 1 : -1
   const found = [...(findings ?? [])].sort((a, b) =>
-    (a.best_job ? bestFirst * a.best_job.metric.best : Infinity) - (b.best_job ? bestFirst * b.best_job.metric.best : Infinity))
+    (a.best_job ? bestFirst * a.best_job.metric.value : Infinity) - (b.best_job ? bestFirst * b.best_job.metric.value : Infinity))
 
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
@@ -345,7 +345,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                     <td className={num}>
                       {h.best_job ? (
                         <TextLink onClick={e => e.stopPropagation()} href={`/jobs/${h.best_job.id}`} title={h.best_job.id}>
-                          {h.best_job.metric.name} {h.best_job.metric.best.toFixed(4)}
+                          {h.best_job.metric.name} {h.best_job.metric.value.toFixed(4)}
                         </TextLink>
                       ) : <span className="text-xs text-muted">—</span>}
                       {h.best_job?.summary_due && <div><NoSummary /></div>}
@@ -679,7 +679,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                           {envSettings(exp, variedByHypothesis.get(exp.hypothesis_id) ?? [])}
                         </div>
                       </td>
-                      <td className={num}>{exp.metric?.best.toFixed(4) ?? '—'}</td>
+                      <td className={num}>{exp.metric?.value.toFixed(4) ?? '—'}</td>
                       <td className={num}>{cost != null ? `${formatAccH(cost)} ${budgetUnit(kindOf(exp.accelerator_type))}` : '—'}</td>
                       <td className="text-xs text-subtle">{new Date(exp.created_at).toLocaleString()}</td>
                     </LinkTr>

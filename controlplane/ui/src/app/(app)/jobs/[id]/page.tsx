@@ -168,10 +168,10 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
             {(j.metrics ?? []).map(m => (
               <div key={m.name} className="mb-2.5 font-mono">
                 <span className={m.name === primaryMetricName ? 'text-2xl font-bold text-success' : 'text-lg font-semibold'}>
-                  {m.best.toFixed(4)}
+                  {m.value.toFixed(4)}
                 </span>
                 <span className="ml-2 text-xs text-muted">
-                  best {m.name} · last {m.last.toFixed(4)}{m.basis !== 'raw' && ` · basis ${m.basis}`}
+                  {m.name}{m.basis !== 'raw' && ` · basis ${m.basis}`}
                 </span>
               </div>
             ))}

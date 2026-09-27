@@ -90,7 +90,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect, onAddIdea
         {bestJob && (
           <div className="font-mono text-xs">
             <span className="text-muted">Best job </span>
-            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.best.toFixed(4)}</TextLink>
+            <TextLink href={`/jobs/${bestJob.id}`}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
           </div>
         )}
         {finding && (
