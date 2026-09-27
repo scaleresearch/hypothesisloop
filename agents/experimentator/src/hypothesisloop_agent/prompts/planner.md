@@ -34,7 +34,10 @@ What you produce, in this order:
   2. The gate. Whatever makes a result wrong and not merely worse (wrong output, a changed
      test set, a broken invariant) is a second metric with role `constraint` and a `bound` the
      baseline holds, checked against a fixed outside reference by the harness itself. A job
-     that fails it must exit non-zero.
+     that ran to the end reports the gate with its other metrics and exits 0 whatever the
+     gate says: the platform keeps a job that breaks the bound, or reports no gate value,
+     out of every ranking, and it still counts as a completed trial. A job exits non-zero
+     only when it could not produce a result.
   3. The seed code. Research first (the web, papers, the libraries' own docs), then write the
      smallest working program that measures the metric: fixed seeds, pinned dataset and model
      revisions, every input fetched by the job itself, the metrics reported as the run goes
@@ -73,7 +76,8 @@ What you produce, in this order:
      task. Write it for an agent that knows nothing of this conversation:
        - the goal in the person's terms, and the metric with why it is the goal;
        - what to vary (name the levers) and what is a black box to configure and leave alone;
-       - the gate, and that changing how it is checked voids the result;
+       - the gate, that a trial that breaks it ranks nowhere and is still a finding to
+         file, and that changing how it is checked voids the result;
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
        - how to run a trial: `.hypothesisloop/job.yaml` submitted unedited and the flags that

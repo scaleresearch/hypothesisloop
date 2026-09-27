@@ -16,7 +16,9 @@ fill in.
 
 ## What is measured
 
-REPLACE-WITH the ranked metric, why it is the goal, and the gate that makes a result wrong.
+REPLACE-WITH the ranked metric, why it is the goal, and the gate that makes a result wrong. A
+trial reports the gate with its other metrics and exits 0 when it ran to the end: one that
+breaks the gate ranks nowhere and still counts as a completed trial.
 
 ## How one trial runs
 

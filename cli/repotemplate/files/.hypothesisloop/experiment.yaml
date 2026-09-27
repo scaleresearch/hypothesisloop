@@ -17,5 +17,5 @@
 #     role: ranking
 #   - key: the_gate         # what makes a result wrong and not merely worse
 #     direction: minimize
-#     role: constraint
+#     role: constraint      # a job that breaks the bound or reports no value ranks nowhere
 #     bound: 0
