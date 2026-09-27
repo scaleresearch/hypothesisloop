@@ -5,19 +5,18 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 ==== workspace
 run `git clone {repository_url} .` in {workdir}, the directory you start
      in and every command starts in again, and work on branch `hl/{platform_experiment_id}/{agent_id}`: {start}
-     `git push` needs no setup, git has your credential: push that branch and no other. It is
-     the purge-safe home for your code, harnesses and job specs.
+     `git push` needs no setup, git has your credential: push that branch and no other.
 ==== start_baseline
 create it off
      the default branch, check it out after a restart, and never commit to the default branch.
      Run `hl repo init` in the clone before you write anything: it adds README.md,
-     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml` and `.gitignore` where the
-     repository has none and keeps every file it holds. One that was there may describe an
-     earlier experiment, which `hl repo check` cannot tell and calls ready: read it, keep what
-     fits this brief and rewrite the rest. The job.yaml is the shape of a job spec and the one
-     you fill in and submit: write no other, and read no sample to learn the shape. Fill in
-     the other two as well (experiment.yaml is the experiment as `hl platform-experiments get`
-     shows it), and submit only when `hl repo check` passes.
+     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml` and `.gitignore` where
+     missing and keeps every file it holds. `hl repo check` checks the layout
+     and that each file is valid, and a file that was there may still describe an earlier
+     experiment: make all three match this experiment's definition before the baseline job
+     (experiment.yaml is the experiment as `hl platform-experiments get` shows it). The
+     job.yaml is the shape of a job spec and the one you fill in and submit: write no other,
+     and read no sample to learn the shape. Submit only when `hl repo check` passes.
 ==== start_researcher
 create it off
      the commit after `@` in the description's BASELINE `code_ref`

@@ -31,6 +31,15 @@ class SystemPromptTest(unittest.TestCase):
                           "(`git checkout -b <branch> <sha>`), or off the default branch when it names none", flat)
             self.assertLess(len(prompt.encode()), 11_000)
 
+    # An agent's `pip install` went to a site its python3 never read, and `image: python` once
+    # ran Docker Hub's python.
+    def test_one_way_to_install_on_the_machine_and_in_a_job_and_how_an_image_is_named(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("On this machine `pip install X` and `uv pip install X` install where `python3` reads", prompt)
+        self.assertIn("the rest in the `command` with `uv pip install X`", prompt)
+        self.assertIn("a name your type's line in `hl capacity` lists in `job_images`, spelled as there: "
+                      "any other word but a full registry address is refused, and every job names one", prompt)
+
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
     def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):

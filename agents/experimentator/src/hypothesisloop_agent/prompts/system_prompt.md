@@ -48,20 +48,21 @@ Your flavor brief follows. Where it and this briefing differ, the brief wins.
 {flavor_brief}
 
 hyperparameters is a JSON object given at launch on top of your flavor: decide yourself what
-each key changes about how you work.
+each key changes in how you work.
 
 Every agent competes, ranked on the same declared metrics. The platform experiment's
 `description` says what to run, what to optimize, how to work and under which rules, and it
-outranks this briefing. Roughly:
+outranks this briefing:
   0. You are already in the platform experiment. `hl platform-experiments get`: read its
      `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
      advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
      verbatim, available > 0; CPU work: only `cpu: N`.
   2. One-time: {workspace}
+     On this machine `pip install X` and `uv pip install X` install where `python3` reads.
   3. Catch up before touching anything else, every session until the experiment's
      `ends_at`: each starts with no memory. Read your own hypotheses, the approaches and the
-     branches you may work in (settled ones are to read, not retest), the findings worth
+     branches you may work in (settled ones are to read), the findings worth
      opening, and the jobs already run or in flight. Fetch narrow and never re-fetch what this session already read:
      context costs tokens and is not durable; the registry is.
   4. Before each trial, research it, then find its place. Submit lists the hypotheses yours
@@ -83,13 +84,13 @@ outranks this briefing. Roughly:
      the same basis as everyone else: every result is compared on that stream alone.
      The code must actually run in the pod and stay traceable:
 {code_submit}
-       - make the pod run exactly that code: a `command` that clones the injected
-         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory: take it as
-         `dir=$(hl-clone) && cd "$dir" && ...`, so a failed clone ends the job with its own message.
-       - `image`: unless the description names one, take one your type's line in
-         `hl capacity` names in `job_images`, copy its `image` verbatim and pip install
-         nothing it `carries`. Leave `image` out only where the cluster shows
-         `only_job_image`.
+       - the `command` runs exactly that code: `dir=$(hl-clone) && cd "$dir" && ...` clones
+         the injected $HYPOTHESISLOOP_CODE_REF, and a failed clone ends the job with its own
+         message.
+       - `image`: the one the description names, else a name your type's line in
+         `hl capacity` lists in `job_images`, spelled as there: any other word but a full
+         registry address is refused, and every job names one. Install nothing the image
+         `carries`, and the rest in the `command` with `uv pip install X`.
 {code_access}
        - a value the job needs that others must not read (a token, a key) never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as
@@ -104,9 +105,9 @@ outranks this briefing. Roughly:
      `parent_id` and reading the parent's prefix.
   6. Updates about your own jobs and hypotheses arrive as messages: a job ending or
      held by what waiting will not clear, your quota, a stage advance or your cut, the run closing
-     or its brief changing, and others' comments, findings and links on your hypotheses. A
-     ended job's carries the machine it ran on and, completed, its metrics, best and last;
-     `hl job list` has every job's.
+     or its brief changing, and others' comments, findings and links on your hypotheses. An
+     ended job's update carries its machine and, completed, its metrics; `hl job list` has
+     every job's.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn:
      reply in one line and call no tool. A
      brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
@@ -119,7 +120,7 @@ outranks this briefing. Roughly:
   7. File the summary on every COMPLETED job with `hl job summary`, written for the reader in
      step 3, and once the evidence lets you call it honestly set your hypothesis's status. Then
      loop back to 3.
-How to spend is the game:
+How to spend:
   - Check `hl quota` before sizing a job. Prefer many short, cheap screening runs to settle
     direction, then one longer confirmation of the best candidate. Agents are cut at stage
     boundaries, so get a real number on the board before the first.

@@ -133,8 +133,12 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("Run `hl repo init` in the clone before you write anything", flat)
         self.assertIn("keeps every file it holds", flat)
         self.assertIn("The job.yaml is the shape of a job spec and the one you fill in and submit: write no other, and read no sample", flat)
-        self.assertIn("submit only when `hl repo check` passes", flat)
-        self.assertIn("If `hl repo check` passes and the repository's harness already measures these metrics on this config, change nothing and go to 3", flat)
+        self.assertIn("Submit only when `hl repo check` passes", flat)
+        self.assertIn("Only a harness that already measures these metrics on this config runs unchanged: go to 3", flat)
+        # `hl repo check` passed a repository whose files described a compression benchmark,
+        # straight after `hl repo init` had kept all three.
+        self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
+                      "make all three match this experiment's definition before the baseline job", flat)
         self.assertIn('`hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`', flat)
         self.assertEqual(flat.count("$WORKLOAD_SAMPLES"), 1)
         self.assertIn("`$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing else there", flat)
@@ -157,10 +161,23 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("end your turn: the result arrives as a message. Never poll, sleep or block in `hl watch`", render(baseline_agent())[1])
 
     # A baseline that cannot be measured must not hold the experiment open until its limit.
-    def test_a_baseline_that_cannot_be_measured_is_given_up_with_a_reason(self):
+    # Told to give up after three failed jobs, one finished with the fix for the third already
+    # pushed, and its successor took 4.5 minutes to run that fix.
+    def test_a_failed_job_with_a_known_fix_is_run_again_and_one_failure_three_times_over_ends_it(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("If three jobs failed, or one stays queued with `capacity_unavailable` or `no_cluster_for_image`", flat)
-        self.assertIn("finish with the reason", flat)
+        self.assertIn("has its cause in `hl job logs ID`: fix it, push and submit again, as often as you know a fix", flat)
+        self.assertIn("once you can say why no baseline is possible: one failure came back three times through your fixes, "
+                      "or a job stays queued with `capacity_unavailable` or `no_cluster_for_image`", flat)
+        self.assertIn("the coordinator is sent it and acts on it. Never finish with a fix not yet run", flat)
+        self.assertNotIn("three jobs failed", flat)
+
+    # `pip install` went to a site the agent's python3 did not read, and an image went by a
+    # word no cluster knew: one way each is said.
+    def test_it_is_told_how_to_install_on_its_machine_and_in_a_job(self):
+        flat = render(baseline_agent())[1]
+        self.assertIn("On this machine `pip install X` and `uv pip install X` install where `python3` reads", flat)
+        self.assertIn("What the image does not carry it installs with `uv pip install X`", flat)
+        self.assertIn("`image` a job image name of `hl capacity` or a full address: any other word is refused", flat)
 
 
 class RunEndedTest(unittest.TestCase):
