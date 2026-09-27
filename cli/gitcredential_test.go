@@ -93,18 +93,20 @@ func TestGitCredentialAnswersOnlyForTheRepositoryThePlatformNames(t *testing.T) 
 		}
 	}
 	reached := len(*asked)
-	// Without the whole address there is nothing to ask about.
-	for name, input := range map[string]string{
-		"no path":           "protocol=https\nhost=github.com\n\n",
-		"an empty path":     "protocol=https\nhost=github.com\npath=\n\n",
-		"an empty protocol": "protocol=\nhost=github.com\npath=Acme/Model.git\n\n",
-		"no protocol":       "host=github.com\npath=Acme/Model.git\n\n",
-		"no host":           "protocol=https\npath=Acme/Model.git\n\n",
-		"nothing asked":     "\n",
+	// Without the whole address there is nothing to ask about. A researcher typed one with no
+	// path by hand, got no output and no help, and went on guessing.
+	for name, tc := range map[string]struct{ input, lacks string }{
+		"no path":           {"protocol=https\nhost=github.com\n\n", "path"},
+		"an empty path":     {"protocol=https\nhost=github.com\npath=\n\n", "path"},
+		"an empty protocol": {"protocol=\nhost=github.com\npath=Acme/Model.git\n\n", "protocol"},
+		"no protocol":       {"host=github.com\npath=Acme/Model.git\n\n", "protocol"},
+		"no host":           {"protocol=https\npath=Acme/Model.git\n\n", "host"},
+		"nothing asked":     {"\n", "protocol"},
 	} {
-		code, stdout, stderr := gitCredential(t, "get", input)
-		if code != 0 || stdout != "" || stderr != "" {
-			t.Errorf("%s: exit %d, stdout %q, stderr %q, want silence", name, code, stdout, stderr)
+		code, stdout, stderr := gitCredential(t, "get", tc.input)
+		if code != 1 || stdout != "" || strings.Count(stderr, "\n") != 1 || !strings.HasPrefix(stderr, "hl: git-credential: no "+tc.lacks+" in the address") ||
+			!strings.Contains(stderr, "git calls this itself") || !strings.Contains(stderr, "git push needs no setup") {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 1 and one line saying git calls it", name, code, stdout, stderr)
 		}
 	}
 	if len(*asked) != reached {

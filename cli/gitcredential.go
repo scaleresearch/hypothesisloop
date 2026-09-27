@@ -14,7 +14,8 @@ import (
 
 const gitCredentialHelp = `usage: hl git-credential get|store|erase
 
-git's credential helper for the repository your platform experiment names. git runs it, not you:
+git's credential helper for the repository your platform experiment names. git runs it, not you,
+and where it is set up git push, git fetch and hl job submit need nothing more:
 
   git config --global credential.helper '!hl git-credential'
   git config --global credential.useHttpPath true
@@ -23,7 +24,8 @@ On get it sends the platform the address git asked about. For the experiment's r
 Git LFS address, the platform answers with the credential for that one repository and this hands
 it to git. Nothing is stored, so store and erase do nothing. For any other host or repository the
 platform has none, this prints nothing and git carries on without it. useHttpPath is what makes
-git state the repository: without it no address is the repository's and nothing is handed out.`
+git state the repository: an address without protocol, host or path, as git sends without it
+and as one typed by hand may be, is refused with one line and nothing is handed out.`
 
 // cmdGitCredential speaks git's credential helper protocol: attributes as key=value lines on
 // stdin, and for get the credential the same way on stdout.
@@ -55,11 +57,12 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 		fmt.Fprintf(stderr, "hl: git-credential: reading what git asked: %s\n", err)
 		return 1
 	}
-	// git asks this helper about every host. The credential is for one repository on one host,
-	// so an address that names none is not it, and git goes on without a credential.
+	// git with credential.useHttpPath states all three, so an address without one is typed by
+	// hand or comes from a git that is not set up.
 	for _, key := range []string{"protocol", "host", "path"} {
 		if asked[key] == "" {
-			return 0
+			fmt.Fprintf(stderr, "hl: git-credential: no %s in the address asked about. git calls this itself with protocol, host and path, and git push needs no setup: run nothing by hand. A git that leaves the path out lacks credential.useHttpPath true\n", key)
+			return 1
 		}
 	}
 	var credential struct {
