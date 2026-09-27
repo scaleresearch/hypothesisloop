@@ -298,8 +298,10 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 //
 // The cluster the row was placed on is appended to tried_clusters in the same statement, under
 // the identity its runtime reported, so the next placement can leave it out for a while
-// (scheduler.tried_cluster_ttl_seconds). That holds for every infrastructure fault, a scale-up
-// that timed out included: each spends the one allowance, because the tried list only delays a
+// (scheduler.tried_cluster_ttl_seconds). That holds for every infrastructure fault the cluster
+// is the cause of (domain.FailedByItsCluster), a scale-up that timed out included, and for no
+// other: a job whose code could not be fetched or whose offer was gone goes back to any
+// cluster at once. Every one spends the one allowance, because the tried list only delays a
 // return to the cluster and a job could otherwise go round its clusters for ever.
 //
 // Returns false when the ceiling is reached or another writer got there first — both mean the
@@ -321,10 +323,10 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 		tried_clusters = tried_clusters || COALESCE((
 			SELECT jsonb_build_array(jsonb_build_object(
 				'cluster_id', c.reported_id, 'at', to_jsonb(NOW()), 'reason', split_part($3, ':', 1)))
-			FROM clusters c WHERE c.name = e.cluster_name AND c.reported_id IS NOT NULL), '[]'::jsonb),
+			FROM clusters c WHERE $5 AND c.name = e.cluster_name AND c.reported_id IS NOT NULL), '[]'::jsonb),
 		updated_at = NOW()
 	WHERE e.id = $1 AND e.status = $2 AND e.infra_requeue_count < $4`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues)
+	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues, domain.FailedByItsCluster(domain.EvictionReason(reason)))
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: %w", err)
 	}

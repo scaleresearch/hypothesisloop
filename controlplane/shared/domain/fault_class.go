@@ -101,6 +101,16 @@ func IsInfrastructureFault(reason EvictionReason) bool {
 	return ok && class == FaultInfrastructure
 }
 
+// FailedByItsCluster reports whether an infrastructure fault says something about the cluster the
+// job was on, so that the job's next placement leaves that cluster out for a while (its tried
+// list). Two faults do not: code_unreachable is the platform's or the repository's outage, the
+// same from every cluster, and no_offer is a market that had no machine at that moment, which
+// the cluster's reported capacity already keeps the job waiting on.
+func FailedByItsCluster(reason EvictionReason) bool {
+	code := reason.Code()
+	return IsInfrastructureFault(reason) && code != EvictionCodeUnreachable && code != EvictionNoOffer
+}
+
 // IsPolicyFault reports whether an eviction reason names the platform's own decision — the one
 // class where the job was fine and its work is worth saving, and so the one class that earns a
 // checkpoint window before the workload is deleted.

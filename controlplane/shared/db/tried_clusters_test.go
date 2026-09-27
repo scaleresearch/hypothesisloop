@@ -70,6 +70,27 @@ func TestAnInfrastructureRequeueRecordsTheClusterAndSpendsTheAllowance(t *testin
 	}
 }
 
+// A job whose code could not be fetched, or whose offer was gone, failed for no reason of its
+// cluster's: it is requeued on the same allowance and the cluster stays a candidate at once.
+func TestARequeueThatIsNotTheClustersFaultLeavesTheTriedListAlone(t *testing.T) {
+	w := newTwoOrgs(t)
+	ctx := context.Background()
+	w.bound(t, w.ofA)
+	for name, reason := range map[string]string{
+		"code":  string(domain.EvictionCodeUnreachable) + ": command exited with code 75: hl-clone: no answer",
+		"offer": string(domain.EvictionNoOffer) + ": no machine to rent in 3m0s of asking",
+	} {
+		id := w.placed(t, "untried-"+name, w.peA, w.ofA, domain.StatusSubmitted)
+		if ok, err := w.exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, reason, 2); err != nil || !ok {
+			t.Fatalf("%s: requeue = %v, %v", name, ok, err)
+		}
+		got := w.get(t, id)
+		if got.Status != domain.StatusQueued || got.InfraRequeueCount != 1 || got.AttemptCount != 1 || got.EvictionReason != reason || len(got.TriedClusters) != 0 {
+			t.Fatalf("%s: %s, infra %d, attempts %d, reason %q, tried %+v, want it queued with the allowance spent and no cluster tried", name, got.Status, got.InfraRequeueCount, got.AttemptCount, got.EvictionReason, got.TriedClusters)
+		}
+	}
+}
+
 // A cluster whose runtime has reported no identity has nothing the tried list could name it by.
 // The requeue still happens and still spends.
 func TestAnInfrastructureRequeueOnAClusterWithNoReportedIdentityRecordsNothing(t *testing.T) {
