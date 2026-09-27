@@ -4,7 +4,7 @@ import { useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import { fetchPlatformExperimentAgents } from '@/lib/api'
 import { formatAccH, formatDate, relTime } from '@/lib/format'
-import { abandonDraft, acceptDraft, draftState, reviseDraft } from '@/lib/planning'
+import { abandonDraft, acceptDraft, reviseDraft } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
@@ -202,7 +202,8 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const router = useProjectRouter()
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
-  const state = draftState(draft)
+  if (!draft.status_reason) throw new Error(`draft ${draft.id} came without a status_reason`)
+  const state = draft.status_reason.reason
   const reread = () => void mutate(['pe', draft.id])
 
   async function abandon() {

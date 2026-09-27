@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
 import { DraftView } from '@/components/draft'
 import { formatDate } from '@/lib/format'
-import { draftState } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup } from '@/types'
@@ -40,9 +39,10 @@ const proposal: Proposal = {
   risks: ['One seed only.'],
 }
 
-function draft(more: Partial<Draft> = {}): Draft {
+function draft(reason: 'planning' | 'revising' | 'proposed' | 'declined', more: Partial<Draft> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
+    status_reason: { reason, message: '' },
     goal: 'Does a cosine schedule beat a constant one?', planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as Draft
 }
@@ -60,23 +60,16 @@ beforeEach(() => {
 
 describe('a draft being planned', () => {
   it('says what the planner and its machine are doing and offers nothing to accept', async () => {
-    show(draft())
+    show(draft('planning'))
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/working out how to measure this\. Its machine is starting/))
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
   })
-
-  it('is one of three states by what the API says', () => {
-    expect(draftState(draft())).toBe('planning')
-    expect(draftState(draft({ proposal, proposed_at: '2026-10-05T12:10:00Z' }))).toBe('proposed')
-    expect(draftState(draft({ proposal }))).toBe('revising')
-    expect(draftState(draft({ revisions: [{ message: 'Smaller.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))).toBe('revising')
-  })
 })
 
 describe('a proposed draft', () => {
-  const proposed = () => draft({ proposal, proposed_at: '2026-10-05T12:10:00Z' })
+  const proposed = () => draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z' })
 
   // A proposal once waited for a baseline job and showed its numbers. Nothing has run when a
   // person reads one now, and the page says so in place of a number nobody measured.
@@ -127,7 +120,7 @@ describe('a proposed draft', () => {
   })
 
   it('keeps the proposal readable while it is revised, with what was asked, and takes no acceptance', async () => {
-    show(draft({ proposal, revisions: [{ message: 'It must fit one RTX 4090.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
+    show(draft('revising', { proposal, revisions: [{ message: 'It must fit one RTX 4090.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
     expect(screen.getByText('It must fit one RTX 4090.')).toBeTruthy()
     expect(screen.getByText(/Ada asked/)).toBeTruthy()
     expect(screen.getByText('Proposed experiment: Cosine or constant')).toBeTruthy()
@@ -151,10 +144,9 @@ describe('a proposed draft', () => {
 // A goal the planner could not plan left a draft with nothing on its page until it closed.
 describe('a draft the planner declined', () => {
   const why = '"Make the model better" names nothing to measure: say which model, on what data, and what better means.'
-  const declined = () => draft({ declined_reason: why, declined_at: '2026-10-05T12:10:00Z', planning_ends_at: undefined, proposal_expires_at: '2026-10-12T12:10:00Z' })
+  const declined = () => draft('declined', { declined_reason: why, declined_at: '2026-10-05T12:10:00Z', planning_ends_at: undefined, proposal_expires_at: '2026-10-12T12:10:00Z' })
 
   it('shows the reason, nothing to accept, and the ways to answer it or drop it', async () => {
-    expect(draftState(declined())).toBe('declined')
     show(declined())
     expect(screen.getByText('The planner proposed no experiment')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
@@ -169,8 +161,7 @@ describe('a draft the planner declined', () => {
   })
 
   it('keeps the reason readable while the planner tries again', async () => {
-    const retrying = draft({ declined_reason: why })
-    expect(draftState(retrying)).toBe('revising')
+    const retrying = draft('revising', { declined_reason: why })
     show(retrying)
     expect(screen.getByText(why)).toBeTruthy()
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))

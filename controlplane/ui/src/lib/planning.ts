@@ -81,13 +81,6 @@ export async function acceptDraft(id: string, acceptance: Acceptance): Promise<v
   await apiSend<Draft>('POST', `/platform-experiments/${id}/accept`, acceptance)
 }
 
-/** What a draft is waiting for. */
-export function draftState(draft: Draft): 'planning' | 'revising' | 'proposed' | 'declined' {
-  if (draft.declined_at) return 'declined'
-  if (draft.proposed_at) return 'proposed'
-  return draft.revisions?.length || draft.proposal || draft.declined_reason ? 'revising' : 'planning'
-}
-
 /** Abandons a draft: it is closed and its planner's machine released. */
 export async function abandonDraft(id: string): Promise<void> {
   await apiSend('POST', `/platform-experiments/${id}/close`)

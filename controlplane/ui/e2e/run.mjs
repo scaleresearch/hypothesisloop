@@ -702,7 +702,7 @@ async function scenarios(browser) {
   }
   const draftGoal = 'Does a cosine learning-rate schedule beat a constant one?'
   let draftNow = {
-    id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', shared: false,
+    id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', status_reason: { reason: 'planning', message: '' }, shared: false,
     budget_accelerator_hours: 2, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
     planning_ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
@@ -715,7 +715,7 @@ async function scenarios(browser) {
     if (request.method() === 'OPTIONS') return route.fallback()
     if (request.method() === 'POST') {
       draftWrites.push({ path, body: request.postDataJSON() })
-      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
+      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, status_reason: { reason: 'revising', message: '' }, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
@@ -731,7 +731,7 @@ async function scenarios(browser) {
   assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
 
   // The planner proposed: the card says nothing has run yet, with no number nobody measured, and the questions first.
-  draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString() }
+  draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
   await page.reload()
   await page.getByText('Proposed experiment: Cosine or constant').waitFor()
   await page.getByText('val_loss, lower is better', { exact: true }).waitFor()
@@ -744,7 +744,7 @@ async function scenarios(browser) {
   await page.getByText('It must fit one RTX 4090.').waitFor()
   assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}/revise`, body: { message: 'It must fit one RTX 4090.' } }])
 
-  draftNow = { ...draftNow, proposed_at: new Date().toISOString() }
+  draftNow = { ...draftNow, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
   await page.reload()
   draftWrites.length = 0
   await page.getByLabel('Budget (accelerator-hours)').fill('3')
