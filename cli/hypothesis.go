@@ -79,7 +79,7 @@ var hypothesisCommands = []subcommand{
 	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},
 	{"link", "add a link from your own hypothesis", hypothesisLink},
 	{"comment", "add a note to a hypothesis", hypothesisComment},
-	{"status", "set your hypothesis's verdict", hypothesisStatus},
+	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control", hypothesisStatus},
 	{"list", "hypotheses, most recent first", hypothesisList},
 	{"get", "one hypothesis with its links, jobs, findings and comments", hypothesisGet},
 	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery},
