@@ -22,6 +22,11 @@ case "$ref" in
 	;;
 esac
 
+# Exit codes: 2 for a code ref that is none, 1 where the repository answers and does not give the
+# commit (it was never pushed), and 75 where neither the repository nor the platform's credential
+# for it answered. 75 is domain.ExitCodeCodeUnreachable: the runtime reports the job as
+# code_unreachable and the platform queues it again at no cost, since its command never ran.
+#
 # A job that cannot reach the repository or the platform's credential for it this second usually
 # can a few seconds later, so the fetch is tried $tries times, $pause seconds apart, and no more.
 tries=4
@@ -33,8 +38,12 @@ try=1
 while ! said=$(git -C "$dir" fetch -q --depth 1 "${ref%@*}" "${ref##*@}" 2>&1); do
 	said=$(printf '%s' "$said" | tr '\n' ' ')
 	if [ "$try" -eq "$tries" ]; then
-		echo "hl-clone: could not fetch the code: $tries tries to fetch ${ref##*@} from ${ref%@*} failed, the last with: $said" >&2
-		exit 1
+		if git ls-remote -q "${ref%@*}" HEAD >/dev/null 2>&1; then
+			echo "hl-clone: could not fetch the code: $tries tries to fetch ${ref##*@} from ${ref%@*} failed and the repository answers, so the commit is not in it, the last with: $said" >&2
+			exit 1
+		fi
+		echo "hl-clone: could not fetch the code: $tries tries failed and the repository or the platform's credential for it does not answer, so the command never ran and the platform queues the job again. Fetching ${ref##*@} from ${ref%@*}, the last try said: $said" >&2
+		exit 75
 	fi
 	echo "hl-clone: try $try of $tries to fetch the code failed, the next is in ${pause}s: $said" >&2
 	try=$((try + 1))

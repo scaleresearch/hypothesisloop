@@ -1,0 +1,62 @@
+package scheduler
+
+import (
+	"context"
+	"testing"
+
+	"go.uber.org/zap"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+)
+
+const cloneSaid = "command exited with code 75: hl-clone: could not fetch the code: 4 tries failed"
+
+func TestAJobWhoseCodeWasUnreachableIsRequeuedAndNeverFailed(t *testing.T) {
+	for _, status := range []domain.ExperimentStatus{domain.StatusSubmitted, domain.StatusRunning} {
+		store := &lifecycleStore{infraCeiling: 3}
+		backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
+		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
+		exp := scaleUpExperiment(1, 0)
+		exp.Status = status
+
+		if err := w.reconcileOne(context.Background(), exp, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		want := "code_unreachable: " + cloneSaid
+		if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != want {
+			t.Fatalf("%s: requeued with %q, want %q", status, store.requeuedReasons, want)
+		}
+		if len(store.finished) != 0 || len(store.terminalReasons) != 0 || store.markedSettled != 0 {
+			t.Fatalf("%s: finished %q, terminal %q, settled %d: the job was ended", status, store.finished, store.terminalReasons, store.markedSettled)
+		}
+	}
+}
+
+func TestAJobWhoseCodeStaysUnreachableEndsEvictedWithThatReason(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 0}
+	backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
+
+	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.terminalReasons) != 1 || store.terminalReasons[0] != "code_unreachable: "+cloneSaid || len(store.finished) != 0 {
+		t.Fatalf("terminal %q, finished %q: want one eviction and no FAILED", store.terminalReasons, store.finished)
+	}
+}
+
+func TestAJobWhoseOwnCommandFailedIsFailed(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3}
+	backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonContainerFailed, message: "command exited with code 1: boom"}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
+
+	exp := scaleUpExperiment(1, 0)
+	exp.Status = domain.StatusRunning
+	if err := w.reconcileOne(context.Background(), exp, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.requeuedReasons) != 0 || len(store.finished) != 1 || store.finished[0] != "FAILED container_failed: command exited with code 1: boom" {
+		t.Fatalf("requeued %q, finished %q", store.requeuedReasons, store.finished)
+	}
+}

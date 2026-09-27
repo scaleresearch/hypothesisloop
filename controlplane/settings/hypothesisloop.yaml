@@ -402,7 +402,7 @@ scheduler:
 
   # How many times one experiment may go back to the queue for free after an infrastructure
   # fault (cluster_unreachable, workload_gone, stuck_pending, flavor_mismatch,
-  # accelerator_type_unobservable). Those attempts cost no max_retries budget and no
+  # accelerator_type_unobservable, code_unreachable). Those attempts cost no max_retries budget and no
   # accelerator-hours -- the environment failed the job, not the agent. Past this ceiling the
   # job stops and stays EVICTED with the reason that kept ending it.
   max_infrastructure_requeues: 3

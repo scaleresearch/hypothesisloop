@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
@@ -138,5 +139,18 @@ func TestGetClusterIDReturnsTheKubeSystemNamespaceUID(t *testing.T) {
 	}
 	if id != "fixed-cluster-uid-1234" {
 		t.Errorf("GetClusterID = %q, want the kube-system namespace UID", id)
+	}
+}
+
+func TestAContainerThatExitedWithTheCodeUnreachableCodeIsReportedSo(t *testing.T) {
+	reason, message, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: domain.ExitCodeCodeUnreachable, Reason: "Error"}, 0)
+	if reason != domain.PhaseReasonCodeUnreachable || message != "container exited with code 75 (Error)" {
+		t.Fatalf("got %q %q", reason, message)
+	}
+	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}, 0); reason != domain.PhaseReasonContainerFailed {
+		t.Fatalf("exit 1 is %q", reason)
+	}
+	if reason, _, _ := terminatedPhaseDetail(&corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}, 0); reason != domain.PhaseReasonOOMKilled {
+		t.Fatalf("an OOM kill is %q", reason)
 	}
 }

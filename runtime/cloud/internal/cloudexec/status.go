@@ -49,7 +49,7 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, att
 		return "", "", 0, 1, "", nil
 	}
 	if how, code, _ := e.ending(ctx, v, i); how == endingFailed {
-		return domain.PhaseReasonContainerFailed, fmt.Sprintf("command exited with code %d", code), 0, 1, "", nil
+		return domain.PhaseReasonOfExit(code), fmt.Sprintf("command exited with code %d", code), 0, 1, "", nil
 	}
 	return "", "", 0, 1, "", nil
 }

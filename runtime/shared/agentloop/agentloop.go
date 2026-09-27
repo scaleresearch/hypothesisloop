@@ -541,7 +541,7 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 			a.Log("poll phase detail %s: %v", id, err)
 			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""
 		}
-		if said := exitline.LastOutput(logTail); reason == domain.PhaseReasonContainerFailed && said != "" {
+		if said := exitline.LastOutput(logTail); (reason == domain.PhaseReasonContainerFailed || reason == domain.PhaseReasonCodeUnreachable) && said != "" {
 			message += ": " + said
 		}
 	}

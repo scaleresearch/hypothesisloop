@@ -254,6 +254,12 @@ const (
 	// same allowance as every other, with the cluster kept in the job's tried_clusters.
 	EvictionScaleUpTimeout EvictionReason = "scale_up_timeout"
 
+	// EvictionCodeUnreachable is a job whose command never ran because its code could not be
+	// fetched: the platform's git credential or the repository did not answer. The runtime
+	// reports it as PhaseReasonCodeUnreachable. An infrastructure fault like every other:
+	// requeued for free while the allowance lasts, then EVICTED and refunded.
+	EvictionCodeUnreachable EvictionReason = "code_unreachable"
+
 	// EvictionClusterWithdrawn is a job requeued because the cluster it was placed on stopped
 	// taking it: the platform ended the sharing, or the cluster's org removed it. The job did
 	// nothing wrong and spends no retry.
@@ -291,6 +297,8 @@ const (
 	// PhaseReasonOOMKilled: the container was killed for exceeding its memory limit. Distinct
 	// from a plain non-zero exit because the fix is different — raise the request, not the code.
 	PhaseReasonOOMKilled = "oom_killed"
+	// PhaseReasonCodeUnreachable: the job's process ended with ExitCodeCodeUnreachable.
+	PhaseReasonCodeUnreachable = "code_unreachable"
 	// PhaseReasonNoOffer: a runtime that rents machines found none to rent for the job within
 	// the time its operator allows. Another look changes nothing the runtime has not waited for.
 	PhaseReasonNoOffer = "no_offer"
@@ -299,6 +307,21 @@ const (
 	PhaseReasonWaitingForOffer  = "waiting_for_offer"
 	PhaseReasonInstanceStarting = "instance_starting"
 )
+
+// ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: hl-clone ends with
+// it when neither the platform's git credential nor the repository answered, so the job's own
+// command never started. It is EX_TEMPFAIL of sysexits.h. A job's command that ends with it says
+// the same of itself.
+const ExitCodeCodeUnreachable = 75
+
+// PhaseReasonOfExit is the reason every runtime reports a process that ended with a non-zero code
+// under.
+func PhaseReasonOfExit(code int) string {
+	if code == ExitCodeCodeUnreachable {
+		return PhaseReasonCodeUnreachable
+	}
+	return PhaseReasonContainerFailed
+}
 
 // failureCauseDetailRunes bounds the runtime's message in a failure cause: the cause is stored on
 // the job and travels in every update about it.
@@ -312,10 +335,7 @@ const FailureNoReason = "failed, runtime gave no reason; see `hl job logs`"
 // has one. Where the runtime's last word is not about a process that ended, the cause says so,
 // with what a runtime that named no reason said beside it, its exit code where it reports one.
 func (d PhaseDetail) FailureCause() string {
-	message, _, _ := strings.Cut(d.Message, "\n")
-	if runes := []rune(message); len(runes) > failureCauseDetailRunes {
-		message = string(runes[:failureCauseDetailRunes])
-	}
+	message := d.detail()
 	switch {
 	case d.Reason == "" && message != "":
 		return FailureNoReason + " (" + message + ")"
@@ -325,6 +345,27 @@ func (d PhaseDetail) FailureCause() string {
 		return d.Reason
 	}
 	return d.Reason + ": " + message
+}
+
+// detail is the runtime's message as a reason carries it: its first line, bounded.
+func (d PhaseDetail) detail() string {
+	message, _, _ := strings.Cut(d.Message, "\n")
+	if runes := []rune(message); len(runes) > failureCauseDetailRunes {
+		message = string(runes[:failureCauseDetailRunes])
+	}
+	return message
+}
+
+// EvictionOfFailure is the eviction a failed process is ended with where the failure was the
+// environment's and no doing of the job, and false for a failure of the job's own.
+func (d PhaseDetail) EvictionOfFailure() (EvictionReason, bool) {
+	if d.Reason != PhaseReasonCodeUnreachable {
+		return "", false
+	}
+	if message := d.detail(); message != "" {
+		return EvictionCodeUnreachable.WithDetail(message), true
+	}
+	return EvictionCodeUnreachable, true
 }
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on

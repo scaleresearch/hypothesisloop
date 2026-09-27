@@ -112,7 +112,7 @@ func podScheduledCondition(p *corev1.Pod) (scheduled bool, unscheduledMessage st
 // tail as the single diagnostic channel. Reported through phase_detail rather than a new column
 // because it reaches the experiment record on the existing path, with no schema change.
 func terminatedPhaseDetail(t *corev1.ContainerStateTerminated, restarts int32) (string, string, int32) {
-	reason := domain.PhaseReasonContainerFailed
+	reason := domain.PhaseReasonOfExit(int(t.ExitCode))
 	if t.Reason == "OOMKilled" {
 		reason = domain.PhaseReasonOOMKilled
 	}

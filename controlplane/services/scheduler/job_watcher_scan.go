@@ -161,6 +161,12 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	case workload.JobPhaseSucceeded:
 		return w.onFinished(ctx, exp, domain.StatusCompleted, "")
 	case workload.JobPhaseFailed:
+		// A process the environment failed is no failure of the job: it goes back to the queue
+		// on the infrastructure allowance, and ends EVICTED and refunded once that is spent.
+		if eviction, environment := (domain.PhaseDetail{Reason: reason, Message: message}).EvictionOfFailure(); environment {
+			w.evictNotYetRunning(ctx, exp, eviction)
+			return nil
+		}
 		return w.onFinished(ctx, exp, domain.StatusFailed, domain.PhaseDetail{Reason: reason, Message: message}.FailureCause())
 	case workload.JobPhaseRunning:
 		if exp.Status == domain.StatusRunning {

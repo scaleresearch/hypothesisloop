@@ -65,6 +65,9 @@ var faultClasses = map[EvictionReason]FaultClass{
 	// A speculative gang never fully bound within its deadline, or the autoscaler refused
 	// outright — the environment's autoscaler failed to deliver, not the job's doing.
 	EvictionScaleUpTimeout: FaultInfrastructure,
+	// The job's command never started: its code could not be fetched because the platform's git
+	// credential or the repository did not answer.
+	EvictionCodeUnreachable: FaultInfrastructure,
 
 	// --- policy: the platform decided, and the job was fine -----------------------------------
 	EvictionStageCut:               FaultPolicy,

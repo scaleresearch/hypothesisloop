@@ -31,6 +31,7 @@ type scaleUpBackend struct {
 	// reason is what the runtime reports the job waits for, and firstReported when the attempt
 	// first reported each reason.
 	reason        string
+	message       string
 	firstReported map[string]time.Time
 }
 
@@ -45,7 +46,7 @@ func (b *scaleUpBackend) PollPhaseDetail(context.Context, *domain.Experiment) (r
 	if b.phaseDetailFound != nil {
 		found = *b.phaseDetailFound
 	}
-	return b.reason, "", 0, b.scheduledNodes, b.schedulingReason, found, nil
+	return b.reason, b.message, 0, b.scheduledNodes, b.schedulingReason, found, nil
 }
 func (b *scaleUpBackend) PhaseReportedSince(_ context.Context, _ *domain.Experiment, reason string) (time.Time, bool, error) {
 	since, found := b.firstReported[reason]
