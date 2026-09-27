@@ -69,12 +69,12 @@ class BriefingTest(unittest.TestCase):
         with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
             cfg = config.Config()
         cfg.run_as(config.COORDINATOR_FLAVOR, "model-1")
-        return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git")
+        return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
 
     def test_it_renders_with_the_rules_the_commands_and_its_assignment(self):
         prompt = self.render()
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
-        self.assertIn("clone https://github.com/acme/model.git", prompt)
+        self.assertIn("clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", " ".join(prompt.split()))
         self.assertIn("(:Objective {id:'pe-1'})", prompt)
         self.assertIsNone(re.search(r"\{[a-z_]+\}", prompt), "a placeholder was left unfilled")
 

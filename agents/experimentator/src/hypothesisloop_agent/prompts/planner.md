@@ -38,7 +38,8 @@ What you produce, in this order:
   3. The seed code. Research first (the web, papers, the libraries' own docs), then write the
      smallest working program that measures the metric: fixed seeds, pinned dataset and model
      revisions, every input fetched by the job itself, the metrics reported as the run goes
-     and once more at the end, the way the examples in $WORKLOAD_SAMPLES do. Researchers copy
+     and once more at the end, the way `$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy
+     that one file, and read nothing else there. Researchers copy
      and change this code, so keep the part they vary apart from the part that measures, and
      say which is which.
      Where it is kept: {workspace}
@@ -51,7 +52,8 @@ What you produce, in this order:
      `only_job_image`: anywhere else a job that names none stays queued. Register one
      hypothesis on `root` that
      states the baseline, then submit the seed code as a job against it with
-     `hl job submit FILE --hypothesis ID --theory "..."`, the committed file unedited:
+     `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`, the committed
+     file unedited:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
          $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
@@ -68,8 +70,8 @@ What you produce, in this order:
        - the gate, and that changing how it is checked voids the result;
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
-       - how to run a trial: the job spec to submit (the type and count, image, memory, command),
-         how long one takes and what it costs. Researchers are told to start their code from
+       - how to run a trial: `.hypothesisloop/job.yaml` submitted unedited and the flags that
+         vary it, how long one takes and what it costs. Researchers are told to start their code from
          that code_ref, so say nothing of cloning;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
   6. The size: the smallest plan that can reach the goal, since the person pays for all of
@@ -88,7 +90,9 @@ What you produce, in this order:
 
 Then write the proposal file, in the shape `hl platform-experiments propose` shows above, and
 send it once it is finished: the first one that passes the checks is stored and ends your work,
-so never send one to learn the shape. Its
+so never send one to learn the shape. A refused propose stores nothing and costs nothing: fix
+what its message names and send it again. Write free text in the file as a `|` block or in
+quotes, since a colon in unquoted text is not valid YAML. Its
 `metric_reason` and `measurement` are read by the person in place of your code: plain words, no
 jargon they did not use. Put in `questions` whatever the sentence left open and you had to
 decide (the dataset, the hardware, what counts as good enough), in `risks` what could make the

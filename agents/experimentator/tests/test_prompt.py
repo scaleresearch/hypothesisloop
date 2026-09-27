@@ -11,7 +11,7 @@ FLAVORS = sorted(p.stem for p in (Path(core.__file__).parent / "prompts" / "flav
 class SystemPromptTest(unittest.TestCase):
     def render(self, flavor: str) -> str:
         cfg = SimpleNamespace(agent_id="agent-a", flavor=flavor, platform_experiment_id="pe-1", hyperparameters={"k": 1})
-        return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git")
+        return core.system_prompt(cfg, "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
 
     def test_every_flavor_renders_with_the_rules_and_the_hl_commands(self):
         for flavor in FLAVORS:
@@ -20,7 +20,7 @@ class SystemPromptTest(unittest.TestCase):
             flat = " ".join(prompt.split())
             # Five of six hosted agents cloned into /tmp and then fought the working directory
             # every command starts in.
-            self.assertIn("clone https://github.com/acme/model.git into the directory you start in", flat)
+            self.assertIn("clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", flat)
             self.assertIn("work on branch `hl/pe-1/agent-a`", flat)
             # Told to branch off the default branch, a researcher never met the planner's seed,
             # and the `hl-clone` a brief sent it to leaves a directory with no origin to push to.

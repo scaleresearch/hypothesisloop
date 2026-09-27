@@ -3,14 +3,19 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 {start} the start_ section of the agent's role.
 
 ==== workspace
-clone {repository_url} into the directory you start in, where every command
-     starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}`: {start}
+clone {repository_url} into {workdir}, the directory you start in, where
+     every command starts again, and work on branch `hl/{platform_experiment_id}/{agent_id}`: {start}
      `git push` is authorized: push that branch and no other. It is the purge-safe home for
      your workload code, harnesses, job specs and Dockerfiles.
-     $WORKLOAD_SAMPLES holds working examples to copy and adapt.
 ==== start_planner
 create it off
-     the default branch, and check it out after a restart.
+     the default branch, check it out after a restart, and never commit to the default branch.
+     Run `hl repo init` in the clone before you write anything: it adds README.md,
+     `.hypothesisloop/experiment.yaml` and `.hypothesisloop/job.yaml` where the repository has
+     none and keeps every file it holds. The job.yaml is the shape of a job spec and the one
+     you fill in and submit: write no other, and read no sample to learn the shape. Fill in
+     the other two as well (experiment.yaml is the `experiment` you propose), and propose only
+     when `hl repo check` passes.
 ==== start_researcher
 create it off
      the commit after `@` in the description's BASELINE `code_ref`
@@ -18,6 +23,7 @@ create it off
      check it out after a restart. Others push `hl/{platform_experiment_id}/<their id>`:
      `git fetch` to read or build on it.
      `.hypothesisloop/job.yaml`, if present, is the base job spec.
+     $WORKLOAD_SAMPLES holds working examples to copy and adapt.
 ==== code_submit
        - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit and
          `git push` only after changing a tracked file (message = hypothesis id + theory).
@@ -26,7 +32,8 @@ create it off
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  3. To read what the agents start from, clone {repository_url}: when it has them,
+  3. To read what the agents start from, clone {repository_url} into {workdir},
+     the directory you start in: when it has them,
      `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
      base job spec. Each agent pushes its own branch `hl/{platform_experiment_id}/<its id>`. Your access to
      the repository is read-only. You push nothing, and nothing you write locally outlives

@@ -11,7 +11,7 @@ def planner():
 
 class PlannerPromptTest(unittest.TestCase):
     def render(self) -> str:
-        return core.system_prompt(planner(), "RULES\n", "COMMANDS", "https://github.com/acme/model.git")
+        return core.system_prompt(planner(), "RULES\n", "COMMANDS", "https://github.com/acme/model.git", "/agent/workspace")
 
     # The planner has its own briefing: the researchers' one tells an agent to compete, and a
     # planner that competed would optimize a metric nobody had chosen yet.
@@ -35,14 +35,36 @@ class PlannerPromptTest(unittest.TestCase):
     def test_the_planners_code_goes_to_the_drafts_repository(self):
         prompt = self.render()
         flat = " ".join(prompt.split())
-        self.assertIn("Where it is kept: clone https://github.com/acme/model.git into the directory you start in", flat)
+        self.assertIn("Where it is kept: clone https://github.com/acme/model.git into /agent/workspace, the directory you start in", flat)
         self.assertIn("work on branch `hl/pe-1/ag-planner`: create it off the default branch", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
-        # What a researcher is told of the others' branches and of a base job spec is not true
-        # of a planner, whose repository holds one commit and whose draft has no other agent.
-        for absent in ("{", "====", "Others push", "job.yaml", "BASELINE `code_ref`"):
+        # What a researcher is told of the others' branches is not true of a planner, whose
+        # draft has no other agent.
+        for absent in ("{", "====", "Others push", "BASELINE `code_ref`"):
             self.assertNotIn(absent, flat)
         self.assertLess(len(prompt.encode()), 11_000)
+
+    # A planner cloned three times looking for its directory, read six sample directories to
+    # learn the shape of a job spec, wrote one of its own beside the repository's, and named no
+    # image in it. The repository's layout is one rule: hl repo init, fill in, hl repo check.
+    def test_the_planner_makes_the_repository_ready_from_the_template(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("never commit to the default branch", flat)
+        self.assertIn("Run `hl repo init` in the clone before you write anything", flat)
+        self.assertIn("keeps every file it holds", flat)
+        self.assertIn("The job.yaml is the shape of a job spec and the one you fill in and submit: write no other, and read no sample", flat)
+        self.assertIn("propose only when `hl repo check` passes", flat)
+        self.assertIn('`hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`', flat)
+        self.assertEqual(flat.count("$WORKLOAD_SAMPLES"), 1)
+        self.assertIn("`$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing else there", flat)
+        self.assertIn(["repo"], core._HL_HELP_PLANNER)
+
+    # A planner whose proposal was not valid YAML believed a refused propose was costly, tried
+    # to validate the file with tools its machine does not have, and sent it blind.
+    def test_a_refused_propose_is_fixed_and_sent_again(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("A refused propose stores nothing and costs nothing: fix what its message names and send it again", flat)
+        self.assertIn("a colon in unquoted text is not valid YAML", flat)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):

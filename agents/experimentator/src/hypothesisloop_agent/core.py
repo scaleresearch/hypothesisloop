@@ -22,7 +22,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
 # A planner writes the first job spec and proposes, which no other agent does.
-_HL_HELP_PLANNER = ([], ["job"], ["job", "submit"], ["hypothesis"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
+_HL_HELP_PLANNER = ([], ["job"], ["job", "submit"], ["hypothesis"], ["repo"], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
@@ -49,9 +49,9 @@ def _code_sections() -> dict[str, str]:
     return sections
 
 
-def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str) -> str:
+def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str, workdir: str) -> str:
     values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
-                  repository_url=repository_url)
+                  repository_url=repository_url, workdir=workdir)
     code = _code_sections()
     template, sections = "coordinator.md", ("repository_line", "start_code")
     if config.plans(cfg):
@@ -123,7 +123,7 @@ def prepare() -> RunSetup:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
 
     commands = hl_commands(plans=True) if config.plans(cfg) else hl_commands(config.coordinates(cfg))
-    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url)
+    system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url, os.path.abspath(workdir))
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 
