@@ -242,18 +242,16 @@ func (d *Doc) authorize(audience Audience) func(huma.Context, func(huma.Context)
 
 func (d *Doc) refuse(ctx huma.Context, err error) {
 	var refusal *auth.Error
-	if errors.As(err, &refusal) {
-		if refusal.Reason != "" {
-			ctx.SetHeader("Content-Type", "application/json")
-			ctx.SetStatus(refusal.GetStatus())
-			_ = json.NewEncoder(ctx.BodyWriter()).Encode(refusal)
-			return
-		}
-		_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
+	if !errors.As(err, &refusal) {
+		refusal = auth.Internal(d.logger, "could not authenticate a request", err, zap.String("path", ctx.Operation().Path))
+	}
+	if refusal.Reason != "" {
+		ctx.SetHeader("Content-Type", "application/json")
+		ctx.SetStatus(refusal.GetStatus())
+		_ = json.NewEncoder(ctx.BodyWriter()).Encode(refusal)
 		return
 	}
-	d.logger.Error("could not authenticate a request", zap.String("path", ctx.Operation().Path), zap.Error(err))
-	_ = huma.WriteErr(d.API, ctx, http.StatusInternalServerError, auth.InternalError)
+	_ = huma.WriteErr(d.API, ctx, refusal.GetStatus(), refusal.Message)
 }
 
 // Register registers a Huma operation and records its metadata for the digest. audience is

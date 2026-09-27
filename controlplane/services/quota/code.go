@@ -121,8 +121,7 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 		}
 		joined, err := roster.Joined(ctx, in.ID, in.AgentID)
 		if err != nil {
-			logger.Error("store code failed", zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		if !joined {
 			return nil, huma.Error404NotFound("agent " + in.AgentID + " is not in platform experiment " + in.ID)
@@ -132,8 +131,7 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 		}
 		repository, err := roster.Repository(ctx, in.ID)
 		if err != nil {
-			logger.Error("store code failed", zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		if repository != "" {
 			return nil, &reasonError{status: http.StatusConflict, Reason: "code_in_repository",
@@ -144,8 +142,7 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 				Message: "the body is not a git bundle whose tip is " + in.SHA + ": make it with `git bundle create <file> HEAD`, or push with `hl code push`"}
 		}
 		if err := code.PutCode(ctx, in.ID, in.AgentID, in.SHA, in.RawBody); err != nil {
-			logger.Error("store code failed", zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		return &struct{ Body storedCode }{Body: storedCode{SHA: in.SHA, SizeBytes: len(in.RawBody)}}, nil
 	})
@@ -162,8 +159,7 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 			return nil, huma.Error404NotFound("code not found")
 		}
 		if err != nil {
-			logger.Error("read code failed", zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "read code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		return &sessionBytes{ContentType: "application/octet-stream", Body: bundle}, nil
 	}

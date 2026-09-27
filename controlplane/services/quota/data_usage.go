@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -49,12 +51,13 @@ type DataUsageHandler struct {
 	// active refuses a key to an agent that was cut or whose platform experiment closed.
 	active           ActiveGate
 	maxBytesPerAgent int64
+	logger           *zap.Logger
 }
 
 // NewDataUsageHandler returns a handler reporting against client, with the same per-agent ceiling
 // admission enforces so a caller can see how close it is to being refused.
-func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, active ActiveGate, maxBytesPerAgent int64) *DataUsageHandler {
-	return &DataUsageHandler{dataStore: client, keys: keys, active: active, maxBytesPerAgent: maxBytesPerAgent}
+func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, active ActiveGate, maxBytesPerAgent int64, logger *zap.Logger) *DataUsageHandler {
+	return &DataUsageHandler{dataStore: client, keys: keys, active: active, maxBytesPerAgent: maxBytesPerAgent, logger: logger}
 }
 
 // RegisterDataUsageHuma registers the durable-data usage operation on doc.
@@ -75,7 +78,7 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		}
 		usage, err := h.Usage(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get platform experiment data usage", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body *DataUsage }{Body: usage}, nil
 	})
@@ -111,7 +114,7 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		case errors.Is(err, db.ErrPlatformExperimentClosed):
 			return nil, huma.Error409Conflict(err.Error())
 		case err != nil:
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get agent data key", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body *domain.DataAccess }{Body: dataAccess}, nil
 	})

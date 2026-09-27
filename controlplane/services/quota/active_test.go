@@ -68,7 +68,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 		r := chi.NewRouter()
 		doc := apidocs.New(r, "test", "1.0.0", "", caller, auth.NewAccess(placement), zap.NewNop())
 		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, zap.NewNop()))
-		RegisterDataUsageHuma(doc, NewDataUsageHandler(client, store, svc, 0))
+		RegisterDataUsageHuma(doc, NewDataUsageHandler(client, store, svc, 0, zap.NewNop()))
 
 		post := func(path, body string) *httptest.ResponseRecorder {
 			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))

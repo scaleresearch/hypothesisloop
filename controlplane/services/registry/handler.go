@@ -59,12 +59,6 @@ type hypothesisGraph struct {
 	Edges []domain.GraphEdge `json:"edges"`
 }
 
-// internal logs a failure of the platform's own and answers 500 without it.
-func (h *Handler) internal(what string, err error) error {
-	h.logger.Error(what, zap.Error(err))
-	return huma.Error500InternalServerError(auth.InternalError)
-}
-
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
 // not been told apart from: the problem details plus the hypotheses themselves.
 type similarHypothesesError struct {
@@ -85,7 +79,7 @@ const similarDetail = "Nothing was registered: your hypothesis reads close to th
 
 // hypothesisWriteError maps the errors a hypothesis write can return to the status an agent can
 // act on, keeping the message.
-func hypothesisWriteError(err error) error {
+func (h *Handler) hypothesisWriteError(err error) error {
 	var similar *graphdb.SimilarError
 	if errors.As(err, &similar) {
 		return &similarHypothesesError{Status: http.StatusConflict, Title: http.StatusText(http.StatusConflict),
@@ -104,7 +98,7 @@ func hypothesisWriteError(err error) error {
 	case errors.Is(err, ErrHypothesisNotFound):
 		return huma.Error404NotFound(err.Error())
 	default:
-		return huma.Error500InternalServerError(err.Error())
+		return auth.Internal(h.logger, "write hypothesis", err)
 	}
 }
 
@@ -158,7 +152,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	loadHypothesis := func(ctx context.Context, id string) (*domain.Hypothesis, error) {
 		hyp, err := h.svc.GetHypothesis(ctx, id)
 		if err != nil {
-			return nil, h.internal("get hypothesis", err)
+			return nil, auth.Internal(h.logger, "get hypothesis", err)
 		}
 		if hyp == nil {
 			return nil, auth.NotFound("hypothesis")
@@ -172,7 +166,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		for _, id := range ids {
 			hyp, err := h.svc.GetHypothesis(ctx, id)
 			if err != nil {
-				return h.internal("get hypothesis", err)
+				return auth.Internal(h.logger, "get hypothesis", err)
 			}
 			placedIn := id
 			if hyp != nil {
@@ -201,7 +195,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get lineage", err, zap.String("id", in.ID))
 		}
 		// Nothing checks a parent at submission, so an ancestor can sit in another org.
 		visible := make([]*domain.Experiment, 0, len(chain))
@@ -231,7 +225,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list experiment data", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body []objectstore.Object }{Body: objects}, nil
 	})
@@ -253,7 +247,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get metrics", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body []*domain.MetricDataPoint }{Body: ts}, nil
 	})
@@ -285,8 +279,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, ErrInvalidMetric) {
 				return nil, huma.Error422UnprocessableEntity(err.Error())
 			}
-			h.logger.Error("record metric", zap.String("id", in.ID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "append metric", err, zap.String("id", in.ID))
 		}
 		return nil, nil
 	})
@@ -312,8 +305,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, ErrExperimentNotFound) {
 				return nil, huma.Error404NotFound(err.Error())
 			}
-			h.logger.Error("get log tail", zap.String("id", in.ID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get log tail", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body []string }{Body: lines}, nil
 	})
@@ -353,7 +345,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		series, err := h.svc.GetPlatformExperimentTimeseries(ctx, in.ID, in.MetricName, lookback, end)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "platform experiment timeseries", err, zap.String("id", in.ID))
 		}
 		resp := &struct {
 			Body struct {
@@ -422,7 +414,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		hyp, links, existed, err := h.svc.RegisterHypothesis(ctx, owner, actor, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 		if err != nil {
 			h.logger.Info("register hypothesis", zap.Error(err))
-			return nil, hypothesisWriteError(err)
+			return nil, h.hypothesisWriteError(err)
 		}
 		status := http.StatusCreated
 		if existed {
@@ -468,7 +460,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		links, err := h.svc.AddHypothesisLink(ctx, in.ID, owner, actor, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
 		if err != nil {
 			h.logger.Info("add hypothesis link", zap.Error(err))
-			return nil, hypothesisWriteError(err)
+			return nil, h.hypothesisWriteError(err)
 		}
 		return &struct {
 			Status int
@@ -498,8 +490,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.Is(err, graphdb.ErrInvalidQuery) {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			h.logger.Error("query hypotheses", zap.Error(err))
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "query hypotheses", err)
 		}
 		return &struct{ Body *graphdb.QueryResult }{Body: result}, nil
 	})
@@ -526,7 +517,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis graph", err)
 		}
 		return &struct{ Body hypothesisGraph }{Body: hypothesisGraph{Root: in.PlatformExperimentID, Nodes: nodes, Edges: edges}}, nil
 	})
@@ -567,11 +558,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			Restricted: restricted, Within: within, Status: in.Status, Limit: in.Limit, Offset: in.Offset}
 		hs, err := h.svc.ListHypotheses(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list hypotheses", err)
 		}
 		stats, err := h.svc.HypothesisStats(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list hypotheses", err)
 		}
 		return &struct {
 			Body       []*domain.HypothesisListItem
@@ -596,7 +587,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		stats, err := h.svc.HypothesisStats(ctx, graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent,
 			Restricted: restricted, Within: within})
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "hypothesis stats", err)
 		}
 		return &struct{ Body *domain.HypothesisStats }{Body: stats}, nil
 	})
@@ -619,7 +610,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "platform experiment findings", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body []*HypothesisEvidence }{Body: findings}, nil
 	})
@@ -650,30 +641,30 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if err := h.svc.NameHypothesis(ctx, hyp); err != nil {
-			return nil, h.internal("name the hypothesis's actors", err)
+			return nil, auth.Internal(h.logger, "name the hypothesis's actors", err)
 		}
 		links, err := h.svc.GetHypothesisLinks(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
 		jobFilter := domain.ExperimentFilter{Scope: domain.AllTenants, HypothesisID: in.ID}
 		jobs, err := h.svc.List(ctx, domain.ExperimentFilter{
 			Scope: domain.AllTenants, HypothesisID: in.ID, Limit: in.Limit, Offset: in.Offset,
 		})
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
 		jobCount, err := h.svc.Count(ctx, jobFilter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
 		findings, findingCount, err := h.svc.ListHypothesisFindings(ctx, in.ID, in.Limit, in.Offset)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
 		comments, commentCount, err := h.svc.ListHypothesisComments(ctx, in.ID, in.Limit, in.Offset)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "get hypothesis", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body hypothesisWithJobs }{Body: hypothesisWithJobs{
 			Hypothesis: hyp,
@@ -717,7 +708,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		c, err := h.svc.AddHypothesisComment(ctx, in.ID, owner, actor, in.Body.Text)
 		if err != nil {
 			h.logger.Info("add hypothesis comment", zap.Error(err))
-			return nil, hypothesisWriteError(err)
+			return nil, h.hypothesisWriteError(err)
 		}
 		return &struct {
 			Status int
@@ -762,7 +753,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		hyp, err := h.svc.SetHypothesisStatus(ctx, in.ID, owner, actor, Verdict{Status: in.Body.Status, Against: in.Body.Against, Despite: in.Body.Despite})
 		if err != nil {
 			h.logger.Info("set hypothesis status", zap.Error(err))
-			return nil, hypothesisWriteError(err)
+			return nil, h.hypothesisWriteError(err)
 		}
 		return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
 	})

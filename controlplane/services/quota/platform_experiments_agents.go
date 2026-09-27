@@ -262,8 +262,7 @@ func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
 	if errors.As(err, &refused) {
 		return &reasonError{status: refused.status, Reason: refused.reason, Message: refused.Error()}
 	}
-	h.logger.Error(op+" failed", zap.Error(err))
-	return huma.Error500InternalServerError(auth.InternalError)
+	return auth.Internal(h.logger, op+" failed", err)
 }
 
 type joinedAgentsBody struct {

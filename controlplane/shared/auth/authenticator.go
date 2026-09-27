@@ -276,13 +276,19 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (Principal, error) 
 // logged and never sent: the caller may be anyone.
 const InternalError = "internal error"
 
+// Internal logs a failure of the platform's own, with what the request was doing, and returns the
+// 500 that says nothing about it. Every handler answers such a failure through it.
+func Internal(logger *zap.Logger, what string, err error, fields ...zap.Field) *Error {
+	logger.Error(what, append(fields, zap.Error(err))...)
+	return &Error{status: http.StatusInternalServerError, Message: InternalError}
+}
+
 // WriteError answers a refusal in the API's {"error": ...} shape; any other error is logged and
 // answered as a 500 that says nothing about it.
 func WriteError(w http.ResponseWriter, logger *zap.Logger, err error) {
 	var refusal *Error
 	if !errors.As(err, &refusal) {
-		logger.Error("request failed before its handler", zap.Error(err))
-		refusal = &Error{status: http.StatusInternalServerError, Message: InternalError}
+		refusal = Internal(logger, "request failed before its handler", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(refusal.status)

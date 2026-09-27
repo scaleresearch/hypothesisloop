@@ -365,8 +365,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		desired, err := h.reconcile(ctx, in.Name, in.Body)
 		if err != nil {
 			// Never the answer itself: it holds every agent's token.
-			h.logger.Error("launcher reconcile failed", zap.String("launcher", in.Name), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(h.logger, "launcher reconcile failed", err, zap.String("launcher", in.Name))
 		}
 		return &struct{ Body *Desired }{Body: desired}, nil
 	})

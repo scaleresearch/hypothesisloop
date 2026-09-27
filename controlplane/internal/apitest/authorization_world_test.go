@@ -270,7 +270,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	quota.RegisterAgentsHuma(doc, peHandler)
 	quota.RegisterPlanningHuma(doc, peHandler)
 	quota.RegisterShareHuma(doc, nil, logger)
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0))
+	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
 	quota.RegisterSessionsHuma(doc, nil, logger)
 	quota.RegisterCodeHuma(doc, nil, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))

@@ -57,7 +57,7 @@ func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewDataUsageHandler(client, keys, anyoneActive{}, 0))
+	RegisterDataUsageHuma(apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewDataUsageHandler(client, keys, anyoneActive{}, 0, zap.NewNop()))
 	return r, &created
 }
 

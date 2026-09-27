@@ -320,8 +320,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if filter.PlatformExperimentID == "" {
 		exp, err := h.experiments.GetExperiment(r.Context(), filter.ExperimentID)
 		if err != nil {
-			h.logger.Error("watch: resolve experiment", zap.String("id", filter.ExperimentID), zap.Error(err))
-			writeWatchError(w, http.StatusInternalServerError, "could not resolve experiment")
+			auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: resolve experiment", err, zap.String("id", filter.ExperimentID)))
 			return
 		}
 		if exp == nil {
@@ -344,8 +343,7 @@ func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("watch: replay", zap.Error(err))
-		writeWatchError(w, http.StatusInternalServerError, "replay failed")
+		auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: replay", err))
 		return
 	}
 

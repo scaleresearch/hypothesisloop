@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -111,10 +112,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if errors.As(err, &admErr) {
 				return nil, &reasonError{status: admissionHTTPStatus(admErr.Reason), Reason: admErr.Reason, Message: admErr.Message}
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
 		if err := h.svc.NameJobs(ctx, &exp); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
 		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
 	})
@@ -206,20 +207,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		exps, err := h.svc.store.ListExperiments(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
 		if err := h.svc.NameJobs(ctx, exps...); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
 		total, err := h.svc.store.CountExperiments(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
 		if err := h.svc.mergePhaseDetails(ctx, exps); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
 		if err := h.svc.mergeMetrics(ctx, exps); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "list experiments", err)
 		}
 		return &struct {
 			Body       []*domain.Experiment
@@ -285,7 +286,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			NeedsSummary:         in.NeedsSummary,
 		}, in.GroupBy)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "experiment stats", err)
 		}
 		return &struct{ Body *domain.ExperimentStats }{Body: stats}, nil
 	})
@@ -304,7 +305,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		exp, err := h.svc.GetExperiment(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "get experiment", err, zap.String("id", in.ID))
 		}
 		if exp == nil {
 			return nil, huma.Error404NotFound("experiment not found")
@@ -353,7 +354,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "cancel experiment", err, zap.String("id", in.ID))
 		}
 		out := &struct {
 			Body struct {
@@ -388,7 +389,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if e := admissionStatusError(err); e != nil {
 				return nil, e
 			}
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "write experiment summary", err, zap.String("id", in.ID))
 		}
 		reply := summaryReply{Status: "ok"}
 		if hypothesis != nil {
@@ -416,7 +417,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if err := h.svc.RePrioritize(ctx); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "reprioritize", err)
 		}
 		out := &struct {
 			Body struct {
@@ -477,7 +478,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	}
 	exp, err := h.svc.store.GetExperiment(ctx, id)
 	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	if exp == nil {
 		return nil, huma.Error404NotFound("experiment not found")
@@ -490,7 +491,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	// of a shared cluster does not overrule the org a job belongs to.
 	cluster, err := h.svc.store.GetCluster(ctx, clusterName)
 	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	if cluster == nil {
 		return nil, huma.Error400BadRequest("cluster is not registered")
@@ -517,7 +518,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	if exp.Job.Nodes() > 1 {
 		capable, err := h.svc.workload.GetMultiNodeCapability(ctx)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 		}
 		if !capable[clusterName] {
 			return nil, huma.Error422UnprocessableEntity("cluster does not run jobs that span more than one node")
@@ -526,7 +527,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 
 	resolved, err := h.svc.grace.Resolve(exp.Job)
 	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	// The job is planned as this admission resolves it, from the submitted job. Whatever an
 	// earlier admission resolved, a slot pin included, belongs to that admission.
@@ -534,7 +535,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	candidate.ResolvedJob = &resolved
 	clusterActive := false
 	if err := h.svc.recordAdmission(ctx, id, time.Now().UTC()); err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	claimed, err := h.svc.store.ClaimSubmitted(ctx, id, clusterName, &resolved, func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
 		gAvail, _, err := readFlavorCapacity(ctx, h.svc.workload, h.svc.logger)
@@ -574,7 +575,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return desiredPlacementFits(nodeAvail[clusterName], nodeResources[clusterName], nodeLabels[clusterName], desired, &candidate, &resolved), nil
 	})
 	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	if !claimed {
 		if !clusterActive {
@@ -582,7 +583,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		}
 		current, err := h.svc.store.GetExperiment(ctx, id)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 		}
 		if current == nil || current.Status != domain.StatusQueued {
 			return nil, huma.Error409Conflict("only QUEUED experiments can be admitted")
@@ -595,12 +596,12 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 	exp.UpdatedAt = time.Now().UTC()
 	if err := h.svc.workload.CreateWorkload(ctx, exp); err != nil {
 		if rollbackErr := h.svc.store.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); rollbackErr != nil {
-			return nil, huma.Error500InternalServerError("workload creation failed and admission rollback failed: " + rollbackErr.Error())
+			return nil, auth.Internal(h.svc.logger, "admit experiment: workload creation failed and admission rollback failed", errors.Join(err, rollbackErr), zap.String("id", id), zap.String("cluster", clusterName))
 		}
-		return nil, huma.Error500InternalServerError("workload creation failed: " + err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment: workload creation failed", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	if err := h.svc.NameJobs(ctx, exp); err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
+		return nil, auth.Internal(h.svc.logger, "admit experiment", err, zap.String("id", id), zap.String("cluster", clusterName))
 	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }

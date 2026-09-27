@@ -175,19 +175,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	}, error) {
 		heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list clusters", err)
 		}
 		available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list clusters", err)
 		}
 		clusterIDs, err := metricsdb.LiveClusterIDs(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list clusters", err)
 		}
 		autoscalerEnabled, err := metricsdb.LiveClusterAutoscalerCapability(ctx, h.metricsDBURL, h.connectedWithin)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "list clusters", err)
 		}
 		names := make([]string, 0, len(heartbeats))
 		for name := range heartbeats {
@@ -329,7 +329,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				return nil, huma.Error409Conflict("cluster " + clusterName + " is bound to another cluster_id than the " + report.ClusterID +
 					" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity " + clusterName + ")")
 			case err != nil:
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 			}
 		}
 
@@ -339,7 +339,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			return nil, huma.Error400BadRequest("job_image is longer than " + strconv.Itoa(domain.MaxJobImageLength) + " characters")
 		}
 		if err := h.store.RecordJobImage(ctx, clusterName, report.JobImage, report.JobImageDefault); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 
 		if err := metricsdb.RecordClusterCapacitySnapshot(ctx, h.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
@@ -356,12 +356,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			RAMAvailable:               report.RAMAvailableBytes, RAMTotal: report.RAMTotalBytes,
 			StorageAvailable: report.StorageAvailableBytes, StorageTotal: report.StorageTotalBytes,
 		}); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 
 		exps, err := h.store.ListDesiredWorkloads(ctx, clusterName)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 		// The other half of the same view: what should NO LONGER exist, and for how much longer
 		// it may. A job the platform itself decided to stop -- preempted, cut, out of quota, out
@@ -373,14 +373,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		// with maxCheckpointGrace, so there is no terminating state to write, advance or clear.
 		undesired, err := h.store.ListRecentlyUndesiredWorkloads(ctx, clusterName, h.maxCheckpointGrace)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 		resp := &struct {
 			Body reconcileBody
 		}{}
 		h.attachDataAccess(exps)
 		if err := h.attachTokens(exps); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 		// A runtime may belong to another org than the job, so it is handed what it builds a
 		// workload from and nothing else of the job.
@@ -409,8 +409,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		case errors.Is(err, db.ErrClusterNotFound):
 			return nil, auth.NotFound("cluster")
 		case err != nil:
-			h.logger.Error("detach cluster", zap.String("cluster", in.Name), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(h.logger, "detach cluster", err, zap.String("cluster", in.Name))
 		}
 		h.logger.Info("cluster detached by its runtime", zap.String("cluster", in.Name), zap.Int("requeued", len(requeued)))
 		resp := &struct {
@@ -456,7 +455,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}
 		placementByID, err := h.store.PlacementByID(ctx, ids)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
 		for _, rep := range in.Body.Reports {
 			// A report for an experiment this cluster no longer owns is dropped, not a reason to
@@ -503,11 +502,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			}
 		}
 		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
 		if len(observations) > 0 {
 			if err := metricsdb.RecordObservations(ctx, h.metricsDBURL, observations); err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 			}
 		}
 		resp := &struct {

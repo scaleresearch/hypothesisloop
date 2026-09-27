@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -448,6 +449,23 @@ func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), InternalError) {
 		t.Fatalf("got = %d %q, want 500 with the generic body", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestInternalLogsTheCauseAndAnswersWithoutIt(t *testing.T) {
+	core, logs := observer.New(zap.ErrorLevel)
+	cause := errors.New(`pq: relation "signups" does not exist`)
+	answer := Internal(zap.New(core), "list agents", cause, zap.String("id", "pe-1"))
+	body, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.GetStatus() != http.StatusInternalServerError || string(body) != `{"error":"internal error"}` {
+		t.Fatalf("answered %d %s, want 500 with the generic body", answer.GetStatus(), body)
+	}
+	entries := logs.All()
+	if len(entries) != 1 || entries[0].Message != "list agents" || entries[0].ContextMap()["id"] != "pe-1" || entries[0].ContextMap()["error"] != cause.Error() {
+		t.Fatalf("logged %+v, want the cause once with the request's fields", entries)
 	}
 }
 

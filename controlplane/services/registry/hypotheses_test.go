@@ -599,7 +599,7 @@ func TestQueryGraphBindsTheEvidence(t *testing.T) {
 // In r7 a held agent ran its jobs under the close hypothesis and was then refused setting its
 // status. The hold has to say whose verdict that is and that a narrower claim is its own.
 func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClaimIsNew(t *testing.T) {
-	err := hypothesisWriteError(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
+	err := (&Handler{}).hypothesisWriteError(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
 	var hold *similarHypothesesError
 	if !errors.As(err, &hold) || hold.Status != http.StatusConflict || len(hold.Similar) != 1 {
 		t.Fatalf("hypothesisWriteError(SimilarError) = %#v, want a 409 carrying the similar hypotheses", err)

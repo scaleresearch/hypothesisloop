@@ -45,8 +45,7 @@ func RegisterSessionsHuma(doc *apidocs.Doc, sessions SessionStore, logger *zap.L
 			return nil, huma.Error400BadRequest("the body is the session and must not be empty")
 		}
 		if err := sessions.PutSession(ctx, platformExperimentID, agentID, snapshot); err != nil {
-			logger.Error("store session failed", zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "store session failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
 		}
 		return &struct{ Body storedSession }{Body: storedSession{SizeBytes: len(snapshot)}}, nil
 	}
@@ -59,8 +58,7 @@ func RegisterSessionsHuma(doc *apidocs.Doc, sessions SessionStore, logger *zap.L
 			return nil, huma.Error404NotFound("session not found")
 		}
 		if err != nil {
-			logger.Error("read session failed", zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID), zap.Error(err))
-			return nil, huma.Error500InternalServerError(auth.InternalError)
+			return nil, auth.Internal(logger, "read session failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
 		}
 		return &sessionBytes{ContentType: "application/octet-stream", Body: snapshot}, nil
 	}

@@ -278,8 +278,7 @@ func (h *Handler) answer(op string, err error) error {
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
 		return huma.Error409Conflict(err.Error())
 	default:
-		h.logger.Error("accounts request failed", zap.String("operation", op), zap.Error(err))
-		return huma.Error500InternalServerError(auth.InternalError)
+		return auth.Internal(h.logger, "accounts request failed", err, zap.String("operation", op))
 	}
 }
 

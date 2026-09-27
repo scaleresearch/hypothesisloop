@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -67,8 +68,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
 				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
 			}
-			h.logger.Error("registerAgent failed")
-			return nil, huma.Error500InternalServerError("failed to register agent: " + err.Error())
+			return nil, auth.Internal(h.logger, "register agent", err, zap.String("agentID", in.Body.ID))
 		}
 		return &struct{ Body *domain.Agent }{Body: agent}, nil
 	})
@@ -99,11 +99,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		filter := db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Scope: scope, Limit: in.Limit, Offset: in.Offset}
 		agents, err := h.svc.store.ListAgents(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to list agents")
+			return nil, auth.Internal(h.logger, "list agents", err)
 		}
 		stats, err := h.svc.store.AgentStats(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to count agents")
+			return nil, auth.Internal(h.logger, "list agents", err)
 		}
 		return &struct {
 			Body       []*domain.Agent
@@ -127,7 +127,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		stats, err := h.svc.store.AgentStats(ctx, db.AgentsFilter{PlatformExperimentID: in.PlatformExperimentID, Search: in.Search, Scope: scope})
 		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to count agents")
+			return nil, auth.Internal(h.logger, "agent stats", err)
 		}
 		return &struct{ Body *domain.AgentStats }{Body: stats}, nil
 	})
@@ -255,7 +255,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, invalid(err.Error())
 		}
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "create platform experiment", err)
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
@@ -311,11 +311,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pes, err := peh.svc.store.ListPlatformExperiments(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "list platform experiments", err)
 		}
 		total, err := peh.svc.store.CountPlatformExperiments(ctx, filter)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "list platform experiments", err)
 		}
 		if pes == nil {
 			pes = []*domain.PlatformExperiment{}
@@ -340,7 +340,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		cost, err := peh.svc.JobCost(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get job cost", err, zap.String("id", in.ID))
 		}
 		if cost == nil {
 			return nil, huma.Error404NotFound("experiment not found")
@@ -363,19 +363,19 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if pe == nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
 		signups, err := peh.svc.store.ListSignups(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
 		if err := peh.nameActors(ctx, pe); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	})
@@ -430,7 +430,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		signup, err := peh.svc.store.GetAgentSignup(ctx, in.ID, in.AgentID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get platform experiment signup", err, zap.String("id", in.ID))
 		}
 		if signup == nil {
 			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
@@ -577,7 +577,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "list platform experiment quotas", err, zap.String("id", in.ID))
 		}
 		if quotas == nil {
 			quotas = []*domain.AgentQuota{}
@@ -598,7 +598,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		aq, err := peh.svc.GetAgentQuota(ctx, in.AgentID, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 		}
 		if aq == nil {
 			return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID + ": quota is granted when the experiment starts, to the agents signed up to it")
@@ -618,14 +618,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		if pe == nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
 		cuts, err := peh.svc.store.ListCutAgents(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		if cuts == nil {
 			cuts = []domain.AgentCut{}
@@ -636,14 +636,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		advances, err := peh.svc.store.ListStageAdvances(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		if advances == nil {
 			advances = []domain.StageAdvance{}
 		}
 		allSignups, err := peh.svc.store.ListParticipants(ctx, in.ID)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		activeAgents := []string{}
 		for _, a := range allSignups {
@@ -653,7 +653,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		progress, err := peh.svc.stageProgress(ctx, pe)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body StagesStatusResponse }{Body: StagesStatusResponse{
 			Stages:               pe.Stages,
@@ -700,7 +700,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		clusters, err := peh.liveCapacity(ctx, orgID, every)
 		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, auth.Internal(peh.logger, "get resource capacity", err)
 		}
 		out := &struct {
 			Body struct {
