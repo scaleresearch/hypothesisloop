@@ -60,10 +60,12 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn(["repo"], core._HL_HELP_PLANNER)
 
     # A planner whose proposal was not valid YAML believed a refused propose was costly, tried
-    # to validate the file with tools its machine does not have, and sent it blind.
+    # to validate the file with tools its machine does not have, and sent it blind. The next one
+    # spent six commands installing a parser for a file hl had already refused.
     def test_a_refused_propose_is_fixed_and_sent_again(self):
         flat = " ".join(self.render().split())
-        self.assertIn("A refused propose stores nothing and costs nothing: fix what its message names and send it again", flat)
+        self.assertIn("`hl` checks the YAML of every file it reads and names the line: install no parser", flat)
+        self.assertIn("A refused propose stores nothing: fix what it names and send it again", flat)
         self.assertIn("a colon in unquoted text is not valid YAML", flat)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.

@@ -97,9 +97,9 @@ func TestRepoCheckNamesWhatKeepsACloneFromReady(t *testing.T) {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{
-		"free text with a colon in it":   {repotemplate.ExperimentFile, "name: sweep\ndescription: the goal: accuracy\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is not the YAML of an experiment: yaml: line 2:"},
+		"free text with a colon in it":   {repotemplate.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is not the YAML of an experiment: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
 		"no ranking metric":              {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
-		"a job spec that is not YAML":    {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: yaml: line "},
+		"a job spec that is not YAML":    {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":         {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
 		"a secret in the committed spec": {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
 	} {
@@ -118,6 +118,25 @@ func TestRepoCommandsAreRefusedOutsideAClone(t *testing.T) {
 	for _, command := range []string{"init", "check"} {
 		if code, out := repo(t, command); code == 0 || !strings.Contains(out, "this is not a git repository") {
 			t.Errorf("hl repo %s outside a clone = %d\n%s", command, code, out)
+		}
+	}
+}
+
+// A planner whose file had a colon in its first line was told no line, and spent six commands
+// installing a parser to find it. Every file hl reads is refused with where and what it reads there.
+func TestAFileThatIsNotYAMLIsRefusedWithItsLineColumnAndText(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "proposal.yaml")
+	write(t, filepath.Dir(file), "proposal.yaml", "experiment:\n  name: SHA-256 throughput: on CPU\n")
+	t.Setenv("HL_TOKEN", "hlk_x")
+	t.Setenv("API_URL", "http://127.0.0.1:1")
+	want := file + " is not valid YAML: line 2, column 27: mapping values are not allowed in this context, where the line reads: name: SHA-256 throughput: on CPU"
+	for _, args := range [][]string{
+		{"platform-experiments", "propose", "--platform-experiment", "pe-1", file},
+		{"job", "submit", "--agent", "ag-1", file},
+		{"hypothesis", "submit", "--agent", "ag-1", "--file", file},
+	} {
+		if code, _, stderr := hl(t, args...); code != 2 || strings.TrimSpace(stderr) != "hl: "+want {
+			t.Errorf("hl %s = %d\n%s\nwant only\nhl: %s", strings.Join(args[:2], " "), code, stderr, want)
 		}
 	}
 }

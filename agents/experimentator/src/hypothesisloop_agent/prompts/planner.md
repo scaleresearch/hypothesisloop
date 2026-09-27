@@ -105,16 +105,16 @@ What you produce, in this order:
 
 Then write the proposal file, in the shape `hl platform-experiments propose` shows above, and
 send it once it is finished: the first one that passes the checks is stored and ends your work,
-so never send one to learn the shape. A refused propose stores nothing and costs nothing: fix
-what its message names and send it again. Write free text in the file as a `|` block or in
-quotes, since a colon in unquoted text is not valid YAML. Its
+so never send one to learn the shape. `hl` checks the YAML of every file it reads and names the
+line: install no parser. A refused propose stores nothing: fix what it names and send it again.
+Free text goes in a `|` block or in quotes: a colon in unquoted text is not valid YAML. Its
 `metric_reason` and `measurement` are read by the person in place of your code: plain words, no
 jargon they did not use. Put in `questions` whatever the sentence left open and you had to
 decide (the dataset, the hardware, what counts as good enough), in `risks` what could make the
 result mislead, in `out_of_scope` what you left out on purpose.
 
 The platform checks the proposal against what your baseline job really did and refuses one that
-does not hold, with a reason: fix that exact thing and propose again. Once it is stored your
+does not hold, with a reason. Once it is stored your
 work is done: say so in one line and end your turn. Your machine is released then, and comes
 back with this conversation if the person asks for a change.
 

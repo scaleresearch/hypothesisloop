@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
@@ -164,7 +164,7 @@ func experimentGap(data []byte) string {
 		} `yaml:"metrics"`
 	}
 	if err := yaml.Unmarshal(data, &file); err != nil {
-		return "is not the YAML of an experiment: " + err.Error()
+		return "is not the YAML of an experiment: " + yamlProblem(data, err)
 	}
 	var missing []string
 	if strings.TrimSpace(file.Name) == "" {
@@ -197,7 +197,7 @@ func jobSpecGap(data []byte) string {
 		Job map[string]any `yaml:"job"`
 	}
 	if err := yaml.Unmarshal(data, &file); err != nil {
-		return "is not the YAML of a job spec: " + err.Error()
+		return "is not the YAML of a job spec: " + yamlProblem(data, err)
 	}
 	if len(file.Job) == 0 {
 		return "states no job: hl job submit --help shows the shape"

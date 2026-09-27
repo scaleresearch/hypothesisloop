@@ -54,7 +54,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
@@ -947,6 +947,21 @@ experiment runs and after it closed.`, stderr)
 	return 0
 }
 
+// yamlProblem is why raw is not the YAML a command reads, with where the parser stopped when
+// it says: the line, the column and what that line reads.
+func yamlProblem(raw []byte, err error) string {
+	var problem *yaml.LoadError
+	if !errors.As(err, &problem) || problem.Mark.Line == 0 {
+		return err.Error()
+	}
+	said := problem.Mark.String() + ": " + problem.Message
+	lines := strings.Split(string(raw), "\n")
+	if problem.Mark.Line > len(lines) || strings.TrimSpace(lines[problem.Mark.Line-1]) == "" {
+		return said
+	}
+	return said + ", where the line reads: " + strings.TrimSpace(lines[problem.Mark.Line-1])
+}
+
 func readYAMLBody(path string) (map[string]any, error) {
 	var raw []byte
 	var err error
@@ -960,7 +975,7 @@ func readYAMLBody(path string) (map[string]any, error) {
 	}
 	var body map[string]any
 	if err := yaml.Unmarshal(raw, &body); err != nil {
-		return nil, fmt.Errorf("not valid YAML: %w", err)
+		return nil, fmt.Errorf("%s is not valid YAML: %s", path, yamlProblem(raw, err))
 	}
 	if body == nil {
 		return nil, fmt.Errorf("expected a YAML mapping at the top level, got nothing")
@@ -990,7 +1005,7 @@ func readYAMLItems(path, listKey string) ([]map[string]any, error) {
 	}
 	var doc any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("not valid YAML: %w", err)
+		return nil, fmt.Errorf("%s is not valid YAML: %s", path, yamlProblem(raw, err))
 	}
 	switch v := doc.(type) {
 	case []any:

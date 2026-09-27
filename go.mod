@@ -18,6 +18,7 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/prometheus v0.314.0
 	go.uber.org/zap v1.28.0
+	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.35.3
