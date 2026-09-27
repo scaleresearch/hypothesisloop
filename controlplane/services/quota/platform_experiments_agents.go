@@ -50,14 +50,14 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_required, starts_at_ahead, no_researchers, budget_spent, starting), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads requested until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_required, starts_at_ahead, no_researchers, budget_spent, starting), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
 	Token        string               `json:"token,omitempty"`
 }
 
 // roster is signups as the API answers them. In an open platform experiment a researcher's
-// machine is not asked for and its instance reads requested, which a coordinator took for a
-// launch that failed: each agent that waits for the start says so, and for what. A machine that
-// is asked for and not running yet says that too (instanceStarting), in any status.
+// machine is not asked for, and reading requested it was taken for a launch that failed: each
+// agent that waits for the start says so, and for what, and its instance reads waiting. A machine
+// that is asked for and not running yet says that too (instanceStarting), in any status.
 func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
@@ -86,6 +86,11 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 		waits := "it takes its first turn when the platform starts the run"
 		if signup.Hosted {
 			waits = "its machine is asked for when the platform starts the run, and none is before"
+		}
+		if signup.Instance != nil {
+			instance := *signup.Instance
+			instance.Waiting = true
+			out[i].Instance = &instance
 		}
 		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message}
 	}
@@ -405,7 +410,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
 			"hosted=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
-			"Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads requested. " +
+			"Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads waiting: no machine exists before the start. " +
 			"400 max_hosted_reached beyond max_hosted machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, the next is added in its place. " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
@@ -458,7 +463,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Every agent that joined, in the order they did, with its role, what it was launched with and actor, whose credential added it. No token is listed. " +
 			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote. " +
-			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads requested until then, which is no failed launch. A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
+			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body joinedAgentsBody }, error) {

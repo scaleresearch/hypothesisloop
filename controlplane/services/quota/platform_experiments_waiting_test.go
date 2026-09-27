@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -201,5 +202,60 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	}
 	if why := roster[0].StatusReason; why == nil || why.Reason == "instance_starting" || !strings.Contains(why.Message, "its machine is asked for when the platform starts the run") {
 		t.Errorf("before the start: got = %+v", why)
+	}
+}
+
+// A researcher read instance.state requested from the accept on, while no machine is asked for
+// until the start.
+func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	store.signups = []domain.AgentSignup{
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{}},
+		{AgentID: "bo", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor},
+	}
+	state := func(agent JoinedAgent) string {
+		t.Helper()
+		body, err := json.Marshal(agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Instance *struct {
+				State string `json:"state"`
+			} `json:"instance"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Instance == nil {
+			return ""
+		}
+		return out.Instance.State
+	}
+	svc := newSignupTestService(t, store)
+	roster, err := svc.roster(context.Background(), "pe-1", store.signups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state(roster[0]); got != "waiting" || roster[0].StatusReason == nil {
+		t.Errorf("a researcher before the start: state %q with %+v, want waiting beside its status_reason", got, roster[0].StatusReason)
+	}
+	if got := state(roster[1]); got != "requested" {
+		t.Errorf("a baseline agent, whose machine starts at once: state %q, want requested", got)
+	}
+	if got := state(roster[2]); got != "" {
+		t.Errorf("an agent the platform does not run: instance state %q, want no instance", got)
+	}
+	if store.signups[0].Instance.Waiting {
+		t.Error("the roster changed the signup it was given")
+	}
+
+	store.pe.Status = domain.PlatformExpRunning
+	if roster, err = svc.roster(context.Background(), "pe-1", store.signups); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(roster[0]); got != "requested" {
+		t.Errorf("a researcher after the start: state %q, want requested", got)
 	}
 }
