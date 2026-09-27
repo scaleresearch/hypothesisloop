@@ -52,8 +52,11 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	if len(goal) > domain.MaxGoalBytes {
 		return nil, refuseUpdate(422, "invalid_goal", "goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes)
 	}
-	if launch.Launcher == "" || launch.DefaultModel == "" || launch.MaxHosted <= 0 {
+	if launch.Launcher == "" || launch.DefaultModel == "" {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
+	}
+	if maxProposedResearchers(launch.MaxHosted) < 1 {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_hosted_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxHosted)
 	}
 	if err := s.requireLauncher(ctx, launch.Launcher); err != nil {
 		return nil, err
@@ -71,7 +74,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		Name:                  draftName(goal),
 		Goal:                  goal,
 		Actor:                 &by,
-		MaxAgents:             1,
+		MaxAgents:             maxProposedResearchers(launch.MaxHosted),
 		Metrics:               []domain.MetricDefinition{},
 		ReportIntervalSeconds: settings.ReportIntervalSeconds,
 		PlanningEndsAt:        now.Add(planning.Limit),
@@ -115,7 +118,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
 			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. A draft takes no job, so nothing is measured " +
+			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then its max_agents is the most researchers a proposal may name: max_hosted less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +

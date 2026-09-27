@@ -78,8 +78,12 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if pe.Status != domain.PlatformExpDraft || pe.Goal != goal || out["status"] != "draft" || out["goal"] != goal {
 		t.Fatalf("created %+v", pe)
 	}
-	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
-		t.Errorf("a draft holds %v AccH, %d metrics, %d places, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.MaxAgents, pe.CoordinatorHosted)
+	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.CoordinatorHosted {
+		t.Errorf("a draft holds %v AccH, %d metrics, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.CoordinatorHosted)
+	}
+	// A planner read a made-up max_agents of 1 as a cap and proposed one researcher.
+	if most := maxProposedResearchers(hostingMaxHosted); pe.MaxAgents != most || out["max_agents"] != float64(most) {
+		t.Errorf("a draft reads max_agents %d (%v answered), want %d: the most researchers a proposal is accepted with", pe.MaxAgents, out["max_agents"], most)
 	}
 	if limit := pe.PlanningEndsAt.Sub(before); limit < testPlanning.Limit-time.Minute || limit > testPlanning.Limit+time.Minute {
 		t.Errorf("a draft ends %v after it was created, want the planning limit", limit)

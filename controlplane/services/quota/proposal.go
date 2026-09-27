@@ -59,6 +59,13 @@ func refusedProposal(reason, format string, args ...any) error {
 	return api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...))
 }
 
+// maxProposedResearchers is the most researchers a proposal may name, and a draft's max_agents
+// until one is accepted: of the maxHosted machines the platform runs for an accepted draft, one
+// is its coordinator's and one its baseline agent's.
+func maxProposedResearchers(maxHosted int) int {
+	return maxHosted - 2
+}
+
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It returns the experiment the proposal states, as validate
 // answers it: with its cost, its length and one place for each researcher.
@@ -67,10 +74,8 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Propos
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	// The coordinator the platform runs for an accepted draft is one of its machines, and the
-	// agent that measures its baseline another.
-	if len(p.Agents) == 0 || len(p.Agents) > maxHosted-2 {
-		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers, got %d", maxHosted-2, len(p.Agents))
+	if most := maxProposedResearchers(maxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
+		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
 	}
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}
