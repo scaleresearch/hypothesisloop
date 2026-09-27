@@ -75,14 +75,20 @@ function hlAdmin(...args) {
   })
 }
 
-// On a stack with a GitHub App every experiment keeps its code in a repository, and one that
-// names none has the platform create a new one on github.com. So the run names the sandbox
-// repository of .env on every create a page sends without one, and connects the installation
-// that covers it to the org that creates. Null on a stack with no App, where none is needed.
+// Every experiment keeps its code in a repository. On a stack with a GitHub App one that names
+// none has the platform create a new one on github.com, so the run names the sandbox repository
+// of .env on every create a page sends without one, and connects the installation that covers
+// it to the org that creates. On a stack with none the platform creates no repository, so the
+// run makes one on the local git server and names that.
 let sandbox = null
 
 async function findSandbox(token) {
-  if ((await api(token, '/github/app')).status !== 200) return
+  if ((await api(token, '/github/app')).status !== 200) {
+    const repository = `ui-e2e-${run}.git`
+    execFileSync('bash', ['-c', '. localdev/lib/auth.sh && git init -q --bare "${HL_GIT_ROOT}/$1"', 'git', repository], { cwd: repo })
+    sandbox = { repository }
+    return
+  }
   const value = key => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_env_value "$1"', 'env', key], { cwd: repo, encoding: 'utf8' }).trim()
   sandbox = { installation: value('HL_E2E_GITHUB_INSTALLATION'), repository: value('HL_E2E_GITHUB_REPO') }
   assert.ok(sandbox.installation && sandbox.repository, 'this stack has a GitHub App: .env must set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO')
@@ -96,7 +102,7 @@ async function newContext(browser) {
   await context.route(creates, route => {
     const request = route.request()
     const body = request.method() === 'POST' ? request.postDataJSON() : null
-    if (!sandbox || !body || body.repository || body.repository_account) return route.fallback()
+    if (!body || body.repository || body.repository_account) return route.fallback()
     return route.continue({ postData: JSON.stringify({ ...body, repository: sandbox.repository }) })
   })
   context.on('weberror', webError => crashes.push(`${webError.page()?.url()}: ${webError.error().message}`))
@@ -429,7 +435,7 @@ async function scenarios(browser) {
   // App, the sandbox installation is connected to it before any page offers to create.
   const adaHome = await (await api(await tokenOf(ada), '/me')).json()
   await findSandbox(await tokenOf(ada))
-  if (sandbox) hlAdmin('github', 'connect', adaHome.orgs[0].id, sandbox.installation)
+  if (sandbox.installation) hlAdmin('github', 'connect', adaHome.orgs[0].id, sandbox.installation)
   await page.goto(`${UI}/platform-experiments`)
   await page.getByText(`New experiment in Default org / Default project`).waitFor()
   await page.getByLabel('What do you want to find out?').waitFor()
@@ -495,8 +501,7 @@ async function scenarios(browser) {
   assert.equal(await agentRows.count(), 2)
 
   section('a hosted agent the platform refuses is not listed, and the page says why')
-  // An experiment needs no repository to have its agents hosted, so the real API would take
-  // this one and a launcher would rent for it. The refusal is stood in for: what a deployment
+  // The real API would take this one and a launcher would rent for it. The refusal is stood in for: what a deployment
   // with no launcher registered answers. Nothing reaches the API.
   const refusedHosting = { reason: 'launcher_not_registered', message: 'no launcher named main is registered: nothing can be hosted until hl-admin launcher add main' }
   const hostedAddURL = `${API}/platform-experiments/${experimentID}/agents`
@@ -619,7 +624,7 @@ async function scenarios(browser) {
     runWrites.push({ path, body })
     if (path === '/platform-experiments') {
       const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
-      return route.continue({ postData: JSON.stringify(sandbox ? { ...rest, repository: sandbox.repository } : rest) })
+      return route.continue({ postData: JSON.stringify({ ...rest, repository: sandbox.repository }) })
     }
     if (path.endsWith('/agents')) {
       // Never hosted for real: joined as one its operator runs, or refused as a deployment
@@ -641,7 +646,7 @@ async function scenarios(browser) {
     await dialog.getByRole('button', { name: 'Add', exact: true }).click()
     await dialog.getByRole('button', { name: 'Next: budget and rules' }).click()
     await dialog.getByRole('button', { name: 'Hosted agents' }).click()
-    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isEnabled(), 'hosted agents need no repository')
+    assert.ok(await dialog.getByRole('button', { name: 'Create and run' }).isEnabled(), 'hosted agents need no repository chosen')
     await dialog.getByRole('tab', { name: '1. Essentials' }).click()
     await dialog.getByLabel('Repository').click()
     await page.getByRole('option', { name: 'acme/widgets' }).click()
@@ -932,7 +937,7 @@ async function scenarios(browser) {
   const settingsPage = `${UI}/settings?project=${secondProjectID}`
   const installationsAPI = `${API}/orgs/${orgID}/github-installations`
   // The run connected the sandbox installation for its creates, which are all done by now.
-  if (sandbox) assert.equal((await api(await tokenOf(ada), `${installationsAPI.slice(API.length)}/${sandbox.installation}`, 'DELETE')).status, 204)
+  if (sandbox.installation) assert.equal((await api(await tokenOf(ada), `${installationsAPI.slice(API.length)}/${sandbox.installation}`, 'DELETE')).status, 204)
   const appRead = page.waitForResponse(`${API}/github/app`)
   const installationsRead = page.waitForResponse(r => r.url().startsWith(installationsAPI) && r.request().method() === 'GET')
   await page.goto(settingsPage)

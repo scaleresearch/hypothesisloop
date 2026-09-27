@@ -159,18 +159,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked, and it is kept until the experiment closes. " +
 			"It is not read from the file, and is fixed from then on. " +
-			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, " +
+			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
 			"A platform experiment keeps its code in a repository: left out, the platform creates a private one with one commit on the GitHub account the org connected, named from the experiment and its id, " +
 			"stores it as if the request had named it and answers with it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
 			"422 github_not_connected when the org has connected no GitHub account, 422 repository_not_created when the installation has not granted the App the creation of repositories " +
 			"(its owner grants it, or the request names a repository), 409 repository_not_created when the name is taken. Nothing is created without its repository. " +
-			"On a deployment whose git host is plain the platform creates none and reads no experiment file: repository is a name under the host's root, created there beforehand, " +
-			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. With repository on GitHub, " +
-			"and repository_url in the answer is where from. An installation of the platform's GitHub App that the org connected must cover it " +
+			"Named, an installation of the platform's GitHub App that the org connected must cover it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
-			"installation_gone when the App was removed on GitHub, and 503 github_not_configured on a deployment with no GitHub App. " +
+			"and installation_gone when the App was removed on GitHub. " +
+			"On a deployment whose git host is plain the platform creates none and reads no experiment file: repository is a name under the host's root, created there beforehand, " +
+			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. " +
 			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Neither is read from the file and both are fixed from then on. " +
 			"This call creates the experiment and no agent: each agent joins by its own POST /platform-experiments/{id}/agents. " +

@@ -1,9 +1,7 @@
 // Walks the path of a new person on the hosted stack: sign in, open the full form behind
 // Advanced on the home page, pick a repository, Create and run,
 // and watch the experiment. It rents real machines, so it is run by hand:
-//   node e2e/walk.mjs [--until form|filled|created|done] [--off cluster,cluster] [--no-repository]
-// --no-repository connects no GitHub account and types the task in: agents start in an empty
-// workspace and the platform keeps their code.
+//   node e2e/walk.mjs [--until form|filled|created|done] [--off cluster,cluster]
 // It keeps no screenshot and no page text: it prints the steps it passed and what it timed.
 // --off switches those clusters off for the person's org in Settings before the form is filled.
 // It serves its own copy of the UI signed in through the local identity provider, as run.mjs does.
@@ -31,19 +29,11 @@ const SETTINGS = join(repo, 'controlplane', 'settings', '.hypothesisloop.dev.yam
 const flag = (name, fallback) => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : fallback
 const until = flag('--until', 'done')
 const off = flag('--off', '').split(',').filter(Boolean)
-const noRepository = process.argv.includes('--no-repository')
 const RESEARCHERS = 2
-// A task small enough to type: it needs no accelerator and nothing but Python.
-const NO_REPOSITORY_BRIEF = `There is no repository: start from an empty directory.
-Write sort.py, a function that sorts one million random 32-bit integers (seed 0) in plain Python
-without calling sorted or list.sort, and bench.py, which checks the result against sorted and
-reports items_per_second (higher is better) to the platform. A wrong order fails the job.
-Each agent tries a different algorithm, one job at a time, at most three jobs, each asking for
-2 CPU cores (cpu: 2 and no accelerator) and 4Gi. The coordinator closes the experiment once both have stopped.`
 const LONGEST = 60 * 60 * 1000
 const REPOSITORY = process.env.HL_E2E_GITHUB_REPO
 const INSTALLATION = process.env.HL_E2E_GITHUB_INSTALLATION
-assert.ok(noRepository || (REPOSITORY && INSTALLATION), 'usage: HL_E2E_GITHUB_REPO=.. HL_E2E_GITHUB_INSTALLATION=.. node e2e/walk.mjs, or --no-repository')
+assert.ok(REPOSITORY && INSTALLATION, 'usage: HL_E2E_GITHUB_REPO=.. HL_E2E_GITHUB_INSTALLATION=.. node e2e/walk.mjs')
 
 const run = randomUUID().slice(0, 6)
 const person = { id: randomUUID(), name: `Walk ${run}` }
@@ -107,10 +97,8 @@ async function main() {
     await page.goto(`${UI}/settings`)
     await page.waitForLoadState('networkidle')
     passed('settings-before-github')
-    if (!noRepository) {
-      hlAdmin('github', 'connect', org.id, INSTALLATION)
-      note('GitHub was connected with hl-admin: the Connect GitHub button needs a person at GitHub')
-    }
+    hlAdmin('github', 'connect', org.id, INSTALLATION)
+    note('GitHub was connected with hl-admin: the Connect GitHub button needs a person at GitHub')
     await page.reload()
     await page.waitForLoadState('networkidle')
     passed('settings-github-and-clusters')
@@ -131,16 +119,9 @@ async function main() {
     // The home page starts from a sentence; the form this walk fills is behind Advanced.
     await page.getByRole('button', { name: 'Advanced', exact: true }).click()
     const form = page.getByRole('dialog')
-    if (noRepository) {
-      await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`walk-${run}`)
-      await form.getByLabel('Description').fill(NO_REPOSITORY_BRIEF)
-      await form.getByPlaceholder('custom_metric_key').fill('items_per_second')
-      await form.getByRole('button', { name: 'Add Custom' }).click()
-    } else {
-      await form.getByLabel('Repository').click()
-      await page.getByRole('option', { name: REPOSITORY }).click()
-      await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
-    }
+    await form.getByLabel('Repository').click()
+    await page.getByRole('option', { name: REPOSITORY }).click()
+    await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
     passed('form-repository-chosen')
     await form.getByRole('button', { name: 'Next: budget and rules' }).click()
     await form.getByRole('button', { name: 'Hosted agents' }).click()
