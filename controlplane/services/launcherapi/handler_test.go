@@ -55,6 +55,12 @@ func named(pe, agent, name string) domain.AgentSignup {
 	return signup
 }
 
+// ended is a hosted agent whose run is over for reason.
+func ended(signup domain.AgentSignup, reason domain.RunEnd) domain.AgentSignup {
+	signup.Ended = reason
+	return signup
+}
+
 func observed(instances ...ObservedInstance) Observed {
 	if instances == nil {
 		instances = []ObservedInstance{}
@@ -117,9 +123,9 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{
 		"main": {
 			{AgentSignup: hosted("pe-1", "ag-running")},
-			{AgentSignup: named("pe-1", "ag-cut", "pe1-agcut-aaaaaaaaaaaa"), Ending: true},
-			{AgentSignup: named("pe-2", "ag-closed", "pe2-agclosed-bbbbbbbbbbbb"), Ending: true},
-			{AgentSignup: hosted("pe-2", "ag-closed-before-it-ever-ran"), Ending: true},
+			{AgentSignup: ended(named("pe-1", "ag-cut", "pe1-agcut-aaaaaaaaaaaa"), domain.RunEndCut)},
+			{AgentSignup: ended(named("pe-2", "ag-closed", "pe2-agclosed-bbbbbbbbbbbb"), domain.RunEndClosed)},
+			{AgentSignup: ended(hosted("pe-2", "ag-closed-before-it-ever-ran"), domain.RunEndClosed)},
 			{AgentSignup: hosted("pe-3", "ag-open")},
 		},
 		"other": {{AgentSignup: hosted("pe-9", "ag-elsewhere")}},
@@ -267,7 +273,7 @@ func TestAChangeOfConfigOrOfTheLaunchersInputsRenamesRunningInstancesAndLeavesEn
 	agents := func() map[string][]db.LauncherAgent {
 		return map[string][]db.LauncherAgent{"main": {
 			{AgentSignup: hosted("pe-1", "ag-running")},
-			{AgentSignup: named("pe-1", "ag-cut", "pe1-agcut-createdunder1"), Ending: true},
+			{AgentSignup: ended(named("pe-1", "ag-cut", "pe1-agcut-createdunder1"), domain.RunEndCut)},
 		}}
 	}
 	store := &launcherStore{ByLauncher: agents()}
@@ -619,7 +625,7 @@ func TestAHandlerCannotBeBuiltWithoutWhatEveryInstanceNeeds(t *testing.T) {
 func TestOnlyTheEndOfTheMachineAskedForIsRecorded(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
 		{AgentSignup: hosted("pe-1", "ag-1")},
-		{AgentSignup: named("pe-1", "ag-ending", "pe1-agending-aaaaaaaaaaaa"), Ending: true},
+		{AgentSignup: ended(named("pe-1", "ag-ending", "pe1-agending-aaaaaaaaaaaa"), domain.RunEndPlanned)},
 	}}}
 	name := mustReconcile(t, store, observed()).Instances[0].Name
 	for _, reported := range [][]ObservedInstance{

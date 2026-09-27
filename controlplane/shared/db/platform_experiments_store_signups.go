@@ -280,8 +280,9 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)
 	return finished, nil
 }
 
-// The last column is whether the agent's run ended long enough ago for its machine to be
-// released: its platform experiment closed, it was cut, or it finished.
+// The last two columns are whether the agent's run ended long enough ago for its machine to be
+// released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
+// a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
        s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
@@ -292,7 +293,12 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
            s.finished_at,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
            (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
-           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.flavor = '`+domain.PlannerFlavor+`'))`)
+           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.flavor = '`+domain.PlannerFlavor+`'))`) + `,
+       CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
+            WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
+            WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
+            WHEN s.flavor = '` + domain.PlannerFlavor + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
+            ELSE '' END`
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -303,7 +309,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason,
-		&signup.FinishedAt, &signup.FinishedReason, &instance.Released}, more...)...); err != nil {
+		&signup.FinishedAt, &signup.FinishedReason, &instance.Released, &signup.Ended}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	if signup.Hosted {
@@ -352,15 +358,13 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID
 	return &signup, nil
 }
 
-// LauncherAgent is a hosted agent as its launcher's desired state names it. Ending is true once
-// its platform experiment closed, it was cut or it finished: its machine is no longer wanted and is left to
-// finish its last turn.
+// LauncherAgent is a hosted agent as its launcher's desired state names it. Once its run Ended
+// its machine is no longer wanted and is left to finish its last turn.
 type LauncherAgent struct {
 	domain.AgentSignup
 	// AgentImage is the image the agent's platform experiment names for its machines, empty for
 	// the platform's own.
 	AgentImage string
-	Ending     bool
 }
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
@@ -385,13 +389,10 @@ WHERE s.hosted AND s.launcher = $1
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
 
-// launcherAgentEnding says that the agent's run is over and its machine is only winding down.
-const launcherAgentEnding = `(pe.status = 'closed' OR c.agent_id IS NOT NULL OR s.finished_at IS NOT NULL OR (s.flavor = '` + domain.PlannerFlavor + `' AND pe.proposed_at IS NOT NULL))`
-
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherAgentEnding+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -401,7 +402,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	for rows.Next() {
 		var agent LauncherAgent
 		var err error
-		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage, &agent.Ending); err != nil {
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 		}
 		agents = append(agents, agent)

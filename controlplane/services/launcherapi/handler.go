@@ -152,7 +152,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ending,
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "",
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(restarts int) (Instance, error) {
 				return instanceFor(signup, restarts, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)

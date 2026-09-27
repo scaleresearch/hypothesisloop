@@ -277,11 +277,17 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 		running, runningAgents[4], (windDown + time.Second).Seconds()); err != nil {
 		t.Fatal(err)
 	}
-	if signup, err := pes.GetAgentSignup(ctx, running, runningAgents[4]); err != nil || signup.FinishedAt == nil || signup.FinishedReason != "quota spent" || !signup.Instance.Released {
+	if signup, err := pes.GetAgentSignup(ctx, running, runningAgents[4]); err != nil || signup.FinishedAt == nil || signup.FinishedReason != "quota spent" || !signup.Instance.Released || signup.Ended != domain.RunEndFinished {
 		t.Errorf("finished signup: got = (%+v, %v), want = its moment, its reason and its machine released", signup, err)
 	}
 	cutTestAgent(t, pool, running, runningAgents[1], 30*time.Second)
 	expect(runningAgents[1], true)
+	if signup, err := pes.GetAgentSignup(ctx, running, runningAgents[1]); err != nil || signup.Ended != domain.RunEndCut {
+		t.Errorf("cut signup: got = (%+v, %v), want = ended as cut", signup, err)
+	}
+	if signup, err := pes.GetAgentSignup(ctx, running, runningAgents[0]); err != nil || signup.Ended != "" {
+		t.Errorf("signup of an agent at work: got = (%+v, %v), want = not ended", signup, err)
+	}
 	cutTestAgent(t, pool, running, runningAgents[2], windDown+time.Second)
 
 	justClosed := newPE()
@@ -316,7 +322,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 		if !a.Hosted || a.Launcher != launcher {
 			t.Errorf("listed an agent that is not this launcher's: %+v", a)
 		}
-		got[a.AgentID] = a.Ending
+		got[a.AgentID] = a.Ended != ""
 		order = append(order, a.PlatformExperimentID+"/"+a.AgentID)
 	}
 	if !reflect.DeepEqual(got, want) {

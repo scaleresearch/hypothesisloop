@@ -418,7 +418,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		return &struct{ Body signupReply }{Body: signupReply{
 			AgentID: signup.AgentID, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
-			FinishedAt: signup.FinishedAt,
+			FinishedAt: signup.FinishedAt, Ended: signup.Ended,
 		}}, nil
 	})
 
@@ -722,4 +722,5 @@ type signupReply struct {
 	Model           string         `json:"model"`
 	Hyperparameters map[string]any `json:"hyperparameters"`
 	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
+	Ended           domain.RunEnd  `json:"ended,omitempty" enum:"closed,cut,finished,planned" doc:"Why the agent's run here is over, absent while it goes on: the platform experiment closed, the agent was cut at a stage boundary, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
 }

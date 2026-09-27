@@ -192,7 +192,7 @@ func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T
 	c.rented.Start(name)
 	ids := c.rented.IDs(name)
 
-	c.store.ByLauncher["main"][0].Ending = true
+	c.store.ByLauncher["main"][0].Ended = domain.RunEndClosed
 	c.pass()
 	c.pass()
 	if c.rented.Stops(name) != 2 || !reflect.DeepEqual(c.rented.IDs(name), ids) {
@@ -279,7 +279,7 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	// The platform experiment closes: both are told to stop and left to finish.
 	c.rented.Start(replacement)
 	ids := c.rented.IDs(replacement)
-	c.store.ByLauncher["main"][0].Ending = true
+	c.store.ByLauncher["main"][0].Ended = domain.RunEndClosed
 	c.store.Coordinators[0].Ending = true
 	c.pass()
 	if c.rented.Stops(replacement) != 1 || c.rented.Stops(agent) != 1 || !reflect.DeepEqual(c.rented.IDs(replacement), ids) {

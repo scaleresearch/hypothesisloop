@@ -179,10 +179,15 @@ _COORDINATOR_SHUTDOWN_PROMPT = (
 )
 
 
+_PLANNED_SHUTDOWN_PROMPT = "This is your last turn. Start nothing new. You owe nothing more: end your turn."
+
+
 def _shutdown_prompt(setup: core.RunSetup) -> str:
     """The last turn's instruction, opened with why the machine stops as the platform has it now."""
-    base = _COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(setup.cfg) else _SHUTDOWN_PROMPT
-    return f"{core.stop_cause(setup)} {base}"
+    ended, cause = core.stop_cause(setup)
+    if config.coordinates(setup.cfg):
+        return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
+    return f"{cause} {_PLANNED_SHUTDOWN_PROMPT if ended == 'planned' else _SHUTDOWN_PROMPT}"
 
 
 class TurnStalled(Exception):

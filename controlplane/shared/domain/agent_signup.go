@@ -36,10 +36,26 @@ type AgentSignup struct {
 	// gave as why. From then its machine is no longer wanted.
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	FinishedReason string     `json:"finished_reason,omitempty"`
+	// Ended is why the agent's run in the platform experiment is over, empty while it goes on.
+	// A hosted agent's machine is told to stop for this and for nothing else, and the agent
+	// reads it to learn why.
+	Ended RunEnd `json:"-"`
 	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`
 }
+
+// RunEnd is why an agent's run in a platform experiment is over.
+type RunEnd string
+
+const (
+	RunEndClosed   RunEnd = "closed"
+	RunEndCut      RunEnd = "cut"
+	RunEndFinished RunEnd = "finished"
+	// RunEndPlanned is a planner whose answer to its draft is stored: a proposal, or why there
+	// is none. A revision takes it back.
+	RunEndPlanned RunEnd = "planned"
+)
 
 // AgentInstance is the recorded outcome of a hosted agent's machine, as its launcher reported it.
 type AgentInstance struct {

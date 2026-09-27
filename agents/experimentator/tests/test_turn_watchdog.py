@@ -44,9 +44,9 @@ def _setup():
                                                max_wall_hours=0))
 
 
-# A machine stopped in a running experiment is told exactly that, ahead of what to do with its turn.
-LAST = ("You are being stopped while the platform experiment is still running and you have not finished: "
-        "you were cut at a stage boundary, or this machine is being replaced. " + run._SHUTDOWN_PROMPT)
+# A machine stopped while its agent's run goes on is told exactly that, ahead of what to do with its turn.
+LAST = ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
+        "Only this machine is being stopped, and the platform does not say why. " + run._SHUTDOWN_PROMPT)
 
 
 def _result():

@@ -140,11 +140,12 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time, 2026-01-01T02:48:00Z, and the platform closed it"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "coordinator", "you closed it"),
-            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "generalist", "its coordinator closed it"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
-            ({**ended, "close_reason": "planning_limit_reached"}, {}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
-            ({"status": "running"}, {}, "coordinator", "still running: this machine is being replaced"),
-            ({"status": "running"}, {"finished_at": "2026-01-01T00:20:00Z"}, "generalist", "you said you have nothing left to do"),
+            ({**ended, "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
+            ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
+            ({"status": "running"}, {"ended": "finished"}, "generalist", "you said you have nothing left to do"),
+            ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
         ):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
                                     client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
@@ -152,6 +153,14 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(prompt.startswith("You are being stopped"), prompt)
             self.assertIn(want, prompt)
             self.assertNotIn("owner", prompt)
+
+    # A planner whose proposal was just stored was told its machine was being replaced and to
+    # file the summaries it owed.
+    def test_a_planner_whose_answer_is_stored_is_told_its_planning_is_over_and_owes_nothing(self):
+        setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor="planner", platform_experiment_id="pe-1"),
+                                client=SimpleNamespace(get_signup=lambda *_: {"ended": "planned"}))
+        self.assertEqual(run._shutdown_prompt(setup), "You are being stopped because your planning is over: the platform has your answer "
+                         "to the draft. This is your last turn. Start nothing new. You owe nothing more: end your turn.")
 
 
 if __name__ == "__main__":

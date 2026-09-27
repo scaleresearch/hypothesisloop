@@ -111,7 +111,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	pe, planner := createTestDraft(t, pool, launcher)
 	const windDown = 2 * time.Minute
 
-	listed := func() (found, ending bool) {
+	listed := func() (found bool, ended domain.RunEnd) {
 		t.Helper()
 		agents, err := pes.ListLauncherAgents(ctx, launcher, windDown)
 		if err != nil {
@@ -119,10 +119,10 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 		for _, a := range agents {
 			if a.AgentID == planner {
-				return true, a.Ending
+				return true, a.Ended
 			}
 		}
-		return false, false
+		return false, ""
 	}
 	propose := func(ago time.Duration) {
 		t.Helper()
@@ -131,12 +131,12 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 	}
 
-	if found, ending := listed(); !found || ending {
-		t.Fatalf("while planning: listed %v, ending %v, want kept", found, ending)
+	if found, ended := listed(); !found || ended != "" {
+		t.Fatalf("while planning: listed %v, ended %q, want kept", found, ended)
 	}
 	propose(0)
-	if found, ending := listed(); !found || !ending {
-		t.Fatalf("just proposed: listed %v, ending %v, want winding down", found, ending)
+	if found, ended := listed(); !found || ended != domain.RunEndPlanned {
+		t.Fatalf("just proposed: listed %v, ended %q, want winding down as planned", found, ended)
 	}
 	propose(windDown + time.Second)
 	if found, _ := listed(); found {
@@ -160,8 +160,8 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.EndsAt.Sub(until).Abs() > time.Second {
 		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
-	if found, ending := listed(); !found || ending {
-		t.Fatalf("revising: listed %v, ending %v, want kept", found, ending)
+	if found, ended := listed(); !found || ended != "" {
+		t.Fatalf("revising: listed %v, ended %q, want kept", found, ended)
 	}
 	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Launch != "" {
 		t.Fatalf("after a revision the planner's launch is %+v, %v, want none, so that its next machine is a new launch", signup.Instance, err)
@@ -175,8 +175,8 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 	}
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, 0)
-	if found, ending := listed(); !found || !ending {
-		t.Fatalf("just closed: listed %v, ending %v, want winding down like any agent", found, ending)
+	if found, ended := listed(); !found || ended != domain.RunEndClosed {
+		t.Fatalf("just closed: listed %v, ended %q, want winding down like any agent", found, ended)
 	}
 	if err := pes.Revise(ctx, pe, "too late", by, until); err != ErrNotDraft {
 		t.Fatalf("revising a closed draft: got = %v, want ErrNotDraft", err)

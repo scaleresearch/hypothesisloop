@@ -63,30 +63,28 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn(["job", "submit"], core._HL_HELP_PLANNER)
 
 
-class PlannerStopTest(unittest.TestCase):
-    signup: dict = {}
-
-    def reason(self, cfg, platform_experiment):
-        client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment, get_signup=lambda *_: self.signup)
+class RunEndedTest(unittest.TestCase):
+    def reason(self, cfg, signup, platform_experiment=None):
+        client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment, get_signup=lambda *_: signup)
         return core.stop_reason(SimpleNamespace(cfg=cfg, client=client), time.time(), [False])
 
     # The planner's machine is rented while it plans and no longer: it stops by itself once the
-    # proposal is stored, and a revision, which clears proposed_at, lets it go on.
-    def test_a_planner_stops_once_its_draft_is_proposed_or_accepted(self):
-        self.assertIsNone(self.reason(planner(), {"status": "draft"}))
-        self.assertIsNone(self.reason(planner(), {"status": "draft", "proposed_at": None, "proposal": {"x": 1}}))
-        self.assertEqual(self.reason(planner(), {"status": "draft", "proposed_at": "2026-01-01T00:00:00Z"}), "the draft is answered")
-        self.assertEqual(self.reason(planner(), {"status": "draft", "proposed_at": "2026-01-01T00:00:00Z", "declined_reason": "nothing to measure"}), "the draft is answered")
-        self.assertEqual(self.reason(planner(), {"status": "open"}), "the draft is answered")
-        self.assertEqual(self.reason(planner(), {"status": "closed"}), "platform experiment closed")
+    # platform says its answer is stored, and a revision, which takes that back, lets it go on.
+    def test_a_planner_stops_once_the_platform_has_its_answer(self):
+        self.assertIsNone(self.reason(planner(), {}))
+        self.assertEqual(self.reason(planner(), {"ended": "planned"}), "the platform ended the run: planned")
+        self.assertEqual(self.reason(planner(), {"ended": "closed"}), "the platform ended the run: closed")
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):
         researcher = SimpleNamespace(agent_id="ag-1", flavor="generalist", platform_experiment_id="pe-1", max_wall_hours=0)
-        self.assertIsNone(self.reason(researcher, {"status": "open"}))
-        self.assertIsNone(self.reason(researcher, {"status": "running"}))
-        self.signup = {"finished_at": "2026-01-01T00:20:00Z"}
-        self.assertEqual(self.reason(researcher, {"status": "running"}), "the agent finished")
+        self.assertIsNone(self.reason(researcher, {}))
+        self.assertEqual(self.reason(researcher, {"ended": "finished"}), "the platform ended the run: finished")
+
+    def test_a_coordinator_stops_once_its_platform_experiment_closed(self):
+        coordinator = SimpleNamespace(agent_id="", flavor="coordinator", platform_experiment_id="pe-1", max_wall_hours=0)
+        self.assertIsNone(self.reason(coordinator, None, {"status": "running"}))
+        self.assertEqual(self.reason(coordinator, None, {"status": "closed"}), "the platform ended the run: closed")
 
 
 if __name__ == "__main__":
