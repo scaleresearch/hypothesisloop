@@ -51,7 +51,9 @@ on idle capacity and can be evicted for a guaranteed job; it draws on the same q
 no extra hours (hl quota).
 A submit is refused with a reason: unknown_job_image for an image that is neither, as below;
 no_cluster_for_image when no cluster could run the job with its image, or with none;
-experiment_closed after the experiment's end.
+experiment_not_started before the platform starts the run, when only a baseline agent's job is
+taken (status_reason of hl platform-experiments get says what the start waits for and what you
+do until then); experiment_closed after the experiment's end.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
 metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
@@ -151,22 +153,6 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 		Reason        string  `json:"not_admitted_reason,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
-		var refused *apiclient.HTTPError
-		if errors.As(err, &refused) && strings.Contains(refused.Body, `"experiment_not_started"`) {
-			pe := fmt.Sprint(metadata["platform_experiment_id"])
-			var exp struct {
-				Why statusReason `json:"status_reason"`
-			}
-			if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe), nil, &exp); err != nil {
-				return fail(stderr, err)
-			}
-			notice, err := openNotice(c, pe, *agent, exp.Why)
-			if err != nil {
-				return fail(stderr, err)
-			}
-			fmt.Fprintln(stderr, "hl: job submit: "+notice)
-			return 1
-		}
 		return fail(stderr, err)
 	}
 	held := out.Reason == summaryGate

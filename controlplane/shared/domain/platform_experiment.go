@@ -227,7 +227,7 @@ type PlatformExperiment struct {
 	Status            PlatformExperimentStatus `json:"status"`
 	// StatusReason is where a draft stands with its planner, and why an open platform experiment
 	// is not running yet. Worked out when one is read and stored nowhere.
-	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"On a draft or an open platform experiment, read one by one: where it stands. A draft's reason is planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing and the platform starts it within a minute."`
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"On a draft or an open platform experiment, read one by one: where it stands. A draft's reason is planning, revising, proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing and the platform starts it within a minute. message begins with the next step of whoever reads it, the command included, then says what the start waits for."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.

@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -199,12 +200,12 @@ func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
 	if err := svc.SweepAutoStart(ctx); err != nil || store.started != 0 {
 		t.Fatalf("the sweep past starts_at without a baseline: %v, %d starts, want it left to wait", err, store.started)
 	}
-	if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != "baseline_required" {
+	if err := svc.Describe(ctx, store.pe, auth.Principal{Kind: auth.KindUser}); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != "baseline_required" {
 		t.Fatalf("an open experiment without a baseline: status_reason = %+v, %v, want baseline_required", store.pe.StatusReason, err)
 	}
 
 	store.pe.BaselineJobID = "job-baseline"
-	if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason.Reason != "starting" {
+	if err := svc.Describe(ctx, store.pe, auth.Principal{Kind: auth.KindUser}); err != nil || store.pe.StatusReason.Reason != "starting" {
 		t.Fatalf("with its baseline declared: status_reason = %+v, %v, want starting", store.pe.StatusReason, err)
 	}
 	if err := svc.SweepAutoStart(ctx); err != nil || store.started != 1 {
@@ -253,7 +254,7 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 		if store.started != 0 {
 			t.Errorf("%s: %d starts reached the store, want none", name, store.started)
 		}
-		if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != c.reason {
+		if err := svc.Describe(ctx, store.pe, auth.Principal{Kind: auth.KindUser}); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != c.reason {
 			t.Errorf("%s: status_reason = %+v, %v, want %s", name, store.pe.StatusReason, err, c.reason)
 		}
 	}

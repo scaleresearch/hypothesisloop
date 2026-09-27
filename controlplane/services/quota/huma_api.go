@@ -336,7 +336,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. repository is the code it works on, owner/name on GitHub, " +
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. Its message is worded for whoever reads it and begins with that caller's own next step: a coordinator or a person is told to add a baseline agent or to declare its job, with the hl command, an agent of role baseline to measure, and any other agent that its jobs are refused until the start. Nothing else says what an open platform experiment waits for. repository is the code it works on, owner/name on GitHub, " +
 			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
 			"One made from a sentence carries goal, and while it is a draft what its planner proposed (proposal, proposed_at) and what a person asked to change (revisions): " +
 			"status_reason says where a draft stands: planning, revising, proposed (proposed_at is set and it waits to be accepted) or declined (declined_at and declined_reason are set, there is nothing to accept, and it waits to be revised or closed). Either answer waits until proposal_expires_at, when the platform closes the draft.",
@@ -359,7 +359,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
-		if err := peh.svc.Describe(ctx, pe); err != nil {
+		reader, _ := auth.FromContext(ctx)
+		if err := peh.svc.Describe(ctx, pe, reader); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if err := peh.svc.Spend(ctx, pe); err != nil {
@@ -399,7 +400,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		// A coordinator's token is handed to a machine the platform rents, so it changes the
 		// brief and declares the baseline, and nothing a run's cost or length follows from.
-		if caller, _ := auth.FromContext(ctx); caller.Kind == auth.KindCoordinator {
+		caller, _ := auth.FromContext(ctx)
+		if caller.Kind == auth.KindCoordinator {
 			if others := in.Body.carried("description", "baseline_job_id"); len(others) > 0 {
 				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and baseline_job_id and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 			}
@@ -409,7 +411,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, peh.refusal("update platform experiment", err)
 		}
 		answered := *pe
-		if err := peh.svc.Describe(ctx, &answered); err != nil {
+		if err := peh.svc.Describe(ctx, &answered, caller); err != nil {
 			return nil, peh.refusal("update platform experiment", err)
 		}
 		return &struct{ Body *domain.PlatformExperiment }{Body: &answered}, nil
@@ -554,7 +556,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agent_id}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
-			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one.",
+			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one. " +
+			"404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
@@ -567,7 +570,18 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 		}
 		if aq == nil {
-			return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID + ": quota is granted when the experiment starts, to the agents signed up to it")
+			pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
+			if err != nil {
+				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
+			}
+			if pe == nil || pe.Status != domain.PlatformExpOpen {
+				return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID)
+			}
+			reader, _ := auth.FromContext(ctx)
+			if err := peh.svc.Describe(ctx, pe, reader); err != nil {
+				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
+			}
+			return nil, api.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+in.AgentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
 		}
 		return &struct{ Body *AgentQuotaView }{Body: aq}, nil
 	})

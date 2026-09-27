@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -25,7 +24,10 @@ Used counts a job that has not started at its estimate and a running one at what
 In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.
 For one agent, where the platform sets a ceiling: data_bytes is what it holds under its data
 prefix and max_data_bytes the ceiling. At or over it every submit is refused with
-data_quota_exceeded until some is deleted.`, stderr)
+data_quota_exceeded until some is deleted.
+Quota is granted when the platform experiment starts. Before that an agent that holds none
+prints no line and exits 0, with the platform's word on stderr for what the start waits for and
+what you do until then, the same as status_reason of hl platform-experiments get.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent, else $AGENT_ID)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
@@ -50,18 +52,8 @@ data_quota_exceeded until some is deleted.`, stderr)
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		// Quota is granted at the start, so before it the agent has none: no error of its own.
-		var refused *apiclient.HTTPError
-		var exp struct {
-			Status string       `json:"status"`
-			Why    statusReason `json:"status_reason"`
-		}
-		if errors.As(err, &refused) && refused.Status == 404 &&
-			c.Do("GET", "/platform-experiments/"+url.PathEscape(*pe), nil, &exp) == nil && exp.Status == "open" {
-			notice, err := openNotice(c, *pe, *agent, exp.Why)
-			if err != nil {
-				return fail(stderr, err)
-			}
-			fmt.Fprintln(stderr, "hl: quota: "+notice)
+		if reason, message := refusalOf(err); reason == "quota_not_granted" {
+			fmt.Fprintln(stderr, "hl: quota: "+message)
 			return 0
 		}
 		return fail(stderr, err)

@@ -146,36 +146,6 @@ has no default: write the id out. --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
 
-// statusReason is why an open platform experiment is not running yet, as its GET answers it.
-type statusReason struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-// openNotice is the caller's own next step in an open platform experiment, then why the
-// platform has not started it. agent is the agent the command acts as, empty for none.
-func openNotice(c *apiclient.Client, platformExperiment, agent string, why statusReason) (string, error) {
-	role := ""
-	if agent != "" {
-		roles, err := rolesOf(c, platformExperiment)
-		if err != nil {
-			return "", err
-		}
-		role = roles[agent]
-	}
-	step := ""
-	switch {
-	case agent != "" && role != "baseline":
-		step = "every job submit is refused until the platform starts the run; prepare, then end your turn and the start arrives as an update. "
-	case why.Reason != "baseline_required":
-	case agent != "":
-		step = "your job is admitted now. Measure the baseline with one job, file its summary (hl job summary), then hl platform-experiments agents finish. "
-	case kindOf(c.Token) == callerCoordinator:
-		step = "add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job. "
-	}
-	return "open: " + step + why.Message, nil
-}
-
 // subcommand is one command of a group. The group's listing takes its synopsis from the command's
 // own --help, so the two cannot drift.
 type subcommand struct {
@@ -230,6 +200,54 @@ func orEnv(flagValue, name string) string {
 		return flagValue
 	}
 	return os.Getenv(name)
+}
+
+// printLeading prints record as printJSON does with the keys lead ahead of the others: its
+// description is long, and a reader of the first lines must not miss what it waits for.
+func printLeading(stdout io.Writer, record map[string]any, lead ...string) {
+	keys := make([]string, 0, len(record))
+	for _, key := range lead {
+		if _, has := record[key]; has {
+			keys = append(keys, key)
+		}
+	}
+	rest := make([]string, 0, len(record))
+	for key := range record {
+		if !slices.Contains(lead, key) {
+			rest = append(rest, key)
+		}
+	}
+	slices.Sort(rest)
+	var b bytes.Buffer
+	b.WriteString("{")
+	for i, key := range append(keys, rest...) {
+		name, _ := json.Marshal(key)
+		value, err := json.MarshalIndent(record[key], "  ", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "hl: encoding response: %s\n", err)
+			return
+		}
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, "\n  %s: %s", name, value)
+	}
+	b.WriteString("\n}")
+	fmt.Fprintln(stdout, b.String())
+}
+
+// refusalOf is the reason and the message err was refused with by the platform, empty for any
+// other error.
+func refusalOf(err error) (reason, message string) {
+	var refused *apiclient.HTTPError
+	var body struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	}
+	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &body) != nil {
+		return "", ""
+	}
+	return body.Reason, body.Message
 }
 
 func printJSON(stdout io.Writer, v any) {
@@ -653,7 +671,7 @@ agent with --role baseline, and once its job is COMPLETED with a summary, run
 hl platform-experiments update --description-file brief.md --baseline-job JOB. The platform
 starts the run within a minute once the baseline is declared, a researcher has joined and
 starts_at, when the file states one, has passed; nothing else starts it. While it is open
-hl platform-experiments get answers in status_reason what the start waits for and in
+hl platform-experiments get answers in status_reason what the start waits for and your next step, and in
 baseline_due_at when the platform closes it, with close_reason baseline_limit_reached, if it is
 not running by then.
 
@@ -899,7 +917,10 @@ closes it if nobody does: planning_ends_at on a draft being planned, proposal_ex
 its planner answered, baseline_due_at while it is open, and ends_at, which is started_at plus
 duration_hours, once it runs. status_reason says where a draft stands (planning, revising,
 proposed, declined) and why an open one is not running yet (baseline_required, starts_at_ahead,
-no_researchers, budget_spent, starting).`, stderr)
+no_researchers, budget_spent, starting). On an open one its message begins with your own next
+step, worded for your token: the command a coordinator or a person runs, what a baseline agent
+measures, or that a researcher's jobs are refused until the start. It is printed ahead of the
+record with id and status, and nothing is written beside the JSON, so the output parses whole.`, stderr)
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -913,19 +934,7 @@ no_researchers, budget_spent, starting).`, stderr)
 		return fail(stderr, err)
 	}
 	delete(out, "$schema")
-	// Ahead of the record, whose description is long: a reader of its first lines must not miss it.
-	if out["status"] == "open" {
-		_, _, agent := scopeOf(c.Token)
-		reason, _ := out["status_reason"].(map[string]any)
-		code, _ := reason["reason"].(string)
-		message, _ := reason["message"].(string)
-		notice, err := openNotice(c, id, agent, statusReason{Reason: code, Message: message})
-		if err != nil {
-			return fail(stderr, err)
-		}
-		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notice)
-	}
-	printJSON(stdout, out)
+	printLeading(stdout, out, "id", "status", "status_reason")
 	return 0
 }
 

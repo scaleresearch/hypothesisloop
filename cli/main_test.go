@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -244,16 +245,13 @@ func TestJobSummaryPointsAtTheVerdictThatIsTheAgentsToSet(t *testing.T) {
 	}
 }
 
-func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
+// The refusal is the platform's whole word on a job sent before the start: hl asks nothing more
+// and prints it as any other.
+func TestJobSubmitBeforeTheStartPrintsTheRefusalAndAsksNothingMore(t *testing.T) {
+	requests := 0
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/agents"):
-			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"jane","role":"competitor"}]}`))
-		case r.Method == "GET":
-			_, _ = w.Write([]byte(`{"id":"pe-1","status":"open","status_reason":{"reason":"baseline_required","message":"pe-1 has no baseline"}}`))
-		default:
-			http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
-		}
+		requests++
+		http.Error(w, `{"reason":"experiment_not_started","message":"platform experiment pe-1 has not started"}`, http.StatusUnprocessableEntity)
 	})
 	setAPIURL(t, url)
 	jobFile := t.TempDir() + "/job.yaml"
@@ -262,10 +260,9 @@ func TestJobSubmitBeforeTheStartSaysToWaitForIt(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
-	if code != 1 || stdout.Len() != 0 || strings.Count(stderr.String(), "\n") != 1 ||
-		!strings.HasPrefix(stderr.String(), "hl: job submit: open: every job submit is refused until the platform starts the run") ||
-		!strings.HasSuffix(stderr.String(), "pe-1 has no baseline\n") {
-		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	if code != 1 || requests != 1 || stdout.Len() != 0 || strings.Count(stderr.String(), "\n") != 1 ||
+		!strings.Contains(stderr.String(), `"reason":"experiment_not_started"`) || !strings.Contains(stderr.String(), "pe-1 has not started") {
+		t.Fatalf("exit %d after %d requests, stdout %q, stderr %q", code, requests, stdout.String(), stderr.String())
 	}
 }
 
@@ -745,77 +742,59 @@ func TestJobStatusPrintsTheRecordAndNothingElse(t *testing.T) {
 	}
 }
 
-// A coordinator that read "wait" of an open experiment waited instead of adding the baseline
-// agent, and a baseline agent's job is admitted while it is open: each caller is told its own
-// next step, then the platform's status_reason, on stderr, and stdout stays the record alone.
-func TestOpenPlatformExperimentTellsEachCallerItsNextStep(t *testing.T) {
-	record := map[string]any{"id": "pe-1", "status": "open", "starts_at": "2000-01-01T00:00:00Z"}
-	recordingServer(t, func(_ int, r recorded) any {
-		if strings.HasSuffix(r.Path, "/agents") {
-			return map[string]any{"agents": []map[string]any{{"agent_id": "ag-b", "role": "baseline"}, {"agent_id": "ag-r", "role": "competitor"}}}
-		}
+// hl once printed each caller's next step on stderr beside the record, and a reader that parsed
+// both streams as one (2>&1) failed on it. The platform says the step in status_reason, and hl
+// writes the record alone, with what it waits for ahead of its long description.
+func TestPlatformExperimentsGetWritesTheRecordAloneWithItsReasonFirst(t *testing.T) {
+	record := map[string]any{"id": "pe-1", "description": "a long brief", "name": "a run", "starts_at": "2000-01-01T00:00:00Z"}
+	requests := 0
+	recordingServer(t, func(int, recorded) any {
+		requests++
 		return record
 	})
-	for _, tc := range []struct {
-		token, status, reason, want string
-	}{
-		{derivedToken("coordinator:pe-1"), "open", "baseline_required", "open: add a baseline agent (hl platform-experiments agents add --hosted --role baseline) and declare its job with hl platform-experiments update --baseline-job. why baseline_required"},
-		{derivedToken("coordinator:pe-1"), "open", "no_researchers", "open: why no_researchers"},
-		{derivedToken("agent:pe-1/ag-b"), "open", "baseline_required", "open: your job is admitted now."},
-		{derivedToken("agent:pe-1/ag-b"), "open", "starting", "open: why starting"},
-		{derivedToken("agent:pe-1/ag-r"), "open", "baseline_required", "open: every job submit is refused until the platform starts the run"},
-		{derivedToken("agent:pe-1/ag-r"), "open", "starts_at_ahead", "open: every job submit is refused until the platform starts the run; prepare, then end your turn and the start arrives as an update. why starts_at_ahead"},
-		{"hlk_person", "open", "baseline_required", "open: why baseline_required"},
-		{"hlk_person", "running", "", ""},
-		{"hlk_person", "closed", "", ""},
-	} {
-		t.Setenv("HL_TOKEN", tc.token)
-		record["status"] = tc.status
-		delete(record, "status_reason")
-		if tc.reason != "" {
-			record["status_reason"] = map[string]any{"reason": tc.reason, "message": "why " + tc.reason}
-		}
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("exit %d, stderr %s", code, stderr.String())
-		}
-		var parsed map[string]any
-		if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil || parsed["id"] != "pe-1" {
-			t.Fatalf("%s %s: stdout is not the record alone: %v, %q", tc.token, tc.status, err, stdout.String())
-		}
-		want := ""
-		if tc.want != "" {
-			want = "hl: platform-experiments get: " + tc.want
-		}
-		if got := stderr.String(); !strings.HasPrefix(got, want) || (want == "") != (got == "") || strings.Count(got, "\n") > 1 ||
-			strings.Contains(got, "starts in") {
-			t.Fatalf("%s %s %s: stderr %q, want it to begin %q", tc.token, tc.status, tc.reason, got, want)
+	for _, token := range []string{derivedToken("coordinator:pe-1"), derivedToken("agent:pe-1/ag-r"), "hlk_person"} {
+		for _, status := range []string{"open", "running"} {
+			t.Setenv("HL_TOKEN", token)
+			record["status"] = status
+			delete(record, "status_reason")
+			if status == "open" {
+				record["status_reason"] = map[string]any{"reason": "baseline_required", "message": "Add a baseline agent"}
+			}
+			requests = 0
+			var out bytes.Buffer
+			if code := run([]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, &out, &out); code != 0 || requests != 1 {
+				t.Fatalf("%s %s: exit %d after %d requests, output %s", token, status, code, requests, out.String())
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal(out.Bytes(), &parsed); err != nil || !reflect.DeepEqual(parsed, record) {
+				t.Fatalf("%s %s: both streams together are not the record alone: %v, %q", token, status, err, out.String())
+			}
+			lead := "{\n  \"id\": \"pe-1\",\n  \"status\": \"" + status + "\",\n  \"description\""
+			if status == "open" {
+				lead = "{\n  \"id\": \"pe-1\",\n  \"status\": \"open\",\n  \"status_reason\": {\n    \"message\": \"Add a baseline agent\",\n    \"reason\": \"baseline_required\"\n  },\n  \"description\""
+			}
+			if !strings.HasPrefix(out.String(), lead) {
+				t.Errorf("%s %s: output begins %q, want %q", token, status, out.String(), lead)
+			}
 		}
 	}
 }
 
-// Quota is granted at the start. Before it hl quota answers with the caller's next step and no
-// error.
-func TestQuotaBeforeTheStartSaysWhatTheCallerDoes(t *testing.T) {
-	status := "open"
+// Quota is granted at the start. Before it the platform refuses with what the caller does until
+// then, and hl quota prints that with no error and no second request.
+func TestQuotaBeforeTheStartPrintsThePlatformsWordAndNoError(t *testing.T) {
+	reason, requests := "quota_not_granted", 0
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.Contains(r.URL.Path, "/quotas/"):
-			http.Error(w, `{"error":"agent jane has no quota in platform experiment pe-1"}`, http.StatusNotFound)
-		case strings.HasSuffix(r.URL.Path, "/agents"):
-			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"jane","role":"competitor"}]}`))
-		default:
-			_, _ = w.Write([]byte(`{"id":"pe-1","status":"` + status + `","status_reason":{"reason":"baseline_required","message":"pe-1 has no baseline"}}`))
-		}
+		requests++
+		http.Error(w, `{"reason":"`+reason+`","message":"agent jane holds no quota yet: prepare, then end your turn"}`, http.StatusNotFound)
 	})
 	setAPIURL(t, url)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 0 || stdout.Len() != 0 || strings.Contains(stderr.String(), "starts in") ||
-		!strings.HasPrefix(stderr.String(), "hl: quota: open: every job submit is refused until the platform starts the run") {
-		t.Fatalf("open: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	if code != 0 || requests != 1 || stdout.Len() != 0 || stderr.String() != "hl: quota: agent jane holds no quota yet: prepare, then end your turn\n" {
+		t.Fatalf("open: exit %d after %d requests, stdout %q, stderr %q", code, requests, stdout.String(), stderr.String())
 	}
-	status = "running"
+	reason = "not_found"
 	stderr.Reset()
 	if code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "HTTP 404") {
 		t.Fatalf("running: exit %d, stderr %q, want the 404", code, stderr.String())

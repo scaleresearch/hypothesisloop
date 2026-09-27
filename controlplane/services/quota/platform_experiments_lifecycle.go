@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -340,21 +341,17 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 	return nil
 }
 
-// notStartable says why the open platform experiment pe is not started at now, as a refusal whose
-// reason is what the experiment answers as its status_reason, or nil when it is to be started.
-// With no refusal it returns what the researchers share (RunBudget).
-func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) (float64, error) {
+// notStartable says why the open platform experiment pe, whose roster is signups, is not started
+// at now, as a refusal whose reason is what the experiment answers as its status_reason, or nil
+// when it is to be started. With no refusal it returns what the researchers share (RunBudget).
+func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) (float64, error) {
 	// Every researcher starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
 	if pe.BaselineJobID == "" {
-		return 0, api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline: an agent of role baseline measures it with one job while the experiment is open, and it is declared with PATCH baseline_job_id (hl platform-experiments update --baseline-job). The platform starts the run once it is declared", pe.ID))
+		return 0, api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and the platform starts the run only once it has", pe.ID))
 	}
 	if pe.StartsAt.After(now) {
 		return 0, api.Refuse(http.StatusConflict, "starts_at_ahead", fmt.Sprintf("platform experiment %s has its baseline and starts at its starts_at, %s", pe.ID, pe.StartsAt.UTC().Format(time.RFC3339)))
-	}
-	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
-	if err != nil {
-		return 0, fmt.Errorf("platform_experiments.notStartable: %w", err)
 	}
 	if !slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.SharesBudget() }) {
 		return 0, noResearchers(pe.ID)
@@ -370,7 +367,7 @@ func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domai
 }
 
 func noResearchers(id string) error {
-	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with POST /platform-experiments/%s/agents, and the platform starts the run", id, id))
+	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id))
 }
 
 // Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
@@ -400,9 +397,69 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	return &domain.StatusReason{Reason: "planning", Message: "its planner is working out how to measure the goal and has until planning_ends_at"}
 }
 
+const (
+	addBaselineAgent = "`hl platform-experiments agents add --hosted --role baseline`"
+	declareBaseline  = "`hl platform-experiments update --baseline-job JOB --description-file brief.md`, the brief's BASELINE block naming JOB and its code_ref"
+)
+
+// waiting is why the open pe, whose roster is signups, is not running yet: the reason and the
+// sentence its status_reason and its roster answer with.
+func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*domain.StatusReason, error) {
+	_, err := s.notStartable(ctx, pe, signups, time.Now().UTC())
+	var refused *api.Refusal
+	switch {
+	case errors.As(err, &refused):
+		return &domain.StatusReason{Reason: refused.Reason, Message: refused.Message}, nil
+	case err != nil:
+		return nil, err
+	}
+	return &domain.StatusReason{Reason: "starting", Message: "the baseline is declared and the platform starts the run within a minute"}, nil
+}
+
+// nextStep is what reader does about an open pe that waits for reason, a sentence that ends in
+// a space, or nothing when all it can do is wait. A coordinator told only that a baseline was
+// required waited for one and added no agent to measure it, so the step names its command.
+func nextStep(pe *domain.PlatformExperiment, reason string, signups []domain.AgentSignup, reader auth.Principal) string {
+	if reader.Kind == auth.KindAgent {
+		measures := slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
+			return signup.AgentID == reader.AgentID && signup.Role == domain.SignupRoleBaseline
+		})
+		switch {
+		case !measures:
+			return "Every job you submit is refused until the platform starts the run: prepare, then end your turn, and the start arrives as an update. "
+		case reason == "baseline_required":
+			return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish. "
+		}
+		return ""
+	}
+	if reason != "baseline_required" {
+		return ""
+	}
+	if reader.Kind != auth.KindCoordinator && pe.CoordinatorHosted {
+		return "Its coordinator adds the agent of role baseline that measures it and declares the job: nothing is yours to do. "
+	}
+	var baselines, measuring []string
+	for _, signup := range signups {
+		if signup.Role != domain.SignupRoleBaseline {
+			continue
+		}
+		baselines = append(baselines, signup.Name)
+		if signup.FinishedAt == nil && (signup.Instance == nil || !signup.Instance.Stopped) {
+			measuring = append(measuring, signup.Name)
+		}
+	}
+	switch {
+	case len(baselines) == 0:
+		return "Add a baseline agent with " + addBaselineAgent + ": none has joined. Once its job is COMPLETED with a summary, declare it with " + declareBaseline + ". "
+	case len(measuring) == 0:
+		return "Every baseline agent (" + strings.Join(baselines, ", ") + ") finished or stopped: declare the COMPLETED job one of them left (hl job list) with " + declareBaseline + ". When none left a job that can be declared, add another baseline agent with " + addBaselineAgent + ". "
+	}
+	return "Baseline agent " + strings.Join(measuring, ", ") + " is measuring: once its job is COMPLETED with a summary, declare it with " + declareBaseline + ". "
+}
+
 // Describe sets on a draft where it stands with its planner, and on an open pe why it is not
-// running yet (StatusReason).
-func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment) error {
+// running yet and what reader does about it (StatusReason). It is the one place that says so.
+func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	if pe.Status == domain.PlatformExpDraft {
 		pe.StatusReason = draftReason(pe)
 		return nil
@@ -410,16 +467,16 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 	if pe.Status != domain.PlatformExpOpen {
 		return nil
 	}
-	_, err := s.notStartable(ctx, pe, time.Now().UTC())
-	var refused *api.Refusal
-	switch {
-	case errors.As(err, &refused):
-		pe.StatusReason = &domain.StatusReason{Reason: refused.Reason, Message: refused.Message}
-	case err != nil:
-		return err
-	default:
-		pe.StatusReason = &domain.StatusReason{Reason: "starting", Message: "the baseline is declared and the platform starts the run within a minute"}
+	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
+	why, err := s.waiting(ctx, pe, signups)
+	if err != nil {
+		return err
+	}
+	why.Message = nextStep(pe, why.Reason, signups, reader) + why.Message
+	pe.StatusReason = why
 	return nil
 }
 
@@ -427,7 +484,11 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 // answers the refusal of notStartable when pe is not to be started.
 func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]*domain.AgentQuota, error) {
 	// Read before the transaction, which must issue no query of its own.
-	runBudget, err := s.notStartable(ctx, pe, now)
+	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.start: %w", err)
+	}
+	runBudget, err := s.notStartable(ctx, pe, signups, now)
 	if err != nil {
 		return nil, err
 	}
