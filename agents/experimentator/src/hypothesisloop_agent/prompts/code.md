@@ -17,7 +17,7 @@ Work on branch
      experiment: make all three match this experiment's definition before the baseline job
      (experiment.yaml is the experiment as `hl platform-experiments get` shows it). The
      job.yaml is the shape of a job spec and the one you fill in and submit: write no other,
-     and read no sample to learn the shape. Submit only when `hl repo check` passes.
+     and read no sample to learn the shape. Submit only when `hl repo check` passes and the branch is pushed.
 ==== start_researcher
 Every hypothesis has its
      own branch: before working on an idea, and after a restart, `hl hypothesis checkout ID`

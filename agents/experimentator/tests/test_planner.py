@@ -122,7 +122,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
         self.assertLess(len(prompt.encode()), 5_500)
-        self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["hypothesis"], ["repo"]])
+        self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
     def test_its_code_goes_to_the_experiments_repository(self):
@@ -151,14 +151,16 @@ class BaselinePromptTest(unittest.TestCase):
         # straight after `hl repo init` had kept all three.
         self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
                       "make all three match this experiment's definition before the baseline job", flat)
-        self.assertIn('`hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`', flat)
+        self.assertIn('`hl job submit .hypothesisloop/job.yaml --theory "..."`', flat)
         self.assertEqual(flat.count("$WORKLOAD_SAMPLES"), 1)
         self.assertIn("`$WORKLOAD_SAMPLES/template/seed/metrics.py` does: copy that one file, and read nothing else there", flat)
 
-    # One planner tried confirmed against the baseline itself and was refused, another forced it
-    # with --despite: a baseline is the control and has no verdict.
-    def test_the_baselines_hypothesis_takes_no_verdict(self):
-        self.assertIn("Its hypothesis states the control, which claims no effect: set no status on it", render(baseline_agent())[1])
+    # The control was a root hypothesis that stayed open to the end, and in one run the parent
+    # of every other: the baseline is the objective's own.
+    def test_the_baseline_takes_no_hypothesis(self):
+        flat = render(baseline_agent())[1]
+        self.assertIn("The baseline is the objective's own and takes no hypothesis", flat)
+        self.assertNotIn("--hypothesis", flat)
 
     # Told to hold the baseline job to its own estimate, both planners of a run ran the baseline
     # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.

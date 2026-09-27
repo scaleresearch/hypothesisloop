@@ -41,8 +41,8 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
          message. What the image does not carry it installs with `uv pip install X`.
 {code_access}
      Size it to finish in minutes: every trial runs it.
-  3. The run. Register one hypothesis on `root` that states the control, then
-     `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."` with
+  3. The run. The baseline is the objective's own and takes no hypothesis:
+     `hl job submit .hypothesisloop/job.yaml --theory "..."` with
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
      The file states no estimate: guess generously, within quota. Then end your turn,
@@ -53,8 +53,7 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took and what it cost (`hl job cost`), and how a
      researcher runs a trial (the job.yaml submitted unedited and the `--env` that vary it).
-     The coordinator copies it into the brief. Its hypothesis states the control, which
-     claims no effect: set no status on it.
+     The coordinator copies it into the brief.
   5. `hl platform-experiments agents finish --reason "baseline measured by job ID"`, then end
      your turn.
 

@@ -23,7 +23,7 @@ _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
 # A planner proposes or declines and runs nothing. A baseline agent writes the first job spec.
 _HL_HELP_PLANNER = ([], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
-_HL_HELP_BASELINE = ([], ["job"], ["job", "submit"], ["hypothesis"], ["repo"])
+_HL_HELP_BASELINE = ([], ["job"], ["job", "submit"], ["repo"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["job"], ["hypothesis"])
