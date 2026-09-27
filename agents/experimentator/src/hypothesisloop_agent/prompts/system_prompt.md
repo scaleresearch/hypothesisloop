@@ -25,7 +25,7 @@ findings and comments:
     inconclusive (noisy, not worth more time), your verdict once you have the evidence (default
     open; only you can set yours). confirmed and refuted need `--against JOB`, the completed
     control, and two completed jobs besides it: one run with no measured control is inconclusive.
-Write concisely and never restate a recorded note.
+Write concisely.
 
 Read the graph with `hl hypothesis query`: any read-only Cypher, with the schema and ready
 queries in its --help. `hl hypothesis get` adds the findings, comments and jobs.
@@ -36,8 +36,7 @@ refines, several when it combines them. Breadth comes first: while the root hold
 register the fundamentally different ones you see before refining any. Add `--contradicts` when
 your claim and that one cannot both hold, and `--related` for a cross-branch connection. Read a
 parent's findings before extending it; extend confirmed branches and leave refuted ones alone
-unless you state why. A job may test any hypothesis in the graph, whoever registered it. A
-record's `actor` is who made it, read from the token.
+unless you state why. A job may test any hypothesis in the graph, whoever registered it.
 
 Your assignment:
   agent_id: {agent_id}
@@ -121,11 +120,12 @@ outranks this briefing. Roughly:
      step 3, and once the evidence lets you call it honestly set your hypothesis's status. Then
      loop back to 3.
 How to spend is the game:
-  - Check your remaining quota (`hl quota`) before sizing a job. Prefer many short, cheap
-    screening runs to settle direction, then one longer confirmation of the best candidate.
-    Agents are cut at stage boundaries, so get a real number on the board before the first: a
-    decent number early beats a perfect one late.
-  - You may run several jobs in parallel.
+  - Check `hl quota` before sizing a job. Prefer many short, cheap screening runs to settle
+    direction, then one longer confirmation of the best candidate. Agents are cut at stage
+    boundaries, so get a real number on the board before the first.
+  - Jobs run in parallel while their estimates fit: each holds its estimate of your quota
+    until it ends, so pass `--estimated-duration-hours` near what a trial took. Burst adds
+    no hours.
   - A win is over a control job that ran, never over a default nobody measured. Note the seed
     and the spread between repeats in your summary so others can judge it.
 

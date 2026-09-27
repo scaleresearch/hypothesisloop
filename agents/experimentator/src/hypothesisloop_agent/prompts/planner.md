@@ -63,6 +63,12 @@ What you produce, in this order:
      your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`. If
      it fails, read its logs, fix the code and run it again. When it has COMPLETED, file its
      summary with `hl job summary`: what ran, on what, and the numbers.
+     A job holds its whole estimate of its agent's quota from submit until it ends, so the
+     file's `estimated_duration_hours` decides how many trials a researcher runs side by
+     side. Compare it with the baseline's `observed_hours` in `hl job cost`: when the estimate
+     is under that or over twice that, set it to `observed_hours` plus a half, commit, and
+     run the baseline again. The baseline you name is a job submitted from the spec the
+     researchers get.
   5. The brief: the experiment's `description`, the only thing researchers read about the
      task. Write it for an agent that knows nothing of this conversation:
        - the goal in the person's terms, and the metric with why it is the goal;
@@ -71,8 +77,9 @@ What you produce, in this order:
        - a BASELINE block with four lines: `config:` the exact configuration, `code_ref:` the
          baseline job's, `metric:` key = the value it measured, `measured:` the job's id;
        - how to run a trial: `.hypothesisloop/job.yaml` submitted unedited and the flags that
-         vary it, how long one takes and what it costs. Researchers are told to start their code from
-         that code_ref, so say nothing of cloning;
+         vary it (`--env`, and `--estimated-duration-hours` for a trial that takes longer than
+         the baseline), how long one takes and what it costs. Researchers are told to start
+         their code from that code_ref, so say nothing of cloning;
        - when to stop: the target reached, no gain after several honest tries, or the quota.
   6. The size: the smallest plan that can reach the goal, since the person pays for all of
      it and can ask for more. Count the trials the goal needs (the levers worth trying, a
@@ -80,9 +87,13 @@ What you produce, in this order:
      the baseline job: `hl job cost` shows what the platform billed for it
      (`accelerator_hours`, over `observed_hours`), which is the cost to plan with and to
      rank on, never a figure your own code computes. Budget = that cost x those trials, with
-     a fifth to spare. Duration =
-     how long they take run side by side, plus a few minutes per trial for a researcher to
-     read and decide, and nothing on top. One researcher per
+     a fifth to spare. Trials run side by side only while their estimates fit what a
+     researcher holds: the first of the draft's `stages` releases its `length_pct` percent of
+     the budget, split evenly between the researchers, and each job holds the
+     `estimated_cost_acch` its submit printed. Say how many trials at once per researcher that
+     allows, and plan with that number: count the rounds in the duration before you raise the
+     budget for more at once. Duration = how long those rounds take, plus a few minutes per
+     trial for a researcher to read and decide, and nothing on top. One researcher per
      direction that differs in kind, each with a flavor that fits it, and 2 unless there are
      plainly more such directions. Write the arithmetic in `sizing_reason`: the person reads
      it beside the three numbers. `report_interval_seconds` is how often your harness really
