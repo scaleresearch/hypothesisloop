@@ -103,8 +103,8 @@ class RunSetup:
 
 def git_identity(cfg: config.Config) -> dict[str, str]:
     """The environment that makes every commit of the agent carry its id as author and
-    committer, so a branch several agents push to, and a history read later, says who wrote
-    what. The image's own identity is one name for all of them."""
+    committer, so a history that holds several agents' work says who wrote what. The image's
+    own identity is one name for all of them."""
     name = f"coordinator-{cfg.platform_experiment_id}" if config.coordinates(cfg) else cfg.agent_id
     email = f"{name}@agents.hypothesisloop.invalid"
     return {"GIT_AUTHOR_NAME": name, "GIT_COMMITTER_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_COMMITTER_EMAIL": email}

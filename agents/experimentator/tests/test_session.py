@@ -247,13 +247,17 @@ if __name__ == "__main__":
 
 
 class NewMachineNoteTest(unittest.TestCase):
-    # A restored coordinator was told to check out its branch, and it has none.
-    def test_an_agent_is_sent_to_its_branch_and_a_coordinator_is_not(self):
+    # A restored coordinator was told to check out its branch, and it has none. A researcher's
+    # branch is its hypothesis's, which only hl names.
+    def test_a_researcher_is_sent_to_its_hypothesis_a_baseline_agent_to_its_branch_and_a_coordinator_to_neither(self):
         from types import SimpleNamespace
-        agent = run._new_machine_note(SimpleNamespace(flavor="generalist"))
-        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator"))
-        for note in (agent, coordinator):
+        researcher = run._new_machine_note(SimpleNamespace(flavor="generalist", role="competitor"))
+        baseline = run._new_machine_note(SimpleNamespace(flavor="generalist", role="baseline"))
+        coordinator = run._new_machine_note(SimpleNamespace(flavor="coordinator", role="coordinator"))
+        for note in (researcher, baseline, coordinator):
             self.assertIn("The machine you ran on was replaced", note)
-        self.assertIn("check out your branch", agent)
+        self.assertIn("run `hl hypothesis checkout ID` for the hypothesis you work on", researcher)
+        self.assertIn("check out your branch", baseline)
+        self.assertNotIn("hypothes", baseline)
         self.assertNotIn("branch", coordinator)
         self.assertIn("summary", coordinator)

@@ -279,9 +279,12 @@ async def _keep_session_stored(setup: core.RunSetup) -> None:
 _NEW_MACHINE_NOTE = (
     "The machine you ran on was replaced. Your conversation is the one you had, and nothing else "
     "came with it: files you wrote and did not push are gone, and so is every process you started. ")
-_NEW_MACHINE_AGENT = (
-    "Clone the repository again, check out your branch, and look at the state of your jobs and "
-    "hypotheses with hl before you go on.")
+_NEW_MACHINE_RESEARCHER = (
+    "Clone the repository again, run `hl hypothesis checkout ID` for the hypothesis you work on, "
+    "and look at the state of your jobs and hypotheses with hl before you go on.")
+_NEW_MACHINE_BASELINE = (
+    "Clone the repository again, check out your branch, and look at the state of your jobs with "
+    "hl before you go on.")
 # A coordinator has no branch and writes nothing to the repository.
 _NEW_MACHINE_COORDINATOR = (
     "Keep the summary's file again from `hl platform-experiments get`, clone the repository only "
@@ -290,7 +293,9 @@ _NEW_MACHINE_COORDINATOR = (
 
 
 def _new_machine_note(cfg) -> str:
-    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_COORDINATOR if config.coordinates(cfg) else _NEW_MACHINE_AGENT)
+    if config.coordinates(cfg):
+        return _NEW_MACHINE_NOTE + _NEW_MACHINE_COORDINATOR
+    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_RESEARCHER)
 
 
 # A planner's machine is released with its answer and a revision starts another. Told only that
