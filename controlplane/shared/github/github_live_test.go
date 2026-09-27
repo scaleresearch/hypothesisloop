@@ -28,6 +28,8 @@ import (
 //	HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY  owner/name of a sandbox repository the push check
 //	                                          and the first-commit check may each make a branch
 //	                                          in, which they delete again
+//	HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION  an installation on an organisation, for the
+//	                                          creation check
 //
 // Connecting an installation needs a person's authorisation code from a browser, so the code
 // exchange, GET /user/installations with a person's token and its revocation have no check here.
@@ -206,14 +208,22 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 
 // A read token clones and cannot push. A write token pushes a branch, and the branch is deleted.
 // Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
-// by name: HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1, once the installation grants the creation of
-// repositories.
+// by name: HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1, on the installation
+// HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION names, which is on an organisation and grants
+// the creation of repositories. GitHub lets no installation create on a person's own account.
 func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	if os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_CREATE") != "1" {
-		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_CREATE is not 1: this creates a repository on the installation's account and cannot delete it")
+		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_CREATE is not 1: this creates a repository on an organisation and cannot delete it")
 	}
 	client := liveClient(t)
-	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
+	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION")
+	target, err := client.Installation(t.Context(), installation)
+	if err != nil {
+		t.Fatalf("Installation(%d) = %v", installation, err)
+	}
+	if target.AccountType != AccountOrganization {
+		t.Skipf("HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION is on %s, a personal account, where GitHub lets no App installation create a repository: name an installation on an organisation", target.AccountLogin)
+	}
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
 	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
 	if err != nil {

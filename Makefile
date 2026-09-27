@@ -456,7 +456,8 @@ agent-test:
 # (controlplane/shared/github/github_live_test.go). Both the token checks and the push check use
 # the sandbox repository of HL_E2E_GITHUB_REPO; the push check and the first-commit check each
 # make a branch there and delete it. The App's key reaches the test in a file that exists only
-# for the run.
+# for the run. The creation check runs with HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1 and creates on
+# the organisation of HL_E2E_GITHUB_CREATE_INSTALLATION, skipping when .env names none.
 test-github-live:
 	@bash -c 'set -euo pipefail; . localdev/lib/auth.sh; \
 	  test -n "$$HL_GITHUB_APP_ID" || { echo "make test-github-live: .env does not set GITHUB_APP_ID" >&2; exit 1; }; \
@@ -469,6 +470,7 @@ test-github-live:
 	  HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_INSTALLATION)" \
 	  HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
 	  HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY="$$(lib_env_value HL_E2E_GITHUB_REPO)" \
+	  HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION="$$(lib_env_value HL_E2E_GITHUB_CREATE_INSTALLATION)" \
 	  go test ./controlplane/shared/github -run Live -count=1 -v -timeout 180s'
 
 lint:
