@@ -58,6 +58,13 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Leave `--estimated-duration-hours` out: the platform applies the one it measured on the baseline. "
                       "State one only for a trial clearly longer or shorter.", " ".join(self.render("generalist").split()))
 
+    # One config differed up to 2.3x between rented hosts, and researchers who compared across
+    # them found fp16 slower than fp32.
+    def test_a_trial_is_compared_with_a_control_on_the_same_host(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("Compare a trial only with a control that ran on the same host (`on host N` in its update)", prompt)
+        self.assertIn("With none there, rerun the control alongside. A finding across hosts says so", prompt)
+
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())
