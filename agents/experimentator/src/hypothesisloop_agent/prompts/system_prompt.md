@@ -43,8 +43,7 @@ Your assignment:
   flavor: {flavor}
   hyperparameters: {hyperparameters}
 
-Your flavor brief follows (what kind of trial you run, what you vary, what to look for). Where
-it and this briefing differ, the brief wins.
+Your flavor brief follows. Where it and this briefing differ, the brief wins.
 
 {flavor_brief}
 
@@ -85,7 +84,8 @@ outranks this briefing. Roughly:
      The code must actually run in the pod and stay traceable:
 {code_submit}
        - make the pod run exactly that code: a `command` that clones the injected
-         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
+         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory: take it as
+         `dir=$(hl-clone) && cd "$dir" && ...`, so a failed clone ends the job with its own message.
        - `image`: unless the description names one, take one your type's line in
          `hl capacity` names in `job_images`, copy its `image` verbatim and pip install
          nothing it `carries`. Leave `image` out only where the cluster shows
@@ -114,8 +114,8 @@ outranks this briefing. Roughly:
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are
      cut, wind up and stop.
      While a job is QUEUED, cancel and resubmit it smaller if its `not_admitted_reason` stays
-     `capacity_unavailable` and no cluster can fit it. The scheduler does not know which of your
-     own jobs is more urgent: to put one first, cancel the one blocking it.
+     `capacity_unavailable` and no cluster can fit it. To put one of your own jobs first, cancel
+     the one blocking it.
   7. File the summary on every COMPLETED job with `hl job summary`, written for the reader in
      step 3, and once the evidence lets you call it honestly set your hypothesis's status. Then
      loop back to 3.

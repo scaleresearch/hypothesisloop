@@ -16,7 +16,7 @@ job:
   # `hl capacity` shows the cluster with only_job_image.
   image: REPLACE-WITH-AN-IMAGE-HL-CAPACITY-LISTS
   # hl-clone checks out the commit the job was submitted from and prints its directory.
-  command: ["bash", "-lc", "cd \"$(hl-clone)\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
+  command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL"]
   # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines and
   # states `cpu: N`, whole cores.
   accelerator_type: REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS

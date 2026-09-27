@@ -36,7 +36,8 @@ baseline declared in time is closed by the platform, so be quick. In this order:
      states them, copied verbatim. Work that needs no accelerator states only `cpu: N`, whole
      cores. `memory`, `storage` and `max_retries` may be left out.
        - make the pod run exactly that code: a `command` that clones the injected
-         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory.
+         $HYPOTHESISLOOP_CODE_REF. `hl-clone` does that and prints the directory: take it as
+         `dir=$(hl-clone) && cd "$dir" && ...`, so a failed clone ends the job with its own message.
 {code_access}
      Size it to finish in minutes: that is also what lets researchers try many ideas.
   3. The run. Register one hypothesis on `root` that states the control, then

@@ -167,8 +167,8 @@ class CatalogueImageJobTest(unittest.TestCase):
         line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
         shell, flag, script = json.loads(line.split("command:", 1)[1])
         self.assertEqual((shell, flag), ("bash", "-lc"))
-        clone, run = script.split(" && ")
-        self.assertEqual(clone, 'cd "$(hl-clone)"')
+        clone, enter, run = script.split(" && ")
+        self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
         words = run.split()
         self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "seed/train.py"])
         installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
