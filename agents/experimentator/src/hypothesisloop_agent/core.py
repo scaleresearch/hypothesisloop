@@ -38,11 +38,10 @@ def hl_commands(coordinates: bool = False, plans: bool = False) -> str:
         for group in groups)
 
 
-def _code_sections(repository_url: str) -> dict[str, str]:
-    """The paragraphs of a briefing that depend on where code lives: the experiment's repository,
-    or with none the platform, which keeps each pushed commit. A planner starts the code and a
-    researcher starts from the planner's, so how the workspace begins is a section per role."""
-    text = (_PROMPTS_DIR / "code" / ("repository.md" if repository_url else "platform.md")).read_text()
+def _code_sections() -> dict[str, str]:
+    """The paragraphs of a briefing about the experiment's repository. A planner starts the code
+    and a researcher starts from the planner's, so how the workspace begins is a section per role."""
+    text = (_PROMPTS_DIR / "code.md").read_text()
     sections = {}
     for section in text.split("\n==== ")[1:]:
         name, _, body = section.partition("\n")
@@ -53,7 +52,7 @@ def _code_sections(repository_url: str) -> dict[str, str]:
 def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url: str) -> str:
     values = dict(rules=rules.strip(), hl_commands=commands, platform_experiment_id=cfg.platform_experiment_id,
                   repository_url=repository_url)
-    code = _code_sections(repository_url)
+    code = _code_sections()
     template, sections = "coordinator.md", ("repository_line", "start_code")
     if config.plans(cfg):
         template, sections = "planner.md", ("workspace", "code_submit", "code_access")
@@ -86,8 +85,6 @@ class RunSetup:
     client: api_client.PlatformClient
     system_prompt: str
     workdir: str
-    # Empty for a platform experiment that names no repository.
-    repository_url: str = ""
 
 
 def git_identity(cfg: config.Config) -> dict[str, str]:
@@ -120,13 +117,14 @@ def prepare() -> RunSetup:
     os.makedirs(workdir, exist_ok=True)
 
     # The repository is the one the platform experiment names: the agent clones it through
-    # `hl git-credential`, so no address and no git token is handed to it at launch. With none
-    # named, the agent starts in an empty directory and the platform keeps what it pushes.
-    repository_url = platform_experiment.get("repository_url") or ""
+    # `hl git-credential`, so no address and no git token is handed to it at launch.
+    repository_url = platform_experiment.get("repository_url")
+    if not repository_url:
+        raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no repository, and an agent works in its clone of one")
 
     commands = hl_commands(plans=True) if config.plans(cfg) else hl_commands(config.coordinates(cfg))
     system_prompt_text = system_prompt(cfg, client.fetch_rules(), commands, repository_url)
-    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, repository_url=repository_url)
+    return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir)
 
 
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:

@@ -10,8 +10,8 @@ def planner():
 
 
 class PlannerPromptTest(unittest.TestCase):
-    def render(self, repository_url: str = "") -> str:
-        return core.system_prompt(planner(), "RULES\n", "COMMANDS", repository_url)
+    def render(self) -> str:
+        return core.system_prompt(planner(), "RULES\n", "COMMANDS", "https://github.com/acme/model.git")
 
     # The planner has its own briefing: the researchers' one tells an agent to compete, and a
     # planner that competed would optimize a metric nobody had chosen yet.
@@ -31,24 +31,16 @@ class PlannerPromptTest(unittest.TestCase):
             self.assertIn(word, flat)
         self.assertLess(len(prompt.encode()), 11_000)
 
-    # A planner of a draft with a repository was told to `hl code push`, which answers 409
-    # there, and to `git push` in the next paragraph. It reads where its code goes in the words
-    # the researchers' briefing uses, one way for the draft it is in.
-    def test_the_planners_code_goes_where_the_drafts_code_lives(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("Where it is kept: this experiment has no repository. Run `git init` in the directory you start in", flat)
-        self.assertIn("`hl code push` stores your committed HEAD with the platform", flat)
-        self.assertIn("submit from there with `code_ref` left empty: hl pins the HEAD you pushed", flat)
-        for absent in ("git push", "branch `hl/", "{", "===="):
-            self.assertNotIn(absent, flat)
-        prompt = self.render("https://github.com/acme/model.git")
+    # It reads where its code goes in the words the researchers' briefing uses.
+    def test_the_planners_code_goes_to_the_drafts_repository(self):
+        prompt = self.render()
         flat = " ".join(prompt.split())
         self.assertIn("Where it is kept: clone https://github.com/acme/model.git into the directory you start in", flat)
         self.assertIn("work on branch `hl/pe-1/ag-planner`: create it off the default branch", flat)
         self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
         # What a researcher is told of the others' branches and of a base job spec is not true
         # of a planner, whose repository holds one commit and whose draft has no other agent.
-        for absent in ("hl code push", "git init", "no repository", "{", "====", "Others push", "job.yaml", "BASELINE `code_ref`"):
+        for absent in ("{", "====", "Others push", "job.yaml", "BASELINE `code_ref`"):
             self.assertNotIn(absent, flat)
         self.assertLess(len(prompt.encode()), 11_000)
 

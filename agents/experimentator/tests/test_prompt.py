@@ -57,19 +57,6 @@ class SystemPromptTest(unittest.TestCase):
         prompt = self.render("generalist")
         self.assertIsNone(re.search(r"(GET|POST|PUT) /|/explore|openapi|\$API_URL", prompt))
 
-    # The variant for a platform experiment with no repository replaces the paragraphs about the
-    # repository and adds none, so it fits the same limit.
-    def test_with_no_repository_the_briefing_is_no_longer_and_names_no_remote(self):
-        for flavor in FLAVORS:
-            cfg = SimpleNamespace(agent_id="agent-a", flavor=flavor, platform_experiment_id="pe-1", hyperparameters={"k": 1})
-            prompt = core.system_prompt(cfg, "RULES\n", "COMMANDS", "")
-            self.assertLessEqual(len(prompt.encode()), len(self.render(flavor).encode()))
-            flat = " ".join(prompt.split())
-            self.assertIn("submit from there with `code_ref` left empty: hl pins the HEAD you pushed", flat)
-            self.assertIn("`hl-clone <code_ref of a job> <dir>`", flat)
-            for absent in ("git push", "branch `hl/", "{repository", "===="):
-                self.assertNotIn(absent, flat)
-
 
 if __name__ == "__main__":
     unittest.main()

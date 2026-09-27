@@ -276,24 +276,15 @@ _NEW_MACHINE_NOTE = (
 _NEW_MACHINE_AGENT = (
     "Clone the repository again, check out your branch, and look at the state of your jobs and "
     "hypotheses with hl before you go on.")
-# With no repository the platform holds each commit the agent pushed, under its jobs.
-_NEW_MACHINE_AGENT_NO_REPOSITORY = (
-    "Take your code back with `hl-clone <code_ref of your last job> .` (hl job list shows it), and "
-    "look at the state of your jobs and hypotheses with hl before you go on.")
 # A coordinator has no branch and writes nothing to the repository.
 _NEW_MACHINE_COORDINATOR = (
     "Keep the summary's file again from `hl platform-experiments get`, clone the repository only "
     "if you need to read it, and look at the state of the jobs and hypotheses with hl before you "
     "go on.")
-_NEW_MACHINE_COORDINATOR_NO_REPOSITORY = (
-    "Keep the summary's file again from `hl platform-experiments get`, and look at the state of "
-    "the jobs and hypotheses with hl before you go on.")
 
 
-def _new_machine_note(cfg, repository_url: str) -> str:
-    if config.coordinates(cfg):
-        return _NEW_MACHINE_NOTE + (_NEW_MACHINE_COORDINATOR if repository_url else _NEW_MACHINE_COORDINATOR_NO_REPOSITORY)
-    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_AGENT if repository_url else _NEW_MACHINE_AGENT_NO_REPOSITORY)
+def _new_machine_note(cfg) -> str:
+    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_COORDINATOR if config.coordinates(cfg) else _NEW_MACHINE_AGENT)
 
 
 _on_new_machine = False
@@ -428,7 +419,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     async with ClaudeSDKClient(options=options) as client:
         first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
         if _on_new_machine:
-            first_prompt = _new_machine_note(cfg, setup.repository_url) + "\n\n" + first_prompt
+            first_prompt = _new_machine_note(cfg) + "\n\n" + first_prompt
         await client.query(first_prompt)
         while True:
             got_result = False

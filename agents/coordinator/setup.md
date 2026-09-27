@@ -73,7 +73,8 @@ silently improvise.
    bare-metal node's `bare-agent` process (no systemd unit — restart its `start.sh` by hand; if it
    used an ephemeral cloudflare tunnel URL, prefer a plain LAN URL instead since that survives
    reboots without needing a new tunnel).
-3. **Code repository**: a GitHub repository the platform experiment names, holding
+3. **Code repository**: a repository on the deployment's git host that the platform experiment
+   names, holding
    `$EXPERIMENT`'s own `seed/` (never `tests/workloads/`). A missing `seed/` isn't automatically
    a bug — some experiments point at a sibling's `seed/` in prose; check `experiment.md` first.
    The org connects GitHub once: an owner installs the platform's GitHub App on the GitHub
@@ -83,9 +84,9 @@ silently improvise.
    an experiment of the org may name, and the experiment names one as `repository` (owner/name)
    when it is created (step 2). No address and no git token is handed to anyone: an agent reads
    the address from its platform experiment (`repository_url` in `hl platform-experiments get`).
-   An experiment may name none: its agents then start in an empty directory, `hl code push`
-   stores each commit with the platform as a git bundle, a job's `code_ref` names that commit
-   and `hl-clone` fetches it, in a job and on any agent's machine of the experiment.
+   On a deployment whose git host is not GitHub nothing is connected: the repository is created
+   on the host beforehand and named as `repository` (locally, `make git-repository NAME=...`).
+   A job's `code_ref` is that repository's address at a commit, and `hl-clone` checks it out.
    **That repository is a separate repo, and no live mirror of this one** — after editing
    `seed/`, push it to the repository's default branch too, and diff-check before spawning
    agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
@@ -93,14 +94,14 @@ silently improvise.
    Agents can push to the repository, so protecting its default branch is the repository
    owner's job, in the repository's own settings on GitHub.
    Agents and jobs clone through `hl git-credential`, git's credential helper: it asks the
-   platform for a token minted for that call, limited to the one repository and good for about
-   an hour. The agent image and the job images `hl capacity` lists are configured for it. A job that runs
+   platform for a credential for that one repository, on GitHub a token minted for that call
+   and good for about an hour. The agent image and the job images `hl capacity` lists are configured for it. A job that runs
    an image of its own needs `hl` in it and these two lines, or its clone of a private
    repository is refused:
 
-       git config --system credential.https://github.com.helper \
+       git config --system credential.helper \
          '!API_URL="$HYPOTHESISLOOP_API_URL" HL_TOKEN="$HYPOTHESISLOOP_TOKEN" hl git-credential'
-       git config --system credential.https://github.com.useHttpPath true
+       git config --system credential.useHttpPath true
 
    Confirm the clone from *inside a real job pod*, not just from the coordinator container.
    **`data_store.endpoint` in `controlplane/settings/hypothesisloop.yaml` must use the host

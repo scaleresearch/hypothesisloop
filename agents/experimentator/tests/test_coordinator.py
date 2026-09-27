@@ -62,13 +62,6 @@ class StartupTest(PlatformCase):
             self.assertIn("does not coordinate platform experiment pe-1", str(refused.exception))
             self.assertNotIn(COORDINATOR_TOKEN, str(refused.exception))
 
-    def test_with_no_repository_the_coordinator_starts_and_is_told_there_is_none(self):
-        FakePlatform.joined, FakePlatform.repository_url = {"agents"}, ""
-        flat = " ".join(self.prepare().system_prompt.split())
-        self.assertIn("repository: none. The platform keeps the code each job ran.", flat)
-        self.assertIn("To read the code a job ran, `hl-clone <its code_ref> <dir>`", flat)
-        self.assertNotIn("clone {", flat)
-        self.assertNotIn("experiment.yaml", flat)
 
 
 class BriefingTest(unittest.TestCase):

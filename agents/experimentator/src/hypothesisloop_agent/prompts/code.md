@@ -1,6 +1,6 @@
-Where an agent's code lives, spliced into the briefings by core.system_prompt: a section per
-placeholder, each opened by a line of ==== and its name, and {start} the start_ section of the
-agent's role. This one is for a platform experiment that names a repository.
+Where an agent's code lives, the platform experiment's repository, spliced into the briefings by
+core.system_prompt: a section per placeholder, each opened by a line of ==== and its name, and
+{start} the start_ section of the agent's role.
 
 ==== workspace
 clone {repository_url} into the directory you start in, where every command
