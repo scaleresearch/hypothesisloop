@@ -164,7 +164,8 @@ _TURN_SILENCE_TIMEOUT_S = 900
 # On a stop a turn in flight is interrupted and the agent, working or idle, gets one turn of this
 # length to write down what it already knows. `podman stop` must allow for it: -t 90. Jobs still
 # in flight are left running and without a summary: nothing of theirs can be written yet. An agent
-# that finished is neither interrupted nor given that turn.
+# whose own action ended its run owes nothing: its turn in flight gets this long to end by itself
+# and no turn follows.
 _SHUTDOWN_TURN_S = 60
 _SHUTDOWN_PROMPT = (
     "This is your last turn, about a minute long. Start nothing new and "
@@ -180,18 +181,13 @@ _COORDINATOR_SHUTDOWN_PROMPT = (
 )
 
 
-_PLANNED_SHUTDOWN_PROMPT = "This is your last turn. Start nothing new. You owe nothing more: end your turn."
-
-
 def _shutdown_prompt(setup: core.RunSetup) -> str | None:
     """The last turn's instruction, opened with why the machine stops as the platform has it now.
-    None for an agent that finished: the platform took its word only with nothing owed."""
-    ended, cause = core.stop_cause(setup)
-    if ended == "finished":
+    None for an agent whose own action ended its run: it gets no last turn."""
+    cause = core.stop_cause(setup)
+    if cause is None:
         return None
-    if config.coordinates(setup.cfg):
-        return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
-    return f"{cause} {_PLANNED_SHUTDOWN_PROMPT if ended == 'planned' else _SHUTDOWN_PROMPT}"
+    return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT if config.coordinates(setup.cfg) else _SHUTDOWN_PROMPT}"
 
 
 class TurnStalled(Exception):
@@ -321,13 +317,13 @@ def _restore_session(setup: core.RunSetup) -> None:
 
 
 async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
-    """Interrupts the turn in flight as soon as stopped() is true. The turn of an agent that
-    finished is its last by its own word and ends by itself."""
+    """Interrupts the turn in flight as soon as stopped() is true. The turn of an agent whose own
+    action ended its run is its last and is interrupted only if it goes on past _SHUTDOWN_TURN_S."""
     while not stopped():
         await asyncio.sleep(1)
-    if core.stop_cause(setup)[0] == "finished":
-        log.info("stop requested after the agent finished: its turn runs to its own end")
-        return
+    if core.stop_cause(setup) is None:
+        log.info("stop requested after the agent ended its own run: its turn has %ss to end by itself", _SHUTDOWN_TURN_S)
+        await asyncio.sleep(_SHUTDOWN_TURN_S)
     try:
         await client.interrupt()
     except Exception as e:
@@ -336,10 +332,10 @@ async def _interrupt_on_stop(client, setup: core.RunSetup, stopped) -> None:
 
 async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], events: list[dict]) -> None:
     """The shutdown turn, opened with events and whatever else finished since the last delivery.
-    An agent that finished gets none."""
+    An agent whose own action ended its run gets none."""
     prompt = _shutdown_prompt(setup)
     if prompt is None:
-        log.info("stopping: the agent finished, no last turn")
+        log.info("stopping: the agent ended its own run, no last turn")
         return
     log.info("stopping: one last turn to file what is owed")
     agent = setup.cfg.agent_id

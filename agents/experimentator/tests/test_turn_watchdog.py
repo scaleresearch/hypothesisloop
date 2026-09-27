@@ -103,30 +103,41 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
 
     # A researcher that had just finished was interrupted in its closing message and given a
     # turn to file summaries the platform had already checked it did not owe.
-    async def test_a_stop_after_the_agent_finished_lets_its_turn_end_and_gives_no_other(self):
-        stop_flag = [False]
-        asked = asyncio.Event()
+    async def stop_after_finishing(self, client_class, sleep) -> StoppableClient:
+        setup = _setup()
+        setup.client.get_signup = lambda *_: {"ended": "finished"}
+        with mock.patch.object(run, "ClaudeSDKClient", client_class), \
+                mock.patch.object(run.asyncio, "sleep", sleep), \
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, 0.0, self.stop_flag), timeout=5)
+        return HangingClient.instances[-1]
 
-        def signup(*_):
-            asked.set()
-            return {"ended": "finished"}
+    async def test_a_stop_after_the_agent_finished_lets_its_turn_end_and_gives_no_other(self):
+        self.stop_flag = [False]
+        given_time = asyncio.Event()
+
+        async def sleep(seconds):
+            if seconds == run._SHUTDOWN_TURN_S:
+                given_time.set()
+                await asyncio.Event().wait()
+            self.stop_flag[0] = True
 
         class FinishingClient(StoppableClient):
             async def receive_response(self):
                 yield AssistantMessage(content=[TextBlock(text="finished, closing words")], model="m")
-                await asked.wait()
+                await given_time.wait()
                 yield _result()
 
-        setup = _setup()
-        setup.client.get_signup = signup
-        with mock.patch.object(run, "ClaudeSDKClient", FinishingClient), \
-                mock.patch.object(run.asyncio, "sleep", mock.AsyncMock(side_effect=lambda _: stop_flag.__setitem__(0, True))), \
-                contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, 0.0, stop_flag), timeout=5)
-        client = HangingClient.instances[-1]
+        client = await self.stop_after_finishing(FinishingClient, sleep)
         self.assertFalse(client.interrupted.is_set())
         self.assertEqual(client.queries, ["Begin."])
         self.assertTrue(client.disconnected)
+
+    async def test_a_finished_agent_that_works_on_is_interrupted_at_the_deadline_and_gets_no_other_turn(self):
+        self.stop_flag = [False]
+        client = await self.stop_after_finishing(StoppableClient, mock.AsyncMock(side_effect=lambda _: self.stop_flag.__setitem__(0, True)))
+        self.assertTrue(client.interrupted.is_set())
+        self.assertEqual(client.queries, ["Begin."])
 
 
 class IdleClient(StoppableClient):

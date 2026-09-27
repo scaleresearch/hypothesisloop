@@ -139,7 +139,6 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         for experiment, signup, flavor, want in (
             ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time, 2026-01-01T02:48:00Z, and the platform closed it"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z"),
-            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {}, "coordinator", "you closed it"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({"status": "closed", "planning_ends_at": "2026-01-01T02:48:00Z", "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
@@ -153,13 +152,19 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(want, prompt)
             self.assertNotIn("owner", prompt)
 
-    # A planner whose proposal was just stored was told its machine was being replaced and to
-    # file the summaries it owed.
-    def test_a_planner_whose_answer_is_stored_is_told_its_planning_is_over_and_owes_nothing(self):
-        setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor="planner", platform_experiment_id="pe-1"),
-                                client=SimpleNamespace(get_signup=lambda *_: {"ended": "planned"}))
-        self.assertEqual(run._shutdown_prompt(setup), "You are being stopped because your planning is over: the platform has your answer "
-                         "to the draft. This is your last turn. Start nothing new. You owe nothing more: end your turn.")
+    # A researcher that finished, a planner whose proposal was stored and a coordinator that
+    # closed its own run were each interrupted in their closing words and given a turn to file
+    # what they did not owe.
+    def test_an_agent_whose_own_action_ended_its_run_gets_no_last_turn(self):
+        closed = {"status": "closed", "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}
+        for experiment, signup, flavor in (
+            ({"status": "running"}, {"ended": "finished"}, "generalist"),
+            ({"status": "draft"}, {"ended": "planned"}, "planner"),
+            (closed, {}, "coordinator"),
+        ):
+            setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", flavor=flavor, platform_experiment_id="pe-1"),
+                                    client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
+            self.assertIsNone(run._shutdown_prompt(setup), flavor)
 
 
 if __name__ == "__main__":

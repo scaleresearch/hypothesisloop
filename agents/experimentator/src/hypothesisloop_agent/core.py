@@ -133,10 +133,10 @@ def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
     return stop_flag[0] or bool(hours and (time.time() - started_at) / 3600.0 >= hours)
 
 
-def _closer(actor: dict | None, coordinates: bool) -> str:
+def _closer(actor: dict | None) -> str:
     kind, name = (actor or {}).get("kind"), (actor or {}).get("name") or "unnamed"
     if kind == "coordinator":
-        return "you closed it" if coordinates else "its coordinator closed it"
+        return "its coordinator closed it"
     if kind == "user":
         return f"a person closed it ({name})"
     if kind == "key":
@@ -157,7 +157,7 @@ def run_ended(setup: RunSetup) -> str:
     return setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id).get("ended", "")
 
 
-def _closed_because(setup: RunSetup) -> str:
+def _closed_because(setup: RunSetup) -> str | None:
     cfg = setup.cfg
     pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
     closed_at = pe.get("closed_at", "an unrecorded time")
@@ -168,30 +168,34 @@ def _closed_because(setup: RunSetup) -> str:
     if pe.get("close_reason") == "proposal_expired":
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
     if pe.get("close_reason") == "closed_by_request":
+        closed_by = pe.get("closed_by")
+        if config.coordinates(cfg) and (closed_by or {}).get("kind") == "coordinator":
+            return None
         return (f"You are being stopped because the platform experiment was closed before its end time: "
-                f"{_closer(pe.get('closed_by'), config.coordinates(cfg))} at {closed_at}.")
+                f"{_closer(closed_by)} at {closed_at}.")
     return f"You are being stopped because the platform experiment closed at {closed_at}. The platform recorded no reason."
 
 
-def stop_cause(setup: RunSetup) -> tuple[str | None, str]:
-    """run_ended at this moment, None when the platform could not be asked, and the sentence that
-    tells the agent why its machine is being stopped. A cause the platform does not give is said
-    to be unknown, never inferred. An agent that finished is told nothing: it stops by itself."""
+def stop_cause(setup: RunSetup) -> str | None:
+    """The sentence that tells the agent why its machine is being stopped, as the platform has it
+    at this moment. None when the agent's own action ended its run: a researcher that finished, a
+    planner whose answer is stored, a coordinator that closed its platform experiment. It is told
+    nothing and stops by itself. A cause the platform does not give is said to be unknown, never
+    inferred."""
     try:
         ended = run_ended(setup)
         if ended == "closed":
-            return ended, _closed_because(setup)
-        if ended == "finished":
-            return ended, ""
-        return ended, {
+            return _closed_because(setup)
+        return {
+            "finished": None,
+            "planned": None,
             "cut": "You are being stopped because you were cut from the platform experiment at a stage boundary.",
-            "planned": "You are being stopped because your planning is over: the platform has your answer to the draft.",
             "": ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
                  "Only this machine is being stopped, and the platform does not say why."),
         }[ended]
     except api_client.APIError as e:
         log.warning("could not read why the machine stops (%s)", e)
-        return None, "You are being stopped. The platform could not be asked why."
+        return "You are being stopped. The platform could not be asked why."
 
 
 def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | None:
