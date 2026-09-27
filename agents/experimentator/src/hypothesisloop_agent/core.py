@@ -155,16 +155,16 @@ def prepare() -> RunSetup:
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
 
 
-def revision_asked(setup: RunSetup) -> str | None:
-    """The revision a planner has not answered yet, None for anyone else and for a draft with
-    none: the platform reads such a draft as revising, and as proposed or declined once the
+def revising(setup: RunSetup) -> dict | None:
+    """The draft of a planner that has a revision to answer, None for anyone else and for a draft
+    with none: the platform reads such a draft as revising, and as proposed or declined once the
     last revision is answered."""
     if not config.plans(setup.cfg):
         return None
     draft = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
     if draft.get("status_reason", {}).get("reason") != "revising":
         return None
-    return draft["revisions"][-1]["message"]
+    return draft
 
 
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:

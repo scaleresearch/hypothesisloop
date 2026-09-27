@@ -36,7 +36,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
-from hypothesisloop_agent import config, core, progress, session, updates
+from hypothesisloop_agent import config, core, progress, proposal, session, updates
 from hypothesisloop_agent.claude import activity
 
 log = logging.getLogger("llm_agent")
@@ -299,19 +299,34 @@ def _new_machine_note(cfg) -> str:
 
 
 # A planner's machine is released with its answer and a revision starts another. Told only that
-# its machine was replaced and to continue, a planner had to find the revision by itself.
+# its machine was replaced and to continue, a planner had to find the revision by itself, and
+# with the file of its proposal gone it wrote the whole proposal again.
 _REVISION_PROMPT = (
     "The person read your answer and asks for this revision:\n\n{revision}\n\n"
     "Read the draft and the capacity again and answer with a new proposal.")
 _REVISION_NEW_MACHINE = " Your machine was released with your answer: a file you wrote on it is gone."
+_REVISION_PROPOSAL = " Your last proposal, as the platform stores it, is in {path}: edit that file and propose it."
+_PROPOSAL_FILE = "proposal.yaml"
+
+
+def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
+    """What a planner is told of the revision it has to answer, with the proposal the draft holds
+    put back as a file. A draft it declined holds none."""
+    prompt = _REVISION_PROMPT.format(revision=draft["revisions"][-1]["message"]) + (_REVISION_NEW_MACHINE if _on_new_machine else "")
+    if not draft.get("proposal"):
+        return prompt
+    path = os.path.join(os.path.abspath(setup.statedir), _PROPOSAL_FILE)
+    with open(path, "w") as f:
+        f.write(proposal.render(draft["proposal"]))
+    return prompt + _REVISION_PROPOSAL.format(path=path)
 
 
 def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """What opens a connection: a handoff, the start, or for a resumed session the revision that
     brought a planner back, else that it goes on. A new machine is said in each."""
-    revision = core.revision_asked(setup) if resume_id and not initial_prompt else None
-    if revision:
-        return _REVISION_PROMPT.format(revision=revision) + (_REVISION_NEW_MACHINE if _on_new_machine else "")
+    draft = core.revising(setup) if resume_id and not initial_prompt else None
+    if draft:
+        return _revision_prompt(setup, draft)
     prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
     return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
 

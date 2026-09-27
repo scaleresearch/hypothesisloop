@@ -1,3 +1,5 @@
+import os
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -258,6 +260,59 @@ class RunEndedTest(unittest.TestCase):
                 self.assertTrue(run._first_prompt(setup(planner(), again), "s-1", None).endswith("Continue where you left off."))
             self.assertTrue(run._first_prompt(setup(baseline_agent(), draft), "s-1", None).endswith("Continue where you left off."))
         self.assertNotIn("gone", run._first_prompt(setup(planner(), draft), "s-1", None))
+
+    # A planner woken for a revision found its proposal's file gone with its machine and wrote
+    # the whole proposal again.
+    def test_a_revision_puts_the_stored_proposal_back_as_a_file(self):
+        from hypothesisloop_agent.claude import run
+        stored = {"risks": ["A shared GPU: the repeats may differ.", "two\nlines\n"],
+                  "agents": [{"flavor": "hyperparameter-search", "hyperparameters": {"direction": "Sweep batch_size.\n"}}, {}],
+                  "experiment": {"name": "ResNet-18: throughput", "metrics": [{"key": "top1_agreement", "role": "constraint", "bound": 0.99}],
+                                 "description": "GOAL\n\n  config: fp32\n"},
+                  "duration_hours": 4, "accelerator_type": "nvidia.com/gpu.product=RTX-4090", "sizing_reason": " kept as sent"}
+        draft = {"status": "draft", "revisions": [{"message": "Keep the bar."}], "status_reason": {"reason": "revising"}, "proposal": stored}
+        with tempfile.TemporaryDirectory() as statedir:
+            def setup(platform_experiment):
+                return SimpleNamespace(cfg=planner(), statedir=statedir, client=SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment))
+
+            path = os.path.join(os.path.realpath(statedir), "proposal.yaml")
+            with mock.patch.object(run, "_on_new_machine", True):
+                prompt = run._first_prompt(setup(dict(draft, proposal=None)), "s-1", None)
+                self.assertTrue(prompt.endswith("a file you wrote on it is gone."))
+                self.assertFalse(os.path.exists(path))
+                prompt = run._first_prompt(setup(draft), "s-1", None)
+            self.assertTrue(prompt.endswith(f"is gone. Your last proposal, as the platform stores it, is in {os.path.abspath(statedir)}/proposal.yaml: edit that file and propose it."))
+            with open(path) as f:
+                self.assertEqual(f.read(), """\
+risks:
+  - |-
+    A shared GPU: the repeats may differ.
+  - |
+    two
+    lines
+agents:
+  -
+    flavor: hyperparameter-search
+    hyperparameters:
+      direction: |
+        Sweep batch_size.
+  - {}
+experiment:
+  name: |-
+    ResNet-18: throughput
+  metrics:
+    -
+      key: top1_agreement
+      role: constraint
+      bound: 0.99
+  description: |
+    GOAL
+
+      config: fp32
+duration_hours: 4
+accelerator_type: nvidia.com/gpu.product=RTX-4090
+sizing_reason: " kept as sent"
+""")
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):
