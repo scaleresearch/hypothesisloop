@@ -20,10 +20,17 @@ type startStore struct {
 	PlatformExperimentsStore
 	pe           *domain.PlatformExperiment
 	participants []db.StartParticipant
-	planner      string
+	// baselines are the agents of role baseline, which take no share and whose spend is taken
+	// from the budget before the shares are carved.
+	baselines []string
 }
 
-func (f *startStore) PlannerID(context.Context, string) (string, error) { return f.planner, nil }
+func (f *startStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
+	if role != domain.SignupRoleBaseline {
+		return nil, fmt.Errorf("asked for the agents of role %s", role)
+	}
+	return f.baselines, nil
+}
 
 func (f *startStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	return f.pe, nil
@@ -168,14 +175,14 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 		t.Errorf("sole participant's guaranteed = %v, want the first stage's share (%v) of a 100-hour budget — releasing more lets one agent spend the whole run's budget before anyone is cut", got, want)
 	}
 
-	// Planning spend counts toward the budget: the shares are carved from what it left, and a
-	// budget planning spent whole starts nothing.
+	// What measuring the baseline cost counts toward the budget: the shares are carved from what
+	// it left, and a budget the baseline spent whole starts nothing.
 	for spent, want := range map[float64]float64{20: 40, 100: 0} {
 		metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"resource_type":"accelerator_hours","tier":"guaranteed"},"value":[1,"%v"]}]}}`, spent)
 		}))
-		store := &startStore{planner: "planner-1", participants: []db.StartParticipant{participant("human-1", "")}, pe: &domain.PlatformExperiment{
+		store := &startStore{baselines: []string{"baseline-1"}, participants: []db.StartParticipant{participant("human-1", "")}, pe: &domain.PlatformExperiment{
 			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, CreatedAt: time.Now().Add(-time.Hour),
 			Stages: []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
 		}}
@@ -184,13 +191,13 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 		quotas, err := svc.Start(context.Background(), "pe-1")
 		metrics.Close()
 		if want == 0 {
-			if err == nil || !strings.Contains(err.Error(), "planning spent the whole budget") {
-				t.Errorf("start after planning spent %v of 100: err = %v, want it refused as spent", spent, err)
+			if err == nil || !strings.Contains(err.Error(), "measuring the baseline spent the whole budget") {
+				t.Errorf("start after the baseline spent %v of 100: err = %v, want it refused as spent", spent, err)
 			}
 			continue
 		}
 		if err != nil || len(quotas) != 1 || quotas[0].GuaranteedAcceleratorHours != want {
-			t.Errorf("start after planning spent %v of 100: quotas = %+v, %v, want a first share of %v", spent, quotas, err, want)
+			t.Errorf("start after the baseline spent %v of 100: quotas = %+v, %v, want a first share of %v", spent, quotas, err, want)
 		}
 	}
 }

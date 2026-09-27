@@ -22,34 +22,26 @@ import (
 // Proposal is what a draft's planner proposes: the experiment as its file would state it, and
 // beside it what a run costs, which is only ever proposed. A person states the budget, the
 // duration and the agents again when accepting, by the rule that keeps them out of the
-// experiment file: an agent's token wrote this.
+// experiment file: an agent's token wrote this. Nothing has run when it is written: the
+// baseline is measured after a person accepts, before any researcher starts.
 type Proposal struct {
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
 	// brief every agent works from), metrics, report_interval_seconds, stages and the policies.
 	// It is checked by validate, as the body of a create is.
 	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, and optionally report_interval_seconds, stages and default_quota_tier, which left out are the platform's settings, and max_concurrent_accelerators."`
 
-	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run."`
+	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run: a cap, estimated before anything ran."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, from its start."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
-	// BaselineJobID is the planner's completed job that measured the baseline. Its numbers are
-	// read from the metrics store when the proposal is shown, never copied here.
-	BaselineJobID string `json:"baseline_job_id" doc:"The planner's own completed job in this draft that measured the baseline, with its finding filed."`
+	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
-	SizingReason string   `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal: the arithmetic from what the baseline cost and how long it took, in plain words."`
+	SizingReason string   `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
 	OutOfScope   []string `json:"out_of_scope,omitempty"`
 	Risks        []string `json:"risks,omitempty"`
-	Questions    []string `json:"questions,omitempty" doc:"What the person should answer before starting, when the goal left it open."`
-}
-
-// storedProposal is a proposal as the platform keeps and answers it: what the planner wrote, and
-// beside it what the platform read from the baseline job.
-type storedProposal struct {
-	Proposal
-	domain.BaselineReading
+	Questions    []string `json:"questions,omitempty" doc:"What the person should answer before starting, when the goal left it open: among them any bound of a gate that depends on a number nobody has measured yet."`
 }
 
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
@@ -110,19 +102,19 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int, no
 
 // requirePlanner admits only the planner of the draft id: the agent the platform signed up to
 // plan it, with its own token.
-func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id string) (string, error) {
+func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id string) error {
 	caller, _ := auth.FromContext(ctx)
 	if caller.Kind != auth.KindAgent || caller.PlatformExperimentID != id {
-		return "", huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
+		return huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
 	}
 	signup, err := h.svc.store.GetAgentSignup(ctx, id, caller.AgentID)
 	if err != nil {
-		return "", h.refusal("read planner", err)
+		return h.refusal("read planner", err)
 	}
 	if signup == nil || signup.Flavor != domain.PlannerFlavor {
-		return "", huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
+		return huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
 	}
-	return caller.AgentID, nil
+	return nil
 }
 
 func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
@@ -173,12 +165,11 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
-			"The budget caps everything the platform experiment spends, planning included: what the planner spent is taken from it, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
-			"The platform hosts its coordinator and each researcher, and starts_at is now, so POST /platform-experiments/{id}/start starts it and the platform does if nobody calls. " +
-			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
-			"and 422 budget_spent when planning already spent the budget stated; " +
-			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it. " +
-			"What the planner's baseline job cost is real spend of this platform experiment and counts in the run's consumed budget from the start.",
+			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
+			"The platform hosts its coordinator and each researcher, and starts_at is now. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
+			"no researcher's machine is started before, and the platform starts the experiment once the baseline is declared. " +
+			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check; " +
+			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body AcceptRequest
@@ -197,13 +188,12 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours and agents are proposed, and the person who accepts states them. " +
+			"A proposal defines the experiment and runs nothing: its brief's BASELINE block states the control configuration and that nothing is measured yet, its numbers are estimates, " +
+			"and the baseline is measured once a person accepted, before any researcher starts (PATCH /platform-experiments/{id}, baseline_job_id). " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
-			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
-			"no_baseline, baseline_not_completed, baseline_without_finding, brief_without_baseline, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
-			"The stored proposal also answers accelerator_type, the type the baseline job ran on, and a body that states it is refused. " +
-			"The platform experiment then carries baseline_job_id and job_estimated_duration_hours, one and a half times the hours the baseline job was observed running. That is the estimated_duration_hours of every job of the platform experiment that states none (POST /experiments), " +
-			"so the estimate the baseline job itself was submitted with is a guess and is held to nothing.",
+			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), missing_explanation, too_long, " +
+			"and accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now. Stored, it replaces the one before, marks the draft proposed " +
+			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body Proposal
@@ -211,8 +201,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		plannerID, err := h.requirePlanner(ctx, in.ID)
-		if err != nil {
+		if err := h.requirePlanner(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		pe, err := h.svc.store.GetPlatformExperiment(ctx, in.ID)
@@ -225,38 +214,22 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		experiment, err := h.checkProposal(in.Body, pe.MaxHosted, time.Now().UTC())
-		if err != nil {
+		if _, err := h.checkProposal(in.Body, pe.MaxHosted, time.Now().UTC()); err != nil {
 			return nil, err
 		}
-		if in.Body.BaselineJobID == "" {
-			return nil, refusedProposal("no_baseline", "baseline_job_id is required: the job that measured the baseline, completed, with its finding filed")
-		}
-		baseline, err := h.svc.baseline(ctx, pe, in.Body.BaselineJobID)
-		if err != nil {
-			return nil, h.refusal("read baseline", err)
-		}
-		if err := checkBaseline(&domain.PlatformExperiment{
-			ID: in.ID, Description: experiment.Description, Metrics: experiment.Metrics,
-			BudgetAcceleratorHours: in.Body.BudgetAcceleratorHours, MaxAgents: len(in.Body.Agents), BaselineJobID: in.Body.BaselineJobID,
-		}, baseline); err != nil {
-			return nil, err
-		}
-		if baseline.Job.AgentID != plannerID {
-			return nil, refusedProposal("no_baseline", "baseline_job_id %q is no job of yours in this draft: run the baseline with `hl job submit` and name that job", in.Body.BaselineJobID)
-		}
-		reachable, err := h.reachable(ctx, baseline.Job.OrgID)
+		caller, _ := auth.FromContext(ctx)
+		reachable, err := h.reachable(ctx, caller.OrgIDs[0])
 		if err != nil {
 			return nil, h.refusal("read capacity", err)
 		}
-		if ran := string(baseline.Job.AcceleratorType); !reachable[ran] {
-			return nil, refusedProposal("accelerator_unreachable", "the baseline ran on %s, which no cluster this org's jobs can be placed on has now: run it again on a type `hl capacity` lists", ran)
+		if !reachable[string(in.Body.AcceleratorType)] {
+			return nil, refusedProposal("accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", in.Body.AcceleratorType)
 		}
-		stored, err := json.Marshal(storedProposal{Proposal: in.Body, BaselineReading: domain.BaselineReading{AcceleratorType: baseline.Job.AcceleratorType}})
+		stored, err := json.Marshal(in.Body)
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}
-		err = h.svc.store.SetProposal(ctx, in.ID, stored, baseline.Job.ID, baselineHeadroom*baseline.ObservedHours, time.Now().UTC().Add(h.planning.ProposedFor))
+		err = h.svc.store.SetProposal(ctx, in.ID, stored, time.Now().UTC().Add(h.planning.ProposedFor))
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}
@@ -278,7 +251,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 // AcceptRequest is what the person who accepts a draft states themselves: what the run costs,
 // how long it lasts and who runs it. The proposal only proposed them, since an agent wrote it.
 type AcceptRequest struct {
-	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what planning already spent and burst hours included."`
+	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from now."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
 }
@@ -316,15 +289,6 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	experiment, err := h.checkProposal(proposal, pe.MaxHosted, now)
 	if err != nil {
 		return nil, err
-	}
-	// Start refuses the same budget: refused here, a draft is never accepted and unstartable.
-	planning, err := h.svc.PlanningSpend(ctx, pe)
-	if err != nil {
-		return nil, h.refusal("accept", err)
-	}
-	if planning >= req.BudgetAcceleratorHours {
-		return nil, refusedProposal("budget_spent", "planning already spent %.3g accelerator hours and they count toward the budget, so a budget of %g leaves nothing for the researchers to share: state a larger one",
-			planning, req.BudgetAcceleratorHours)
 	}
 	if h.launch.Launcher == "" || h.launch.DefaultModel == "" {
 		return nil, h.refusal("accept", errors.New("the handler has no agent launch settings"))
@@ -416,7 +380,7 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if _, err := h.requirePlanner(ctx, in.ID); err != nil {
+		if err := h.requirePlanner(ctx, in.ID); err != nil {
 			return nil, err
 		}
 		reason := strings.TrimSpace(in.Body.Reason)

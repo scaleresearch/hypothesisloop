@@ -18,12 +18,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// Planning is what one draft may spend before a person accepts its proposal, and how many
-// drafts an org may have. The platform pays for planning.
+// Planning bounds a draft, which the platform pays for: how long it is planned and waits, and
+// how many drafts an org may have.
 type Planning struct {
-	// AllowanceAcceleratorHours is the draft's whole budget: what the planner's baseline job
-	// may cost.
-	AllowanceAcceleratorHours float64
 	// Limit is how long a planner has to propose, from the goal or from a revision.
 	Limit time.Duration
 	// ProposedFor is how long a proposal waits for the person before the draft is closed.
@@ -52,8 +49,8 @@ func draftName(goal string) string {
 
 // CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
 // an agent the platform runs, of role baseline, so that it is never ranked or cut, and of flavor
-// planner. The draft has the planning allowance for a budget and the planning limit for an end,
-// and nothing else of a run: the planner proposes the rest and a person accepts it.
+// planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
+// the planner proposes the rest and a person accepts it.
 func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, prepare func(context.Context, *domain.PlatformExperiment) error) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
@@ -73,26 +70,25 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
 	now := time.Now().UTC()
-	// A draft states nothing of a run yet, so what its planner's job runs under is the platform's.
+	// A draft states nothing of a run yet, so its ladder and its policies are the platform's.
 	settings := s.withSettings(CreatePlatformExperimentRequest{})
 	pe := &domain.PlatformExperiment{
-		ID:                     "pe-" + uuid.New().String()[:8],
-		ProjectID:              projectID,
-		Name:                   draftName(goal),
-		Goal:                   goal,
-		Actor:                  &by,
-		BudgetAcceleratorHours: planning.AllowanceAcceleratorHours,
-		MaxAgents:              1,
-		Metrics:                []domain.MetricDefinition{},
-		ReportIntervalSeconds:  settings.ReportIntervalSeconds,
-		PlanningEndsAt:         now.Add(planning.Limit),
-		Status:                 domain.PlatformExpDraft,
-		Stages:                 settings.Stages,
-		CurrentStage:           1,
-		DefaultQuotaTier:       domain.QuotaTier(settings.DefaultQuotaTier),
-		MaxHosted:              launch.MaxHosted,
-		CreatedAt:              now,
-		UpdatedAt:              now,
+		ID:                    "pe-" + uuid.New().String()[:8],
+		ProjectID:             projectID,
+		Name:                  draftName(goal),
+		Goal:                  goal,
+		Actor:                 &by,
+		MaxAgents:             1,
+		Metrics:               []domain.MetricDefinition{},
+		ReportIntervalSeconds: settings.ReportIntervalSeconds,
+		PlanningEndsAt:        now.Add(planning.Limit),
+		Status:                domain.PlatformExpDraft,
+		Stages:                settings.Stages,
+		CurrentStage:          1,
+		DefaultQuotaTier:      domain.QuotaTier(settings.DefaultQuotaTier),
+		MaxHosted:             launch.MaxHosted,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 	planner := &domain.Agent{ID: plannerID, Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{
@@ -130,10 +126,10 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Start planning a platform experiment from one sentence", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
-			"A draft has the planning allowance for a budget, no metrics, and one agent, its planner, which the platform runs (flavor planner, role baseline, in the roster like any agent) " +
+			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (flavor planner, role baseline, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. Until then nothing but the " +
-			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
+			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. A draft takes no job, so nothing is measured " +
+			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
 			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required, repository_account_personal, repository_creation_not_permitted, 409 repository_exists and 502 repository_not_created as on POST /platform-experiments. " +

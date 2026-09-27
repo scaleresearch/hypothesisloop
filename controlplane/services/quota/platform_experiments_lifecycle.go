@@ -342,7 +342,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		return nil, err
 	}
 	if runBudget <= 0 {
-		return nil, fmt.Errorf("budget_spent: planning spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share", pe.BudgetAcceleratorHours)
+		return nil, fmt.Errorf("budget_spent: measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share", pe.BudgetAcceleratorHours)
 	}
 
 	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {

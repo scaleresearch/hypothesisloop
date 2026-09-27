@@ -227,22 +227,29 @@ func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
 	}
 }
 
-type openStore struct{ poolOnlyStore }
-
-func (openStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpOpen}, nil
+type unstartedStore struct {
+	poolOnlyStore
+	status domain.PlatformExperimentStatus
 }
 
-func TestSubmitToAnOpenPlatformExperimentSaysItHasNotStarted(t *testing.T) {
-	s := &Service{codeHost: testCodeHost{}, store: openStore{}, hypotheses: humanHypothesis("pe-1")}
+func (s unstartedStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: s.status}, nil
+}
 
-	// An incomplete spec too: the start is what the agent must wait for, before any field.
-	incomplete := humanIdeaSubmission()
-	incomplete.Theory = ""
-	for _, exp := range []*domain.Experiment{humanIdeaSubmission(), incomplete} {
-		var admission *AdmissionError
-		if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
-			t.Fatalf("Submit to an open platform experiment: got = %v, want a message saying it has not started", err)
+// A draft once took its planner's baseline job. It takes none: nothing runs before a person
+// accepted, and then an open experiment says the same.
+func TestSubmitToAPlatformExperimentThatHasNotStartedSaysSo(t *testing.T) {
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen} {
+		s := &Service{codeHost: testCodeHost{}, store: unstartedStore{status: status}, hypotheses: humanHypothesis("pe-1")}
+
+		// An incomplete spec too: the start is what the agent must wait for, before any field.
+		incomplete := humanIdeaSubmission()
+		incomplete.Theory = ""
+		for _, exp := range []*domain.Experiment{humanIdeaSubmission(), incomplete} {
+			var admission *AdmissionError
+			if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
+				t.Fatalf("Submit to a platform experiment that is %s: got = %v, want a message saying it has not started", status, err)
+			}
 		}
 	}
 }

@@ -434,18 +434,6 @@ ORDER BY signed_up_at ASC`
 	return agents, rows.Err()
 }
 
-// ListSignupsByRole returns the agent IDs signed up for a platform experiment in one role.
-// PlannerID is the agent that planned a platform experiment as a draft, or "" when it was
-// created whole and nobody planned it.
-func (s *PlatformExperimentsStore) PlannerID(ctx context.Context, platformExpID string) (string, error) {
-	var id string
-	err := s.pool.pool.QueryRow(ctx, `SELECT agent_id FROM experiment_signups WHERE platform_experiment_id = $1 AND flavor = '`+domain.PlannerFlavor+`'`, platformExpID).Scan(&id)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("platform_experiments_store.PlannerID: %w", err)
-	}
-	return id, nil
-}
-
 // ListParticipants returns the agents taking part in a platform experiment: every signup but
 // the planner of a draft that was accepted, whose work ended there.
 func (s *PlatformExperimentsStore) ListParticipants(ctx context.Context, platformExpID string) ([]string, error) {
@@ -463,6 +451,7 @@ ORDER BY s.signed_up_at ASC`, platformExpID)
 	return agents, nil
 }
 
+// ListSignupsByRole returns the agent IDs signed up for a platform experiment in one role.
 func (s *PlatformExperimentsStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	const q = `
 SELECT agent_id FROM experiment_signups

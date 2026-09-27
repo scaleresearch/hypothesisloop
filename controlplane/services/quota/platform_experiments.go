@@ -37,7 +37,7 @@ type PlatformExperimentsStore interface {
 	LauncherKnown(ctx context.Context, name string) (bool, error)
 	// SetProposal stores a draft's proposal and until when it waits for a person; db.ErrNotDraft
 	// for anything but a draft.
-	SetProposal(ctx context.Context, id string, proposal []byte, baselineJobID string, jobEstimatedDurationHours float64, waitUntil time.Time) error
+	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
 	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
@@ -70,8 +70,6 @@ type PlatformExperimentsStore interface {
 	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
 	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
-	// PlannerID is the agent that planned the platform experiment as a draft, or "".
-	PlannerID(ctx context.Context, platformExpID string) (string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
 	ListParticipants(ctx context.Context, platformExpID string) ([]string, error)
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every

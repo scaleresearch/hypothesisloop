@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -76,14 +75,6 @@ VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9)`, pe.ID, signup.AgentID, stri
 		signup.Hosted, signup.Launcher, signup.Flavor, hyperparameters, signup.Model); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 	}
-	// The planner's quota is the draft's whole budget, the planning allowance: its baseline job
-	// is admitted against it like any job against its agent's quota.
-	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
-		ID: uuid.New().String(), AgentID: planner.ID, PlatformExperimentID: pe.ID,
-		GuaranteedAcceleratorHours: pe.BudgetAcceleratorHours, CreatedAt: pe.CreatedAt,
-	})...); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: allocate the planner's quota: %w", err)
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
 	}
@@ -137,13 +128,11 @@ func (s *PlatformExperimentsStore) answerDraft(ctx context.Context, id, update s
 	return ErrNotDraft
 }
 
-// SetProposal stores what a draft's planner proposed with the baseline it rests on, marks it
-// proposed now, and moves the draft's end to waitUntil: from then on it waits for a person, and
-// no longer for the planner.
-func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, baselineJobID string, jobEstimatedDurationHours float64, waitUntil time.Time) error {
+// SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
+// draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
+func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
 	err := s.answerDraft(ctx, id, `
-UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3,
-    baseline_job_id = $4, job_estimated_duration_hours = $5, updated_at = now()`, proposal, waitUntil, baselineJobID, jobEstimatedDurationHours)
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()`, proposal, waitUntil)
 	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 	}
@@ -215,23 +204,8 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 	if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
 		return err
 	}
-	if err := endPlannerAllowance(ctx, tx, pe.ID); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: commit: %w", err)
-	}
-	return nil
-}
-
-// endPlannerAllowance deletes the quota a draft's planner held, the planning allowance. A
-// planner's work ends when its draft is accepted or closed, and its allowance with it.
-func endPlannerAllowance(ctx context.Context, tx pgx.Tx, platformExpID string) error {
-	if _, err := tx.Exec(ctx, `
-DELETE FROM agent_quotas q USING experiment_signups s
-WHERE q.platform_experiment_id = $1 AND s.platform_experiment_id = q.platform_experiment_id
-  AND s.agent_id = q.agent_id AND s.flavor = '`+domain.PlannerFlavor+`'`, platformExpID); err != nil {
-		return fmt.Errorf("end the planner's allowance: %w", err)
 	}
 	return nil
 }

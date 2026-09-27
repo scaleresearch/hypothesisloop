@@ -54,11 +54,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	switch pe.Status {
 	case domain.PlatformExpRunning:
-	// A draft's only signup is its planner (the store takes no other until it is accepted), so
-	// the signup check below admits the planner's baseline job and nobody else's, against the
-	// quota the draft gave it: the planning allowance.
-	case domain.PlatformExpDraft:
-	case domain.PlatformExpOpen:
+	case domain.PlatformExpDraft, domain.PlatformExpOpen:
 		return &AdmissionError{
 			Reason:  "experiment_not_started",
 			Message: fmt.Sprintf("platform experiment %s has not started; jobs are accepted only while it is running", pe.ID),

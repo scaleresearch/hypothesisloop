@@ -263,11 +263,9 @@ type AgentsConfig struct {
 	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
 }
 
-// PlanningConfig is what the platform spends on a draft: a platform experiment being planned
-// from one sentence by an agent the platform runs, before a person accepts its proposal.
+// PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
+// agent the platform runs, before a person accepts its proposal. The platform pays for its machine.
 type PlanningConfig struct {
-	// AllowanceAcceleratorHours is a draft's whole budget: what its planner's baseline job may cost.
-	AllowanceAcceleratorHours float64 `yaml:"allowance_accelerator_hours"`
 	// LimitMinutes is how long a planner has to propose, from the goal or from a revision.
 	LimitMinutes int `yaml:"limit_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.

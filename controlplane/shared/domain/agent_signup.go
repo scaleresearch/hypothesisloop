@@ -145,7 +145,7 @@ func ValidateLauncherName(name string) error {
 const CoordinatorFlavor = "coordinator"
 
 // PlannerFlavor is what the agent of a draft runs as: it works out how to measure the draft's
-// goal, runs the baseline and proposes the experiment. The platform signs it up when the draft
+// goal and proposes the experiment. The platform signs it up when the draft
 // is created, and no request can ask for one: it is no member of AgentFlavors.
 const PlannerFlavor = "planner"
 

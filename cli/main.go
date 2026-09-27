@@ -762,22 +762,24 @@ A coordinator's token changes the description and declares the baseline, and not
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [FILE|-]
 
-For the planner of a draft. FILE is YAML of this shape, with every field shown required unless
-it says optional:
+For the planner of a draft. A proposal defines the experiment and runs nothing: no job, no
+code. FILE is YAML of this shape, with every field shown required unless it says optional:
 
   experiment:
     name: short title
     description: |
-      the brief, the only thing researchers read. It holds a BASELINE block that names
-      baseline_job_id and that job's code_ref, or the proposal is refused.
-    report_interval_seconds: 30        # how often the harness really reports
+      the brief, the only thing researchers read. Its BASELINE block states the control:
+        config: the exact control configuration
+        measured: not yet established
+    report_interval_seconds: 30        # how often a job is to report
     metrics:
       - key: val_accuracy              # one metric ranks: role ranking is the default
         direction: maximize            # or minimize
       - key: exact_match               # optional gate
         direction: maximize
         role: constraint
-        bound: 1                       # a value the baseline holds
+        bound: 1                       # a value the unchanged control holds by construction
+  accelerator_type: ...                # copied verbatim from 'hl capacity', the CPU type for work on cores
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
   duration_hours: 4
   agents:                              # one entry per researcher
@@ -785,11 +787,10 @@ it says optional:
       hyperparameters:                 #   data-search or hyperparameter-search. The direction you
         direction: what this one tries #   give a researcher goes in hyperparameters, any keys.
     - {}
-  baseline_job_id: job-...             # your COMPLETED job with its summary filed
   metric_reason: why this metric is the goal, in plain words
   measurement: how it is measured, in plain words
   sizing_reason: why this budget, duration and number of researchers are the least that reach
-    the goal, with the arithmetic from the baseline's cost and time
+    the goal, worded as the estimate it is
   out_of_scope: [optional sentences]
   risks: [optional sentences]
   questions: [optional sentences]

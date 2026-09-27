@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,9 +37,6 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
 	if drafts, ok := store.(*draftStore); ok {
-		svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
-			return drafts.baseline, nil
-		}
 		handler.reachable = func(context.Context, string) (map[string]bool, error) { return drafts.reachable, nil }
 	}
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
@@ -70,7 +66,7 @@ var planner = auth.Principal{Kind: auth.KindUser, UserID: "u-1", Name: "Ada", Or
 // planningRepositories is the git host as the last planningAPI sees it.
 var planningRepositories *fakeRepositories
 
-func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t *testing.T) {
+func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing.T) {
 	store := &draftStore{}
 	_, call := planningAPI(t, store, planner)
 	goal := "Find out whether a cosine schedule beats a constant learning rate for a small transformer on character-level text, measured by validation loss"
@@ -83,8 +79,8 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if pe.Status != domain.PlatformExpDraft || pe.Goal != goal || out["status"] != "draft" || out["goal"] != goal {
 		t.Fatalf("created %+v", pe)
 	}
-	if pe.BudgetAcceleratorHours != testPlanning.AllowanceAcceleratorHours || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
-		t.Errorf("a draft holds %v AccH, %d metrics, %d places, coordinator %v: want the allowance and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.MaxAgents, pe.CoordinatorHosted)
+	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
+		t.Errorf("a draft holds %v AccH, %d metrics, %d places, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.MaxAgents, pe.CoordinatorHosted)
 	}
 	if limit := pe.PlanningEndsAt.Sub(before); limit < testPlanning.Limit-time.Minute || limit > testPlanning.Limit+time.Minute {
 		t.Errorf("a draft ends %v after it was created, want the planning limit", limit)
@@ -225,18 +221,12 @@ type draftStore struct {
 
 	// over is the limit the org is at.
 	over *db.PlanningLimitError
-	// baseline is what the platform's records say of the job a proposal names, and reachable
-	// the accelerator types the org's jobs can be placed on.
-	baseline  *Baseline
+	// reachable are the accelerator types the org's jobs can be placed on.
 	reachable map[string]bool
 
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
-	// spending is the planner whose spend the metrics store is asked for.
-	spending string
 }
-
-func (s *draftStore) PlannerID(context.Context, string) (string, error) { return s.spending, nil }
 
 func (s *draftStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
@@ -270,12 +260,11 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, baselineJobID string, jobEstimatedDurationHours float64, waitUntil time.Time) error {
+func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
 			pe.Proposal, pe.ProposedAt, pe.DeclinedReason = proposal, &now, ""
-			pe.BaselineJobID, pe.JobEstimatedDurationHours = baselineJobID, jobEstimatedDurationHours
 			pe.SetClosesAt(waitUntil)
 			return nil
 		}
@@ -287,15 +276,15 @@ func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, 
 func aProposal(more map[string]any) map[string]any {
 	body := map[string]any{
 		"experiment": map[string]any{
-			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE code_ref: git://seed@abc measured: job-1",
+			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE config: constant lr 3e-4 measured: not yet established",
 			"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 		},
 		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
-		"baseline_job_id": "job-1",
-		"metric_reason":   "Validation loss on held-out text is the goal itself.",
-		"measurement":     "bench.py trains for a fixed number of steps and scores a split the training never reads.",
-		"sizing_reason":   "The baseline cost 0.1 and took 6 minutes: 2 researchers with 30 trials each need 6 and 4 hours.",
-		"questions":       []string{"Is 4 hours enough?"},
+		"accelerator_type": "rtx-4090",
+		"metric_reason":    "Validation loss on held-out text is the goal itself.",
+		"measurement":      "bench.py trains for a fixed number of steps and scores a split the training never reads.",
+		"sizing_reason":    "An estimate, nothing has run: a trial of about 6 minutes at 1 an hour is 0.1, and 2 researchers with 30 trials each need 6 and 4 hours.",
+		"questions":        []string{"Is 4 hours enough?"},
 	}
 	for key, value := range more {
 		body[key] = value
@@ -308,12 +297,7 @@ func draftWithPlanner() *draftStore {
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
-		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
-		baseline: &Baseline{
-			Job:       &domain.Experiment{ID: "job-1", AgentID: "ag-planner", PlatformExperimentID: "pe-draft", Status: domain.StatusCompleted, AcceleratorType: "rtx-4090", CodeRef: "git://seed@abc", EstimatedDurationHours: 0.3},
-			OwnerRole: domain.SignupRoleBaseline,
-			Finding:   true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, ObservedHours: 0.2,
-		},
+		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		reachable: map[string]bool{"rtx-4090": true},
 	}
 }
@@ -332,7 +316,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	}
 	pe := store.created[0]
 	var stored Proposal
-	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || len(stored.Agents) != 2 || stored.BaselineJobID != "job-1" {
+	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || len(stored.Agents) != 2 || stored.AcceleratorType != "rtx-4090" {
 		t.Fatalf("stored %s, %v", pe.Proposal, err)
 	}
 	if pe.ProposedAt == nil || out["proposed_at"] == nil || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
@@ -345,8 +329,9 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	if out["proposal_expires_at"] != pe.ProposalExpiresAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["planning_ends_at"] != nil {
 		t.Errorf("a proposed draft reads proposal_expires_at %v, ends_at %v, planning_ends_at %v: want how long the proposal waits under that name alone", out["proposal_expires_at"], out["ends_at"], out["planning_ends_at"])
 	}
-	// The draft itself is unchanged: nothing of a proposal takes effect until a person accepts.
-	if pe.Name != "" || len(pe.Metrics) != 0 || pe.BudgetAcceleratorHours != 0 {
+	// The draft itself is unchanged: nothing of a proposal takes effect until a person accepts,
+	// and nothing was measured, so it has no baseline.
+	if pe.Name != "" || len(pe.Metrics) != 0 || pe.BudgetAcceleratorHours != 0 || pe.BaselineJobID != "" || pe.JobEstimatedDurationHours != 0 {
 		t.Errorf("the proposal changed the draft before it was accepted: %+v", pe)
 	}
 
@@ -374,6 +359,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"no reason for the metric":               {map[string]any{"metric_reason": ""}, "missing_explanation"},
 		"no reason for the size":                 {map[string]any{"sizing_reason": " "}, "missing_explanation"},
 		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
+		"a type nobody has now":                  {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
+		"no type":                                {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
 	} {
 		store := draftWithPlanner()
 		_, call := planningAPI(t, store, thePlanner)
@@ -494,26 +481,6 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		}
 	}
 
-	// Planning spend counts toward the budget: one it already spent is refused here, so the
-	// draft is never accepted and unstartable.
-	spent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"resource_type":"accelerator_hours","tier":"guaranteed"},"value":[1,"3"]}]}}`))
-	}))
-	defer spent.Close()
-	store = draftWithPlanner()
-	store.spending = "ag-planner"
-	_, propose = planningAPI(t, store, thePlanner)
-	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	svc, call := planningAPI(t, store, planner)
-	svc.metricsDBURL = spent.URL
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusUnprocessableEntity || out["reason"] != "budget_spent" || store.created[0].Status != domain.PlatformExpDraft {
-		t.Errorf("a budget planning already spent: got = %d %v, want 422 budget_spent and still a draft", code, out)
-	}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 4, "duration_hours": 2, "agents": []map[string]any{{}}}); code != http.StatusOK {
-		t.Errorf("a budget over what planning spent: got = %d %v, want 200", code, out)
-	}
-
 	// The planner proposes and a person accepts: its own token is of no kind that may.
 	store = draftWithPlanner()
 	_, propose = planningAPI(t, store, thePlanner)
@@ -523,79 +490,23 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 }
 
-// What a proposal says of its baseline is checked against what the job did: the person who
-// accepts reads "baseline 1.8" as measured.
-func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *testing.T) {
-	gated := map[string]any{"experiment": map[string]any{
-		"name": "n", "description": "d of job-1 at git://seed@abc", "report_interval_seconds": 30,
-		"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}, {"key": "exact_match", "direction": "maximize", "role": "constraint", "bound": 1}},
-	}}
-	store := draftWithPlanner()
-	_, call := planningAPI(t, store, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(gated)); code != http.StatusOK {
-		t.Fatalf("a baseline that holds the gate: got = %d %v, want 200", code, out)
-	}
-
-	for name, c := range map[string]struct {
-		more   map[string]any
-		change func(*draftStore)
-		reason string
-	}{
-		"no job named":                {map[string]any{"baseline_job_id": ""}, func(*draftStore) {}, "no_baseline"},
-		"a job of someone else":       {nil, func(s *draftStore) { s.baseline.Job.AgentID = "ag-other" }, "no_baseline"},
-		"a job of another experiment": {nil, func(s *draftStore) { s.baseline.Job.PlatformExperimentID = "pe-other" }, "no_baseline"},
-		"a job that failed":           {nil, func(s *draftStore) { s.baseline.Job.Status = domain.StatusFailed }, "baseline_not_completed"},
-		"nothing filed":               {nil, func(s *draftStore) { s.baseline.Finding = false }, "baseline_without_finding"},
-		// A planner that did not know the file's shape probed it with a brief of "x", and that
-		// probe was stored as the proposal a person was asked to accept.
-		"a brief that omits the baseline": {nil, func(s *draftStore) { s.baseline.Job.CodeRef = "git://seed@other" }, "brief_without_baseline"},
-		"a metric nothing reports":        {nil, func(s *draftStore) { delete(s.baseline.Reported, "val_loss") }, "baseline_missing_metric"},
-		"a gate the baseline fails":       {gated, func(s *draftStore) { s.baseline.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
-		"a type nobody has now":           {nil, func(s *draftStore) { s.reachable = map[string]bool{} }, "accelerator_unreachable"},
-		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*draftStore) {}, "budget_below_baseline"},
-	} {
+// A planner ran the baseline itself, which took most of its 16 to 20 minutes, and a proposal
+// was refused unless that job held it up. A proposal defines the experiment and runs nothing:
+// it names no job, and the fields the platform used to read from one are no fields of it.
+func TestAProposalNamesNoBaselineJobAndStatesTheTypeItsJobsAreSizedFor(t *testing.T) {
+	for _, field := range []string{"baseline_job_id", "job_estimated_duration_hours"} {
 		store := draftWithPlanner()
-		c.change(store)
 		_, call := planningAPI(t, store, thePlanner)
-		code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(c.more))
-		if code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].ProposedAt != nil {
-			t.Errorf("%s: got = %d %v, want 422 %s and nothing stored", name, code, out, c.reason)
+		if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{field: "job-1"})); code != http.StatusUnprocessableEntity || store.created[0].ProposedAt != nil {
+			t.Errorf("a proposal that states %s: got = %d %v, want 422 for a field the body does not have", field, code, out)
 		}
 	}
-
-	missing := draftWithPlanner()
-	missing.baseline = nil
-	_, call = planningAPI(t, missing, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusUnprocessableEntity || out["reason"] != "no_baseline" {
-		t.Errorf("a job that does not exist: got = %d %v, want 422 no_baseline", code, out)
-	}
-	// The type is the one the baseline ran on, read from the job: the planner cannot state
-	// another, and the stored proposal answers it.
 	cpu := draftWithPlanner()
-	cpu.baseline.Job.AcceleratorType = domain.CPUType
 	cpu.reachable = map[string]bool{string(domain.CPUType): true}
-	_, call = planningAPI(t, cpu, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": "rtx-4090"})); code != http.StatusUnprocessableEntity {
-		t.Errorf("a proposal that states a type: got = %d %v, want 422 for a field the body does not have", code, out)
-	}
-	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != string(domain.CPUType) {
-		t.Errorf("a proposal whose baseline ran on cores: got = %d %v, want 200 and the CPU type answered", code, out)
-	}
-
-	// A spec estimating 0.1 hours for a trial that ran 0.046 held twice what each job spent, and
-	// one job at a time fit a researcher's first stage. Held to its own estimate, a baseline then
-	// ran twice, the second time only to carry a corrected one. The trial's estimate is the
-	// platform's, from the hours the one baseline ran, whatever that job guessed.
-	guessed := draftWithPlanner()
-	guessed.baseline.Job.EstimatedDurationHours = 1
-	_, call = planningAPI(t, guessed, thePlanner)
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"job_estimated_duration_hours": 0.2})); code != http.StatusUnprocessableEntity {
-		t.Errorf("a proposal that states the trial's estimate: got = %d %v, want 422 for a field the body does not have", code, out)
-	}
-	code, out = call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if estimate, _ := out["job_estimated_duration_hours"].(float64); code != http.StatusOK || out["baseline_job_id"] != "job-1" || math.Abs(estimate-0.3) > 1e-9 {
-		t.Errorf("a baseline that guessed 1 hour and ran 0.2: got = %d %v, want 200 and a trial's estimate of 0.3", code, out)
+	_, call := planningAPI(t, cpu, thePlanner)
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": string(domain.CPUType)}))
+	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != string(domain.CPUType) || out["baseline_job_id"] != nil {
+		t.Errorf("a proposal for work on cores: got = %d %v, want 200, the CPU type answered and no baseline", code, out)
 	}
 }
 

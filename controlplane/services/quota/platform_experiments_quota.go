@@ -51,31 +51,32 @@ func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID,
 // invisible until settlement writes its cost. Both are undercounts, both self-correct, and both
 // err toward letting real work finish — the right direction for an eviction that is irreversible
 // and unrefunded.
-// RunBudget is what the researchers of pe share: its budget less what its planner spent before
-// the proposal was accepted. The budget a person accepts caps everything the platform
-// experiment spends, planning included, so shares are carved from what planning left.
+// RunBudget is what the researchers of pe share: its budget less what its baseline agents have
+// spent. The budget caps everything the platform experiment spends, measuring the baseline
+// included, so shares are carved from what that left.
 func (s *PlatformExperimentsService) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
-	planning, err := s.PlanningSpend(ctx, pe)
+	spent, err := s.baselineSpend(ctx, pe)
 	if err != nil {
 		return 0, err
 	}
-	return max(0, pe.BudgetAcceleratorHours-planning), nil
+	return max(0, pe.BudgetAcceleratorHours-spent), nil
 }
 
-// PlanningSpend is what the planner of pe has spent, zero for one nobody planned.
-func (s *PlatformExperimentsService) PlanningSpend(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
-	planner, err := s.store.PlannerID(ctx, pe.ID)
+// baselineSpend is what the agents of role baseline of pe have spent.
+func (s *PlatformExperimentsService) baselineSpend(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+	agents, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleBaseline)
 	if err != nil {
-		return 0, fmt.Errorf("platform_experiments.PlanningSpend: %w", err)
+		return 0, fmt.Errorf("platform_experiments.baselineSpend: %w", err)
 	}
-	if planner == "" {
-		return 0, nil
+	spent := 0.0
+	for _, agentID := range agents {
+		quota := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: pe.ID}
+		if err := metricsdb.PopulateUsageOne(ctx, s.metricsDBURL, pe.CreatedAt, quota); err != nil {
+			return 0, fmt.Errorf("platform_experiments.baselineSpend: %w", err)
+		}
+		spent += quota.Used()
 	}
-	planning := &domain.AgentQuota{AgentID: planner, PlatformExperimentID: pe.ID}
-	if err := metricsdb.PopulateUsageOne(ctx, s.metricsDBURL, pe.CreatedAt, planning); err != nil {
-		return 0, fmt.Errorf("platform_experiments.PlanningSpend: %w", err)
-	}
-	return planning.Used(), nil
+	return spent, nil
 }
 
 func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {

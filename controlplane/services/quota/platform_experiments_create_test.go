@@ -21,10 +21,7 @@ var testSettings = domain.QuotaConfig{
 	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour,
 }
 
-var testPlanning = Planning{
-	AllowanceAcceleratorHours: 2.0, Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour,
-	MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10,
-}
+var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10}
 
 // One check stands behind a create, a proposal and an accept, so what it refuses and what it
 // takes from the settings is the same for all three.

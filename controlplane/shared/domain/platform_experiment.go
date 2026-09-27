@@ -12,8 +12,8 @@ type PlatformExperimentStatus string
 
 const (
 	// PlatformExpDraft is a platform experiment being planned from a goal: a planner the platform
-	// runs works out what to measure and proposes the rest, nobody else joins, and nothing but
-	// the planning allowance is spent until a person accepts the proposal, which opens it.
+	// runs works out what to measure and proposes the rest, nobody else joins, and no job runs
+	// until a person accepts the proposal, which opens it.
 	PlatformExpDraft   PlatformExperimentStatus = "draft"
 	PlatformExpOpen    PlatformExperimentStatus = "open"
 	PlatformExpRunning PlatformExperimentStatus = "running"
@@ -299,14 +299,6 @@ const (
 	ClosePlanningLimitReached CloseReason = "planning_limit_reached"
 	CloseProposalExpired      CloseReason = "proposal_expired"
 )
-
-// BaselineReading is what the platform read from the baseline job of a proposal and keeps
-// beside it in Proposal. A planner does not state it.
-type BaselineReading struct {
-	// AcceleratorType is the type the baseline job ran on, which the run's jobs are sized for.
-	// On CPUType the budget is CPU core-hours.
-	AcceleratorType AcceleratorType `json:"accelerator_type"`
-}
 
 // PlanningRequest is one request to a draft's planner to change its proposal.
 type PlanningRequest struct {

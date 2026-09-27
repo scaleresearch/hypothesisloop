@@ -578,6 +578,10 @@ ALTER TABLE agent_quotas DROP COLUMN IF EXISTS guaranteed_ram_gb_hours;
 ALTER TABLE agent_quotas DROP COLUMN IF EXISTS burst_ram_gb_hours;
 ALTER TABLE agent_quotas DROP COLUMN IF EXISTS guaranteed_storage_gb_hours;
 ALTER TABLE agent_quotas DROP COLUMN IF EXISTS burst_storage_gb_hours;
+-- A draft's planner once held a quota, the planning allowance its baseline job ran against. A
+-- planner runs no job now, so the rows left from then go.
+DELETE FROM agent_quotas q USING experiment_signups s
+WHERE s.platform_experiment_id = q.platform_experiment_id AND s.agent_id = q.agent_id AND s.flavor = 'planner';
 
 CREATE INDEX IF NOT EXISTS idx_agent_quotas_platform ON agent_quotas(platform_experiment_id);
 CREATE INDEX IF NOT EXISTS idx_agent_quotas_agent    ON agent_quotas(agent_id);

@@ -28,7 +28,7 @@ type PlatformExperimentsHandler struct {
 
 	// Set via WithAgentLaunch.
 	launch AgentLaunch
-	// What a draft may spend, from the settings file's planning section.
+	// What bounds a draft, from the settings file's planning section.
 	planning Planning
 	// reachable reads the accelerator types an org's jobs can be placed on now; reachableTypes
 	// unless a test sets another.
@@ -40,7 +40,7 @@ type PlatformExperimentsHandler struct {
 
 // NewPlatformExperimentsHandler constructs the handler.
 func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, planning Planning, logger *zap.Logger) *PlatformExperimentsHandler {
-	if planning.AllowanceAcceleratorHours <= 0 || planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.MaxConcurrentPerOrg <= 0 || planning.MaxPerDayPerOrg <= 0 {
+	if planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.MaxConcurrentPerOrg <= 0 || planning.MaxPerDayPerOrg <= 0 {
 		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
 	}
 	h := &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
