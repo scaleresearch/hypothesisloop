@@ -40,6 +40,11 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("a name your type's line in `hl capacity` lists in `job_images`, spelled as there: "
                       "any other word but a full registry address is refused, and every job names one", prompt)
 
+    # A job that left its storage out waited for a share of the disk the node never had free.
+    def test_every_job_states_its_storage(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("CPU work: `cpu: N` in its place. Every job states its scratch space (`storage: 4Gi`) or is refused at submit", prompt)
+
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.
     def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):

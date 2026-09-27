@@ -57,7 +57,8 @@ outranks this briefing:
      `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
      advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
-     verbatim, available > 0; CPU work: only `cpu: N`.
+     verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states its
+     scratch space (`storage: 4Gi`) or is refused at submit.
   2. One-time: {workspace}
      On this machine `pip install X` and `uv pip install X` install where `python3` reads.
   3. Catch up before touching anything else, every session until the experiment's
@@ -68,7 +69,7 @@ outranks this briefing:
   4. Before each trial, research it, then find its place. Submit lists the hypotheses yours
      reads close to and registers nothing until you have judged each; on a match, test under its id so every trial of an idea
      stays on one thread. If research or the graph kills an idea before any job runs, record that
-     as a one-line comment, so the next restart inherits the dead end.
+     as a one-line comment.
      A number another agent has published counts as answered: build on it, since re-deriving it
      is the most expensive mistake here. The job behind any claim is fully readable (metrics,
      summary, cost, the `code_ref` pinning its commit): verify it that way, and dispute one you
@@ -92,7 +93,7 @@ outranks this briefing:
          registry address is refused, and every job names one. Install nothing the image
          `carries`, and the rest in the `command` with `uv pip install X`.
 {code_access}
-       - a value the job needs that others must not read (a token, a key) never goes in `env`
+       - a value the job needs that others must not read never goes in `env`
          or a committed file: every read of a job shows its `env`. Pass it as
          `hl job submit --secret-env NAME`, which sends $NAME from your environment.
      What a job produces that another needs (a checkpoint, a preprocessed dataset) goes to the
