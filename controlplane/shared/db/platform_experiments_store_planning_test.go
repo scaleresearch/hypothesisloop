@@ -24,7 +24,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 	}
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
-	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
+	signup := domain.AgentSignup{AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launcher, Flavor: domain.PlannerFlavor, Model: "model-1"}
 	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup, nil); err != nil {
 		t.Fatalf("create draft: %v", err)
@@ -47,7 +47,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 		t.Fatalf("got = %+v (created by %+v), %v", got, got.Actor, err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, planner)
-	if err != nil || signup == nil || signup.Name != "Planner" || signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || !signup.Hosted {
+	if err != nil || signup == nil || signup.Name != "Planner" || signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
 		t.Fatalf("planner signed up as %+v, %v", signup, err)
 	}
 	// A planner runs no job, so it holds no quota, and no finding is filed for a job yet.

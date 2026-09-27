@@ -1180,5 +1180,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS repository_url TEXT NO
 UPDATE platform_experiments SET repository_url = 'https://github.com/' || repository || '.git'
 WHERE repository <> '' AND repository_url = '';
 
+-- A draft's planner once had role baseline and was told apart by its flavor. It has its own role.
+UPDATE experiment_signups SET role = 'planner' WHERE flavor = 'planner' AND role <> 'planner';
 
 COMMIT;

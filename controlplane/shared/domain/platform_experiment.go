@@ -344,6 +344,10 @@ const (
 	// SignupRoleReviewer re-checks other agents' claims and records agreement or dispute. Never
 	// ranked, never cut.
 	SignupRoleReviewer SignupRole = "reviewer"
+	// SignupRolePlanner is the agent the platform signs up to plan a draft. It proposes the
+	// experiment, runs no job, holds no quota and takes no part once the draft is accepted. No
+	// request can ask for it.
+	SignupRolePlanner SignupRole = "planner"
 )
 
 // ParseSignupRole resolves a requested role. An empty string is the competitor default, so every

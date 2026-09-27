@@ -145,15 +145,13 @@ func ValidateLauncherName(name string) error {
 // can join with.
 const CoordinatorFlavor = "coordinator"
 
-// PlannerFlavor is what the agent of a draft runs as: it works out how to measure the draft's
-// goal and proposes the experiment. The platform signs it up when the draft
-// is created, and no request can ask for one: it is no member of AgentFlavors.
+// PlannerFlavor is what the harness of a draft's planner is started as. It is no member of
+// AgentFlavors: the platform signs the planner up, with role SignupRolePlanner.
 const PlannerFlavor = "planner"
 
-// MeasuresBaseline says the agent is one whose job measures the platform experiment's baseline:
-// of role baseline, and no planner, which has the role and runs no job.
+// MeasuresBaseline says the agent is one whose job measures the platform experiment's baseline.
 func (s AgentSignup) MeasuresBaseline() bool {
-	return s.Role == SignupRoleBaseline && s.Flavor != PlannerFlavor
+	return s.Role == SignupRoleBaseline
 }
 
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a

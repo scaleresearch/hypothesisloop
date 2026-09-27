@@ -96,7 +96,7 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
 	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted || signup.Launcher != "main" ||
-		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRoleBaseline || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
+		signup.Flavor != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
 	// A draft has a repository: the one named, or a new one.
@@ -321,7 +321,7 @@ func draftWithPlanner() *draftStore {
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
-		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
+		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, Flavor: domain.PlannerFlavor, Hosted: true}},
 		reachable: map[string]bool{"rtx-4090": true},
 	}
 }

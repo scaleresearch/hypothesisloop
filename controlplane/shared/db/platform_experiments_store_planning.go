@@ -19,7 +19,7 @@ import (
 // prepare, when set, runs once the project is found and before the draft is stored, and may still
 // change pe: it is where something is made for a draft that will exist, and for no other.
 func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error {
-	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Flavor != domain.PlannerFlavor || !signup.Hosted {
+	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
 	}
 	tx, err := s.pool.pool.Begin(ctx)
@@ -178,7 +178,7 @@ func (s *PlatformExperimentsStore) PlannerAnsweredAt(ctx context.Context, platfo
 	err := s.pool.pool.QueryRow(ctx, `
 SELECT pe.proposed_at
 FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.flavor = '`+domain.PlannerFlavor+`'`, platformExpID, agentID).Scan(&answeredAt)
+WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`'`, platformExpID, agentID).Scan(&answeredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -225,7 +225,7 @@ func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message strin
 	// The planner's last machine ended because its work was done. The one a revision asks for
 	// is a new launch, with its own restarts: a launch the launcher's reconcile does not know
 	// spends none of the old one's.
-	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND flavor = $2`, id, domain.PlannerFlavor); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND role = $2`, id, string(domain.SignupRolePlanner)); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,

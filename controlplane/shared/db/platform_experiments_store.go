@@ -484,14 +484,14 @@ WHERE id=$1 AND status=$10`
 }
 
 // reallocateBaselineQuotas writes the quota of every agent of role baseline of pe again, from
-// pe's budget and max_agents. A planner has the role and holds no quota.
+// pe's budget and max_agents.
 func reallocateBaselineQuotas(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
 	if len(pe.Stages) == 0 {
 		return fmt.Errorf("platform experiment %s has no stages to take the first one's share from", pe.ID)
 	}
 	rows, err := tx.Query(ctx, `
 SELECT agent_id, quota_tier FROM experiment_signups
-WHERE platform_experiment_id = $1 AND role = $2 AND flavor <> '`+domain.PlannerFlavor+`'`, pe.ID, string(domain.SignupRoleBaseline))
+WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRoleBaseline))
 	if err != nil {
 		return fmt.Errorf("list baseline agents: %w", err)
 	}
@@ -572,7 +572,7 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 	}
 
 	// An agent of role baseline takes no share of the run: it measured the baseline before the
-	// start, against the quota it joined with. A draft's planner has that role too.
+	// start, against the quota it joined with. A draft's planner took part in the draft only.
 	// Signups joined against the agents they name and their top-3 history, all on this
 	// transaction's own connection. The caller must not issue its own queries while this
 	// transaction is open: several concurrent starts would each hold a connection and wait for
@@ -582,7 +582,7 @@ SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHE
        s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
-WHERE s.platform_experiment_id = $1 AND s.role <> '`+string(domain.SignupRoleBaseline)+`'
+WHERE s.platform_experiment_id = $1 AND s.role NOT IN ('`+string(domain.SignupRoleBaseline)+`', '`+string(domain.SignupRolePlanner)+`')
 ORDER BY s.agent_id`, id)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)

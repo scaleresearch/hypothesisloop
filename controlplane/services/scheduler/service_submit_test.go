@@ -247,7 +247,7 @@ func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain
 func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T) {
 	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: domain.DefaultAgentFlavor}
 	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}
-	planner := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.PlannerFlavor}
+	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, Flavor: domain.PlannerFlavor}
 	for name, store := range map[string]unstartedStore{
 		"a draft's planner":           {status: domain.PlatformExpDraft, signup: planner},
 		"an open one's researcher":    {status: domain.PlatformExpOpen, signup: researcher},

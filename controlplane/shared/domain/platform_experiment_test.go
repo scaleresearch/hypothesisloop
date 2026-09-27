@@ -69,3 +69,12 @@ func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
 		}
 	}
 }
+
+func TestNoRequestAsksForAPlanner(t *testing.T) {
+	if _, err := ParseSignupRole(string(SignupRolePlanner)); err == nil {
+		t.Fatal("role planner was taken from a request: the platform alone signs a planner up")
+	}
+	if (AgentSignup{Role: SignupRolePlanner, Flavor: PlannerFlavor}).MeasuresBaseline() {
+		t.Fatal("a planner measures no baseline")
+	}
+}

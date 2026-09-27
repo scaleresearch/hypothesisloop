@@ -166,7 +166,7 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		}
 	}
 	// max_hosted bounds the machines the platform rents for the experiment at once. An agent that
-	// finished holds none, and a planner's is gone by the time anyone can join. One machine is
+	// finished holds none, and a planner is no agent of an open experiment. One machine is
 	// kept for measuring the baseline, which nothing starts without: the coordinator and the
 	// agents that do not measure it take the others.
 	if hosted || (len(signups) == 0 && coordinatorHosted) {
@@ -174,8 +174,8 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FILTER (WHERE role = $2), COUNT(*) FILTER (WHERE role <> $2)
 FROM experiment_signups
-WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND flavor <> '`+domain.PlannerFlavor+`'`,
-			platformExpID, string(domain.SignupRoleBaseline)).Scan(&measuring, &others); err != nil {
+WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND role <> $3`,
+			platformExpID, string(domain.SignupRoleBaseline), string(domain.SignupRolePlanner)).Scan(&measuring, &others); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
 		}
 		if coordinatorHosted {
@@ -285,7 +285,7 @@ func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpI
 	var running, unfinished bool
 	var finishedAt *time.Time
 	err = tx.QueryRow(ctx, `
-SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`' AND s.flavor <> '`+domain.PlannerFlavor+`', s.finished_at,
+SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`', s.finished_at,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id
                  AND (status IN ('QUEUED', 'SUBMITTED', 'RUNNING') OR `+UnsummarizedCompletedPredicate+`))
@@ -352,11 +352,11 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
            s.finished_at,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
            (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
-           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.flavor = '`+domain.PlannerFlavor+`'))`) + `,
+           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '`+string(domain.SignupRolePlanner)+`'))`) + `,
        CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
             WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
             WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
-            WHEN s.flavor = '` + domain.PlannerFlavor + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
+            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
             ELSE '' END`
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
@@ -445,8 +445,8 @@ LEFT JOIN agents a ON a.id = s.agent_id
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
 WHERE s.hosted AND s.launcher = $1
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
-       OR s.flavor <> '` + domain.PlannerFlavor + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
-       OR s.flavor = '` + domain.PlannerFlavor + `' AND pe.status = 'draft' AND (pe.proposed_at IS NULL OR pe.proposed_at > now() - make_interval(secs => $2)))
+       OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
+       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.proposed_at IS NULL OR pe.proposed_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
 
@@ -500,7 +500,7 @@ ORDER BY signed_up_at ASC`
 func (s *PlatformExperimentsStore) ListParticipants(ctx context.Context, platformExpID string) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.agent_id FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-WHERE s.platform_experiment_id = $1 AND (pe.status = 'draft' OR s.flavor <> '`+domain.PlannerFlavor+`')
+WHERE s.platform_experiment_id = $1 AND (pe.status = 'draft' OR s.role <> '`+string(domain.SignupRolePlanner)+`')
 ORDER BY s.signed_up_at ASC`, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListParticipants: %w", err)

@@ -115,7 +115,7 @@ func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id stri
 	if err != nil {
 		return h.refusal("read planner", err)
 	}
-	if signup == nil || signup.Flavor != domain.PlannerFlavor {
+	if signup == nil || signup.Role != domain.SignupRolePlanner {
 		return huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
 	}
 	return nil

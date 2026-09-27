@@ -42,8 +42,7 @@ func draftName(goal string) string {
 }
 
 // CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
-// an agent the platform runs, of role baseline, so that it is never ranked or cut, and of flavor
-// planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
+// an agent the platform runs, of role planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
 // the planner proposes the rest and a person accepts it.
 func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal string, by domain.Actor, planning Planning, launch AgentLaunch, prepare func(context.Context, *domain.PlatformExperiment) error) (*domain.PlatformExperiment, error) {
 	goal = strings.TrimSpace(goal)
@@ -86,7 +85,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	}
 	planner := &domain.Agent{ID: plannerID, Name: "Planner", PerformanceScore: 0.5, CreatedAt: now}
 	signup := domain.AgentSignup{
-		AgentID: plannerID, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierGuaranteed,
+		AgentID: plannerID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, Launcher: launch.Launcher, Flavor: domain.PlannerFlavor, Model: launch.DefaultModel,
 	}
 	err = s.store.CreateDraft(ctx, pe, planner, signup, prepare)
@@ -113,7 +112,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Start planning a platform experiment from one sentence", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
-			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (flavor planner, role baseline, in the roster like any agent) " +
+			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
 			"the brief, the hardware, the budget and the agents, and it opens only when a person accepts that proposal. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
