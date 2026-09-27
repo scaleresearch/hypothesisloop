@@ -145,12 +145,32 @@ func vacatingSlots(cluster string, sizes, freeAtTickStart map[string]map[string]
 	}
 	vacating := map[string]map[string]int64{}
 	for node, labels := range labelsByNode {
-		if !isSlot(labels) || held[labels[domain.NodeSlotLabel]] || nodeHasRoom(freeAtTickStart[node], sizes[node]) {
+		if !isSlot(labels) || labels[domain.NodeSlotNoOfferLabel] != "" || held[labels[domain.NodeSlotLabel]] || nodeHasRoom(freeAtTickStart[node], sizes[node]) {
 			continue
 		}
 		vacating[node] = sizes[node]
 	}
 	return vacating
+}
+
+// noOfferReason is the not_admitted_reason of a job that waits for a machine to come on offer:
+// no slot of cluster that takes it has room in free, and for one that takes it the runtime's
+// vendor has no machine to rent (domain.NodeSlotNoOfferLabel). "" for any other wait.
+func noOfferReason(exp *domain.Experiment, cluster string, sizes, free map[string]map[string]int64, labelsByNode map[string]map[string]string) string {
+	if _, isFree, misfit := slotFor(exp, cluster, sizes, free, labelsByNode); misfit != "" || isFree {
+		return ""
+	}
+	offerless := map[string]map[string]string{}
+	for node, labels := range labelsByNode {
+		if labels[domain.NodeSlotNoOfferLabel] != "" {
+			offerless[node] = labels
+		}
+	}
+	if _, _, misfit := slotFor(exp, cluster, sizes, free, offerless); misfit != "" {
+		return ""
+	}
+	return fmt.Sprintf("%s: cluster %s has no machine to rent for it now: its provider offers none within the cluster's filters beyond the ones jobs hold, and the job is admitted when one comes on offer",
+		domain.NotAdmittedCapacityUnavailable, cluster)
 }
 
 func waitingForSlotReason(cluster, slot string) string {

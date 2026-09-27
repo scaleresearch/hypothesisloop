@@ -260,6 +260,12 @@ const (
 	// requeued for free while the allowance lasts, then EVICTED and refunded.
 	EvictionCodeUnreachable EvictionReason = "code_unreachable"
 
+	// EvictionNoOffer is a job admitted to a cluster that rents machines and found none to rent
+	// within the time its operator allows (PhaseReasonNoOffer): the offer admission counted was
+	// gone when the runtime asked for it. An infrastructure fault: the job goes back to the queue
+	// and waits there until the cluster reports a machine on offer again.
+	EvictionNoOffer EvictionReason = "no_offer"
+
 	// EvictionClusterWithdrawn is a job requeued because the cluster it was placed on stopped
 	// taking it: the platform ended the sharing, or the cluster's org removed it. The job did
 	// nothing wrong and spends no retry.
@@ -300,7 +306,8 @@ const (
 	// PhaseReasonCodeUnreachable: the job's process ended with ExitCodeCodeUnreachable.
 	PhaseReasonCodeUnreachable = "code_unreachable"
 	// PhaseReasonNoOffer: a runtime that rents machines found none to rent for the job within
-	// the time its operator allows. Another look changes nothing the runtime has not waited for.
+	// the time its operator allows. Another look changes nothing the runtime has not waited for,
+	// so the placement is ended early, as EvictionNoOffer and no fault of the job's.
 	PhaseReasonNoOffer = "no_offer"
 	// PhaseReasonWaitingForOffer and PhaseReasonInstanceStarting say what a job on rented
 	// compute waits for. Neither ends it.
@@ -368,10 +375,23 @@ func (d PhaseDetail) EvictionOfFailure() (EvictionReason, bool) {
 	return EvictionCodeUnreachable, true
 }
 
+// EvictionOfNeverStarting is the eviction a placement is ended with whose runtime reported a
+// reason in NeverSelfHealsPhaseReasons: no_offer with the runtime's sentence where the runtime
+// found no machine, and unschedulable for a job whose own image or configuration cannot start.
+func (d PhaseDetail) EvictionOfNeverStarting() EvictionReason {
+	if d.Reason != PhaseReasonNoOffer {
+		return EvictionUnschedulable
+	}
+	if message := d.detail(); message != "" {
+		return EvictionNoOffer.WithDetail(message)
+	}
+	return EvictionNoOffer
+}
+
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
 // their own, however long a job is left SUBMITTED — a scheduler retry or the runtime's
 // own reconcile loop cannot fix a bad image or a malformed config. A job reporting one of these
-// is evicted EvictionUnschedulable well before StuckPendingTimeout, instead of occupying a
+// is evicted (EvictionOfNeverStarting) well before StuckPendingTimeout, instead of occupying a
 // reservation until the generic timeout catches it.
 var NeverSelfHealsPhaseReasons = map[string]bool{
 	PhaseReasonImagePullFailed: true,

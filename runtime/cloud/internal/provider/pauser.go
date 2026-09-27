@@ -32,6 +32,9 @@ func Capabilities(p Provider) []string {
 	if _, ok := p.(Pauser); ok {
 		found = append(found, CapabilityPause)
 	}
+	if _, ok := p.(Market); ok {
+		found = append(found, CapabilityMarket)
+	}
 	return found
 }
 

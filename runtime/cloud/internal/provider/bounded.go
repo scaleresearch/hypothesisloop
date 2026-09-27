@@ -11,16 +11,38 @@ const CallTimeout = time.Minute
 // Bounded wraps p so that an API which stops answering fails the pass instead of stalling it.
 // What it returns has the capabilities p has.
 func Bounded(p Provider) Provider {
-	if pauser, ok := p.(Pauser); ok {
-		return boundedPauser{bounded{p}, pauser}
+	pauser, pauses := p.(Pauser)
+	market, counts := p.(Market)
+	switch {
+	case pauses && counts:
+		return struct {
+			bounded
+			boundedPauser
+			boundedMarket
+		}{bounded{p}, boundedPauser{pauser}, boundedMarket{market}}
+	case pauses:
+		return struct {
+			bounded
+			boundedPauser
+		}{bounded{p}, boundedPauser{pauser}}
+	case counts:
+		return struct {
+			bounded
+			boundedMarket
+		}{bounded{p}, boundedMarket{market}}
 	}
 	return bounded{p}
 }
 
-type boundedPauser struct {
-	bounded
-	pauser Pauser
+type boundedMarket struct{ market Market }
+
+func (b boundedMarket) Rentable(ctx context.Context, spec Spec, atMost int) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	return b.market.Rentable(ctx, spec, atMost)
 }
+
+type boundedPauser struct{ pauser Pauser }
 
 func (b boundedPauser) Pause(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)

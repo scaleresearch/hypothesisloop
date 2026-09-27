@@ -19,4 +19,8 @@ const (
 	// NodeSlotAcceleratorsLabel is how many accelerators a slot has, taken or free. Free capacity
 	// reads zero for a taken slot, and a job waiting for one still has to be sized against it.
 	NodeSlotAcceleratorsLabel = NodeLabelReservedPrefix + "slot-accelerators"
+	// NodeSlotNoOfferLabel is on a slot no instance holds and no machine can be rented for right
+	// now: the runtime's vendor offers none within the cluster's filters. Such a slot reports
+	// nothing free, and nothing is leaving it.
+	NodeSlotNoOfferLabel = NodeLabelReservedPrefix + "slot-no-offer"
 )

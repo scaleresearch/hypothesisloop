@@ -68,6 +68,8 @@ var faultClasses = map[EvictionReason]FaultClass{
 	// The job's command never started: its code could not be fetched because the platform's git
 	// credential or the repository did not answer.
 	EvictionCodeUnreachable: FaultInfrastructure,
+	// The machine admission counted was rented by someone else before the runtime asked for it.
+	EvictionNoOffer: FaultInfrastructure,
 
 	// --- policy: the platform decided, and the job was fine -----------------------------------
 	EvictionStageCut:               FaultPolicy,

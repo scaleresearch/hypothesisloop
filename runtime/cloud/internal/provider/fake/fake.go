@@ -28,9 +28,13 @@ type Provider struct {
 	calls     map[string]int
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
-	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause" or "Resume"; name is the
-	// instance's, empty for List.
+	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume" or "Rentable"; name
+	// is the instance's, empty for List and Rentable.
 	Fail func(method, name string) error
+
+	// Market, when set, is how many instances of a spec the vendor has to rent right now.
+	// Unset, there is one for every instance asked about.
+	Market func(spec provider.Spec) int
 }
 
 func New() *Provider {
@@ -40,7 +44,20 @@ func New() *Provider {
 var (
 	_ provider.Provider = (*Provider)(nil)
 	_ provider.Pauser   = (*Provider)(nil)
+	_ provider.Market   = (*Provider)(nil)
 )
+
+func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Rentable", ""); err != nil {
+		return 0, err
+	}
+	if p.Market == nil {
+		return atMost, nil
+	}
+	return max(0, min(atMost, p.Market(spec))), nil
+}
 
 func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error) {
 	p.mu.Lock()

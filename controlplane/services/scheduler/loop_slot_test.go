@@ -56,6 +56,14 @@ func (c *slotFixture) take(node string) *slotFixture {
 	return c
 }
 
+// offerless is what the runtime reports for a slot no instance holds and its vendor has no
+// machine to rent for: nothing free, and the label that says why.
+func (c *slotFixture) offerless(node string) *slotFixture {
+	holdSlot(c.accelerators, c.free, c.labels, node)
+	c.labels[node][domain.NodeSlotNoOfferLabel] = "true"
+	return c
+}
+
 // twoH100AndACPU is two 8-cpu slots with one H100 each and one 4-cpu slot without.
 func twoH100AndACPU() *slotFixture {
 	return newSlots().add("h100-0", 1, size(8000, 32, 100)).add("h100-1", 1, size(8000, 32, 100)).add("cpu-0", 0, size(4000, 16, 50))
@@ -795,3 +803,60 @@ func TestAJobWaitingForASlotHoldsNoOtherSlotAgainstBurst(t *testing.T) {
 }
 
 func (*slotStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+// The cluster may rent two H100 machines and its vendor has one on offer. One job is admitted,
+// and the other waits in the queue saying there is no machine to rent: no instance is leaving
+// the offerless slot, so it is promised to no one.
+func TestAJobBeyondWhatTheVendorHasOnOfferWaitsSayingSo(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityBurst, domain.CapacityGuaranteed} {
+		c := twoH100AndACPU().offerless("h100-1")
+		first, second := h100Job("first", "2"), h100Job("second", "2")
+		first.CapacityTier, second.CapacityTier = tier, tier
+		store := &slotStore{queued: []*domain.Experiment{first, second}}
+		l, _ := slotLoop(store, c, fakeObserved{})
+
+		if err := l.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(store.written) != 1 {
+			t.Fatalf("%s: admitted %d jobs to one machine on offer", tier, len(store.written))
+		}
+		for _, exp := range store.queued {
+			if _, admitted := store.written[exp.ID]; admitted {
+				if slot := slotOf(store.written[exp.ID]); slot != "h100-0" {
+					t.Fatalf("%s: %s admitted to %q, which has no offer", tier, exp.ID, slot)
+				}
+				continue
+			}
+			reason := store.reasons[exp.ID]
+			if !strings.HasPrefix(reason, domain.NotAdmittedOutranked) {
+				t.Fatalf("%s: in the tick that took the one offer, %s waits with %q", tier, exp.ID, reason)
+			}
+		}
+
+		// The next tick: the admitted job holds its slot and nothing else is on offer.
+		c = twoH100AndACPU()
+		holder := pinnedTo(sized(t, c, h100Job("holder", "2")), "h100-0")
+		holder.CapacityTier, holder.Status, holder.ClusterName = tier, domain.StatusRunning, rented
+		c.take("h100-0").offerless("h100-1")
+		waiting := h100Job("waiting", "2")
+		waiting.CapacityTier = tier
+		next := &slotStore{queued: []*domain.Experiment{waiting}, running: []*domain.Experiment{holder}}
+		l, _ = slotLoop(next, c, fakeObserved{node: map[string]string{"holder": "h100-0"}})
+		if err := l.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		reason := next.reasons[waiting.ID]
+		if len(next.written) != 0 || len(next.requeued) != 0 || !strings.HasPrefix(reason, domain.NotAdmittedCapacityUnavailable+": ") || !strings.Contains(reason, "no machine to rent") {
+			t.Fatalf("%s: admitted %d, reason %q, want the job waiting for a machine on offer", tier, len(next.written), reason)
+		}
+	}
+}
+
+func TestNothingIsLeavingASlotWithoutAnOffer(t *testing.T) {
+	c := twoH100AndACPU().take("h100-0").offerless("h100-1")
+	vacating := vacatingSlots(rented, c.sizes, c.free, c.labels, nil)
+	if _, leaving := vacating["h100-0"]; !leaving || len(vacating) != 1 {
+		t.Fatalf("vacating %v, want only the slot an instance holds", vacating)
+	}
+}

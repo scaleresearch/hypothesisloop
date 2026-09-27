@@ -22,7 +22,8 @@ reconcile_interval_seconds: 10
 status_interval_seconds: 10
 # How much of a job's output a status push relays.
 log_tail_lines: 100
-# How long a job may wait for a machine to rent before it fails here as no_offer, and how long
+# How long a job may wait for a machine to rent before it goes back to the queue as no_offer, at
+# no cost and with no failure counted against its agent, and how long
 # a rented machine may take to start the job before it is destroyed and another rented. The
 # control plane bounds each wait on its own: it requeues a job whose stuck-pending timeout (300
 # seconds unless the cluster's settings give stuck_pending_timeout_seconds) has passed since
@@ -43,7 +44,10 @@ provider:
 # one job, so the control plane needs no provider settings of its own, and max_instances bounds
 # what can be billed at once. A job is admitted to a shape with exactly the accelerators it asks
 # for and at least the cpu, memory and storage, the smallest such shape first, and is rented and
-# counted at the shape's whole size.
+# counted at the shape's whole size. On a provider that rents out other people's offers (the
+# start line names its capability "market") a node is reported free only while the provider has
+# a machine on offer for it within its settings' filters, so the free capacity the platform shows
+# is what can be rented now and a job beyond it waits in the queue.
 shapes:
   # name is 1 to 16 lowercase letters and digits. accelerator_type is the resource catalog
   # string, written exactly as jobs request it and as it is priced in the control plane's

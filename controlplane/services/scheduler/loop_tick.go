@@ -535,6 +535,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			backlog.record(start, cluster, "guaranteed", exp, shortage)
+			noOffer := noOfferReason(exp, cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster])
 			reason := ""
 			switch {
 			case leaving != "":
@@ -547,6 +548,8 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = misfit
 			case exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
 				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
+			case noOffer != "":
+				reason = noOffer
 			default:
 				fitAtTickStart := domain.Fits(gAvailInitial[cluster], fp) &&
 					topologyFits(nodeAvailAtTickStart[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster], exp)
@@ -682,6 +685,9 @@ func (l *Loop) tick(ctx context.Context) error {
 			reason := misfit
 			if reason == "" && exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, bAvail, multiNodeCapable, registeredClusters, exp) {
 				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
+			}
+			if reason == "" {
+				reason = noOfferReason(exp, cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster])
 			}
 			if reason == "" {
 				claimed, cerr := resolveCache.loadClaimed(ctx)

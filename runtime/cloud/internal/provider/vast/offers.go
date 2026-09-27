@@ -141,6 +141,12 @@ func (h *held) keep(onAccount map[string]bool) {
 	}
 }
 
+func (h *held) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.offers)
+}
+
 // free returns the offers nobody in this process has.
 func (h *held) free(offers []offer) []offer {
 	h.mu.Lock()
@@ -184,6 +190,25 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 	chosen := cheapestPerMachine(open, offerCandidates)
 	p.shuffle(chosen)
 	return chosen, nil
+}
+
+var _ provider.Market = (*Provider)(nil)
+
+// Rentable counts the offers candidates chooses among: the same search, asked for as many offers
+// as are wanted on top of the ones this process holds, which the search goes on listing.
+func (p *Provider) Rentable(ctx context.Context, spec provider.Spec, atMost int) (int, error) {
+	query, err := p.offerQuery(spec)
+	if err != nil {
+		return 0, err
+	}
+	query["limit"] = atMost + p.held.count()
+	var found struct {
+		Offers []offer `json:"offers"`
+	}
+	if _, err := p.call(ctx, http.MethodPost, "/api/v0/bundles/", query, &found); err != nil {
+		return 0, err
+	}
+	return min(atMost, len(p.held.free(found.Offers))), nil
 }
 
 // cheapestPerMachine keeps the first offer of each machine, up to limit machines. offers come

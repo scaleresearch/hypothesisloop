@@ -20,7 +20,7 @@
 //     vendor, and fake implements it.
 //   - A wrapper of a Provider passes on the capabilities of what it wraps (Bounded does).
 //
-// Pauser is the one capability there is. The ones foreseen, to be shaped the same way when
+// Pauser and Market are the capabilities there are. The ones foreseen, to be shaped the same way when
 // something needs them and not before:
 //
 //   - Extender: Extend(ctx, id, until) for a vendor that ends an instance at a lifetime it was

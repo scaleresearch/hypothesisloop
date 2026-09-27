@@ -29,3 +29,17 @@ func TestTheSameNameCanBeRentedTwice(t *testing.T) {
 		t.Fatal("a name outside the contract's rule was rented")
 	}
 }
+
+func TestTheMarketIsWhatATestSaysItIsUpToWhatWasAskedAbout(t *testing.T) {
+	p := New()
+	ctx := context.Background()
+	if count, err := p.Rentable(ctx, provider.Spec{}, 4); err != nil || count != 4 {
+		t.Fatalf("with no market set: %d, %v", count, err)
+	}
+	p.Market = func(spec provider.Spec) int { return spec.AcceleratorCount }
+	for asked, want := range map[int]int{1: 1, 2: 2, 9: 2} {
+		if count, err := p.Rentable(ctx, provider.Spec{AcceleratorCount: 2}, asked); err != nil || count != want {
+			t.Fatalf("asked about %d: %d, %v, want %d", asked, count, err, want)
+		}
+	}
+}

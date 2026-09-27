@@ -87,7 +87,8 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 }
 
 // withoutOffer is what a job is told when there is no machine to rent for it: that it waits,
-// and once it has waited OfferWait since its admission, that this cluster cannot run it.
+// and once it has waited OfferWait since its admission, that this cluster has none for it. The
+// control plane then queues the job again, where it waits for a slot that has an offer.
 func (e *Executor) withoutOffer(exp *domain.Experiment, shape Shape) error {
 	if exp.SubmittedAt == nil {
 		return fmt.Errorf("cloudexec: experiment %s is placed here with no admission time", exp.ID)
@@ -96,7 +97,7 @@ func (e *Executor) withoutOffer(exp *domain.Experiment, shape Shape) error {
 	if time.Since(*exp.SubmittedAt) >= e.offerWait {
 		return &agentexec.Unrunnable{Reason: domain.PhaseReasonNoOffer, Why: fmt.Sprintf("%s in %s of asking", what, e.offerWait)}
 	}
-	return &agentexec.Waiting{Reason: domain.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job fails as no_offer if none comes within %s of its admission", what, e.offerWait)}
+	return &agentexec.Waiting{Reason: domain.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job goes back to the queue as no_offer if none comes within %s of its admission", what, e.offerWait)}
 }
 
 // overdue says i was rented longer ago than Startup and has not started its command.

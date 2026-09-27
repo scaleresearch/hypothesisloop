@@ -249,7 +249,7 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 		zap.String("phase_reason", reason),
 		zap.String("phase_message", message),
 	)
-	w.evictNotYetRunning(ctx, exp, domain.EvictionUnschedulable)
+	w.evictNotYetRunning(ctx, exp, domain.PhaseDetail{Reason: reason, Message: message}.EvictionOfNeverStarting())
 }
 
 // evictNotYetRunning ends a job the lifecycle never advanced to RUNNING, whatever prevented it.

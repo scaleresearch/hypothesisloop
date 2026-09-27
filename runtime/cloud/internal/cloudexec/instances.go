@@ -79,6 +79,8 @@ type view struct {
 	instances []instance
 	unnamed   []instance
 	outputs   map[string]output
+	// rentable is Executor.rentable's answer for this view, nil until it is asked.
+	rentable map[string]int
 }
 
 // output is the end of one instance's output, or why it could not be read.

@@ -60,3 +60,17 @@ func TestAJobWhoseOwnCommandFailedIsFailed(t *testing.T) {
 		t.Fatalf("requeued %q, finished %q", store.requeuedReasons, store.finished)
 	}
 }
+
+func TestAJobThatFoundNoMachineToRentGoesBackToTheQueue(t *testing.T) {
+	said := "no machine to rent for shape rtx4090 in 3m0s of asking"
+	store := &lifecycleStore{infraCeiling: 3}
+	backend := &scaleUpBackend{phase: workload.JobPhasePending, reason: domain.PhaseReasonNoOffer, message: said}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
+
+	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != "no_offer: "+said || len(store.terminalReasons) != 0 {
+		t.Fatalf("requeued %q, terminal %q", store.requeuedReasons, store.terminalReasons)
+	}
+}

@@ -69,9 +69,11 @@ type Executor struct {
 	logTailLines int
 	shapes       []Shape
 	provider     provider.Provider
-	offerWait    time.Duration
-	startup      time.Duration
-	pass         *view
+	// market is the provider's Market capability, nil for a vendor that has none.
+	market    provider.Market
+	offerWait time.Duration
+	startup   time.Duration
+	pass      *view
 	// undestroyed is the instances a destroy failed for since the process started, by id with
 	// their names. It is only what Leave asks for again: each pass finds them anew in the
 	// vendor's list, and a process that starts without it loses nothing. The executor of every
@@ -100,14 +102,17 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.Provider == nil {
 		return nil, fmt.Errorf("cloudexec: Provider is required")
 	}
+	rented := provider.Bounded(cfg.Provider)
+	market, _ := rented.(provider.Market)
 	return &Executor{
+		market:       market,
 		clusterID:    cfg.ClusterID,
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,
 		jobImage:     cfg.JobImage,
 		logTailLines: cfg.LogTailLines,
 		shapes:       append([]Shape(nil), cfg.Shapes...),
-		provider:     provider.Bounded(cfg.Provider),
+		provider:     rented,
 		offerWait:    cfg.OfferWait,
 		startup:      cfg.Startup,
 		undestroyed:  map[string]string{}, undestroyedMu: &sync.Mutex{},

@@ -71,6 +71,10 @@ func TestConformanceGPU(t *testing.T) {
 	providertest.Run(t, conformanceProvider(t, []Accelerator{{Product: product, GPUName: gpuName}}), opts)
 }
 
+func TestConformanceMarket(t *testing.T) {
+	providertest.RunMarket(t, conformanceProvider(t, nil), conformanceOptions())
+}
+
 func TestConformanceHold(t *testing.T) {
 	if os.Getenv("VAST_CONFORMANCE_HOLD") == "" {
 		t.Skip("VAST_CONFORMANCE_HOLD is not set")
