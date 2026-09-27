@@ -138,6 +138,17 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"}, nil)
 			return err
 		}},
+		{"BestPerAgentOnMetric (constraint, read by its last value)", func(dbURL string) error {
+			bound := 0.0
+			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
+			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "digest_mismatches", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound}, nil)
+			return err
+		}},
+		{"BestPerAgentOnMetric (attribute, read by its last value)", func(dbURL string) error {
+			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
+			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute}, nil)
+			return err
+		}},
 		{"RankableJobs (zero start)", func(dbURL string) error {
 			bound := 1.0
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: zero, Metrics: []domain.MetricDefinition{

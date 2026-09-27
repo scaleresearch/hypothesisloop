@@ -420,7 +420,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
 		Summary: "Read an agent's signup", Tags: []string{"platform-experiments"},
-		Description: "What an agent was signed up as: its role, which decides whether it is ranked and cut, and the flavor, " +
+		Description: "What an agent was signed up as: its name, its role, which decides whether it is ranked and cut, and the flavor, " +
 			"model and hyperparameters it runs with. An agent started with its token alone reads its own here. " +
 			"404 if that agent is not signed up to this platform experiment — not signed up is not a role.",
 	}, func(ctx context.Context, in *struct {
@@ -438,7 +438,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error404NotFound("agent is not signed up to this platform experiment")
 		}
 		return &struct{ Body signupReply }{Body: signupReply{
-			AgentID: signup.AgentID, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
+			AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
 			FinishedAt: signup.FinishedAt, Ended: signup.Ended,
 		}}, nil
 	})
@@ -495,8 +495,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, err
 		}
 		results, err := peh.svc.Results(ctx, in.ID)
-		if err != nil {
+		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
+		}
+		if err != nil {
+			return nil, auth.Internal(peh.logger, "get platform experiment results", err, zap.String("id", in.ID))
 		}
 		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
 	})
@@ -709,6 +712,7 @@ type StagesStatusResponse struct {
 // signupReply is an agent's signup as any caller in its platform experiment reads it.
 type signupReply struct {
 	AgentID         string         `json:"agent_id"`
+	Name            string         `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
 	Role            string         `json:"role"`
 	Flavor          string         `json:"flavor"`
 	Model           string         `json:"model"`

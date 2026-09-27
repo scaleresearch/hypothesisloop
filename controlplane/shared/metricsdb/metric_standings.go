@@ -100,23 +100,25 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 //   - The window is the platform experiment's own lifetime, never a constant. A fixed bound made
 //     an agent whose best result was recorded earlier read as "no data", which sorts to the bottom
 //     of the cut order — eliminated for having peaked early.
-//   - min/max_over_time, not a bare selector: Pushgateway stores only the latest pushed value per
+//   - A range function, not a bare selector: Pushgateway stores only the latest pushed value per
 //     label set, so recovering the historical best needs the range.
 //   - Grouped by metric_basis, never collapsed out. A rescaled/non-"raw" value blended into the
 //     same aggregation as a raw one is the scale mismatch that made a ~20% "win" actually ~2x
 //     worse. Non-raw agents are reported separately, never ranked.
 //
 // job_id is in the grouping so the winning value carries the job that produced it (and with it the
-// code ref). It does not change who wins: the per-agent best is still the same direction-aware
-// aggregation, just taken over each agent's per-job bests.
+// code ref). Each job is read by the value its metric's role decides
+// (domain.MetricDefinition.JobValueRule), and the agent's best is the best of those in the
+// metric's direction.
 func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
 	rankable, err := RankableJobs(ctx, dbURL, pe, completed)
 	if err != nil {
 		return nil, nil, err
 	}
-	agg := metric.JobValueRule()
-	promQL := fmt.Sprintf(`%s by (agent_id, metric_basis, job_id) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
-		agg, agg, ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+	// The job value rule names a range function (last_over_time), and last is no aggregation
+	// operator. Each (agent, basis, job) is one series, so the outer aggregation only drops labels.
+	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+		metric.JobValueRule(), ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: %w", metric.Key, err)

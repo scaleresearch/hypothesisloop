@@ -197,3 +197,43 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 		t.Errorf("unrankable = %v, want %v", why, want)
 	}
 }
+
+// A constraint and an attribute are read by each job's last value, and `last` is a range function
+// only: `last by (...)` is no PromQL, and the metrics store refused the whole results read on it.
+func TestBestPerAgentOnAConstraintOrAttributeReadsEachJobsLastValue(t *testing.T) {
+	bound := 0.0
+	for _, metric := range []domain.MetricDefinition{
+		{Key: "digest_mismatches", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
+		{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute},
+	} {
+		if metric.JobValueRule() != domain.JobValueLast {
+			t.Fatalf("%s is read by %q, want its last value", metric.Key, metric.JobValueRule())
+		}
+		var captured []string
+		server := promqlMockServer(t, &captured)
+		pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
+		if _, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, nil); err != nil {
+			t.Fatalf("%s: %v (sent %v)", metric.Key, err, captured)
+		}
+		server.Close()
+		want := `max by (agent_id, metric_basis, job_id) (last_over_time(experiment_metric_value{platform_experiment_id="pe-1", metric_name="` + metric.Key + `"}[`
+		if len(captured) != 1 || !strings.HasPrefix(captured[0], want) {
+			t.Fatalf("%s: sent %v, want one query starting %s", metric.Key, captured, want)
+		}
+	}
+
+	body := `{"status":"success","data":{"resultType":"vector","result":[` +
+		`{"metric":{"agent_id":"a1","metric_basis":"raw","job_id":"job-1"},"value":[1,"3"]},` +
+		`{"metric":{"agent_id":"a1","metric_basis":"raw","job_id":"job-2"},"value":[1,"0"]}]}}`
+	server, _ := vectorServer(t, body)
+	defer server.Close()
+	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
+	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe,
+		domain.MetricDefinition{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute}, allCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := best["a1"]; got.Value != 0 || got.ExperimentID != "job-2" {
+		t.Fatalf("a1 best = %+v, want job-2 at 0: the lowest of its jobs' last values", got)
+	}
+}

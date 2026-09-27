@@ -76,7 +76,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 		return nil, err
 	}
 	if pe == nil {
-		return nil, fmt.Errorf("not_found")
+		return nil, ErrPlatformExperimentNotFound
 	}
 
 	out := &PlatformExperimentResults{
