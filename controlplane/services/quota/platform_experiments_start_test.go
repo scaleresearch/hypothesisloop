@@ -2,18 +2,19 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// startStore fakes the two calls Start makes and hands the allocation callback a fixed signup
+// startStore fakes the calls a start makes and hands the allocation callback a fixed signup
 // set, so what is under test is the allocation itself rather than the transaction around it.
 // Every other method is inherited from the embedded nil interface and panics if reached.
 type startStore struct {
@@ -30,6 +31,17 @@ func (f *startStore) ListSignupsByRole(_ context.Context, _ string, role domain.
 		return nil, fmt.Errorf("asked for the agents of role %s", role)
 	}
 	return f.baselines, nil
+}
+
+func (f *startStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
+	signups := []domain.AgentSignup{{AgentID: "ag-planner", Role: domain.SignupRolePlanner}}
+	for _, agentID := range f.baselines {
+		signups = append(signups, domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline})
+	}
+	for _, p := range f.participants {
+		signups = append(signups, domain.AgentSignup{AgentID: p.AgentID, Role: domain.SignupRoleCompetitor})
+	}
+	return signups, nil
 }
 
 func (f *startStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
@@ -62,9 +74,9 @@ func startWithDefault(t *testing.T, defaultTier domain.QuotaTier, participants .
 	svc := newSignupTestService(t, store)
 	svc.cfg = domain.QuotaConfig{BurstFraction: 0.5}
 
-	quotas, err := svc.Start(context.Background(), "pe-1")
+	quotas, err := svc.start(context.Background(), store.pe, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("Start: %v", err)
+		t.Fatalf("start: %v", err)
 	}
 	byAgent := make(map[string]*domain.AgentQuota, len(quotas))
 	for _, q := range quotas {
@@ -157,76 +169,110 @@ func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *tes
 			{AgentID: "ghost", AgentExists: false},
 		},
 	}
-	if _, err := newSignupTestService(t, store).Start(context.Background(), "pe-1"); err == nil {
+	if _, err := newSignupTestService(t, store).start(context.Background(), store.pe, time.Now().UTC()); err == nil {
 		t.Fatal("Start succeeded with an unresolvable signup, want an error — the run would begin with that agent holding no quota and no way to get one")
 	}
 }
 
-// A platform experiment started on a baseline nobody had measured, or on none: its researchers
-// were ranked against a number each of them invented. It starts only with one declared, when a
-// person starts it and when the platform does at its start time, and waits for one until then.
-func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
-	undeclared := func() *domain.PlatformExperiment {
-		return &domain.PlatformExperiment{
-			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, StartsAt: time.Now().Add(-time.Minute),
-			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
-		}
+// reasonOf is the reason code of a refusal, empty for anything else.
+func reasonOf(err error) string {
+	var refused *api.Refusal
+	if errors.As(err, &refused) {
+		return refused.Reason
 	}
-	store := &sweptStore{startStore: startStore{pe: undeclared(), participants: []db.StartParticipant{participant("agent-1", "")}}}
-	svc := newSignupTestService(t, store)
+	return ""
+}
 
-	_, err := svc.Start(context.Background(), "pe-1")
-	if err == nil || !strings.HasPrefix(err.Error(), "baseline_required: ") || store.started != 0 {
-		t.Fatalf("starting without a baseline: got = %v with %d starts, want baseline_required and nothing started", err, store.started)
-	}
-	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 0 || store.signupsRead != 0 {
+// A platform experiment started on a baseline nobody had measured, or on none: its researchers
+// were ranked against a number each of them invented. The platform starts it only with one
+// declared, and until then it waits and says so.
+func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
+	store := &sweptStore{startStore: startStore{participants: []db.StartParticipant{participant("agent-1", "")}, pe: &domain.PlatformExperiment{
+		ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, StartsAt: time.Now().Add(-time.Minute),
+		Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+	}}}
+	svc := newSignupTestService(t, store)
+	ctx := context.Background()
+
+	if err := svc.SweepAutoStart(ctx); err != nil || store.started != 0 {
 		t.Fatalf("the sweep past starts_at without a baseline: %v, %d starts, want it left to wait", err, store.started)
+	}
+	if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != "baseline_required" {
+		t.Fatalf("an open experiment without a baseline: status_reason = %+v, %v, want baseline_required", store.pe.StatusReason, err)
 	}
 
 	store.pe.BaselineJobID = "job-baseline"
-	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 1 {
-		t.Fatalf("the sweep once a baseline is declared: %v, %d starts, want it started", err, store.started)
+	if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason.Reason != "starting" {
+		t.Fatalf("with its baseline declared: status_reason = %+v, %v, want starting", store.pe.StatusReason, err)
 	}
-	if quotas, err := svc.Start(context.Background(), "pe-1"); err != nil || len(quotas) != 1 || quotas[0].AgentID != "agent-1" {
-		t.Fatalf("starting with a baseline: got = %+v, %v, want the researcher's share", quotas, err)
+	if err := svc.SweepAutoStart(ctx); err != nil || store.started != 1 {
+		t.Fatalf("the sweep once a baseline is declared: %v, %d starts, want it started", err, store.started)
 	}
 }
 
-// An experiment that states no starts_at has no moment of its own: with its baseline declared it
-// waits for whoever starts it, which is what its coordinator is briefed to tell the owner.
-func TestAnExperimentWithoutAStartTimeIsStartedByACallAndNeverByTheSweep(t *testing.T) {
-	store := &sweptStore{startStore: startStore{
-		pe: &domain.PlatformExperiment{
+// An experiment that stated no starts_at once waited for a call nothing announced: a direct API
+// user polled for baseline_job_id and its coordinator wrote that the run was proceeding. The
+// platform starts every run, at starts_at or at once without one, and what stops it is read on
+// the experiment.
+func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *testing.T) {
+	declared := func() *sweptStore {
+		return &sweptStore{startStore: startStore{participants: []db.StartParticipant{participant("agent-1", "")}, pe: &domain.PlatformExperiment{
 			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline",
 			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
-		},
-		participants: []db.StartParticipant{participant("agent-1", "")},
-	}}
-	svc := newSignupTestService(t, store)
-	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 0 {
-		t.Fatalf("the sweep with a baseline and no starts_at: %v, %d starts, want it left to its owner", err, store.started)
+		}}}
 	}
-	if quotas, err := svc.Start(context.Background(), "pe-1"); err != nil || len(quotas) != 1 || store.started != 1 {
-		t.Fatalf("its owner's start: got = %+v, %v, want it started", quotas, err)
+	ctx := context.Background()
+
+	store := declared()
+	if err := newSignupTestService(t, store).SweepAutoStart(ctx); err != nil || store.started != 1 {
+		t.Fatalf("the sweep with a baseline and no starts_at: %v, %d starts, want it started", err, store.started)
+	}
+
+	for name, c := range map[string]struct {
+		change func(*sweptStore)
+		reason string
+	}{
+		"a starts_at still ahead":      {func(f *sweptStore) { f.pe.StartsAt = time.Now().Add(time.Hour) }, "starts_at_ahead"},
+		"no researcher signed up":      {func(f *sweptStore) { f.participants, f.baselines = nil, []string{"ag-baseline"} }, "no_researchers"},
+		"a researcher lost to a start": {func(f *sweptStore) { f.lost = true }, ""},
+	} {
+		store := declared()
+		c.change(store)
+		svc := newSignupTestService(t, store)
+		if err := svc.SweepAutoStart(ctx); err != nil {
+			t.Fatalf("%s: the sweep: got = %v, want it to pass over the experiment", name, err)
+		}
+		if _, err := svc.start(ctx, store.pe, time.Now().UTC()); err == nil || (c.reason != "" && reasonOf(err) != c.reason) {
+			t.Errorf("%s: start: got = %v, want refused %s", name, err, c.reason)
+		}
+		if c.reason == "" {
+			continue
+		}
+		if store.started != 0 {
+			t.Errorf("%s: %d starts reached the store, want none", name, store.started)
+		}
+		if err := svc.Describe(ctx, store.pe); err != nil || store.pe.StatusReason == nil || store.pe.StatusReason.Reason != c.reason {
+			t.Errorf("%s: status_reason = %+v, %v, want %s", name, store.pe.StatusReason, err, c.reason)
+		}
 	}
 }
 
 // sweptStore is startStore with what the sweep reads, counting the starts that got through.
 type sweptStore struct {
 	startStore
-	started, signupsRead int
+	started int
+	// lost has the start find the experiment no longer open.
+	lost bool
 }
 
 func (f *sweptStore) ListPlatformExperimentsByStatus(context.Context, domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
 	return []*domain.PlatformExperiment{f.pe}, nil
 }
 
-func (f *sweptStore) ListSignups(context.Context, string) ([]string, error) {
-	f.signupsRead++
-	return []string{"agent-1"}, nil
-}
-
 func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
+	if f.lost {
+		return false, nil, nil
+	}
 	f.started++
 	return f.startStore.StartPlatformExperimentTx(ctx, id, quotasFor)
 }
@@ -257,10 +303,10 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 		}}
 		svc := newSignupTestService(t, store)
 		svc.metricsDBURL = metrics.URL
-		quotas, err := svc.Start(context.Background(), "pe-1")
+		quotas, err := svc.start(context.Background(), store.pe, time.Now().UTC())
 		metrics.Close()
 		if want == 0 {
-			if err == nil || !strings.Contains(err.Error(), "measuring the baseline spent the whole budget") {
+			if reasonOf(err) != "budget_spent" {
 				t.Errorf("start after the baseline spent %v of 100: err = %v, want it refused as spent", spent, err)
 			}
 			continue

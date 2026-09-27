@@ -152,8 +152,15 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testin
 	}
 
 	// max_agents counts the researchers that joined, so it is never set under them.
+	// What a declared experiment still waits for is read on it.
 	store, patch = declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
+	if code, out := patch(map[string]any{"budget_accelerator_hours": 8}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "no_researchers" {
+		t.Errorf("a declared experiment nobody joined: got = %d %v, want status_reason no_researchers", code, out["status_reason"])
+	}
 	store.researchers = []string{"ag-1", "ag-2"}
+	if code, out := patch(map[string]any{"budget_accelerator_hours": 9}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "starting" {
+		t.Errorf("a declared experiment with its researchers: got = %d %v, want status_reason starting", code, out["status_reason"])
+	}
 	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_researchers" || store.created[0].MaxAgents != 2 {
 		t.Errorf("max_agents under the researchers that joined: got = %d %v, want 409 max_agents_below_researchers and nothing changed", code, out)
 	}

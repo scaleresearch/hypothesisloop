@@ -169,7 +169,7 @@ type CreatePlatformExperimentRequest struct {
 	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"` // metric keys jobs must emit
 	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
-	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When the platform starts it on its own. Left out, it starts when POST /platform-experiments/{id}/start is called and at no time of its own."`
+	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"The earliest moment the platform starts the run. Left out, or past, it starts once the baseline is declared."`
 	EndsAt                    time.Time                 `json:"ends_at" required:"false" doc:"When it closes, at most quota.max_platform_experiment_days after it starts. State this or duration_hours, one of the two: both, or neither, answers 422."`
 	DurationHours             float64                   `json:"duration_hours,omitempty" doc:"How long it lasts, in place of ends_at: it closes this many hours after starts_at, or after this create when starts_at is left out."`
 	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default

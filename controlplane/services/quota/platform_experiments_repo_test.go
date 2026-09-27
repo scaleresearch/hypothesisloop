@@ -160,6 +160,14 @@ func (s *createdStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 
 func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
 
+func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
+	signups := make([]domain.AgentSignup, len(s.researchers))
+	for i, agentID := range s.researchers {
+		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
+	}
+	return signups, nil
+}
+
 func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ domain.PlatformExperimentStatus) error {
 	for i, stored := range s.created {
 		if stored.ID == pe.ID {

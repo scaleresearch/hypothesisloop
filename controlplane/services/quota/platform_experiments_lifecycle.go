@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -324,7 +325,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 	}
 	if !inserted {
 		// The insert is guarded on the experiment still being open, so this is either a
-		// concurrent signup of the same agent or a Start that committed since the reads above.
+		// concurrent signup of the same agent or a start that committed since the reads above.
 		already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
 		if err != nil {
 			return fmt.Errorf("platform_experiments.Signup: %w", err)
@@ -359,41 +360,73 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 	return nil
 }
 
-// Start transitions an experiment to running and allocates per-agent quotas.
-func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*domain.AgentQuota, error) {
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if pe == nil {
-		return nil, fmt.Errorf("not_found")
-	}
-	if pe.Status != domain.PlatformExpOpen {
-		return nil, fmt.Errorf("invalid_transition: experiment is %s, expected open", pe.Status)
-	}
+// notStartable says why the open platform experiment pe is not started at now, as a refusal whose
+// reason is what the experiment answers as its status_reason, or nil when it is to be started.
+// With no refusal it returns what the researchers share (RunBudget).
+func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) (float64, error) {
 	// Every researcher starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
 	if pe.BaselineJobID == "" {
-		return nil, fmt.Errorf("baseline_required: platform experiment %s has no baseline: an agent of role baseline measures it with one job while the experiment is open, and it is declared with PATCH baseline_job_id (hl platform-experiments update --baseline-job)", pe.ID)
+		return 0, api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline: an agent of role baseline measures it with one job while the experiment is open, and it is declared with PATCH baseline_job_id (hl platform-experiments update --baseline-job). The platform starts the run once it is declared", pe.ID))
 	}
+	if pe.StartsAt.After(now) {
+		return 0, api.Refuse(http.StatusConflict, "starts_at_ahead", fmt.Sprintf("platform experiment %s has its baseline and starts at its starts_at, %s", pe.ID, pe.StartsAt.UTC().Format(time.RFC3339)))
+	}
+	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+	if err != nil {
+		return 0, fmt.Errorf("platform_experiments.notStartable: %w", err)
+	}
+	if !slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.SharesBudget() }) {
+		return 0, noResearchers(pe.ID)
+	}
+	runBudget, err := s.RunBudget(ctx, pe)
+	if err != nil {
+		return 0, err
+	}
+	if runBudget <= 0 {
+		return 0, api.Refuse(http.StatusConflict, "budget_spent", fmt.Sprintf("measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share: its owner raises budget_accelerator_hours", pe.BudgetAcceleratorHours))
+	}
+	return runBudget, nil
+}
 
+func noResearchers(id string) error {
+	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with POST /platform-experiments/%s/agents, and the platform starts the run", id, id))
+}
+
+// Describe sets on an open pe why it is not running yet (StatusReason).
+func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment) error {
+	if pe.Status != domain.PlatformExpOpen {
+		return nil
+	}
+	_, err := s.notStartable(ctx, pe, time.Now().UTC())
+	var refused *api.Refusal
+	switch {
+	case errors.As(err, &refused):
+		pe.StatusReason = &domain.StatusReason{Reason: refused.Reason, Message: refused.Message}
+	case err != nil:
+		return err
+	default:
+		pe.StatusReason = &domain.StatusReason{Reason: "starting", Message: "the baseline is declared and the platform starts the run within a minute"}
+	}
+	return nil
+}
+
+// start makes the open pe running and allocates each agent that shares the budget its quota. It
+// answers the refusal of notStartable when pe is not to be started.
+func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]*domain.AgentQuota, error) {
+	// Read before the transaction, which must issue no query of its own.
+	runBudget, err := s.notStartable(ctx, pe, now)
+	if err != nil {
+		return nil, err
+	}
 	// Only the first stage's share of the budget is released now; each later stage releases its
 	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
 	// exhausting the whole budget before the ladder has cut anyone.
 	exploreFrac := pe.Stages[0].LengthPct / 100.0
-	now := time.Now().UTC()
-	// Read before the transaction, which must issue no query of its own.
-	runBudget, err := s.RunBudget(ctx, pe)
-	if err != nil {
-		return nil, err
-	}
-	if runBudget <= 0 {
-		return nil, fmt.Errorf("budget_spent: measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share", pe.BudgetAcceleratorHours)
-	}
 
-	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, id, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {
+	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, func(participants []db.StartParticipant) ([]*domain.AgentQuota, error) {
 		if len(participants) == 0 {
-			return nil, fmt.Errorf("no_agents: cannot start with zero sign-ups")
+			return nil, noResearchers(pe.ID)
 		}
 		// Every signed-up agent participates or the start fails. Skipping the ones that could not
 		// be resolved used to mean a transient database error permanently disinherited an agent:
@@ -402,7 +435,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		totalBonusFraction := 0.0
 		for i, p := range participants {
 			if !p.AgentExists {
-				return nil, fmt.Errorf("platform_experiments.Start: agent %s is signed up but does not exist", p.AgentID)
+				return nil, fmt.Errorf("platform_experiments.start: agent %s is signed up but does not exist", p.AgentID)
 			}
 			if p.HasTop3 {
 				bonuses[i] = s.cfg.Top3BonusFraction
@@ -412,7 +445,6 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 
 		allocated := make([]*domain.AgentQuota, 0, len(participants))
 		for i, p := range participants {
-			agentID := p.AgentID
 			acceleratorGuaranteed, acceleratorBurst := domain.AllocateQuota(
 				runBudget*exploreFrac, len(participants), bonuses[i], totalBonusFraction, s.cfg,
 			)
@@ -423,8 +455,8 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 				domain.ResolveQuotaTier(p.QuotaTierOverride, pe.DefaultQuotaTier), acceleratorGuaranteed, acceleratorBurst)
 			allocated = append(allocated, &domain.AgentQuota{
 				ID:                         uuid.New().String(),
-				AgentID:                    agentID,
-				PlatformExperimentID:       id,
+				AgentID:                    p.AgentID,
+				PlatformExperimentID:       pe.ID,
 				GuaranteedAcceleratorHours: acceleratorGuaranteed,
 				BurstAcceleratorHours:      acceleratorBurst,
 				CreatedAt:                  now,
@@ -436,7 +468,7 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 		return nil, err
 	}
 	if !started {
-		return nil, fmt.Errorf("invalid_transition: experiment is no longer open")
+		return nil, invalidTransition("platform experiment %s is no longer open", pe.ID)
 	}
 	for _, q := range quotas {
 		s.logger.Info("quota allocated",
@@ -532,40 +564,28 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	return nil
 }
 
-// SweepAutoStart starts every Open platform experiment whose StartsAt has passed, has a declared
-// baseline and has at least one sign-up. One without a baseline waits for it, until SweepExpired
-// closes it at its BaselineDue. Without this, an operator has to call POST /start by hand the moment
-// starts_at arrives — StartsAt would otherwise be inert metadata, which breaks the case this
-// platform is actually for: agents discovering and running a platform experiment end-to-end with
-// nobody watching the clock for them. A zero StartsAt (unset) is treated as "start immediately
-// on first sign-up" is *not* implied here — Start still requires an explicit call in that case,
-// since there's no scheduled moment to sweep against; only a non-zero, past StartsAt auto-fires.
+// SweepAutoStart starts every open platform experiment that is to be started: its baseline is
+// declared, its starts_at is absent or past, and it has a researcher and budget left for one. It
+// is the one way a run starts. One that is not startable waits, saying why in its status_reason
+// (Describe), until SweepExpired closes it.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
 	if err != nil {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}
 	for _, pe := range pes {
-		if pe.StartsAt.IsZero() || pe.StartsAt.After(now) || pe.BaselineJobID == "" {
+		_, err := s.start(ctx, pe, now)
+		var waiting *api.Refusal
+		if errors.As(err, &waiting) {
 			continue
 		}
-		signedUp, err := s.store.ListSignups(ctx, pe.ID)
 		if err != nil {
-			s.logger.Error("sweep_auto_start: list signups failed",
-				zap.String("platform_experiment_id", pe.ID), zap.Error(err))
-			continue
-		}
-		if len(signedUp) == 0 {
-			continue // wait for at least one sign-up before starting, same rule Start() enforces
-		}
-		if _, err := s.Start(ctx, pe.ID); err != nil {
 			s.logger.Error("sweep_auto_start: start failed",
 				zap.String("platform_experiment_id", pe.ID), zap.Error(err))
 			continue
 		}
-		s.logger.Info("sweep_auto_start: started platform experiment past starts_at",
-			zap.String("platform_experiment_id", pe.ID), zap.Time("starts_at", pe.StartsAt))
+		s.logger.Info("sweep_auto_start: started platform experiment", zap.String("platform_experiment_id", pe.ID))
 	}
 	return nil
 }

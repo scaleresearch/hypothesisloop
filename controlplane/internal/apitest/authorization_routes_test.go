@@ -289,7 +289,6 @@ var routes = []route{
 	{method: "GET", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "PATCH", path: "/platform-experiments/{id}", request: "/platform-experiments/<pe>", body: `{"description":"d"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/signups/{agent_id}", request: "/platform-experiments/<pe>/signups/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "POST", path: "/platform-experiments/{id}/start", request: "/platform-experiments/<pe>/start", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/close", request: "/platform-experiments/<pe>/close", rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/results", request: "/platform-experiments/<pe>/results", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/revise", request: "/platform-experiments/<pe>/revise", body: `{"message":"it must fit one accelerator"}`, rule: scoped(coordinatorAudience, reached)},

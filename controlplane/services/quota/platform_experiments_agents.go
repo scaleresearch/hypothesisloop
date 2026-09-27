@@ -292,7 +292,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present, those of role baseline apart. " +
+		Description: "The only way an agent joins, and only while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +

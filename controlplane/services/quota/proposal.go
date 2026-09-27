@@ -171,7 +171,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator and each researcher, and starts_at is now. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
-			"no researcher's machine is started before, and the platform starts the experiment once the baseline is declared. " +
+			"no researcher's machine is started before, and the platform starts the run once the baseline is declared. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",

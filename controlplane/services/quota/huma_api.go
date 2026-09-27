@@ -152,7 +152,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"max_agents is how many researchers (agents of role competitor, whatever their flavor) may join over its whole life, and counts nobody else: no agent of role baseline, no reviewer, no coordinator. " +
 			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither), and at most the platform's quota.max_platform_experiment_days from starts_at, or from this create without one (422 run_too_long). " +
 			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, and " +
-			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. With no starts_at it starts when it is started. " +
+			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. " +
+			"The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. " +
 			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, " +
 			"and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. " +
 			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
@@ -334,7 +335,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. repository is the code it works on, owner/name on GitHub, " +
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. repository is the code it works on, owner/name on GitHub, " +
 			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
 			"One made from a sentence carries goal, and while it is a draft what its planner proposed (proposal, proposed_at) and what a person asked to change (revisions): " +
 			"a draft with no proposed_at is being planned, one with it waits to be accepted.",
@@ -357,6 +358,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
+		if err := peh.svc.Describe(ctx, pe); err != nil {
+			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
+		}
 		if err := peh.nameActors(ctx, pe); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
@@ -373,7 +377,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
 			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) that already joined, " +
 			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
-			"`baseline_job_id` declares the baseline while the experiment is open, and POST /platform-experiments/{id}/start takes none without one. The job is read from the platform's own records and the declaration refused with 422: " +
+			"`baseline_job_id` declares the baseline while the experiment is open, and the platform starts the run once it is declared: within a minute, or at a starts_at still ahead. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +
 			"brief_without_baseline (the description, as patched, names neither the job nor its code_ref: its BASELINE block does), baseline_missing_metric (a declared metric the job never reported), " +
 			"baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not cover the job's cost once for each of max_agents). " +
@@ -400,7 +404,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, peh.refusal("update platform experiment", err)
 		}
-		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+		answered := *pe
+		if err := peh.svc.Describe(ctx, &answered); err != nil {
+			return nil, peh.refusal("update platform experiment", err)
+		}
+		return &struct{ Body *domain.PlatformExperiment }{Body: &answered}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -427,40 +435,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			AgentID: signup.AgentID, Role: string(signup.Role), Flavor: signup.Flavor, Model: signup.Model, Hyperparameters: signup.Hyperparameters,
 			FinishedAt: signup.FinishedAt, Ended: signup.Ended,
 		}}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "start-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/start",
-		Summary: "Start a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Closes signup and allocates each signed-up agent its quota, so it can only " +
-			"run once and only from status 'open'. Allocation divides the first stage's share of " +
-			"the budget across the agents present at this moment -- an agent that has not signed " +
-			"up by now gets nothing and cannot join later. Fails if nobody has signed up, and with baseline_required until a baseline is declared (PATCH baseline_job_id): " +
-			"an agent of role baseline measures it while the experiment is open, takes no share here, and what it spent is taken from the budget before the shares.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct {
-		Body struct {
-			Status string               `json:"status"`
-			Quotas []*domain.AgentQuota `json:"quotas"`
-		}
-	}, error) {
-		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		quotas, err := peh.svc.Start(ctx, in.ID)
-		if err != nil {
-			return nil, huma.Error400BadRequest(err.Error())
-		}
-		out := &struct {
-			Body struct {
-				Status string               `json:"status"`
-				Quotas []*domain.AgentQuota `json:"quotas"`
-			}
-		}{}
-		out.Body.Status = "running"
-		out.Body.Quotas = quotas
-		return out, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{

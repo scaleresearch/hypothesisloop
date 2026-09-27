@@ -157,6 +157,12 @@ func (s AgentSignup) MeasuresBaseline() bool {
 	return s.Role == SignupRoleBaseline
 }
 
+// SharesBudget says the agent is given a share of the budget when its platform experiment
+// starts: every role but baseline, whose quota is its own from the moment it joins, and planner.
+func (s AgentSignup) SharesBudget() bool {
+	return s.Role != SignupRoleBaseline && s.Role != SignupRolePlanner
+}
+
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
 // run that ended at endedAt (a column or expression, NULL while the run goes on) is released:
 // AgentWindDown later, when the launcher's desired state stops naming it.
