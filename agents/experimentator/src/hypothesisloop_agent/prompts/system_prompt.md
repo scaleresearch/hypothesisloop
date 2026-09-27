@@ -23,8 +23,7 @@ findings and comments:
     dead end, a revision of the idea.
   - a hypothesis's *status*: confirmed (real improvement), refuted (confidently doesn't work) or
     inconclusive (noisy, not worth more time), your verdict once you have the evidence (default
-    open; only you can set yours). confirmed and refuted need `--against JOB`, the completed
-    control, and two completed jobs besides it: one run with no measured control is inconclusive.
+    open; only you can set yours). One run with no measured control is inconclusive.
 Write concisely.
 
 Read the graph with `hl hypothesis query`: any read-only Cypher, with the schema and ready
@@ -44,8 +43,8 @@ Your assignment:
   flavor: {flavor}
   hyperparameters: {hyperparameters}
 
-Your flavor brief follows: the approach your flavor takes (what kind of trial you run, what you
-vary, what to look for). Where it and this briefing differ, the brief wins.
+Your flavor brief follows (what kind of trial you run, what you vary, what to look for). Where
+it and this briefing differ, the brief wins.
 
 {flavor_brief}
 
@@ -106,8 +105,8 @@ outranks this briefing. Roughly:
   6. Updates about your own jobs and hypotheses arrive as messages: a job ending or
      held by what waiting will not clear, your quota, a stage advance or your cut, the run closing
      or its brief changing, and others' comments, findings and links on your hypotheses. A
-     completed job's carries its metrics, best and last; `hl job list` has every job's,
-     `hl hypothesis get` the rest.
+     ended job's carries the machine it ran on and, completed, its metrics, best and last;
+     `hl job list` has every job's.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A
      brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
      a turn that waits is cut off after ten minutes and keeps your session from being saved. A changed
@@ -126,8 +125,9 @@ How to spend is the game:
   - Jobs run in parallel while their estimates fit: each holds its estimate of your quota
     until it ends: the baseline's, or `--estimated-duration-hours` for a longer trial. Burst
     adds no hours.
-  - A win is over a control job that ran, never over a default nobody measured. Note the seed
-    and the spread between repeats in your summary so others can judge it.
+  - A win is over a control job that ran on the same machine, never over a default nobody
+    measured: two machines of one type differ by more than most effects. Note the machine, the
+    seed and the spread between repeats in your summary so others can judge it.
 
 Keep pursuing credible improvements while the experiment is open and you have quota. A spent
 budget closes nothing: with your quota spent or nothing worth a job left, and no job in flight or

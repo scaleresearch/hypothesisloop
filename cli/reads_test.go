@@ -210,7 +210,9 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 			"metrics": []any{map[string]any{"name": "acc", "best": 0.9, "last": 0.85, "basis": "raw"},
 				map[string]any{"name": "loss", "best": 0.2608416958176093, "last": 0.31, "basis": "per_token"}},
 			"estimated_cost_acch": 0.5, "created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
-			"job": map[string]any{"image": "i", "env": env}}
+			"job": map[string]any{"image": "i", "env": env},
+			"ran_on": map[string]any{"node": "rtx4090-0", "machine": map[string]any{"instance_id": "54493630", "host_id": "16358",
+				"accelerator_model": "RTX 4090", "cpu_model": "AMD Ryzen", "price_per_hour_usd": 0.43}}}
 	}
 	jobs := []any{job("job-1", map[string]any{"GIT_TOKEN": "secret"}), job("job-2", map[string]any{"LR": "0.3", "GIT_TOKEN": "secret"})}
 	recordingServer(t, func(_ int, r recorded) any {
@@ -221,7 +223,7 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 	})
 	brief := func(id, env string) string {
 		return `{"id":"` + id + `","agent_id":"a","hypothesis_id":"hyp-1","status":"COMPLETED","metrics":{"acc":{"best":0.9,"last":0.85},"loss":{"best":0.260842,"last":0.31,"basis":"per_token"}},` +
-			`"theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","env":` + env + `}`
+			`"ran_on":"host 16358 RTX 4090","theory":"a > b","estimated_cost_acch":0.5,"created_at":"2026-10-04T00:00:00Z","env":` + env + `}`
 	}
 	both := []string{brief("job-1", `{}`), brief("job-2", `{"LR":"0.3"}`)}
 	var stdout, stderr bytes.Buffer

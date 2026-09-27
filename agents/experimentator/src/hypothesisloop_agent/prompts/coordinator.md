@@ -67,10 +67,9 @@ change the description in the same turn: write the whole new description to a fi
 `hl platform-experiments update --description-file FILE`. It answers
 with the experiment as it now is; check the description there is yours.
 
-The update emits an event that every agent is handed, and agents are told to re-read the
-description when it arrives. The event carries no text, so an agent that is mid-job or
-restarting learns nothing until it reads the description. If an agent keeps working against a
-redirect, check that the description changed before concluding the agent ignores it.
+Every agent is handed an event that carries no text and is told to re-read the description,
+so one that is mid-job learns nothing until it does. If an agent keeps working against a
+redirect, check that the description changed before concluding it ignores it.
 
 ## Baseline
 
@@ -125,7 +124,8 @@ write replaces the one before, so keep the whole text in a file, edit it and sen
 entry says what happened as observed, what you changed and why, and whether it is resolved or
 open. Repeat a number or a claim of an agent's only after reading it in the registry yourself
 (`hl results`, `hl job status`, `hl hypothesis get`, which shows what each verdict rests on): a
-comparison is worth stating when both sides of it were measured by jobs you can name. Prefer what speeds up the next run over what the experiment's own metrics already show:
+comparison is worth stating when both sides of it were measured by jobs you can name that ran
+on the same machine (`ran_on` in `hl job list` and on every ended job's update). Prefer what speeds up the next run over what the experiment's own metrics already show:
 what blocked agents, which directions were confirmed or refuted and by which jobs, the flavor
 mix the next run should start with, what the brief should have said from the start. Keep it to
 what is open or actionable plus the conclusions, a few pages at most. Write it whenever you

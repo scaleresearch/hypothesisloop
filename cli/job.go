@@ -251,6 +251,7 @@ type jobBrief struct {
 	HypothesisID      string          `json:"hypothesis_id"`
 	Status            string          `json:"status"`
 	Metrics           briefMetrics    `json:"metrics"`
+	Machine           machineTag      `json:"ran_on"`
 	NotAdmittedReason string          `json:"not_admitted_reason"`
 	EvictionReason    string          `json:"eviction_reason"`
 	PhaseDetail       json.RawMessage `json:"phase_detail"`
@@ -284,6 +285,33 @@ func (m briefMetrics) MarshalJSON() ([]byte, error) {
 	}
 	b.WriteByte('}')
 	return b.Bytes(), nil
+}
+
+// machineTag prints where a job ran as one short string: the physical machine of a rented
+// instance, else the node, then the accelerator's model or, without one, the CPU's. Two jobs
+// with different tags are not the same measurement.
+type machineTag struct {
+	Node    string `json:"node"`
+	Machine struct {
+		HostID           string `json:"host_id"`
+		AcceleratorModel string `json:"accelerator_model"`
+		CPUModel         string `json:"cpu_model"`
+	} `json:"machine"`
+}
+
+func (m machineTag) MarshalJSON() ([]byte, error) {
+	if m.Node == "" {
+		return []byte(`""`), nil
+	}
+	tag := "node " + m.Node
+	if m.Machine.HostID != "" {
+		tag = "host " + m.Machine.HostID
+	}
+	model := m.Machine.AcceleratorModel
+	if model == "" {
+		model = m.Machine.CPUModel
+	}
+	return json.Marshal(strings.TrimSpace(tag + " " + model))
 }
 
 // briefJobs is one compact line per job, ending in env: the settings that differ between these
@@ -330,8 +358,9 @@ func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
 One job per line, newest first: ids, status, metrics (best and last of each declared metric),
-reasons, theory, cost and env, the settings that differ between the listed jobs (all of them
-for a job listed alone). hl job status ID
+ran_on (the machine: numbers compare only between jobs that share it), reasons, theory, cost
+and env, the settings that differ between the listed jobs (all of them for a job listed
+alone). hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")

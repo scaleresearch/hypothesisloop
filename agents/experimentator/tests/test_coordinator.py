@@ -120,11 +120,12 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         own = updates.watch_env("http://api", AGENT_TOKEN, "/tmp/w")
         self.assertEqual((own["HL_TOKEN"], updates.watch_command(own)), (AGENT_TOKEN, ["hl", "watch"]))
 
-    async def test_an_ended_job_reaches_a_coordinator_as_it_is_with_no_read_as_an_agent(self):
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", status="{}", stats="{}", quota="{}")
+    async def test_an_ended_job_reaches_a_coordinator_with_its_machine_and_no_read_as_an_agent(self):
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", status='{"id":"exp-1","ran_on":{"node":"n1"}}', stats="{}", quota="{}")
         events = await updates.drain({**os.environ, "HL_TOKEN": COORDINATOR_TOKEN}, command)
-        self.assertEqual([e["kind"] for e in events], ["experiment.status"])
-        self.assertFalse(os.path.exists(command[0] + ".reads"))
+        self.assertEqual(updates.message(events, ""), "Platform updates:\nexperiment.status exp-1 COMPLETED on node n1 by agent-a")
+        with open(command[0] + ".reads") as f:
+            self.assertEqual(f.read(), "job status exp-1\n")
 
     def test_the_last_turn_of_a_coordinator_writes_the_summary_and_pushes_nothing(self):
         self.assertNotIn("job", run._COORDINATOR_SHUTDOWN_PROMPT)

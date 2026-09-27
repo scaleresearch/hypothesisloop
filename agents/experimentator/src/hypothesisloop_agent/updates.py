@@ -4,8 +4,9 @@ The harness runs `hl watch` whenever the agent ends its turn, and briefly after 
 calls: the platform holds whatever happened while the agent worked and replays it from the cursor
 hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
 delivered once whichever of the two reads it. An event is a pointer; a job that ended is handed
-over with its metrics, the count of the agent's jobs still unfinished and the quota it has used,
-read once per batch, so that learning of it costs the agent no call.
+over with the machine it ran on and its metrics, and to its agent with the count of its jobs
+still unfinished and the quota it has used, read once per batch, so that learning of it costs
+no call.
 """
 from __future__ import annotations
 
@@ -81,30 +82,52 @@ def _events(stdout: str) -> list[dict]:
 
 
 _UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
+_ENDED = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
+
+
+def _machine(job: dict) -> str:
+    """Where job ran, short: the physical machine of a rented instance, else the node, then the
+    accelerator's model or, without one, the CPU's. `hl job list` prints the same as ran_on."""
+    ran_on = job.get("ran_on")
+    if not ran_on:
+        return ""
+    machine = ran_on.get("machine") or {}
+    where = f"host {machine['host_id']}" if machine.get("host_id") else f"node {ran_on['node']}"
+    return " ".join(part for part in (where, machine.get("accelerator_model") or machine.get("cpu_model")) if part)
+
+
+def _result(job: dict) -> str:
+    return ", ".join([
+        *(f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
+          for m in job.get("metrics", [])),
+        *([f"ranks nowhere: {job['not_rankable_reason']}"] if job.get("rankable") is False else [])])
 
 
 async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
-    """events, completed with what an agent told of an ended job would otherwise read: each
-    COMPLETED job's declared metrics and, when it ranks nowhere, why, as its event's detail, and
-    two closing events: the count of the agent's unfinished jobs and its quota used. Three hl calls per batch; what one could not
-    read is left out. A coordinator's events are every agent's and are handed over as they are."""
-    agent = _agent(env)
-    if not agent or not any(e["kind"] == "experiment.status" for e in events):
+    """events, completed with what whoever is told of an ended job would otherwise read: the
+    machine it ran on, and for a COMPLETED one its declared metrics and, when it ranks nowhere,
+    why, as its event's detail. An agent's batch closes with two more events, the count of its
+    unfinished jobs and its quota used. One hl call each per batch; what one could not read is
+    left out."""
+    def ended(e: dict) -> bool:
+        return e["kind"] == "experiment.status" and e["value"] in _ENDED
+
+    ids = list(dict.fromkeys(e["subject"] for e in events if ended(e)))
+    if not ids:
         return events
+    _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
+    jobs = {job["id"]: job for job in _events(stdout)}
 
-    def completed(e: dict) -> bool:
-        return e["kind"] == "experiment.status" and e["value"] == "COMPLETED"
+    def told(e: dict) -> dict:
+        job = jobs.get(e["subject"]) if ended(e) else None
+        if job is None:
+            return e
+        return dict(e, machine=_machine(job), **({"detail": _result(job)} if e["value"] == "COMPLETED" else {}))
 
-    ids = list(dict.fromkeys(e["subject"] for e in events if completed(e)))
-    detail = {}
-    if ids:
-        _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
-        detail = {job["id"]: ", ".join([
-            *(f"{m['name']} best {m['best']:.6g} last {m['last']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
-              for m in job.get("metrics", [])),
-            *([f"ranks nowhere: {job['not_rankable_reason']}"] if job.get("rankable") is False else [])])
-            for job in _events(stdout)}
-    events = [dict(e, detail=detail[e["subject"]]) if completed(e) and e["subject"] in detail else e for e in events]
+    events = [told(e) for e in events]
+    agent = _agent(env)
+    if not agent:
+        return events
     _, stdout = await _run_hl([hl, "job", "stats", "--agent", agent], env, lambda: False)
     for stats in _events(stdout):
         counts = stats["by_status"]
@@ -152,8 +175,11 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
 
 
 def event_line(event: dict, agent_id: str) -> str:
-    """One compact line per event: kind, subject, value, detail, and who did it when not the agent."""
+    """One compact line per event: kind, subject, value, detail, the machine an ended job ran on,
+    and who did it when not the agent."""
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
+    if event.get("machine"):
+        parts.append(f"on {event['machine']}")
     actor = event.get("agent_id", "")
     if actor and actor != agent_id:
         parts.append(f"by {actor}")
