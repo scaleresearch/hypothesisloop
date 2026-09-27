@@ -1061,7 +1061,7 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 // --- watch -----------------------------------------------------------------------------------------
 
 func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait]
+	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
@@ -1074,6 +1074,7 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'. A job ends COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
+	wake := fs.String("wake", "", "comma-separated event kinds: return only once an event of one of them arrives, and print ahead of it the others that came before. Until then those are not printed and the next watch gets them again")
 	noWait := fs.Bool("no-wait", false, "print the events already waiting and return at once, without listening for more")
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
@@ -1107,6 +1108,28 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 
+	var waking map[string]bool
+	if *wake != "" {
+		var kinds []struct {
+			Kind string `json:"kind"`
+		}
+		if err := apiclient.New(apiURL, token).Do("GET", "/watch/kinds", nil, &kinds); err != nil {
+			return fail(stderr, err)
+		}
+		known := map[string]bool{}
+		for _, k := range kinds {
+			known[k.Kind] = true
+		}
+		waking = map[string]bool{}
+		for _, kind := range strings.Split(*wake, ",") {
+			if !known[kind] {
+				fmt.Fprintf(stderr, "hl watch: --wake: %q is no event kind; GET /watch/kinds lists them\n", kind)
+				return 2
+			}
+			waking[kind] = true
+		}
+	}
+
 	return watchclient.Run(watchclient.Options{
 		URL:                apiURL,
 		Token:              token,
@@ -1119,6 +1142,7 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 		Until:              *until,
 		Follow:             *follow,
 		NoWait:             *noWait,
+		Wake:               waking,
 		Timeout:            time.Duration(*timeout * float64(time.Second)),
 		Since:              *since,
 		CursorFile:         cursorFile,

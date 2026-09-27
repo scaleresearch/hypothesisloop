@@ -107,7 +107,8 @@ outranks this briefing. Roughly:
      or its brief changing, and others' comments, findings and links on your hypotheses. A
      ended job's carries the machine it ran on and, completed, its metrics, best and last;
      `hl job list` has every job's.
-     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn. A
+     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn:
+     reply in one line and call no tool. A
      brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
      a turn that waits is cut off after ten minutes and keeps your session from being saved. A changed
      brief outranks anything you inferred earlier, so re-read it before your next trial. If you are

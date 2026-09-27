@@ -26,12 +26,25 @@ _RETRY_S = 30.0
 # A drain gives up after this long on a platform that does not answer.
 _DRAIN_S = 5
 
+# The kinds that wake whoever ended its turn, per role, and the one place that says so. An event
+# of another kind stays on the platform (hl watch --wake) and is handed over with the next that
+# wakes, after the next tool call, or once IDLE_NUDGE_S has passed. A coordinator has to learn
+# within seconds that an agent finished, that a job is held by what waiting will not clear, that
+# a stage advanced, that someone wrote a comment, that the brief changed or the run closed. An
+# agent has to learn the same of its own jobs ending. Everything else is read when next acting.
+WAKES = {
+    "coordinator": ("agent.finished", "experiment.blocked", "stage.boundary", "comment.new",
+                    "platform_experiment.status", "platform_experiment.description"),
+    "agent": ("experiment.status", "experiment.blocked", "job.underperforming", "agent.cut", "stage.boundary",
+              "comment.new", "platform_experiment.status", "platform_experiment.description"),
+}
+
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
 IDLE_NUDGE_S = 1800
 IDLE_PROMPT = (
     "No platform updates for 30 minutes. Continue with the most useful work available, or end your "
-    "turn to keep waiting for updates."
+    "turn to keep waiting for updates: reply in one line and call no tool."
 )
 
 
@@ -49,7 +62,7 @@ def _agent(env: dict[str, str]) -> str:
 
 def watch_command(env: dict[str, str]) -> list[str]:
     """An agent watches its own resources. A coordinator watches the whole platform experiment,
-    narrowed to what may need a decision. Both are woken as soon as hl returns a batch."""
+    narrowed to what may need a decision."""
     if _agent(env):
         return HL_WATCH
     return [*HL_WATCH, "--all", "--decisions"]
@@ -158,12 +171,14 @@ async def drain(env: dict[str, str], command: list[str] | None = None) -> list[d
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
                      command: list[str] | None = None, retry_s: float = _RETRY_S) -> list[dict]:
-    """Runs hl watch until it returns events, and returns them. Returns [] once idle_s passes
-    without any, or as soon as stopped() is true. A failed hl watch is retried after retry_s."""
+    """Runs hl watch until an event that wakes this role arrives, and returns it with what waited
+    before it. Once idle_s passes without one, returns what waits, which may be nothing. Returns
+    [] as soon as stopped() is true. A failed hl watch is retried after retry_s."""
     command = command or watch_command(env)
+    waking = [*command, "--wake", ",".join(WAKES["agent" if _agent(env) else "coordinator"])]
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
-        code, stdout = await _run_hl(command, env, stopped)
+        code, stdout = await _run_hl(waking, env, stopped)
         events = _events(stdout)
         if events:
             return await _with_job_state(events, env, command[0])
@@ -171,7 +186,7 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
             deadline = min(give_up, time.monotonic() + retry_s)
             while not stopped() and time.monotonic() < deadline:
                 await asyncio.sleep(min(1.0, retry_s))
-    return []
+    return [] if stopped() else await drain(env, command)
 
 
 def event_line(event: dict, agent_id: str) -> str:

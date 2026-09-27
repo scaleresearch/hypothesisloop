@@ -56,6 +56,20 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(runs(counter), 1)
         self.assertEqual(await updates.next_batch(ENV, lambda: False, 0, command=command), [])
 
+    # A coordinator woken for every job's outcome and again for its finding made 129 model
+    # calls where 35 had done.
+    async def test_only_the_roles_waking_kinds_end_the_wait_and_an_idle_one_is_handed_what_waited(self):
+        command, counter = fake_hl(f"echo \"$*\" >> \"$0.args\"\n[ \"$2\" = --no-wait ] && echo '{COMMENT}'\nexit 0\n")
+        events = await updates.next_batch(ENV, lambda: False, 0.2, command=command)
+        self.assertEqual([e["kind"] for e in events], ["comment.new"])
+        with open(counter.replace(".runs", ".args")) as f:
+            asked = f.read().splitlines()
+        self.assertEqual(asked[0], "watch --wake " + ",".join(updates.WAKES["agent"]))
+        self.assertEqual(asked[-1], "watch --no-wait --timeout 5")
+        self.assertIn("agent.finished", updates.WAKES["coordinator"])
+        self.assertNotIn("experiment.status", updates.WAKES["coordinator"])
+        self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
+
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
         events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)

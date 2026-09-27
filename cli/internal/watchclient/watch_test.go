@@ -558,3 +558,54 @@ func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
 		}
 	}
 }
+
+// A watch with Wake holds an event of another kind back, cursor and all, so the platform still
+// has it for whoever reads next, and hands it over ahead of the event that ends the wait.
+func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
+	defer func(d time.Duration) { settleWindow = d }(settleWindow)
+	settleWindow = 100 * time.Millisecond
+	finding := `{"kind":"finding.new","subject":"hyp-1","position":10,"cursor":10}`
+	finished := `{"kind":"agent.finished","subject":"agent-a","position":11,"cursor":11}`
+	for _, tc := range []struct {
+		frames     []string
+		want       string
+		wantCursor int64
+	}{
+		{[]string{finding}, "", 0},
+		{[]string{finding, finding, finished}, finding + "\n" + finished + "\n", 11},
+	} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ln.Close()
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			req, err := http.ReadRequest(bufio.NewReader(conn))
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+			for _, frame := range tc.frames {
+				_, _ = conn.Write(serverTextFrame(frame))
+			}
+			time.Sleep(2 * time.Second)
+		}()
+
+		cursorFile := filepath.Join(t.TempDir(), "cursor.json")
+		var stdout, stderr bytes.Buffer
+		code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+			Wake: map[string]bool{"agent.finished": true}, Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+		if code != 0 || stdout.String() != tc.want {
+			t.Fatalf("exit code = %d, output = %q, want = %q, stderr = %s", code, stdout.String(), tc.want, stderr.String())
+		}
+		if state, err := loadCursor(cursorFile); err != nil || state.Cursor != tc.wantCursor {
+			t.Errorf("saved cursor: got = %d (%v), want = %d", state.Cursor, err, tc.wantCursor)
+		}
+	}
+}

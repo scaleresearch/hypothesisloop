@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,7 +74,11 @@ type Options struct {
 	// Follow streams until the timeout instead of returning with the first batch.
 	Follow bool
 	// NoWait returns once the events already waiting have been printed.
-	NoWait  bool
+	NoWait bool
+	// Wake, when set, names the kinds that end the wait. An event of another kind is neither
+	// printed nor passed by the cursor until one of these arrives, and then goes out ahead of
+	// it: until then it stays the platform's to replay.
+	Wake    map[string]bool
 	Timeout time.Duration
 	Since   int64
 	// CursorFile, when set, is where the cursor is resumed from and saved to (see cursorState).
@@ -103,6 +108,10 @@ func Run(opts Options) int {
 	}
 	if opts.Experiment == "" && opts.PlatformExperiment == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: one of --experiment or --platform-experiment is required")
+		return UsageExitCode
+	}
+	if opts.Wake != nil && (opts.Until != "" || opts.Follow || opts.NoWait) {
+		fmt.Fprintln(opts.Stderr, "hl watch: --wake goes with none of --until, --follow and --no-wait")
 		return UsageExitCode
 	}
 
@@ -147,6 +156,13 @@ type watch struct {
 	printed  bool
 	settleBy time.Time
 	writeErr error
+	// held are the events a watch with Wake has read and not printed, in the order they came.
+	held []heldEvent
+}
+
+type heldEvent struct {
+	line, identity   string
+	position, cursor int64
 }
 
 func (w *watch) run() int {
@@ -254,35 +270,55 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 		if _, caughtUp := event["subscription"]; caughtUp && w.opts.NoWait {
 			return true
 		}
-		var identity []byte
-		if isEvent {
-			delete(event, "cursor")
-			identity, _ = json.Marshal(event)
-			if _, repeat := w.seen[string(identity)]; repeat {
-				continue
+		if !isEvent {
+			if _, err := fmt.Fprintln(w.opts.Stdout, line); err != nil {
+				w.writeErr = err
+				return true
+			}
+			continue
+		}
+		delete(event, "cursor")
+		identity, _ := json.Marshal(event)
+		if _, repeat := w.seen[string(identity)]; repeat {
+			continue
+		}
+		position, _ := event["position"].(float64)
+		arrived := heldEvent{line: line, identity: string(identity), position: int64(position), cursor: int64(c)}
+		if kind, _ := event["kind"].(string); w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake[kind] {
+			// A reconnect replays what is held, since the cursor has not passed it.
+			if !slices.ContainsFunc(w.held, func(h heldEvent) bool { return h.identity == arrived.identity }) {
+				w.held = append(w.held, arrived)
+			}
+			continue
+		}
+		for _, e := range append(w.held, arrived) {
+			if w.writeErr = w.print(e); w.writeErr != nil {
+				return true
 			}
 		}
-		// The cursor moves past an event only once it is written, so one that was not is replayed.
-		if _, err := fmt.Fprintln(w.opts.Stdout, line); err != nil {
-			w.writeErr = err
-			return true
-		}
-		if isEvent {
-			position, _ := event["position"].(float64)
-			w.seen[string(identity)] = int64(position)
-			if int64(c) > w.cursor {
-				w.cursor = int64(c)
-			}
-			w.printed = true
-			if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
-				w.settleBy = time.Now().Add(settleWindow)
-			}
-		}
+		w.held = nil
 		if w.satisfied != nil && w.satisfied(event) {
 			return true
 		}
 	}
 	return !w.settleBy.IsZero()
+}
+
+// print writes one event and moves the cursor past it. The cursor moves only once the event is
+// written, so one that was not is replayed.
+func (w *watch) print(e heldEvent) error {
+	if _, err := fmt.Fprintln(w.opts.Stdout, e.line); err != nil {
+		return err
+	}
+	w.seen[e.identity] = e.position
+	if e.cursor > w.cursor {
+		w.cursor = e.cursor
+	}
+	w.printed = true
+	if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
+		w.settleBy = time.Now().Add(settleWindow)
+	}
+	return nil
 }
 
 // cursorState is what the cursor file holds: the largest cursor printed, and the identity of each

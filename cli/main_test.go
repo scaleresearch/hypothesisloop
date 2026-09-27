@@ -787,3 +787,14 @@ func TestDataKeyNeedsAnAgentAndAPlatformExperiment(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q, want 2 and the usage", code, stderr.String())
 	}
 }
+
+func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return []any{map[string]any{"kind": "agent.finished"}} })
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("AGENT_ID", "agent-a")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"watch", "--wake", "agent.finished,agent.finnished"}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), `"agent.finnished" is no event kind`) || len(*got) != 1 || (*got)[0].Path != "/watch/kinds" {
+		t.Fatalf("exit %d, stderr %q, requests %+v", code, stderr.String(), *got)
+	}
+}
