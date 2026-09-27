@@ -121,6 +121,21 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 	}
 }
 
+// A planner read "has no quota" as something missing that it was owed.
+func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpDraft, 5)
+	store.signups = []domain.AgentSignup{{AgentID: "pat", Name: "Planner", Role: domain.SignupRolePlanner}}
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingAgent("pat")), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
+
+	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/pat", "")
+	message, _ := out["message"].(string)
+	if code != http.StatusNotFound || out["reason"] != "planner_has_no_quota" || !strings.Contains(message, "a planner submits no job, so it has no quota and needs none") {
+		t.Errorf("got = %d %v, want 404 planner_has_no_quota saying a planner needs none", code, out)
+	}
+}
+
 // A researcher's machine asked for 40 seconds after the start read instance.state requested with
 // nothing beside it, and was taken for a launch that failed.
 func TestAnAgentWhoseMachineIsOnItsWayCarriesInstanceStarting(t *testing.T) {
