@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,8 +400,8 @@ func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 		if evicted := len(reasons) > 0; evicted != tc.wantEvicted {
 			t.Fatalf("%s: evicted = %v, want %v", tc.name, evicted, tc.wantEvicted)
 		}
-		if tc.wantEvicted && reasons[0] != string(domain.EvictionStuckPending) {
-			t.Errorf("%s: reason = %q, want %q", tc.name, reasons[0], domain.EvictionStuckPending)
+		if tc.wantEvicted && (domain.EvictionReason(reasons[0]).Code() != domain.EvictionStuckPending || !strings.Contains(reasons[0], ": admitted and not running within ")) {
+			t.Errorf("%s: reason = %q, want %q and its sentence", tc.name, reasons[0], domain.EvictionStuckPending)
 		}
 	}
 }

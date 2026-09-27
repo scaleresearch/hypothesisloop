@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -72,5 +73,26 @@ func TestAJobThatFoundNoMachineToRentGoesBackToTheQueue(t *testing.T) {
 	}
 	if len(store.requeuedReasons) != 1 || store.requeuedReasons[0] != "no_offer: "+said || len(store.terminalReasons) != 0 {
 		t.Fatalf("requeued %q, terminal %q", store.requeuedReasons, store.terminalReasons)
+	}
+}
+
+// The update about an eviction is its reason: what the runtime said goes into it, where the
+// phase detail alone had it.
+func TestAnEvictionSaysWhatTheRuntimeSaid(t *testing.T) {
+	store := &lifecycleStore{infraCeiling: 3}
+	backend := &scaleUpBackend{phase: workload.JobPhasePending, reason: domain.PhaseReasonImagePullFailed, message: "manifest unknown"}
+	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
+	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.terminalReasons) != 1 || store.terminalReasons[0] != "unschedulable: image_pull_failed: manifest unknown" {
+		t.Fatalf("terminal %q", store.terminalReasons)
+	}
+
+	if got := notRunningInTime(5*time.Minute, domain.PhaseReasonInstanceStarting); got != "admitted and not running within 5m0s, its runtime reporting instance_starting" {
+		t.Fatalf("got %q", got)
+	}
+	if got := notRunningInTime(5*time.Minute, ""); got != "admitted and not running within 5m0s" {
+		t.Fatalf("got %q", got)
 	}
 }

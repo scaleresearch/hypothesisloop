@@ -76,8 +76,17 @@ func (w *JobWatcher) evictIfPastDeadline(ctx context.Context, exp *domain.Experi
 		zap.String("reason", string(reason)),
 		zap.Duration("timeout", timeout),
 	)
-	w.evictNotYetRunning(ctx, exp, reason)
+	w.evictNotYetRunning(ctx, exp, reason.WithDetail(notRunningInTime(timeout, waitingFor)))
 	return nil
+}
+
+// notRunningInTime is the sentence of an eviction at the admission deadline: how long the job was
+// given, and what its runtime last said it waited for.
+func notRunningInTime(timeout time.Duration, waitingFor string) string {
+	if waitingFor == "" {
+		return fmt.Sprintf("admitted and not running within %s", timeout)
+	}
+	return fmt.Sprintf("admitted and not running within %s, its runtime reporting %s", timeout, waitingFor)
 }
 
 // errClusterNotReporting is why a stuck-pending decision is not made this pass: the job's cluster

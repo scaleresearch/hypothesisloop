@@ -12,8 +12,12 @@ func TestAPlacementThatFoundNoMachineIsEndedAsNoOfferAndIsTheEnvironmentsFault(t
 		t.Fatalf("got %q", eviction)
 	}
 	for _, reason := range []string{PhaseReasonImagePullFailed, PhaseReasonConfigError, PhaseReasonInvalidImage} {
-		if eviction := (PhaseDetail{Reason: reason, Message: "x"}).EvictionOfNeverStarting(); eviction.Code() != EvictionUnschedulable || IsInfrastructureFault(eviction) {
+		eviction := PhaseDetail{Reason: reason, Message: "manifest unknown"}.EvictionOfNeverStarting()
+		if eviction != EvictionReason("unschedulable: "+reason+": manifest unknown") || eviction.Code() != EvictionUnschedulable || IsInfrastructureFault(eviction) {
 			t.Fatalf("%s is ended as %q", reason, eviction)
+		}
+		if eviction := (PhaseDetail{Reason: reason}).EvictionOfNeverStarting(); eviction != EvictionReason("unschedulable: "+reason) {
+			t.Fatalf("%s with no message is ended as %q", reason, eviction)
 		}
 	}
 }

@@ -376,16 +376,21 @@ func (d PhaseDetail) EvictionOfFailure() (EvictionReason, bool) {
 }
 
 // EvictionOfNeverStarting is the eviction a placement is ended with whose runtime reported a
-// reason in NeverSelfHealsPhaseReasons: no_offer with the runtime's sentence where the runtime
-// found no machine, and unschedulable for a job whose own image or configuration cannot start.
+// reason in NeverSelfHealsPhaseReasons, with what the runtime said so the update about it says
+// why: "no_offer: <sentence>" where the runtime found no machine, and for a job whose own image
+// or configuration cannot start "unschedulable: <the runtime's reason>: <sentence>".
 func (d PhaseDetail) EvictionOfNeverStarting() EvictionReason {
-	if d.Reason != PhaseReasonNoOffer {
-		return EvictionUnschedulable
+	code, said := EvictionUnschedulable, d.Reason
+	if d.Reason == PhaseReasonNoOffer {
+		code, said = EvictionNoOffer, ""
 	}
 	if message := d.detail(); message != "" {
-		return EvictionNoOffer.WithDetail(message)
+		said = strings.TrimPrefix(said+": "+message, ": ")
 	}
-	return EvictionNoOffer
+	if said == "" {
+		return code
+	}
+	return code.WithDetail(said)
 }
 
 // NeverSelfHealsPhaseReasons is the set of PhaseDetail.Reason values that will not resolve on
