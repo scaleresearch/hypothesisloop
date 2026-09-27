@@ -100,6 +100,14 @@ type fakeGitHub struct {
 	trees      map[string]map[string]string
 	commits    map[string]string
 	gitRefuses string
+	// createRefusal, when set, is how the creation of a repository is answered.
+	createRefusal *createRefusal
+}
+
+type createRefusal struct {
+	status int
+	header http.Header
+	body   map[string]any
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
@@ -330,7 +338,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			body["suspended_at"] = "2026-01-01T00:00:00Z"
 		}
 		f.answer(w, http.StatusOK, body)
-	case r.Method == http.MethodPost && (r.URL.Path == "/user/repos" || (len(segments) == 3 && segments[0] == "orgs" && segments[2] == "repos")):
+	case r.Method == http.MethodPost && len(segments) == 3 && segments[0] == "orgs" && segments[2] == "repos":
 		var body struct {
 			Name     string `json:"name"`
 			Private  bool   `json:"private"`
@@ -343,15 +351,20 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		installation := f.installations[token.installation]
-		// Each kind of account has its own address, and the other one answers as if nothing were there.
-		onItsAccount := (installation.owner != "") == (r.URL.Path == "/user/repos") && (installation.owner != "" || strings.EqualFold(installation.account, segments[1]))
 		switch {
-		case !onItsAccount:
+		case installation.owner != "" || !strings.EqualFold(installation.account, segments[1]):
 			f.refuse(w, http.StatusNotFound, "Not Found")
+		case f.createRefusal != nil:
+			maps.Copy(w.Header(), f.createRefusal.header)
+			f.answer(w, f.createRefusal.status, f.createRefusal.body)
 		case !installation.creates || len(token.permissions) != 0:
+			w.Header().Set("X-Accepted-GitHub-Permissions", "administration=write; repository_creation=write")
 			f.refuse(w, http.StatusForbidden, "Resource not accessible by integration")
 		case f.repos[strings.ToLower(installation.account+"/"+body.Name)] != nil:
-			f.refuse(w, http.StatusUnprocessableEntity, "Repository creation failed.")
+			f.answer(w, http.StatusUnprocessableEntity, map[string]any{
+				"message": "Repository creation failed.",
+				"errors":  []map[string]string{{"resource": "Repository", "code": "custom", "field": "name", "message": "name already exists on this account"}},
+			})
 		case !body.Private || !body.AutoInit:
 			f.t.Errorf("a repository was asked for with private %v and auto_init %v", body.Private, body.AutoInit)
 		default:
@@ -589,13 +602,13 @@ func TestUserInstallationsAreThoseThePersonReachesAndTheirTokenIsRevoked(t *test
 	found, err := client.UserInstallations(ctx, "code-reader", testRedirect)
 	// reader is an admin of Acme, reaches rival as a collaborator on one repository, and has
 	// account id 200, the number rival the organisation has too.
-	want := []Installation{{ID: 100, AccountLogin: "Acme", Controlled: true}, {ID: 200, AccountLogin: "rival"}}
+	want := []Installation{{ID: 100, AccountLogin: "Acme", AccountType: AccountOrganization, Controlled: true}, {ID: 200, AccountLogin: "rival", AccountType: AccountOrganization}}
 	if err != nil || !slices.Equal(found, want) {
 		t.Fatalf("UserInstallations = %+v, %v, want %+v", found, err, want)
 	}
 	// carol is a plain member of Acme and holds her own account.
 	found, err = client.UserInstallations(ctx, "code-carol", testRedirect)
-	want = []Installation{{ID: 100, AccountLogin: "Acme"}, {ID: 300, AccountLogin: "carol", Controlled: true}}
+	want = []Installation{{ID: 100, AccountLogin: "Acme", AccountType: AccountOrganization}, {ID: 300, AccountLogin: "carol", AccountType: AccountUser, Controlled: true}}
 	if err != nil || !slices.Equal(found, want) {
 		t.Fatalf("UserInstallations = %+v, %v, want %+v", found, err, want)
 	}
@@ -673,8 +686,11 @@ func TestAConnectFailsWhenThePersonsTokenCannotBeRevoked(t *testing.T) {
 func TestInstallationIsReadAsTheApp(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	found, err := client.Installation(ctx, 200)
-	if err != nil || *found != (Installation{ID: 200, AccountLogin: "rival"}) {
+	if err != nil || *found != (Installation{ID: 200, AccountLogin: "rival", AccountType: AccountOrganization}) {
 		t.Fatalf("Installation = %+v, %v", found, err)
+	}
+	if found, err := client.Installation(ctx, 300); err != nil || found.AccountType != AccountUser {
+		t.Fatalf("Installation on a person's own account = %+v, %v, want it typed User", found, err)
 	}
 	if _, err := client.Installation(ctx, 999); !errors.Is(err, ErrInstallationGone) {
 		t.Fatalf("an installation that is not the App's: got = %v, want %v", err, ErrInstallationGone)
@@ -689,19 +705,17 @@ func TestInstallationIsReadAsTheApp(t *testing.T) {
 	}
 }
 
-func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *testing.T) {
+func TestARepositoryIsCreatedPrivateOnTheInstallationsOrganisationAndCoveredByIt(t *testing.T) {
 	f, client := newFakeGitHub(t)
-	// Installation 100 is on an organisation, 300 on a person's own account. Neither covers
-	// every repository of its account, and each covers the one it creates.
-	for installation, want := range map[int64]string{100: "Acme/lr-sweep-1a2b3c4d", 300: "carol/lr-sweep-1a2b3c4d"} {
-		created, err := client.CreateRepository(ctx, installation, "lr-sweep-1a2b3c4d", "what it is for", firstFiles)
-		if err != nil || *created != (Repository{FullName: want, Private: true}) {
-			t.Fatalf("CreateRepository on %d = %+v, %v, want %s", installation, created, err, want)
-		}
-		token, err := client.Token(ctx, installation, want, Write)
-		if err != nil || token.Repository != want {
-			t.Fatalf("a token for the new repository: got = %+v, %v", token, err)
-		}
+	// Installation 100 does not cover every repository of its organisation, and covers the one
+	// it creates.
+	const want = "Acme/lr-sweep-1a2b3c4d"
+	created, err := client.CreateRepository(ctx, 100, "lr-sweep-1a2b3c4d", "what it is for", firstFiles)
+	if err != nil || *created != (Repository{FullName: want, Private: true}) {
+		t.Fatalf("CreateRepository = %+v, %v, want %s", created, err, want)
+	}
+	if token, err := client.Token(ctx, 100, want, Write); err != nil || token.Repository != want {
+		t.Fatalf("a token for the new repository: got = %+v, %v", token, err)
 	}
 	for name, tc := range map[string]struct {
 		installation int64
@@ -709,7 +723,7 @@ func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *t
 		arrange      func()
 		want         error
 	}{
-		"a name the account has":                 {100, "lr-sweep-1a2b3c4d", nil, ErrRepositoryExists},
+		"a name the organisation has":            {100, "lr-sweep-1a2b3c4d", nil, ErrRepositoryExists},
 		"a name with an owner in it":             {100, "a/b", nil, ErrInvalidRepository},
 		"an installation that is gone":           {999, "fresh", nil, ErrInstallationGone},
 		"an installation that may not create":    {200, "fresh", nil, ErrCannotCreateRepositories},
@@ -725,6 +739,86 @@ func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *t
 	}
 	if f.repos["acme/fresh"] != nil || f.repos["rival/fresh"] != nil {
 		t.Fatal("a refused create left a repository behind")
+	}
+}
+
+// GitHub creates on a person's own account "for the authenticated user", and an installation
+// token is no user's: it is refused there whatever the installation granted, so it is not asked.
+func TestNoRepositoryIsAskedForOnAPersonsOwnAccount(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	if created, err := client.CreateRepository(ctx, 300, "fresh", "", firstFiles); created != nil || !errors.Is(err, ErrPersonalAccount) {
+		t.Fatalf("CreateRepository on a personal account = %+v, %v, want %v", created, err, ErrPersonalAccount)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "POST ") {
+			t.Fatalf("a personal account was refused after GitHub was asked to write: %v", f.calls)
+		}
+	}
+}
+
+// Each refusal of a create reads as what it is: GitHub answers 403 for a missing permission and
+// for a rate limit alike, and 422 for a taken name and for every other invalid request.
+func TestARefusedCreateIsToldApartByWhatGitHubAnswered(t *testing.T) {
+	accepted := http.Header{"X-Accepted-Github-Permissions": {"administration=write; repository_creation=write"}}
+	nameErrors := func(message string) map[string]any {
+		return map[string]any{"message": "Repository creation failed.", "errors": []map[string]string{{"resource": "Repository", "code": "custom", "field": "name", "message": message}}}
+	}
+	for name, tc := range map[string]struct {
+		refusal createRefusal
+		check   func(error) bool
+	}{
+		"the name is taken": {
+			createRefusal{status: 422, body: nameErrors("name already exists on this account")},
+			func(err error) bool { return errors.Is(err, ErrRepositoryExists) },
+		},
+		"a 422 about something else": {
+			createRefusal{status: 422, body: map[string]any{"message": "Repository creation failed.", "errors": []map[string]string{{"resource": "Repository", "code": "custom", "field": "visibility", "message": "private repositories are disabled"}}}},
+			func(err error) bool {
+				var failed *CreationFailedError
+				return errors.As(err, &failed) && failed.Status == 422 && failed.Message == "Repository creation failed." && !errors.Is(err, ErrRepositoryExists)
+			},
+		},
+		"a 422 about the name that is not a taken one": {
+			createRefusal{status: 422, body: nameErrors("name is too long (maximum is 100 characters)")},
+			func(err error) bool {
+				var failed *CreationFailedError
+				return errors.As(err, &failed) && !errors.Is(err, ErrRepositoryExists)
+			},
+		},
+		"a permission the installation lacks": {
+			createRefusal{status: 403, header: accepted, body: map[string]any{"message": "Resource not accessible by integration"}},
+			func(err error) bool {
+				var notPermitted *CreationNotPermittedError
+				return errors.As(err, &notPermitted) && notPermitted.Accepted == "administration=write; repository_creation=write" && errors.Is(err, ErrCannotCreateRepositories)
+			},
+		},
+		"an organisation GitHub hides from the installation": {
+			createRefusal{status: 404, body: map[string]any{"message": "Not Found"}},
+			func(err error) bool { return errors.Is(err, ErrCannotCreateRepositories) },
+		},
+		"a rate limit with no calls remaining": {
+			createRefusal{status: 403, header: http.Header{"X-Ratelimit-Remaining": {"0"}}, body: map[string]any{"message": "API rate limit exceeded for installation"}},
+			func(err error) bool { return errors.Is(err, ErrRateLimited) },
+		},
+		"a rate limit only the message tells of": {
+			createRefusal{status: 403, header: accepted, body: map[string]any{"message": "Rate Limit Exceeded"}},
+			func(err error) bool {
+				return errors.Is(err, ErrRateLimited) && !errors.Is(err, ErrCannotCreateRepositories)
+			},
+		},
+		"a failure of GitHub's": {
+			createRefusal{status: 500, body: map[string]any{"message": "Server Error"}},
+			func(err error) bool {
+				var failed *CreationFailedError
+				return errors.As(err, &failed) && failed.Status == 500 && failed.Message == "Server Error"
+			},
+		},
+	} {
+		f, client := newFakeGitHub(t)
+		f.createRefusal = &tc.refusal
+		if created, err := client.CreateRepository(ctx, 100, "fresh", "", firstFiles); created != nil || !tc.check(err) {
+			t.Errorf("%s: CreateRepository = %+v, %v", name, created, err)
+		}
 	}
 }
 

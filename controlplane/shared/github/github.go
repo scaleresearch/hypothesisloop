@@ -69,8 +69,12 @@ var (
 	// ErrInvalidRepository reports a name that is not owner/name.
 	ErrInvalidRepository = errors.New("a repository is named owner/name")
 	// ErrCannotCreateRepositories reports an installation that does not let the App create a
-	// repository on its account: it has not granted the permission, or the account forbids it.
+	// repository on its organisation: it has not granted the permission, or the organisation
+	// forbids it. CreationNotPermittedError carries it.
 	ErrCannotCreateRepositories = errors.New("the installation does not let the GitHub App create repositories")
+	// ErrPersonalAccount reports an installation on a person's own account, where GitHub lets no
+	// App installation create a repository.
+	ErrPersonalAccount = errors.New("a GitHub App installation creates no repository on a personal account")
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
 )
@@ -89,6 +93,30 @@ func (e *FirstCommitError) Error() string {
 
 func (e *FirstCommitError) Unwrap() error { return e.Cause }
 
+// CreationNotPermittedError is GitHub refusing the installation the creation of a repository.
+// Accepted is what GitHub says it takes for the call, one permission of several, as in
+// "administration=write; repository_creation=write", and empty when it did not say.
+type CreationNotPermittedError struct {
+	Accepted string
+}
+
+func (e *CreationNotPermittedError) Error() string {
+	return "github: " + ErrCannotCreateRepositories.Error() + " (GitHub accepts " + strconv.Quote(e.Accepted) + ")"
+}
+
+func (e *CreationNotPermittedError) Unwrap() error { return ErrCannotCreateRepositories }
+
+// CreationFailedError is a create GitHub refused for a reason the platform has no name for,
+// with the status and the message GitHub answered.
+type CreationFailedError struct {
+	Status  int
+	Message string
+}
+
+func (e *CreationFailedError) Error() string {
+	return fmt.Sprintf("github: the repository was not created: GitHub answered %d: %s", e.Status, e.Message)
+}
+
 // Access is what an installation token may do to the repository's contents.
 type Access string
 
@@ -97,11 +125,18 @@ const (
 	Write Access = "write"
 )
 
+// The types of account GitHub installs an App on.
+const (
+	AccountUser         = "User"
+	AccountOrganization = "Organization"
+)
+
 // Installation is one installation of the App: a GitHub account, with the repositories its
 // owner chose there.
 type Installation struct {
 	ID           int64  `json:"installation_id"`
 	AccountLogin string `json:"account_login" doc:"The GitHub user or organisation the App is installed on. It is the owner part of every repository the installation covers."`
+	AccountType  string `json:"account_type" enum:"User,Organization" doc:"Whether that account is a person's own or an organisation. The platform creates repositories on an organisation only."`
 	// Controlled says the person asked about controls that account: it is their own, or an
 	// organisation they are an admin of. Set by UserInstallations alone.
 	Controlled bool `json:"-"`
@@ -238,15 +273,19 @@ func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Insta
 		for _, one := range out.Installations {
 			// A token of this App lists this App's installations only, and it is checked all the
 			// same: an installation of another App must never be connected.
-			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" || one.Account.ID <= 0 || one.Account.Type == "" {
-				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or has no account")
+			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" || one.Account.ID <= 0 || !accountType(one.Account.Type) {
+				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or is on no user or organisation")
 			}
-			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login, Controlled: controlled[account{one.Account.Type, one.Account.ID}]})
+			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login, AccountType: one.Account.Type, Controlled: controlled[account{one.Account.Type, one.Account.ID}]})
 		}
 		if len(out.Installations) < pageSize || len(found) >= out.TotalCount {
 			return found, nil
 		}
 	}
+}
+
+func accountType(kind string) bool {
+	return kind == AccountUser || kind == AccountOrganization
 }
 
 // account is a GitHub account by its type, User or Organization, and its id, which unlike its
@@ -272,7 +311,7 @@ func (c *Client) controlledAccounts(ctx context.Context, userToken string) (map[
 	if self.ID <= 0 {
 		return nil, fmt.Errorf("github: GET /user answered without the person's id")
 	}
-	controlled := map[account]bool{{"User", self.ID}: true}
+	controlled := map[account]bool{{AccountUser, self.ID}: true}
 	for page := 1; ; page++ {
 		var memberships []struct {
 			State        string `json:"state"`
@@ -287,7 +326,7 @@ func (c *Client) controlledAccounts(ctx context.Context, userToken string) (map[
 		}
 		for _, one := range memberships {
 			if one.State == "active" && one.Role == "admin" && one.Organization.ID > 0 {
-				controlled[account{"Organization", one.Organization.ID}] = true
+				controlled[account{AccountOrganization, one.Organization.ID}] = true
 			}
 		}
 		if len(memberships) < pageSize {
@@ -307,6 +346,7 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 		SuspendedAt *string `json:"suspended_at"`
 		Account     struct {
 			Login string `json:"login"`
+			Type  string `json:"type"`
 		} `json:"account"`
 	}
 	path := "/app/installations/" + strconv.FormatInt(installationID, 10)
@@ -321,10 +361,10 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	if out.SuspendedAt != nil {
 		return nil, ErrInstallationGone
 	}
-	if out.ID != installationID || out.Account.Login == "" {
-		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for or its account")
+	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for or its account, a user or an organisation")
 	}
-	return &Installation{ID: out.ID, AccountLogin: out.Account.Login}, nil
+	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type}, nil
 }
 
 // Repositories lists every repository an installation covers, as GitHub pages them. The token
@@ -361,11 +401,12 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 
 var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
-// CreateRepository creates a private repository of that name on the account an installation is
-// on, an organisation or a person's own, whose default branch holds one commit: files, by path.
-// GitHub then counts it among the repositories the installation covers, whichever ones its
-// owner selected. The token it creates with holds everything the installation granted and does
-// not leave here.
+// CreateRepository creates a private repository of that name on the organisation an installation
+// is on, whose default branch holds one commit: files, by path. GitHub then counts it among the
+// repositories the installation covers, whichever ones its owner selected. On a person's own
+// account it is ErrPersonalAccount and GitHub is not asked: its route for that account creates
+// "for the authenticated user", and an installation token is no user's. The token it creates
+// with holds everything the installation granted and does not leave here.
 func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
@@ -373,39 +414,14 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	if len(files) == 0 {
 		return nil, fmt.Errorf("github: a repository is created with the files of its first commit")
 	}
-	jwt, err := c.appJWT()
+	installation, err := c.Installation(ctx, installationID)
 	if err != nil {
 		return nil, err
 	}
-	var installation struct {
-		SuspendedAt *string `json:"suspended_at"`
-		Account     struct {
-			Login string `json:"login"`
-			Type  string `json:"type"`
-		} `json:"account"`
+	if installation.AccountType != AccountOrganization {
+		return nil, ErrPersonalAccount
 	}
-	switch err := c.call(ctx, http.MethodGet, "/app/installations/"+strconv.FormatInt(installationID, 10), jwt, nil, &installation); {
-	case errors.Is(err, errNotFound):
-		return nil, ErrInstallationGone
-	case errors.Is(err, errUnauthorized):
-		return nil, ErrAppCredentials
-	case err != nil:
-		return nil, err
-	}
-	if installation.SuspendedAt != nil {
-		return nil, ErrInstallationGone
-	}
-	owner := installation.Account.Login
-	var path string
-	switch installation.Account.Type {
-	case "Organization":
-		path = "/orgs/" + url.PathEscape(owner) + "/repos"
-	case "User":
-		path = "/user/repos"
-	}
-	if owner == "" || path == "" {
-		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation's account or its type")
-	}
+	owner := installation.AccountLogin
 	// GitHub documents no name by which a token is narrowed to creating repositories, so the
 	// token is asked for whole.
 	token, err := c.mint(ctx, installationID, map[string]any{})
@@ -420,11 +436,17 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	// GitHub writes no tree to a repository with no commit, so it makes the first one itself
 	// and firstCommit takes its place.
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
+	path := "/orgs/" + url.PathEscape(owner) + "/repos"
+	var refused *refusal
 	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
-	case errors.Is(err, errUnprocessable):
+	case errors.Is(err, ErrRateLimited):
+		return nil, err
+	case errors.Is(err, errUnprocessable) && errors.As(err, &refused) && refused.nameExists:
 		return nil, ErrRepositoryExists
-	case errors.Is(err, errForbidden), errors.Is(err, errNotFound):
-		return nil, ErrCannotCreateRepositories
+	case errors.Is(err, errForbidden) && errors.As(err, &refused), errors.Is(err, errNotFound) && errors.As(err, &refused):
+		return nil, &CreationNotPermittedError{Accepted: refused.accepted}
+	case errors.As(err, &refused):
+		return nil, &CreationFailedError{Status: refused.status, Message: refused.message}
 	case err != nil:
 		return nil, err
 	}
@@ -665,11 +687,15 @@ var (
 )
 
 // refusal is an answer of GitHub that is not a success: one of the kinds above, or nil for any
-// other status, with GitHub's own message.
+// other status, with GitHub's own message. accepted is the permissions GitHub says the call
+// takes, and nameExists that it refused a name its account already holds.
 type refusal struct {
-	kind    error
-	message string
-	detail  string
+	kind       error
+	status     int
+	message    string
+	accepted   string
+	nameExists bool
+	detail     string
 }
 
 func (r *refusal) Error() string {
@@ -687,7 +713,8 @@ func (c *Client) call(ctx context.Context, method, path, bearer string, body, ou
 }
 
 // request makes one API request and decodes a 2xx answer into out, when out is set. No error it
-// returns holds the authorization or anything GitHub sent besides its status and its message.
+// returns holds the authorization or anything GitHub sent besides its status, its message and
+// the permissions it says the call takes.
 func (c *Client) request(ctx context.Context, method, path, authorization string, limit int, body, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -730,14 +757,25 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 	}
 	var answer struct {
 		Message string `json:"message"`
+		Errors  []struct {
+			Field   string `json:"field"`
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	_ = json.Unmarshal(data, &answer)
 	refused := &refusal{
-		message: bounded(answer.Message),
-		detail:  fmt.Sprintf("github: %s %s answered %d: %s", method, routeOf(path), resp.StatusCode, bounded(answer.Message)),
+		status:   resp.StatusCode,
+		message:  bounded(answer.Message),
+		accepted: bounded(resp.Header.Get("X-Accepted-GitHub-Permissions")),
+		detail:   fmt.Sprintf("github: %s %s answered %d: %s", method, routeOf(path), resp.StatusCode, bounded(answer.Message)),
+	}
+	for _, one := range answer.Errors {
+		if one.Field == "name" && strings.Contains(one.Message, "already exists") {
+			refused.nameExists = true
+		}
 	}
 	switch {
-	case rateLimited(resp):
+	case rateLimited(resp, answer.Message):
 		refused.kind = ErrRateLimited
 	case resp.StatusCode == http.StatusNotFound:
 		refused.kind = errNotFound
@@ -752,13 +790,14 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 }
 
 // rateLimited tells GitHub's two rate limits from an ordinary refusal: the primary one answers
-// 403 or 429 with no calls remaining, the secondary one with a Retry-After.
-func rateLimited(resp *http.Response) bool {
+// 403 or 429 with no calls remaining, the secondary one with a Retry-After or, GitHub documents,
+// with neither and only its message to say so.
+func rateLimited(resp *http.Response, message string) bool {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
 	return resp.StatusCode == http.StatusForbidden &&
-		(resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")
+		(resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "" || strings.Contains(strings.ToLower(message), "rate limit"))
 }
 
 // routeOf drops the query of a path, so an error names where a call went and nothing it carried.
