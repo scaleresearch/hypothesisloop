@@ -18,7 +18,7 @@ func createTestDraft(t *testing.T, pool *Pool, launcher string) (peID, plannerID
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	pe := &domain.PlatformExperiment{
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
-		BudgetAcceleratorHours: 0.5, MaxAgents: 1, EndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
+		BudgetAcceleratorHours: 0.5, MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 		Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}},
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 	}
@@ -74,7 +74,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = pes.GetPlatformExperiment(ctx, pe)
-	if err != nil || got.ProposedAt == nil || string(got.Proposal) == "" || got.EndsAt.Sub(wait).Abs() > time.Second || got.Status != domain.PlatformExpDraft {
+	if err != nil || got.ProposedAt == nil || string(got.Proposal) == "" || got.ProposalExpiresAt.Sub(wait).Abs() > time.Second || !got.EndsAt.IsZero() || got.Status != domain.PlatformExpDraft {
 		t.Fatalf("proposed: got = %+v, %v", got, err)
 	}
 	open := "pe-" + uuid.New().String()[:8]
@@ -91,7 +91,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	// One without a planner, or with something else in its place, is not created.
 	now := time.Now().UTC()
-	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, EndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
+	bad := &domain.PlatformExperiment{ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
 	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{AgentID: agent.ID, Flavor: "generalist", Hosted: true}, DraftLimits{Concurrent: 1000, PerDay: 1000}, nil); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
@@ -157,7 +157,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 	revised, err := pes.GetPlatformExperiment(ctx, pe)
 	if err != nil || revised.ProposedAt != nil || len(revised.Revisions) != 1 || revised.Revisions[0].Message != "it must fit one accelerator" ||
-		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.EndsAt.Sub(until).Abs() > time.Second {
+		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.PlanningEndsAt.Sub(until).Abs() > time.Second {
 		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
 	if found, ended := listed(); !found || ended != "" {
@@ -357,7 +357,7 @@ func TestAnOrgsDraftsAreBoundedAtOnceAndPerDay(t *testing.T) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: project, Name: "g", Goal: "g", BudgetAcceleratorHours: 0.5, MaxAgents: 1,
-			EndsAt: now.Add(time.Hour), Status: domain.PlatformExpDraft, Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30,
+			PlanningEndsAt: now.Add(time.Hour), Status: domain.PlatformExpDraft, Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30,
 			Stages:    []domain.Stage{{LengthPct: 100}},
 			CreatedAt: now, UpdatedAt: now, MaxHosted: 5,
 		}

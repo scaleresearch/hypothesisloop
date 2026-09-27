@@ -164,7 +164,7 @@ def _closed_because(setup: RunSetup) -> str:
     if pe.get("close_reason") == "end_time_reached":
         return f"You are being stopped because the platform experiment reached its end time, {pe['ends_at']}, and the platform closed it."
     if pe.get("close_reason") == "planning_limit_reached":
-        return f"You are being stopped because the planning limit, {pe['ends_at']}, passed with nothing proposed, and the platform closed the draft."
+        return f"You are being stopped because the planning limit, {pe['planning_ends_at']}, passed with nothing proposed, and the platform closed the draft."
     if pe.get("close_reason") == "proposal_expired":
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
     if pe.get("close_reason") == "closed_by_request":

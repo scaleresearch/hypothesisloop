@@ -4,6 +4,7 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiSend, fetchExperimentMetrics, fetchPlatformExperimentAgents, startPlatformExperiment } from '@/lib/api'
 import { DraftView, lastReported } from '@/components/draft'
+import { formatDate } from '@/lib/format'
 import { draftState } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
@@ -46,7 +47,7 @@ const point = (name: string, value: number, basis = 'raw'): MetricDataPoint =>
 function draft(more: Partial<Draft> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
-    goal: 'Does a cosine schedule beat a constant one?', ends_at: '2026-10-05T12:30:00Z', ...more,
+    goal: 'Does a cosine schedule beat a constant one?', planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as Draft
 }
 
@@ -155,7 +156,7 @@ describe('a proposed draft', () => {
 // A goal the planner could not plan left a draft with nothing on its page until it closed.
 describe('a draft the planner declined', () => {
   const why = '"Make the model better" names nothing to measure: say which model, on what data, and what better means.'
-  const declined = () => draft({ declined_reason: why, proposed_at: '2026-10-05T12:10:00Z' })
+  const declined = () => draft({ declined_reason: why, proposed_at: '2026-10-05T12:10:00Z', planning_ends_at: undefined, proposal_expires_at: '2026-10-12T12:10:00Z' })
 
   it('shows the reason, nothing to accept, and the ways to answer it or drop it', async () => {
     expect(draftState(declined())).toBe('declined')
@@ -163,6 +164,7 @@ describe('a draft the planner declined', () => {
     expect(screen.getByText('The planner proposed no experiment')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
+    expect(screen.getByText(new RegExp(`it is closed on ${formatDate('2026-10-12T12:10:00Z')} otherwise`))).toBeTruthy()
     expect(screen.queryByRole('status')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()

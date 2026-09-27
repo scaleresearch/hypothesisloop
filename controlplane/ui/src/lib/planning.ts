@@ -43,6 +43,10 @@ export interface PlanningRequest {
 /** A platform experiment made from a sentence: a draft, or what a draft became. */
 export type Draft = PlatformExperiment & {
   goal?: string
+  // When the platform closes a draft nobody acts on: the first while its planner has answered
+  // nothing, the second once it has and the answer waits for a person. A draft has no ends_at.
+  planning_ends_at?: string
+  proposal_expires_at?: string
   proposal?: Proposal
   // When the planner answered, with a proposal or with declined_reason. Absent while it works,
   // on the first plan or on a revision.

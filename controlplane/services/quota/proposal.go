@@ -470,7 +470,7 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 }
 
 func planningOver(pe *domain.PlatformExperiment) error {
-	return api.Refuse(http.StatusConflict, "planning_over", "the planning limit of draft "+pe.ID+" passed at "+pe.EndsAt.UTC().Format(time.RFC3339)+": it takes no proposal and no decline, and is closed")
+	return api.Refuse(http.StatusConflict, "planning_over", "the planning limit of draft "+pe.ID+" passed at "+pe.ClosesAt().UTC().Format(time.RFC3339)+": it takes no proposal and no decline, and is closed")
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {

@@ -85,8 +85,11 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 	if pe.BudgetAcceleratorHours != DefaultPlanning.AllowanceAcceleratorHours || len(pe.Metrics) != 0 || pe.MaxAgents != 1 || pe.CoordinatorHosted {
 		t.Errorf("a draft holds %v AccH, %d metrics, %d places, coordinator %v: want the allowance and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.MaxAgents, pe.CoordinatorHosted)
 	}
-	if limit := pe.EndsAt.Sub(before); limit < DefaultPlanning.Limit-time.Minute || limit > DefaultPlanning.Limit+time.Minute {
+	if limit := pe.PlanningEndsAt.Sub(before); limit < DefaultPlanning.Limit-time.Minute || limit > DefaultPlanning.Limit+time.Minute {
 		t.Errorf("a draft ends %v after it was created, want the planning limit", limit)
+	}
+	if out["planning_ends_at"] != pe.PlanningEndsAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["proposal_expires_at"] != nil {
+		t.Errorf("a draft being planned reads planning_ends_at %v, ends_at %v, proposal_expires_at %v: want its planning limit under that name alone", out["planning_ends_at"], out["ends_at"], out["proposal_expires_at"])
 	}
 	if !strings.HasSuffix(pe.Name, "…") || len([]rune(pe.Name)) > draftNameLength+1 || !strings.HasPrefix(goal, strings.TrimSuffix(pe.Name, "…")) {
 		t.Errorf("name = %q, want the goal cut at a word", pe.Name)
@@ -160,7 +163,7 @@ func call2(t *testing.T, r http.Handler, method, path, body string) (int, map[st
 func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	now := time.Now().UTC()
 	draft := func(id string, ends time.Time) *domain.PlatformExperiment {
-		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", EndsAt: ends, Stages: []domain.Stage{{LengthPct: 100}}}
+		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", PlanningEndsAt: ends, Stages: []domain.Stage{{LengthPct: 100}}}
 	}
 	store := &draftStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
 		draft("pe-planning", now.Add(time.Hour)), draft("pe-late", now.Add(-time.Minute)), draft("pe-dropped", now.Add(time.Hour)),
@@ -268,7 +271,8 @@ func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, 
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.Proposal, pe.ProposedAt, pe.EndsAt, pe.DeclinedReason = proposal, &now, waitUntil, ""
+			pe.Proposal, pe.ProposedAt, pe.DeclinedReason = proposal, &now, ""
+			pe.SetClosesAt(waitUntil)
 			return nil
 		}
 	}
@@ -299,7 +303,7 @@ func aProposal(more map[string]any) map[string]any {
 func draftWithPlanner() *draftStore {
 	return &draftStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
-			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, EndsAt: time.Now().Add(time.Minute),
+			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
 		signups: map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		baseline: &Baseline{
@@ -330,8 +334,11 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		t.Errorf("the draft is not marked proposed: %+v", pe)
 	}
 	// From now on it waits for a person, far longer than the planner was given.
-	if wait := pe.EndsAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
+	if wait := pe.ProposalExpiresAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
 		t.Errorf("a proposed draft ends in %v, want %v", wait, DefaultPlanning.ProposedFor)
+	}
+	if out["proposal_expires_at"] != pe.ProposalExpiresAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["planning_ends_at"] != nil {
+		t.Errorf("a proposed draft reads proposal_expires_at %v, ends_at %v, planning_ends_at %v: want how long the proposal waits under that name alone", out["proposal_expires_at"], out["ends_at"], out["planning_ends_at"])
 	}
 	// The draft itself is unchanged: nothing of a proposal takes effect until a person accepts.
 	if pe.Name != "" || len(pe.Metrics) != 0 || pe.BudgetAcceleratorHours != 0 {
@@ -577,7 +584,8 @@ func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Act
 		if pe.ProposedAt == nil {
 			return db.ErrNothingProposed
 		}
-		pe.ProposedAt, pe.EndsAt = nil, planUntil
+		pe.ProposedAt = nil
+		pe.SetClosesAt(planUntil)
 		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
 	}
@@ -622,7 +630,7 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].Actor.Kind != domain.ActorUser || pe.Revisions[0].Actor.ID != "u-1" {
 		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
 	}
-	if left := pe.EndsAt.Sub(before); left < DefaultPlanning.Limit-time.Minute || left > DefaultPlanning.Limit+time.Minute {
+	if left := pe.PlanningEndsAt.Sub(before); left < DefaultPlanning.Limit-time.Minute || left > DefaultPlanning.Limit+time.Minute {
 		t.Errorf("the planner has %v to propose again, want the planning limit", left)
 	}
 	// Read back, whoever asked is named.
@@ -649,7 +657,8 @@ func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil tim
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.DeclinedReason, pe.Proposal, pe.ProposedAt, pe.EndsAt = reason, nil, &now, waitUntil
+			pe.DeclinedReason, pe.Proposal, pe.ProposedAt = reason, nil, &now
+			pe.SetClosesAt(waitUntil)
 			return nil
 		}
 	}
@@ -686,7 +695,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	if code != http.StatusOK || out["declined_reason"] != why || out["proposed_at"] == nil || out["proposal"] != nil || out["status"] != "draft" {
 		t.Fatalf("decline: got = %d %v, want the reason, an answer time and no proposal", code, out)
 	}
-	if wait := store.created[0].EndsAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
+	if wait := store.created[0].ProposalExpiresAt.Sub(before); wait < DefaultPlanning.ProposedFor-time.Minute {
 		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
 	}
 	// The earlier proposal no longer stands, so nothing is accepted.

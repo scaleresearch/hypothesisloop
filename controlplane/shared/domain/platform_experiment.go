@@ -172,12 +172,18 @@ type PlatformExperiment struct {
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on
 	// demand and removes the live-capacity ceiling that used to bound concurrency implicitly —
 	// this is the explicit replacement, enforced in ReserveAdmittedFlavorTx on every submit.
-	MaxConcurrentAccelerators *int                     `json:"max_concurrent_accelerators,omitempty"`
-	Metrics                   []MetricDefinition       `json:"metrics"`                 // metrics jobs must emit; used for ranking
-	ReportIntervalSeconds     int                      `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
-	StartsAt                  time.Time                `json:"starts_at"`
-	EndsAt                    time.Time                `json:"ends_at"`
-	Status                    PlatformExperimentStatus `json:"status"`
+	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
+	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
+	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
+	StartsAt                  time.Time          `json:"starts_at"`
+	// EndsAt is when the run ends and the platform closes it. A draft has no run yet and so
+	// none: the platform closes it at PlanningEndsAt while its planner has answered nothing,
+	// and at ProposalExpiresAt once it has and the answer waits for a person. A draft has
+	// exactly one of the two, and one closed as a draft keeps it. See ClosesAt.
+	EndsAt            time.Time                `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it. Absent on a draft, which has no run yet."`
+	PlanningEndsAt    time.Time                `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
+	ProposalExpiresAt time.Time                `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
+	Status            PlatformExperimentStatus `json:"status"`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
@@ -236,6 +242,33 @@ type PlatformExperiment struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ClosesAt is when the platform closes it if nobody does: EndsAt, PlanningEndsAt or
+// ProposalExpiresAt, whichever it has. It is the one moment stored.
+func (p *PlatformExperiment) ClosesAt() time.Time {
+	switch {
+	case !p.PlanningEndsAt.IsZero():
+		return p.PlanningEndsAt
+	case !p.ProposalExpiresAt.IsZero():
+		return p.ProposalExpiresAt
+	}
+	return p.EndsAt
+}
+
+// SetClosesAt records at under the name of what ends then, which Status, Goal, StartsAt and
+// ProposedAt decide: a draft, or one closed as a draft, which was planned from a goal and never
+// got a start, is being planned until it is proposed and waits for a person from then.
+func (p *PlatformExperiment) SetClosesAt(at time.Time) {
+	p.EndsAt, p.PlanningEndsAt, p.ProposalExpiresAt = time.Time{}, time.Time{}, time.Time{}
+	switch {
+	case p.Status != PlatformExpDraft && (p.Goal == "" || !p.StartsAt.IsZero()):
+		p.EndsAt = at
+	case p.ProposedAt != nil:
+		p.ProposalExpiresAt = at
+	default:
+		p.PlanningEndsAt = at
+	}
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget

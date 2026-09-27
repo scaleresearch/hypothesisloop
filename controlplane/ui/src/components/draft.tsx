@@ -204,7 +204,7 @@ function Planning({ draft, revising }: { draft: Draft; revising: boolean }) {
     <Callout tone="info">
       <span role="status">
         {revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this and running a baseline.'} {machine}{' '}
-        It has until {formatDate(draft.ends_at)}; a draft with no proposal by then is closed. This page updates by itself.
+        It has until {formatDate(draft.planning_ends_at)}; a draft with no proposal by then is closed. This page updates by itself.
       </span>
     </Callout>
   )
@@ -259,7 +259,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
             <p className="text-sm">{draft.declined_reason}</p>
             {state === 'declined' && (
               <p className="text-xs text-muted">
-                Nothing runs and nothing is spent. Answer below to have it try again, or abandon this draft; it is closed on {formatDate(draft.ends_at)} otherwise.
+                Nothing runs and nothing is spent. Answer below to have it try again, or abandon this draft; it is closed on {formatDate(draft.proposal_expires_at)} otherwise.
               </p>
             )}
           </CardContent>

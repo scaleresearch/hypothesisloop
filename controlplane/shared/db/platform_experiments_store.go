@@ -83,7 +83,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	_, err = db.Exec(ctx, q,
 		pe.ID, pe.ProjectID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds,
-		pe.StartsAt, pe.EndsAt, string(pe.Status),
+		pe.StartsAt, pe.ClosesAt(), string(pe.Status),
 		stages, 1,
 		pe.CreatedAt, pe.UpdatedAt, pe.MaxConcurrentAccelerators, string(pe.DefaultQuotaTier),
 		pe.CoordinatorHosted, coordinator.Launcher, coordinator.Model, pe.MaxHosted,
@@ -111,10 +111,11 @@ WHERE id = $1`
 	var coordinator domain.HostedCoordinator
 	var createdBy, closedBy domain.Actor
 	var proposal []byte
+	var closesAt time.Time
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
-		&pe.StartsAt, &pe.EndsAt, &status,
+		&pe.StartsAt, &closesAt, &status,
 		&stagesRaw, &pe.CurrentStage, &pe.Summary,
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorHosted, &coordinator.Launcher, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
@@ -154,6 +155,7 @@ WHERE id = $1`
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
 	pe.Status = domain.PlatformExperimentStatus(status)
+	pe.SetClosesAt(closesAt)
 	return pe, nil
 }
 
@@ -342,10 +344,11 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 		pe := &domain.PlatformExperiment{}
 		var status string
 		var metricsRaw, stagesRaw []byte
+		var closesAt time.Time
 		if err := rows.Scan(
 			&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 			&metricsRaw, &pe.ReportIntervalSeconds,
-			&pe.StartsAt, &pe.EndsAt, &status,
+			&pe.StartsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 			&pe.CoordinatorHosted, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &pe.ProposedAt,
@@ -360,6 +363,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
+		pe.SetClosesAt(closesAt)
 		out = append(out, pe)
 	}
 	return out, rows.Err()

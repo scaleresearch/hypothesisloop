@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestEffectiveRoleDefaultsToRanking(t *testing.T) {
 	d := MetricDefinition{Key: "loss", Direction: "minimize"}
@@ -35,5 +38,34 @@ func TestValidateMetricDefinitions(t *testing.T) {
 				t.Fatalf("ValidateMetricDefinitions(%v) = %v, wantErr %v", tc.defs, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// A proposed draft read `ends_at` a week out: the moment its proposal lapses, under the name of
+// a run's end.
+func TestTheMomentThePlatformClosesItIsNamedForWhatEndsThen(t *testing.T) {
+	at, proposed := time.Now(), time.Now()
+	cases := []struct {
+		name string
+		pe   PlatformExperiment
+		got  func(PlatformExperiment) time.Time
+	}{
+		{"a run", PlatformExperiment{Status: PlatformExpOpen}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"an accepted draft", PlatformExperiment{Status: PlatformExpRunning, Goal: "g", StartsAt: at, ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.EndsAt }},
+		{"a draft being planned", PlatformExperiment{Status: PlatformExpDraft, Goal: "g"}, func(p PlatformExperiment) time.Time { return p.PlanningEndsAt }},
+		{"a proposed draft", PlatformExperiment{Status: PlatformExpDraft, Goal: "g", ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.ProposalExpiresAt }},
+		{"a draft closed with its proposal", PlatformExperiment{Status: PlatformExpClosed, Goal: "g", ProposedAt: &proposed}, func(p PlatformExperiment) time.Time { return p.ProposalExpiresAt }},
+	}
+	for _, c := range cases {
+		c.pe.SetClosesAt(at)
+		named := 0
+		for _, moment := range []time.Time{c.pe.EndsAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt} {
+			if !moment.IsZero() {
+				named++
+			}
+		}
+		if !c.got(c.pe).Equal(at) || named != 1 || !c.pe.ClosesAt().Equal(at) {
+			t.Errorf("%s: got = ends %v, planning ends %v, proposal expires %v, want the moment under one name", c.name, c.pe.EndsAt, c.pe.PlanningEndsAt, c.pe.ProposalExpiresAt)
+		}
 	}
 }

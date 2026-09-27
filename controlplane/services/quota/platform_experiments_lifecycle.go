@@ -427,11 +427,9 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	return s.store.ClosePlatformExperiment(ctx, id, by)
 }
 
-// SweepExpired closes every Open/Running platform experiment whose EndsAt has passed. EndsAt is
-// the zero value when unset (PlatformExperiment.EndsAt is not a pointer), so those are skipped —
-// a platform experiment with no end time runs until someone calls Close explicitly. A draft's
-// EndsAt is its planning limit, and once proposed how long the proposal waits for a person, so
-// the same sweep closes a plan nobody finished or accepted and releases its machine.
+// SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, and
+// a draft whose planning limit passed or whose answer no person took up, which releases its
+// machine. One with no such moment is skipped and runs until someone calls Close.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {
@@ -440,7 +438,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
 		}
 		for _, pe := range pes {
-			if pe.EndsAt.IsZero() || pe.EndsAt.After(now) {
+			if closesAt := pe.ClosesAt(); closesAt.IsZero() || closesAt.After(now) {
 				continue
 			}
 			if err := s.Close(ctx, pe.ID, nil, nil); err != nil {
@@ -448,8 +446,8 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 					zap.String("platform_experiment_id", pe.ID), zap.Error(err))
 				continue
 			}
-			s.logger.Info("sweep_expired: closed platform experiment past ends_at",
-				zap.String("platform_experiment_id", pe.ID), zap.Time("ends_at", pe.EndsAt))
+			s.logger.Info("sweep_expired: closed platform experiment",
+				zap.String("platform_experiment_id", pe.ID), zap.Time("closes_at", pe.ClosesAt()))
 		}
 	}
 	return nil
