@@ -61,6 +61,11 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	if staged := mustGit(t, clone, "status", "--porcelain"); strings.Contains(staged, "A ") {
 		t.Fatalf("hl repo init staged files:\n%s", staged)
 	}
+	// Two planners found another experiment's files here, were told "kept" and "ready" before
+	// they had written a line, and had to work out for themselves that the files were not theirs.
+	if !strings.Contains(out, "may describe an earlier experiment") {
+		t.Fatalf("hl repo init kept a file and did not say whose it may be:\n%s", out)
+	}
 	if code, out := repo(t, "init"); code != 0 || strings.Contains(out, "added") {
 		t.Fatalf("a second hl repo init = %d\n%s", code, out)
 	}
@@ -93,7 +98,7 @@ func TestRepoCheckNamesWhatKeepsACloneFromReady(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
-	if code, out := repo(t, "check"); code != 0 || !strings.HasPrefix(out, "ready: ") {
+	if code, out := repo(t, "check"); code != 0 || !strings.HasPrefix(out, "ready: ") || !strings.Contains(out, "Not checked here: whose experiment they describe") {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{

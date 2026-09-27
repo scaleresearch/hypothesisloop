@@ -34,9 +34,10 @@ experiment repository holds, where the clone has none at that path:
 
 `+repoFiles+`
 
-A file that is there is kept as it is, and nothing is committed. Each added file marks what to
-fill in with REPLACE-WITH or a commented-out example. Fill them in, then git add, commit and
-push on your branch. hl repo check says what is left.`, stderr)
+A file that is there is kept as it is, and nothing is committed. A kept file may describe an
+earlier experiment of this repository: read it, keep what fits yours and rewrite the rest. Each
+added file marks what to fill in with REPLACE-WITH or a commented-out example. Fill them in, then
+git add, commit and push on your branch. hl repo check says what is left.`, stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -48,10 +49,12 @@ push on your branch. hl repo check says what is left.`, stderr)
 		return fail(stderr, err)
 	}
 	files := repotemplate.Files()
+	kept := false
 	for _, path := range sortedPaths(files) {
 		target := filepath.Join(root, filepath.FromSlash(path))
 		if _, err := os.Lstat(target); err == nil {
 			fmt.Fprintf(stdout, "kept   %s\n", path)
+			kept = true
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fail(stderr, err)
@@ -64,8 +67,13 @@ push on your branch. hl repo check says what is left.`, stderr)
 		}
 		fmt.Fprintf(stdout, "added  %s\n", path)
 	}
+	if kept {
+		fmt.Fprintln(stdout, earlierExperiment)
+	}
 	return 0
 }
+
+const earlierExperiment = "A file that was already there may describe an earlier experiment of this repository, which hl cannot tell: read it, keep what fits yours and rewrite the rest."
 
 func repoCheck(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("repo check", `usage: hl repo check
@@ -81,7 +89,9 @@ fix. Exits 0 with "ready" when there is none, 1 otherwise.
 
 A ready repository also holds the code the job spec runs and has a completed job submitted from
 that spec at the same commit (the baseline). No file shows those two, so this command does not
-check them: the baseline is checked when a draft is proposed. hl repo init adds a missing file.`, stderr)
+check them: the baseline is checked when a draft is proposed. Nor does it know whose experiment
+the files describe: those of an earlier experiment in the same repository read as ready.
+hl repo init adds a missing file.`, stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -100,7 +110,7 @@ check them: the baseline is checked when a draft is proposed. hl repo init adds 
 		fmt.Fprintln(stdout, strings.Join(failures, "\n"))
 		return 1
 	}
-	fmt.Fprintln(stdout, "ready: README.md, "+repotemplate.ExperimentFile+" and "+repotemplate.JobSpec+" are filled in. Not checked here: the code the job spec runs, and its baseline job.")
+	fmt.Fprintln(stdout, "ready: README.md, "+repotemplate.ExperimentFile+" and "+repotemplate.JobSpec+" are filled in. Not checked here: whose experiment they describe (an earlier one's in this repository read as ready too), the code the job spec runs, and its baseline job.")
 	return 0
 }
 
