@@ -3,10 +3,7 @@ import contextlib
 import io
 import json
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 import threading
 import unittest
 import urllib.request
@@ -15,7 +12,6 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[3]
-SEED = Path(__file__).resolve().parents[2] / "coordinator/experiments/dummy-data-search-demo/seed"
 
 # Every script that carries its own copy of post_metric: seeds are copied into an experiment's
 # repository and workloads into an image, so none of them can import a shared one.
@@ -131,17 +127,25 @@ class SampleJobFilesTest(unittest.TestCase):
                     self.assertIn("under $WORKLOAD_SAMPLES", text)
 
 
-class BuildAndPushTest(unittest.TestCase):
-    def test_names_the_missing_registry_in_one_line(self):
-        with tempfile.TemporaryDirectory() as repo:
-            shutil.copytree(SEED, Path(repo) / "seed")
-            subprocess.run(["git", "init", "-q", repo], check=True)
-            env = {k: v for k, v in os.environ.items() if k != "REGISTRY"}
-            done = subprocess.run(["bash", "seed/build_and_push.sh"], cwd=repo, env=env, capture_output=True, text=True)
-        self.assertEqual(done.returncode, 1)
-        self.assertEqual(done.stdout, "")
-        self.assertEqual(len(done.stderr.splitlines()), 1)
-        self.assertIn("set REGISTRY=host:port", done.stderr)
+class CatalogueImageJobTest(unittest.TestCase):
+    """dummy-data-search-demo builds no image: its job clones its commit and installs what
+    train.py imports."""
+
+    def test_the_command_runs_train_py_of_the_clone_with_every_import_installed(self):
+        demo = REPO / "agents/coordinator/experiments/dummy-data-search-demo"
+        spec = (demo / ".hypothesisloop/job.yaml").read_text()
+        line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
+        shell, flag, script = json.loads(line.split("command:", 1)[1])
+        self.assertEqual((shell, flag), ("bash", "-lc"))
+        clone, run = script.split(" && ")
+        self.assertEqual(clone, 'cd "$(hl-clone)"')
+        words = run.split()
+        self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "seed/train.py"])
+        installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
+        tree = ast.parse((demo / "seed/train.py").read_text())
+        imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+        self.assertEqual(installed, imported - set(sys.stdlib_module_names))
+        self.assertEqual(sorted(path.name for path in (demo / "seed").iterdir() if path.name != "__pycache__"), ["train.py"])
 
 
 if __name__ == "__main__":
