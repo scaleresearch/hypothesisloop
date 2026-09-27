@@ -27,3 +27,8 @@ job:
   # states `cpu: N`, whole cores.
   accelerator_type: REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS
   accelerator_count: 1
+  # REQUIRED. The scratch space one node of the job writes, always a quantity: left out, or
+  # "max", the submit is refused (storage_required), and so is more than every cluster that
+  # runs the job has when idle (exceeds_cluster_capacity). cpu and memory left out are the
+  # job's share of the node.
+  storage: 4Gi

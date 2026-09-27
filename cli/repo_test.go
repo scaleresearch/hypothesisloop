@@ -38,7 +38,7 @@ func write(t *testing.T, clone, path, content string) {
 
 const (
 	filledExperiment = "name: sweep\ndescription: |\n  the brief\nmetrics:\n  - key: val_accuracy\n    direction: maximize\n"
-	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n"
+	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n  storage: 4Gi\n"
 )
 
 // An empty repository gets every file of the template, and one with code keeps what it has: a file that is
@@ -109,6 +109,9 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		"no ranking metric":              {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
 		"a job spec that is not YAML":    {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":         {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
+		"a job spec with no storage":     {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n", "states no job.storage"},
+		"storage as a share of the node": {repotemplate.JobSpec, "job:\n  image: a\n  storage: max\n", "states job.storage as max"},
+		"a group with no storage":        {repotemplate.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      storage: 4Gi\n    - name: ps\n", "states no job.groups[1].storage"},
 		"a secret in the committed spec": {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
 	} {
 		write(t, clone, repotemplate.ExperimentFile, filledExperiment)

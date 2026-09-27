@@ -86,7 +86,8 @@ it checked and what it did not.
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
               them ranked
-  job-spec    .hypothesisloop/job.yaml states a job, with no REPLACE-WITH left and no secret_env
+  job-spec    .hypothesisloop/job.yaml states a job and its storage as a quantity, in each
+              group of a grouped job, with no REPLACE-WITH left and no secret_env
 
 Not checked: that the files describe this experiment. Those of an earlier experiment in the
 same repository pass, so read them against the brief. Nor the code the job spec runs or its
@@ -217,6 +218,27 @@ func jobSpecGap(data []byte) string {
 	}
 	if _, set := file.Job["secret_env"]; set {
 		return "sets job.secret_env: a committed file holds no secret, pass --secret-env NAME at submit"
+	}
+	groups, _ := file.Job["groups"].([]any)
+	if len(groups) == 0 {
+		return storageGap("job.storage", file.Job["storage"])
+	}
+	for i, group := range groups {
+		fields, _ := group.(map[string]any)
+		if gap := storageGap(fmt.Sprintf("job.groups[%d].storage", i), fields["storage"]); gap != "" {
+			return gap
+		}
+	}
+	return ""
+}
+
+// storageGap is the submit's rule for storage: stated, and as a quantity.
+func storageGap(field string, storage any) string {
+	switch storage {
+	case nil, "":
+		return "states no " + field + ": state the scratch space one node of the job writes, as in storage: 4Gi"
+	case "max":
+		return "states " + field + " as max: storage is a quantity, as in storage: 4Gi, and never a share of the node"
 	}
 	return ""
 }

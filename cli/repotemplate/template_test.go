@@ -20,6 +20,9 @@ func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *te
 	if err := yaml.Unmarshal([]byte(files[JobSpec]), &spec); err != nil || spec.Job["image"] == nil || spec.Job["command"] == nil {
 		t.Fatalf("the job spec = %v, %v, want a job with an image and a command", spec.Job, err)
 	}
+	if spec.Job["storage"] != "4Gi" {
+		t.Fatalf("the job spec states storage %v, want a quantity: a submit without one is refused", spec.Job["storage"])
+	}
 	// A baseline agent told that a job without an image runs in the platform's own left it out
 	// on a cluster that runs the image a job names: the template names one on every cluster.
 	image, _ := spec.Job["image"].(string)
