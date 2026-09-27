@@ -142,7 +142,8 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert finding_row is not None and finding_row.get("agent_id") == agent_b
     assert finding_row["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "a finding names who filed it"
 
-    quotas = api.platform_experiment_quotas(pe_id)
+    # The agent that measured the baseline holds a quota too, and is neither of the two.
+    quotas = [q for q in api.platform_experiment_quotas(pe_id) if q["agent_id"] != api.baseline_of[pe_id].agent]
     assert len(quotas) == 2
     assert human_name not in [q.get("agent_id") for q in quotas]
     results = api.results(pe_id)

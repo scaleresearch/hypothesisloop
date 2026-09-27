@@ -125,14 +125,16 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
     assert rows[root_child["id"]]["builds_on"] == [pe_id]
     assert sorted(rows[combined["id"]]["builds_on"]) == sorted([root_child["id"], sibling["id"]])
 
-    assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=pe_id)] == sorted([root_child["id"], sibling["id"]])
+    # The baseline's control is on the root too, beside what this test placed there.
+    control = api.baseline_of[pe_id].hypothesis
+    assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=pe_id) if r["id"] != control] == sorted([root_child["id"], sibling["id"]])
     assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=root_child["id"])] == sorted([grandchild["id"], combined["id"]])
 
     graph = api.hypothesis_graph(pe_id)
     assert graph["root"] == pe_id
-    node_ids = {n["id"] for n in graph["nodes"]}
+    node_ids = {n["id"] for n in graph["nodes"]} - {control}
     assert node_ids == {root_child["id"], grandchild["id"], sibling["id"], combined["id"]}
-    edges = {(e["from"], e["to"], e["type"]) for e in graph["edges"]}
+    edges = {(e["from"], e["to"], e["type"]) for e in graph["edges"] if e["from"] != control}
     assert edges == {
         (root_child["id"], pe_id, "builds_on"),
         (sibling["id"], pe_id, "builds_on"),
@@ -248,7 +250,8 @@ def test_registration_waits_until_close_hypotheses_are_told_apart(api, graph_pe,
     assert [(h["id"], h["reason"]) for h in body["similar"]] == [(bs8["id"], "close_text")], body
     assert body["similar"][0]["builds_on"] == [pe_id] and body["similar"][0]["agent_id"] == agent_a
     assert "distinct_from" in body["detail"]
-    assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"]] == [bs8["id"]], "a held-back registration created a node"
+    control = api.baseline_of[pe_id].hypothesis
+    assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"] if n["id"] != control] == [bs8["id"]], "a held-back registration created a node"
 
     submit = ["hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--text", reworded, "--builds-on", "root"]
     cli_held = api.hl_expect(*submit)

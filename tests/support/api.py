@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,7 @@ import requests
 import yaml
 
 from . import admin
+from .wait import Deadline, eventually
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
@@ -58,6 +60,16 @@ class HLError(RuntimeError):
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"`{' '.join(self.cmd)}` exited {self.returncode}: {self.output}"
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """The agent that measured a platform experiment's baseline, the hypothesis that states the
+    control and the job that ran it."""
+
+    agent: str
+    hypothesis: str
+    job: str
 
 
 @dataclass
@@ -362,6 +374,41 @@ class API:
     def start_platform_experiment(self, pe_id: str) -> None:
         self.hl("platform-experiments", "start", "--platform-experiment", pe_id)
 
+    # What declare_baseline left in each platform experiment, for a test that asserts on all of
+    # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
+    baseline_of: dict[str, "Baseline"] = {}
+
+    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, hours: float = 0.02, within: float = 300) -> "Baseline":
+        """Gives an open platform experiment the baseline nothing starts without, as a client
+        does: an agent of role baseline joins, its job runs to the end and gets its finding, and
+        the description that names the job is sent with the declaration.
+
+        The job is the generic workload cut to ten seconds, which reports the experiment's ranked
+        metric. A test whose experiment declares other metrics passes the job that reports them.
+        What the job cost is taken from the budget before the shares of the start are carved."""
+        agent = self.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]["agent_id"]
+        hypothesis = self.register_hypothesis(pe_id, agent, "the control, unchanged")["id"]
+        job = self.submit_job(
+            pe_id, agent, hours=hours, hyp_id=hypothesis,
+            job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": "10"}} | (job_overrides or {}),
+        )
+        eventually(
+            f"baseline job {job} of {pe_id} to complete",
+            lambda: self.experiment(job),
+            accept=lambda e: e["status"] == "COMPLETED",
+            reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
+            deadline=Deadline.in_seconds(within),
+            interval=1,
+        )
+        self.file_finding(job, f"the control ran unchanged as {job}")
+        description = self.get_json(f"/platform-experiments/{pe_id}")["description"]
+        with tempfile.NamedTemporaryFile("w", suffix=".md") as brief:
+            brief.write(f"{description}\n\nBASELINE\n  config: the generic workload, unchanged\n  code_ref: {self.code_ref(pe_id)}\n  measured: {job}\n")
+            brief.flush()
+            self.hl("platform-experiments", "update", "--platform-experiment", pe_id, "--description-file", brief.name, "--baseline-job", job)
+        self.baseline_of[pe_id] = Baseline(agent=agent, hypothesis=hypothesis, job=job)
+        return self.baseline_of[pe_id]
+
     def signup_and_start(self, pe_id: str, agents: list[str] | list[tuple]) -> None:
         for a in agents:
             if isinstance(a, tuple):
@@ -370,6 +417,7 @@ class API:
                 self.signup_ok(pe_id, agent_id, role, quota_tier)
             else:
                 self.signup_ok(pe_id, a)
+        self.declare_baseline(pe_id)
         self.start_platform_experiment(pe_id)
 
     def close_platform_experiment(self, pe_id: str) -> None:

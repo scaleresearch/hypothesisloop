@@ -1,10 +1,11 @@
 """A platform experiment made from one sentence, end to end against the control plane.
 
 POST /platform-experiments/drafts makes a draft with a planner the platform runs. The planner
-runs a baseline job against the draft's allowance, files what it found, and proposes the
-experiment; the proposal is held to what that job really did. A person asks for a change in a
-sentence, the planner proposes again, and the person accepts at a cost they state: the draft
-becomes an open platform experiment with a hosted coordinator and its researchers, and starts.
+proposes the experiment's definition and runs nothing. A person asks for a change in a sentence,
+the planner proposes again, and the person accepts at a cost they state: the draft becomes an open
+platform experiment with a hosted coordinator and its researchers. No researcher's machine is
+asked for and nothing starts until an agent of role baseline has measured the baseline and it is
+declared; then the platform starts the run.
 
 No launcher process, no provider and no model is involved. What the planner would do is done
 here with its own token, which the launcher's desired state carries, and each reconcile call is
@@ -36,18 +37,25 @@ def _planner_instance(api: API, pe_id: str) -> tuple[dict | None, set[str]]:
     return (own[0] if own else None), set(desired["ending"])
 
 
-def _proposal(job_id: str, code_ref: str = "", **more) -> dict:
+def _proposal(accelerator_type: str, **more) -> dict:
     return {
         "experiment": {
             "name": "Hidden layer width",
-            "description": f"Vary the hidden layer of the sample classifier and report val_accuracy. BASELINE code_ref: {code_ref} measured: {job_id}",
+            "description": "Vary the hidden layer of the sample classifier and report val_accuracy. BASELINE config: the sample classifier as it is measured: not yet established",
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
+        "accelerator_type": accelerator_type,
         "budget_accelerator_hours": 2, "duration_hours": 3, "agents": [{"flavor": "hyperparameter-search"}, {}],
-        "baseline_job_id": job_id, "metric_reason": "Validation accuracy is what the goal asks about.",
+        "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
-        "sizing_reason": "A trial costs what the baseline did: two researchers with a few trials each fit in 2 hours of budget.",
+        "sizing_reason": "An estimate, nothing has run: a trial is assumed to take a minute, and two researchers with a few trials each fit in 2 hours of budget.",
     } | more
+
+
+def _researcher_instances(api: API, pe_id: str, researchers: list[dict]) -> list[dict]:
+    ids = {a["agent_id"] for a in researchers}
+    return [i for i in api.launcher_desired(LAUNCHER)["instances"]
+            if (scope := token_scope(i["env"]["HL_TOKEN"]))[:2] == ("agent", pe_id) and scope[2] in ids]
 
 
 def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api: API, deadline: Deadline):
@@ -71,38 +79,27 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         # Nobody joins a draft, nobody but the planner proposes, and nothing is accepted yet.
         joining = api.post(f"/platform-experiments/{pe_id}/agents", {})
         assert (joining.status_code, joining.json()["reason"]) == (400, "signup_closed"), joining.text
-        assert api.put(f"/platform-experiments/{pe_id}/proposal", _proposal("job-none")).status_code == 403
+        on = next(a["accelerator_type"] for c in api.capacity()["clusters"] for a in c["accelerators"] if a["kind"] != "cpu" and a["available"] > 0)
+        assert api.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on)).status_code == 403
         early = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 1, "agents": [{}]})
         assert (early.status_code, early.json()["reason"]) == (409, "invalid_transition"), early.text
 
-        # A proposal rests on a baseline the platform saw: none, then one still running.
-        # The sample job runs a minute: a proposal is refused when its baseline's estimate is under
-        # the hours it ran or over twice them.
-        job = planner.submit_job(pe_id, planner_id, hours=0.03, hyp_text="the baseline: the sample classifier as it is")
-        # The type the proposal sizes its jobs for is the one the baseline runs on, which the
-        # platform reads from the job: a body that states one is refused.
-        on, code_ref = api.experiment(job)["accelerator_type"], api.experiment(job)["code_ref"]
-        typed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, accelerator_type=on))
-        assert typed.status_code == 422, typed.text
-        none = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal("job-none"))
-        assert (none.status_code, none.json()["reason"]) == (422, "no_baseline"), none.text
-        running = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
-        assert (running.status_code, running.json()["reason"]) == (422, "baseline_not_completed"), running.text
-        eventually("the planner's baseline job to complete", lambda: api.experiment(job),
-                   accept=lambda e: e["status"] == "COMPLETED", reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"), deadline=deadline)
-        unfiled = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
-        assert (unfiled.status_code, unfiled.json()["reason"]) == (422, "baseline_without_finding"), unfiled.text
-        planner.file_finding(job, "baseline: the sample classifier as it is")
-        unbriefed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job))
-        assert (unbriefed.status_code, unbriefed.json()["reason"]) == (422, "brief_without_baseline"), unbriefed.text
-        unmeasured = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref, experiment=_proposal(job, code_ref)["experiment"] | {
-            "metrics": [{"key": "latency_never_reported", "direction": "minimize"}]}))
-        assert (unmeasured.status_code, unmeasured.json()["reason"]) == (422, "baseline_missing_metric"), unmeasured.text
+        # A planner runs nothing: a draft takes no job, and a proposal names none. It states the
+        # type its jobs are sized for, which must be one the org can run on.
+        hypothesis = planner.post_hypothesis(pe_id, "the baseline: the sample classifier as it is", agent_id=planner_id)
+        if hypothesis.status_code in (200, 201):
+            body = planner.submission_body_for_id(f"job-{pe_id[-8:]}", pe_id, planner_id)
+            refused = planner.post_experiment_body(body)
+            assert refused.status_code >= 400 and "experiment_not_started" in refused.text, refused.text
+        naming_a_job = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, baseline_job_id="job-none"))
+        assert naming_a_job.status_code == 422, naming_a_job.text
+        unreachable = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal("no-such-accelerator"))
+        assert (unreachable.status_code, unreachable.json()["reason"]) == (422, "accelerator_unreachable"), unreachable.text
 
-        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref))
+        proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on))
         assert proposed.status_code == 200, proposed.text
         assert proposed.json()["proposed_at"] and proposed.json()["status"] == "draft"
-        assert proposed.json()["proposal"]["accelerator_type"] == on, proposed.json()["proposal"]
+        assert proposed.json()["proposal"]["accelerator_type"] == on and "baseline_job_id" not in proposed.json()["proposal"], proposed.json()["proposal"]
         # Proposed, the planner's machine is only let wind down.
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "a machine is kept beside a proposal that waits for a person"
@@ -113,7 +110,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert [r["message"] for r in revised.json()["revisions"]] == ["Use three researchers at most."]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None, "a revised draft has no planner"
-        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(job, code_ref, agents=[{}, {}, {}])).status_code == 200
+        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, agents=[{}, {}, {}])).status_code == 200
 
         # Accepted at the cost the person states, whatever was proposed.
         accepted = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "agents": [{"flavor": "data-search"}, {}]})
@@ -126,13 +123,28 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         again = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "agents": [{}]})
         assert (again.status_code, again.json()["reason"]) == (409, "invalid_transition"), again.text
 
-        # Started by the caller or by the platform's own sweep, whichever is first; the budget is
-        # the researchers' and the planner takes no share of it.
-        api.post(f"/platform-experiments/{pe_id}/start")
-        eventually("the accepted draft to run", lambda: api.get_json(f"/platform-experiments/{pe_id}"), accept=lambda p: p["status"] == "running", deadline=deadline)
+        # Accepted, nothing has run and nothing starts: no researcher's machine is asked for, no
+        # researcher's job is taken, and a start is refused until there is a baseline.
+        assert "baseline_job_id" not in pe, pe
+        assert _researcher_instances(api, pe_id, researchers) == [], "a researcher's machine is asked for before there is a baseline"
+        unstarted = api.post(f"/platform-experiments/{pe_id}/start")
+        assert unstarted.status_code >= 400 and "baseline_required" in unstarted.text, unstarted.text
+        too_early = api.post_experiment_body(api.submission_body_for_id(f"job-{pe_id[-8:]}-r", pe_id, researchers[0]["agent_id"]))
+        assert too_early.status_code >= 400 and "experiment_not_started" in too_early.text, too_early.text
+
+        # What the coordinator has done: an agent of role baseline measures the control, and the
+        # baseline is declared with the brief that names it. The platform starts the run itself.
+        baseline = api.declare_baseline(pe_id)
+        declared = api.get_json(f"/platform-experiments/{pe_id}")
+        assert declared["baseline_job_id"] == baseline.job and declared["job_estimated_duration_hours"] > 0, declared
+        eventually("the accepted draft to run once its baseline is declared", lambda: api.get_json(f"/platform-experiments/{pe_id}"),
+                   accept=lambda p: p["status"] == "running", deadline=deadline, interval=2)
+        assert len(_researcher_instances(api, pe_id, researchers)) == len(researchers), "a running experiment's researchers have no machine asked for"
         shares = {q["agent_id"]: q["guaranteed_accelerator_hours"] for q in api.platform_experiment_quotas(pe_id)}
-        assert shares[planner_id] == 2.0, "the planner's quota is still the planning allowance"
-        assert all(shares[a["agent_id"]] > 0 for a in researchers), shares
+        assert planner_id not in shares, "a planner holds a quota"
+        # The first stage's share of the budget over the researchers' places.
+        assert shares[baseline.agent] == pytest.approx(pe["stages"][0]["length_pct"] / 100 * 1 / 2), shares
+        assert all(0 < shares[a["agent_id"]] < shares[baseline.agent] for a in researchers), "the baseline's cost was not taken from the budget before the shares"
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "the planner is run in the experiment it planned"
     finally:

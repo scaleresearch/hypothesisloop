@@ -21,6 +21,8 @@ environment says where it runs:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import os
 import time
 import uuid
@@ -98,7 +100,12 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     org.created_platform_experiments.append(pe_id)
     assert created.json()["repository_url"].endswith(os.environ["HL_E2E_GITHUB_REPO"] + ".git")
     researchers = [org.add_agents(pe_id, hosted=True, flavor=flavor)[0]["agent_id"] for flavor in ("hyperparameter-search", "architecture-search")]
-    org.start_platform_experiment(pe_id)
+    # Its start time is now, and the platform starts it once its coordinator has had the baseline
+    # measured by an agent it added and has declared it: no researcher's machine is rented before.
+    org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
+    eventually("the coordinator to declare a baseline and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
+               accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",
+               deadline=deadline, interval=10)
     everyone: list[str | None] = [None, *researchers]
 
     try:

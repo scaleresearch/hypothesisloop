@@ -49,6 +49,7 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
     # jobs and needs the reserved quota that tier draws from, so its signup explicitly overrides
     # to quota_tier="guaranteed" rather than relying on kind alone.
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
+    api.declare_baseline(pe_id)
     api.start_platform_experiment(pe_id)
 
     # -- a job requesting cpu:"max" resolves and admits like any concrete request --

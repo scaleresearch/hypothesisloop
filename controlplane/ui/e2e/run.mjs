@@ -700,7 +700,7 @@ async function scenarios(browser) {
       metrics: [{ key: 'val_loss', direction: 'minimize' }], report_interval_seconds: 30,
     },
     budget_accelerator_hours: 6, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}],
-    baseline_job_id: 'job-baseline', accelerator_type: 'rtx-4090',
+    accelerator_type: 'rtx-4090',
     metric_reason: 'Validation loss on held-out text is the goal itself.',
     measurement: 'bench.py scores a split the training never reads.',
     questions: ['Is four hours enough?'],
@@ -712,7 +712,7 @@ async function scenarios(browser) {
     ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
   const draftWrites = []
-  const draftAPI = url => url.origin === API && (url.pathname === '/platform-experiments/drafts' || url.pathname.startsWith(`/platform-experiments/${draftID}`) || url.pathname === '/experiments/job-baseline/metrics')
+  const draftAPI = url => url.origin === API && (url.pathname === '/platform-experiments/drafts' || url.pathname.startsWith(`/platform-experiments/${draftID}`))
   await page.route(draftAPI, route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -725,7 +725,6 @@ async function scenarios(browser) {
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
     if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
-    if (path.endsWith('/metrics')) return json([{ experiment_id: 'job-baseline', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.8, metric_basis: 'raw' }])
     return json([])
   })
   await page.goto(`${UI}/platform-experiments`)
@@ -736,11 +735,12 @@ async function scenarios(browser) {
   await page.getByRole('status').filter({ hasText: 'The planner is working out how to measure this' }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
 
-  // The planner proposed: the card shows the baseline the job reported, and the questions first.
+  // The planner proposed: the card says nothing has run yet, with no number nobody measured, and the questions first.
   draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString() }
   await page.reload()
   await page.getByText('Proposed experiment: Cosine or constant').waitFor()
-  await page.getByText('val_loss, lower is better, baseline 1.8').waitFor()
+  await page.getByText('val_loss, lower is better', { exact: true }).waitFor()
+  await page.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090/).waitFor()
   await page.getByText('Is four hours enough?').waitFor()
   draftWrites.length = 0
   await page.getByLabel('What should be different?').fill('It must fit one RTX 4090.')
@@ -753,13 +753,12 @@ async function scenarios(browser) {
   await page.reload()
   draftWrites.length = 0
   await page.getByLabel('Budget (accelerator-hours)').fill('3')
-  const draftStarted = page.waitForResponse(response => response.url().endsWith(`/platform-experiments/${draftID}/start`) && response.request().method() === 'POST')
+  const draftAccepted = page.waitForResponse(response => response.url().endsWith(`/platform-experiments/${draftID}/accept`) && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Accept and run' }).click()
-  await draftStarted
+  await draftAccepted
   assert.deepEqual(draftWrites, [
     { path: `/platform-experiments/${draftID}/accept`, body: { budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}] } },
-    { path: `/platform-experiments/${draftID}/start`, body: null },
-  ], 'the budget the person typed, the proposal\'s duration and researchers, then the start')
+  ], 'the budget the person typed, the proposal\'s duration and researchers, and no start: the platform starts it once its baseline is declared')
   await page.unroute(draftAPI)
 
   section('the idea form has no name field and the idea is filed under the signed-in name')

@@ -79,6 +79,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     agent = json.loads(signup_out)["agent_id"]  # one joined agent per line, as valid JSON
     assert agent.startswith("ag-"), f"hl platform-experiments agents add: the platform issues the id, got {signup_out}"
 
+    api.declare_baseline(pe_id)  # hl platform-experiments update --baseline-job, which start waits for
     api.hl("platform-experiments", "start", "--platform-experiment", pe_id)  # hl platform-experiments start: succeeded
 
     # -- hl hypothesis submit --file / list --

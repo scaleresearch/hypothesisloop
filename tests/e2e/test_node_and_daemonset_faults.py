@@ -75,6 +75,7 @@ def test_node_and_daemonset_faults(api, run_id, deadline):
     # jobs and needs the reserved quota that tier draws from (see test_concurrent_admission_race.py
     # for the same override).
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
+    api.declare_baseline(pe_id)
     api.start_platform_experiment(pe_id)
 
     try:
