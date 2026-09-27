@@ -137,5 +137,5 @@ new job of yours is admitted and your machine stops once you end your turn, so e
 
 An error from `hl` (`hl: ...` with a reason and message) is signal: fix exactly that and
 retry. Reason `agent_held`, `agent_finished` or `experiment_closed` is final: wind up and stop.
-An HTTP 5xx or "could not be reached", from `git push` too, is the platform failing: retry
-once after a minute, then end your turn: the next message wakes you.
+"the platform could not be reached", or a `git push` that fails, is the platform failing:
+retry once after a minute, then end your turn: the next message wakes you.
