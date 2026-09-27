@@ -78,12 +78,14 @@ type fakeRepositories struct {
 	refusal error
 	checked []string
 	asked   []string
-	// created holds each repository made for an experiment that names none, as "project name".
+	// created holds each repository made for an experiment that names none, as "project name",
+	// and committed the files the last one started from.
 	created    []string
+	committed  map[string]string
 	notCreated error
 }
 
-func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string) (string, error) {
+func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {
 	if account != "" {
 		return account + "/" + name, nil
 	}
@@ -91,6 +93,7 @@ func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _
 		return "", f.notCreated
 	}
 	f.created = append(f.created, projectID+" "+name)
+	f.committed = files
 	return "acme/" + name, nil
 }
 

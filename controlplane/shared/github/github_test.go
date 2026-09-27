@@ -95,6 +95,11 @@ type fakeGitHub struct {
 	// kinds holds what a path is when it is not a file: dir, symlink or submodule.
 	kinds map[string]string
 	calls []string
+	// trees holds each tree written, by its sha, and commits the tree of each commit. gitRefuses
+	// names the step of writing a commit that is refused: trees, commits or refs.
+	trees      map[string]map[string]string
+	commits    map[string]string
+	gitRefuses string
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
@@ -123,6 +128,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 		roles:   map[string]map[int64]string{"alice": {100: "admin"}, "reader": {100: "admin"}, "carol": {100: "member"}},
 		tokens:  map[string]mintedToken{}, userTokens: map[string]string{},
 		kinds: map[string]string{"link": "symlink", "vendored": "submodule"},
+		trees: map[string]map[string]string{}, commits: map[string]string{},
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
@@ -350,11 +356,13 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("a repository was asked for with private %v and auto_init %v", body.Private, body.AutoInit)
 		default:
 			f.sequence++
-			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: installation.account + "/" + body.Name, defaultBranch: "main"}
+			repo := &fakeRepo{id: int64(1000 + f.sequence), fullName: installation.account + "/" + body.Name, defaultBranch: "main", files: map[string]string{"README.md": "# " + body.Name + "\n"}}
 			f.repos[strings.ToLower(repo.fullName)] = repo
 			installation.repos[repo.id] = true
-			f.answer(w, http.StatusCreated, map[string]any{"id": repo.id, "full_name": repo.fullName, "private": true})
+			f.answer(w, http.StatusCreated, map[string]any{"id": repo.id, "full_name": repo.fullName, "private": true, "default_branch": repo.defaultBranch})
 		}
+	case len(segments) >= 5 && segments[0] == "repos" && segments[3] == "git":
+		f.git(w, r, bearer, segments)
 	case r.URL.Path == "/installation/repositories":
 		token, ok := f.tokens[bearer]
 		if !ok {
@@ -420,6 +428,80 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			"type": "file", "size": len(content), "encoding": "base64",
 			"content": wrapped(base64.StdEncoding.EncodeToString([]byte(content))),
 		})
+	default:
+		f.refuse(w, http.StatusNotFound, "Not Found")
+	}
+}
+
+// git answers the calls that write a commit without a clone. As GitHub does, it writes only for
+// a token that may push, takes a tree whose files come with their content, and moves a branch
+// off its history only when forced.
+func (f *fakeGitHub) git(w http.ResponseWriter, r *http.Request, bearer string, segments []string) {
+	repo := f.repos[strings.ToLower(segments[1]+"/"+segments[2])]
+	if repo == nil {
+		f.refuse(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	if _, push := f.visible(bearer, repo); !push {
+		f.refuse(w, http.StatusForbidden, "Resource not accessible by integration")
+		return
+	}
+	if f.gitRefuses == segments[4] {
+		f.refuse(w, http.StatusConflict, "Git Repository is empty.")
+		return
+	}
+	var body struct {
+		Tree     json.RawMessage `json:"tree"`
+		BaseTree string          `json:"base_tree"`
+		Parents  []string        `json:"parents"`
+		Message  string          `json:"message"`
+		SHA      string          `json:"sha"`
+		Force    bool            `json:"force"`
+	}
+	json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+	sha := fmt.Sprintf("%040d", len(f.trees)+len(f.commits)+1)
+	switch {
+	case len(segments) == 5 && segments[4] == "trees" && r.Method == http.MethodPost:
+		var entries []struct{ Path, Mode, Type, Content string }
+		json.Unmarshal(body.Tree, &entries) //nolint:errcheck
+		files := map[string]string{}
+		for _, entry := range entries {
+			if entry.Mode != "100644" || entry.Type != "blob" || entry.Path == "" || strings.HasPrefix(entry.Path, "/") {
+				f.refuse(w, http.StatusUnprocessableEntity, "tree.path contains a malformed path component")
+				return
+			}
+			files[entry.Path] = entry.Content
+		}
+		if len(files) == 0 || body.BaseTree != "" {
+			f.t.Errorf("a tree was asked with %d files on base %q, want the files alone", len(files), body.BaseTree)
+		}
+		f.trees[sha] = files
+		f.answer(w, http.StatusCreated, map[string]string{"sha": sha})
+	case len(segments) == 5 && segments[4] == "commits" && r.Method == http.MethodPost:
+		var tree string
+		json.Unmarshal(body.Tree, &tree) //nolint:errcheck
+		if f.trees[tree] == nil {
+			f.refuse(w, http.StatusUnprocessableEntity, "Tree SHA does not exist")
+			return
+		}
+		if body.Parents == nil || len(body.Parents) != 0 || body.Message == "" {
+			f.t.Errorf("a commit was asked with parents %v and message %q, want no parent and a message", body.Parents, body.Message)
+		}
+		f.commits[sha] = tree
+		f.answer(w, http.StatusCreated, map[string]string{"sha": sha})
+	case len(segments) >= 7 && segments[4] == "refs" && segments[5] == "heads" && r.Method == http.MethodPatch:
+		tree, known := f.commits[body.SHA]
+		switch {
+		case strings.Join(segments[6:], "/") != repo.defaultBranch:
+			f.refuse(w, http.StatusUnprocessableEntity, "Reference does not exist")
+		case !known:
+			f.refuse(w, http.StatusUnprocessableEntity, "Object does not exist")
+		case !body.Force:
+			f.refuse(w, http.StatusUnprocessableEntity, "Update is not a fast forward")
+		default:
+			repo.files = f.trees[tree]
+			f.answer(w, http.StatusOK, map[string]any{"ref": "refs/heads/" + repo.defaultBranch})
+		}
 	default:
 		f.refuse(w, http.StatusNotFound, "Not Found")
 	}
@@ -612,7 +694,7 @@ func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *t
 	// Installation 100 is on an organisation, 300 on a person's own account. Neither covers
 	// every repository of its account, and each covers the one it creates.
 	for installation, want := range map[int64]string{100: "Acme/lr-sweep-1a2b3c4d", 300: "carol/lr-sweep-1a2b3c4d"} {
-		created, err := client.CreateRepository(ctx, installation, "lr-sweep-1a2b3c4d", "what it is for")
+		created, err := client.CreateRepository(ctx, installation, "lr-sweep-1a2b3c4d", "what it is for", firstFiles)
 		if err != nil || *created != (Repository{FullName: want, Private: true}) {
 			t.Fatalf("CreateRepository on %d = %+v, %v, want %s", installation, created, err, want)
 		}
@@ -636,13 +718,65 @@ func TestARepositoryIsCreatedPrivateOnTheInstallationsAccountAndCoveredByIt(t *t
 		if tc.arrange != nil {
 			tc.arrange()
 		}
-		if _, err := client.CreateRepository(ctx, tc.installation, tc.repo, ""); !errors.Is(err, tc.want) {
+		if _, err := client.CreateRepository(ctx, tc.installation, tc.repo, "", firstFiles); !errors.Is(err, tc.want) {
 			t.Errorf("%s: got = %v, want %v", name, err, tc.want)
 		}
 		f.ungranted = false
 	}
 	if f.repos["acme/fresh"] != nil || f.repos["rival/fresh"] != nil {
 		t.Fatal("a refused create left a repository behind")
+	}
+}
+
+var firstFiles = map[string]string{"README.md": "what this is\n", ".hypothesisloop/job.yaml": "job:\n  image: one\n"}
+
+// GitHub's own first commit is replaced: the default branch holds the files given and nothing
+// else, written with a token for that one repository.
+func TestACreatedRepositoryHoldsTheFilesGivenAsItsOnlyCommit(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	created, err := client.CreateRepository(ctx, 100, "sweep", "", firstFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held := f.repos["acme/sweep"].files; !maps.Equal(held, firstFiles) {
+		t.Fatalf("the default branch holds %v, want %v", held, firstFiles)
+	}
+	if wrote := f.lastToken(); wrote.permissions["contents"] != "write" || len(wrote.repos) != 1 || f.repoByID(wrote.repos[0]).fullName != created.FullName {
+		t.Fatalf("the commit was written with %+v, want a write token for %s alone", wrote, created.FullName)
+	}
+	token, err := client.Token(ctx, 100, created.FullName, Read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range firstFiles {
+		if data, err := client.File(ctx, token, "", path); err != nil || string(data) != want {
+			t.Errorf("File(%s) = %q, %v, want %q", path, data, err, want)
+		}
+	}
+	if _, err := client.CreateRepository(ctx, 100, "bare", "", nil); err == nil || f.repos["acme/bare"] != nil {
+		t.Fatalf("a create with no files: got = %v, want it refused before anything is created", err)
+	}
+}
+
+// The App creates repositories and deletes none, so a repository whose first commit is refused
+// stays on the account with GitHub's own commit, and the error names it.
+func TestACreateWhoseFirstCommitIsRefusedFailsAndNamesTheRepositoryLeftBehind(t *testing.T) {
+	for step, arrange := range map[string]func(*fakeGitHub){
+		"trees":   func(f *fakeGitHub) { f.gitRefuses = "trees" },
+		"commits": func(f *fakeGitHub) { f.gitRefuses = "commits" },
+		"refs":    func(f *fakeGitHub) { f.gitRefuses = "refs" },
+	} {
+		f, client := newFakeGitHub(t)
+		arrange(f)
+		created, err := client.CreateRepository(ctx, 100, "sweep", "", firstFiles)
+		var uncommitted *FirstCommitError
+		if created != nil || !errors.As(err, &uncommitted) || uncommitted.Repository != "Acme/sweep" || !strings.Contains(err.Error(), "/git/"+step) {
+			t.Fatalf("%s refused: got = %+v, %v, want a FirstCommitError naming Acme/sweep and the call", step, created, err)
+		}
+		left := f.repos["acme/sweep"]
+		if left == nil || left.files[".hypothesisloop/job.yaml"] != "" || left.files["README.md"] == firstFiles["README.md"] {
+			t.Fatalf("%s refused: the repository left behind holds %+v, want GitHub's own first commit", step, left)
+		}
 	}
 }
 

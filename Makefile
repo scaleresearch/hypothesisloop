@@ -443,8 +443,9 @@ agent-test:
 
 # The GitHub client's checks against github.com itself, as the App .env names
 # (controlplane/shared/github/github_live_test.go). Both the token checks and the push check use
-# the sandbox repository of HL_E2E_GITHUB_REPO; the push check pushes a branch there and deletes
-# it. The App's key reaches the test in a file that exists only for the run.
+# the sandbox repository of HL_E2E_GITHUB_REPO; the push check and the first-commit check each
+# make a branch there and delete it. The App's key reaches the test in a file that exists only
+# for the run.
 test-github-live:
 	@bash -c 'set -euo pipefail; . localdev/lib/auth.sh; \
 	  test -n "$$HL_GITHUB_APP_ID" || { echo "make test-github-live: .env does not set GITHUB_APP_ID" >&2; exit 1; }; \

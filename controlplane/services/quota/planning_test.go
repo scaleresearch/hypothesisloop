@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -99,8 +101,8 @@ func TestADraftIsCreatedFromOneSentenceWithThePlanningAllowanceAndNothingElse(t 
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
 	// A draft has a repository: the one named, or a new one.
-	if pe.Repository != "acme/"+RepositoryName(pe) || len(planningRepositories.created) != 1 {
-		t.Errorf("repository = %q (created %v), want one made for the draft", pe.Repository, planningRepositories.created)
+	if pe.Repository != "acme/"+RepositoryName(pe) || len(planningRepositories.created) != 1 || !maps.Equal(planningRepositories.committed, repotemplate.Files()) || planningRepositories.committed[domain.ExperimentFile] == "" {
+		t.Errorf("repository = %q (created %v), want one made for the draft from the template, which holds %s", pe.Repository, planningRepositories.created, domain.ExperimentFile)
 	}
 	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 1 {
 		t.Errorf("naming a repository: got = %d %v, want it as GitHub spells it and none created", code, out["repository"])

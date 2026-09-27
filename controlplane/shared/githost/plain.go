@@ -72,7 +72,7 @@ func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, er
 	return repository, nil
 }
 
-func (p *Plain) Create(context.Context, string, string, string, string) (string, error) {
+func (p *Plain) Create(context.Context, string, string, string, string, map[string]string) (string, error) {
 	return "", api.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -36,12 +37,13 @@ func RepositoryName(pe *domain.PlatformExperiment) string {
 	return name + "-" + strings.TrimPrefix(pe.ID, "pe-")
 }
 
-// provideRepository gives a platform experiment the repository the request named, or with none
-// named one the platform creates for it, on account when the request says which.
+// provideRepository gives a platform experiment the repository the request named, as it is, or
+// with none named one the platform creates for it from the template, on account when the
+// request says which.
 func (h *PlatformExperimentsHandler) provideRepository(named, account string) func(context.Context, *domain.PlatformExperiment) error {
 	return func(ctx context.Context, pe *domain.PlatformExperiment) error {
 		if named == "" {
-			created, err := h.repos.Create(ctx, pe.ProjectID, account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name)
+			created, err := h.repos.Create(ctx, pe.ProjectID, account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name, repotemplate.Files())
 			if err != nil {
 				return err
 			}

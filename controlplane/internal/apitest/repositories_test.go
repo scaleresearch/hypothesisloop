@@ -30,6 +30,6 @@ func (worldRepositories) Serves(repository, protocol, host, path string) bool {
 	return protocol+"://"+host+"/"+strings.Trim(path, "/") == worldGitRoot+repository
 }
 
-func (worldRepositories) Create(_ context.Context, _, _, name, _ string) (string, error) {
+func (worldRepositories) Create(_ context.Context, _, _, name, _ string, _ map[string]string) (string, error) {
 	return name, nil
 }

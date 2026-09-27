@@ -27,7 +27,7 @@ type GitHubApp interface {
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
-	CreateRepository(ctx context.Context, installationID int64, name, description string) (*github.Repository, error)
+	CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*github.Repository, error)
 }
 
 // InstallationStore is the persistence of the installations orgs connected. *db.AccountsStore
@@ -130,9 +130,13 @@ var errNoInstallation = errors.New("the org has connected no GitHub account")
 // failure: it is logged and answered without its text.
 func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var status huma.StatusError
+	var uncommitted *github.FirstCommitError
 	switch {
 	case errors.As(err, &status):
 		return err
+	case errors.As(err, &uncommitted):
+		logger.Error("github created a repository and did not take its first commit", zap.String("operation", op), zap.Error(err))
+		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+uncommitted.Repository+" and did not take its first commit, so nothing else was created. The repository is left on the GitHub account without the experiment's files: name it in repository on the next try, where hl repo init adds them, or delete it on GitHub")
 	case errors.Is(err, db.ErrOrgNotFound):
 		return notFound("org")
 	case errors.Is(err, db.ErrGitHubInstallationNotFound):

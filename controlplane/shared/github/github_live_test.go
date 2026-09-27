@@ -3,9 +3,11 @@ package github
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 )
 
@@ -23,7 +26,8 @@ import (
 //	HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION   an installation of it, for the token checks
 //	HYPOTHESISLOOP_GITHUB_LIVE_REPOSITORY     owner/name of a repository that installation covers
 //	HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY  owner/name of a sandbox repository the push check
-//	                                          may push a branch to, which it deletes again
+//	                                          and the first-commit check may each make a branch
+//	                                          in, which they delete again
 //
 // Connecting an installation needs a person's authorisation code from a browser, so the code
 // exchange, GET /user/installations with a person's token and its revocation have no check here.
@@ -211,7 +215,7 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	client := liveClient(t)
 	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
-	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.")
+	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
 	if err != nil {
 		t.Fatalf("CreateRepository(%s) = %v", name, err)
 	}
@@ -219,6 +223,66 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	token, err := client.Token(t.Context(), installation, created.FullName, Write)
 	if err != nil || token.Repository != created.FullName {
 		t.Fatalf("a write token for %s: got = %+v, %v, want one: the installation covers what it created", created.FullName, token != nil, err)
+	}
+}
+
+// The calls that give a created repository its first commit, made on a branch of the sandbox
+// that stands in for a new repository's default branch and is deleted again.
+func TestLiveFirstCommitReplacesWhatABranchHeld(t *testing.T) {
+	client := liveClient(t)
+	installation := liveID(t, "HYPOTHESISLOOP_GITHUB_LIVE_INSTALLATION")
+	name := os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY")
+	if ValidRepository(name) != nil {
+		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_PUSH_REPOSITORY is not set to owner/name")
+	}
+	write, err := client.Token(ctx, installation, name, Write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var repository struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	var head struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := client.call(ctx, http.MethodGet, "/repos/"+name, write.Value, nil, &repository); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.call(ctx, http.MethodGet, "/repos/"+name+"/git/ref/heads/"+repository.DefaultBranch, write.Value, nil, &head); err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 4)
+	rand.Read(suffix) //nolint:errcheck
+	branch := fmt.Sprintf("hl/live-check/%x", suffix)
+	if err := client.call(ctx, http.MethodPost, "/repos/"+name+"/git/refs", write.Value, map[string]string{"ref": "refs/heads/" + branch, "sha": head.Object.SHA}, nil); err != nil {
+		t.Fatalf("create branch %s in the sandbox: %v", branch, err)
+	}
+	t.Cleanup(func() {
+		if err := client.call(ctx, http.MethodDelete, "/repos/"+name+"/git/refs/heads/"+branch, write.Value, nil, nil); err != nil {
+			t.Errorf("delete branch %s from the sandbox: %v", branch, err)
+		}
+	})
+
+	files := repotemplate.Files()
+	if err := client.firstCommit(ctx, write, branch, files); err != nil {
+		t.Fatalf("firstCommit on %s: %v", branch, err)
+	}
+	var commit struct {
+		Parents []json.RawMessage `json:"parents"`
+		Files   []json.RawMessage `json:"files"`
+	}
+	if err := client.call(ctx, http.MethodGet, "/repos/"+name+"/commits/"+url.PathEscape(branch), write.Value, nil, &commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Parents) != 0 || len(commit.Files) != len(files) {
+		t.Fatalf("the branch's head has %d parents and %d files, want no parent and the %d files of the template", len(commit.Parents), len(commit.Files), len(files))
+	}
+	for path, want := range files {
+		if data, err := client.File(ctx, write, branch, path); err != nil || string(data) != want {
+			t.Errorf("File(%s) on %s = %d bytes, %v, want the template's %d", path, branch, len(data), err, len(want))
+		}
 	}
 }
 

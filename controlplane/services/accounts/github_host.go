@@ -67,8 +67,8 @@ func (h *GitHubHost) Reachable(ctx context.Context, projectID, repository string
 
 // Create makes a private repository on the GitHub account named, one the org of the project
 // connected, or with none named on the only one it connected: with several, which one is the
-// request's to say.
-func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, description string) (string, error) {
+// request's to say. files are its first commit.
+func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error) {
 	const op = "create-repository"
 	project, err := h.store.GetProject(ctx, projectID)
 	if err != nil {
@@ -98,7 +98,7 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 	case chosen == nil:
 		return "", refusal(h.logger, op, errNotConnected, http.StatusUnprocessableEntity)
 	}
-	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, name, description)
+	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, name, description, files)
 	if err != nil {
 		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}

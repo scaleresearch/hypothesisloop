@@ -14,9 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +74,20 @@ var (
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
 )
+
+// FirstCommitError reports a repository that was created and did not take its first commit. It
+// is left on the account holding what GitHub starts one with: the App creates repositories and
+// deletes none.
+type FirstCommitError struct {
+	Repository string
+	Cause      error
+}
+
+func (e *FirstCommitError) Error() string {
+	return "github: " + e.Repository + " was created and did not take its first commit: " + e.Cause.Error()
+}
+
+func (e *FirstCommitError) Unwrap() error { return e.Cause }
 
 // Access is what an installation token may do to the repository's contents.
 type Access string
@@ -346,13 +362,16 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
 // CreateRepository creates a private repository of that name on the account an installation is
-// on, an organisation or a person's own, with one commit so that it can be cloned at once.
+// on, an organisation or a person's own, whose default branch holds one commit: files, by path.
 // GitHub then counts it among the repositories the installation covers, whichever ones its
 // owner selected. The token it creates with holds everything the installation granted and does
 // not leave here.
-func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string) (*Repository, error) {
+func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("github: a repository is created with the files of its first commit")
 	}
 	jwt, err := c.appJWT()
 	if err != nil {
@@ -394,9 +413,12 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 		return nil, err
 	}
 	var out struct {
-		FullName string `json:"full_name"`
-		Private  bool   `json:"private"`
+		FullName      string `json:"full_name"`
+		Private       bool   `json:"private"`
+		DefaultBranch string `json:"default_branch"`
 	}
+	// GitHub writes no tree to a repository with no commit, so it makes the first one itself
+	// and firstCommit takes its place.
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
 	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
 	case errors.Is(err, errUnprocessable):
@@ -409,7 +431,41 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
 		return nil, fmt.Errorf("github: POST %s answered without the private repository asked for", path)
 	}
+	write, err := c.Token(ctx, installationID, out.FullName, Write)
+	if err != nil {
+		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
+	}
+	if err := c.firstCommit(ctx, write, out.DefaultBranch, files); err != nil {
+		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
+	}
 	return &Repository{FullName: out.FullName, Private: true}, nil
+}
+
+// firstCommit makes files the only commit of a branch the token's repository has: a tree, a
+// commit of it with no parent, and the branch moved there whatever it held.
+func (c *Client) firstCommit(ctx context.Context, token *Token, branch string, files map[string]string) error {
+	if branch == "" {
+		return fmt.Errorf("github: %s names no default branch", token.Repository)
+	}
+	entries := make([]map[string]string, 0, len(files))
+	for _, path := range slices.Sorted(maps.Keys(files)) {
+		entries = append(entries, map[string]string{"path": path, "mode": "100644", "type": "blob", "content": files[path]})
+	}
+	git := "/repos/" + token.Repository + "/git/"
+	var tree, commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := c.call(ctx, http.MethodPost, git+"trees", token.Value, map[string]any{"tree": entries}, &tree); err != nil {
+		return err
+	}
+	made := map[string]any{"message": "Start from the HypothesisLoop experiment template", "tree": tree.SHA, "parents": []string{}}
+	if err := c.call(ctx, http.MethodPost, git+"commits", token.Value, made, &commit); err != nil {
+		return err
+	}
+	if tree.SHA == "" || commit.SHA == "" {
+		return fmt.Errorf("github: %s answered a tree or a commit without its sha", token.Repository)
+	}
+	return c.call(ctx, http.MethodPatch, git+"refs/heads/"+branch, token.Value, map[string]any{"sha": commit.SHA, "force": true}, nil)
 }
 
 // revoke ends a person's token at GitHub, so that nothing of theirs outlives the question it

@@ -131,7 +131,7 @@ func TestAPlainHostIsReachedWithTheDeploymentsOneCredential(t *testing.T) {
 func TestAPlainHostCreatesNoRepositoryAndReadsNoFile(t *testing.T) {
 	plain := newPlain(t, "https://git.example/experiments", "", "")
 	ctx := context.Background()
-	named, err := plain.Create(ctx, "prj-a", "", "sweep-1a2b3c4d", "")
+	named, err := plain.Create(ctx, "prj-a", "", "sweep-1a2b3c4d", "", map[string]string{"README.md": "x"})
 	if status, reason := refused(err); named != "" || status != 422 || reason != "repository_required" {
 		t.Errorf("Create = %q, %v, want 422 repository_required", named, err)
 	}

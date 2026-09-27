@@ -15,9 +15,10 @@ type Provider interface {
 	// platform experiment's code in it.
 	Reachable(ctx context.Context, projectID, repository string) (string, error)
 	// Create makes a repository of that name for a platform experiment that names none, on the
-	// account named where the host has several for the project, and returns it. A host that
-	// creates none refuses.
-	Create(ctx context.Context, projectID, account, name, description string) (string, error)
+	// account named where the host has several for the project, and returns it. files, by path,
+	// are its first commit. A host that creates none refuses. A repository the request names is
+	// never written to.
+	Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error)
 	// File reads a file at the head of the repository's default branch. A host that serves no
 	// file to the platform refuses.
 	File(ctx context.Context, projectID, repository, path string) ([]byte, error)
