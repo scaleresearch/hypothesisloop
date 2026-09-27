@@ -9,10 +9,10 @@ runtime/cloud/internal/agentlaunch's own tests, one of which runs it against the
 handler. The local control plane gives hosted agents to the launcher named in its config
 (agents.launcher).
 
-A hosted agent works in its platform experiment's repository, so hosting is refused for an
-experiment that names none. The tests that host agents therefore need a repository to name, the
-same sandbox test_experiment_repo.py pushes to, and are skipped without it (conftest's
-sandbox_repository).
+A hosted agent works in its platform experiment's repository, which every experiment has on a
+stack with a GitHub App. Most tests here name the sandbox repository test_experiment_repo.py
+pushes to and are skipped without it (conftest's sandbox_repository). With no App an experiment
+has no repository and is hosted all the same, which the first test holds on either stack.
 
 Exclusive: every test here asks as the one launcher the local control plane gives hosted agents
 to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
@@ -101,17 +101,19 @@ def roster(api: API, pe_id: str) -> dict[str, dict]:
     return {a["agent_id"]: a for a in api.agents(pe_id)}
 
 
-def test_an_agent_is_hosted_in_a_platform_experiment_that_names_no_repository(api: API, run_id: str):
+def test_agents_and_a_coordinator_are_hosted_with_a_repository_exactly_where_the_stack_has_an_app(api: API, run_id: str):
     project = api
-    pe_id = project.create_platform_experiment(f"hosted-no-repo-{run_id}", 1.0, 5)
+    r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_hosted=True)
+    assert r.status_code == 201 and r.json()["coordinator_hosted"] is True, f"{r.status_code} {r.text}"
+    pe_id = r.json()["id"]
     try:
         # With no repository the agent starts in an empty directory and the platform keeps the
         # code it pushes, so hosting it needs none.
+        assert ("repository_url" in r.json()) == (project.sandbox_repository() is not None), r.text
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
-        assert r.status_code == 201, f"hosted with no repository: {r.status_code} {r.text}"
+        assert r.status_code == 201, f"hosted: {r.status_code} {r.text}"
         hosted = r.json()["agents"][0]
         assert hosted["hosted"] and hosted["launcher"], hosted
-        assert "repository_url" not in project.get_json(f"/platform-experiments/{pe_id}")
         assert project.remove_agent(pe_id, hosted["agent_id"]).status_code == 200
         assert project.agents(pe_id) == [], "the hosted agent was not removed"
 
@@ -133,6 +135,9 @@ def test_an_agent_is_hosted_in_a_platform_experiment_that_names_no_repository(ap
         assert project.remove_agent(pe_id, own["agent_id"]).status_code == 200
         again = project.post_json(f"/platform-experiments/{pe_id}/agents", {"agent_id": own["agent_id"]})["agents"][0]
         assert again["agent_id"] == own["agent_id"] and again["token"] == own["token"], again
+
+        r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_model="some-model")
+        assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
     finally:
         project.close_platform_experiment(pe_id)
 
@@ -360,15 +365,6 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     assert not instances
     for agent in survivors:
         assert before[agent]["name"] in ending, f"{agent} is not left to end after the close"
-
-
-def test_a_coordinator_is_hosted_in_a_project_with_no_repository(api: API, run_id: str):
-    project = api
-    r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_hosted=True)
-    assert r.status_code == 201 and r.json()["coordinator_hosted"] is True and "repository_url" not in r.json(), f"{r.status_code} {r.text}"
-    project.close_platform_experiment(r.json()["id"])
-    r = _hosted_run(project, f"coordinated-no-repo-{run_id}", coordinator_model="some-model")
-    assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
 
 
 def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_keeps(with_repo: API, run_id: str):

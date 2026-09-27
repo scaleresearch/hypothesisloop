@@ -1,11 +1,12 @@
 """The repository a platform experiment works on: how an org's GitHub connection is reached, what
 an experiment may name, and who is handed a git credential.
 
-Most of this holds whether or not the deployment has a GitHub App: every boundary around an org's
-installations, and that nothing is handed out for an experiment that names no repository. A real
-connect needs a person to authorise the App in a browser, so the one test that clones and pushes
-has hl-admin connect the installation instead, which asks GitHub as the App that it exists. It
-runs only when the environment names a sandbox repository:
+Every boundary around an org's installations holds whether or not the deployment has a GitHub
+App. With one every platform experiment has a repository, so the test of an experiment that names
+none runs only on a stack with no App. A real connect needs a person to authorise the App in a
+browser, so the one test that clones and pushes has hl-admin connect the installation instead,
+which asks GitHub as the App that it exists. It runs only when the environment names a sandbox
+repository:
 
     HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
     HL_E2E_GITHUB_REPO            owner/name, a repository tests may push branches to
@@ -130,15 +131,20 @@ def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs
         refused = _call(caller, "POST", "/git-credentials", ANY_REPO)
         assert refused.status_code == 403 and refused.json()["reason"] == "forbidden" and "password" not in refused.text, refused.text
     assert requests.post(a.api._url("/git-credentials"), json=ANY_REPO, timeout=30).status_code == 401
-    nothing = _call(agent, "POST", "/git-credentials", ANY_REPO)
-    assert nothing.status_code == 404 and nothing.json()["reason"] == "no_repository", nothing.text
     # The address git asks about is part of the question.
     assert _call(agent, "POST", "/git-credentials", {}).status_code == 422
 
 
 @pytest.mark.parallel
-def test_hl_git_credential_gives_git_nothing_when_the_experiment_names_no_repository(run):
-    _, agent = run
+def test_a_platform_experiment_without_a_repository_has_no_clone_address_and_hands_git_nothing(orgs, run):
+    a, _ = orgs
+    if _call(a.api, "GET", "/github/app").status_code != 503:
+        pytest.skip("this stack has a GitHub App, so every platform experiment has a repository: run on a stack with no App")
+    pe_id, agent = run
+    read = agent.get_json(f"/platform-experiments/{pe_id}")
+    assert "repository" not in read and "repository_url" not in read, read
+    nothing = _call(agent, "POST", "/git-credentials", ANY_REPO)
+    assert nothing.status_code == 404 and nothing.json()["reason"] == "no_repository", nothing.text
     asked = "protocol=https\nhost=github.com\npath=acme/model.git\n\n"
     got = agent.hl_expect("git-credential", "get", input=asked)
     assert got.returncode == 1 and got.stdout == "" and "names no repository" in got.stderr, got
@@ -148,23 +154,15 @@ def test_hl_git_credential_gives_git_nothing_when_the_experiment_names_no_reposi
 
 
 @pytest.mark.parallel
-def test_a_platform_experiment_without_a_repository_has_no_clone_address_and_no_from_repo(orgs, run):
-    a, _ = orgs
-    pe_id, agent = run
-    read = agent.get_json(f"/platform-experiments/{pe_id}")
-    assert "repository" not in read and "repository_url" not in read, read
-    created = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
-    assert created.status_code == 422 and created.json()["reason"] == "no_repository", created.text
-
-
-@pytest.mark.parallel
 def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_changes(orgs, run):
-    """A create without from_repo states its name, description and metrics, and an update changes
-    the fields it names and no others."""
+    """A create without from_repo states its name, description and metrics, one with it names the
+    repository, and an update changes the fields it names and no others."""
     a, _ = orgs
     pe_id, agent = run
     partial = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "name": "only a name"})
     assert partial.status_code == 422 and "description" in partial.json()["error"], partial.text
+    unnamed = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
+    assert unnamed.status_code == 422 and unnamed.json()["reason"] == "no_repository", unnamed.text
     before = agent.get_json(f"/platform-experiments/{pe_id}")
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"}).status_code == 422
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {}).status_code == 422
@@ -224,7 +222,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
 
     connected = admin.connect_github(org.org_id, installation)
     assert connected["installation_id"] == int(installation) and connected["account_login"].lower() == repo.split("/")[0].lower(), connected
-    pe_id = other_pe = branch = ""
+    pe_id = branch = ""
     agent = None
     try:
         assert [i["installation_id"] for i in _installations(org)] == [int(installation)]
@@ -235,14 +233,12 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         assert _installations(other) == []
 
         pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2, repository=repo)
-        other_pe = other.api.create_platform_experiment(f"repo-bystander-{run_id}", 1, 2)
         clone_url = f"https://github.com/{repo}.git"
         read = org.api.get_json(f"/platform-experiments/{pe_id}")
         assert (read["repository"], read["repository_url"]) == (repo, clone_url), read
 
         added = org.api.add_agents(pe_id)[0]
         agent = org.api.as_caller(added["token"], org.org_id, org.project_id)
-        bystander = other.api.as_caller(other.api.add_agents(other_pe)[0]["token"], other.org_id, other.project_id)
 
         mine = {"protocol": "https", "host": "github.com", "path": f"{repo}.git"}
         minted = _call(agent, "POST", "/git-credentials", mine)
@@ -255,11 +251,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         for elsewhere in ({**mine, "path": f"{repo}-other.git"}, {**mine, "host": "example.com"}, {**mine, "protocol": "http"}):
             refused = _call(agent, "POST", "/git-credentials", elsewhere)
             assert refused.status_code == 404 and refused.json()["reason"] == "not_found", (elsewhere, refused.text)
-        # An agent of an experiment that names no repository is handed nothing, and cannot clone.
-        assert _call(bystander, "POST", "/git-credentials", mine).status_code == 404
-        refused = _git(bystander, tmp_path, "clone", "--depth", "1", clone_url, "bystander")
-        assert refused.returncode != 0, "an agent of another org cloned the repository"
-        # And its org cannot name the repository: it connected nothing that covers it.
+        # Another org cannot name the repository: it connected nothing that covers it.
         named = _call(other.api, "POST", "/platform-experiments", {
             **RUN, "project_id": other.project_id, "name": f"repo-taken-{run_id}", "description": "another org's repository",
             "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "repository": repo,
@@ -300,6 +292,5 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
             admin.connect_github(org.org_id, installation)
             _git(agent, tmp_path / "work", "push", "origin", "--delete", branch)
         _call(org.api, "DELETE", f"/orgs/{org.org_id}/github-installations/{installation}")
-        for api_, pe in ((org.api, pe_id), (other.api, other_pe)):
-            if pe:
-                api_.close_platform_experiment(pe)
+        if pe_id:
+            org.api.close_platform_experiment(pe_id)

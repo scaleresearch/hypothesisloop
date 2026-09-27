@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import subprocess
 import uuid
-from datetime import datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -73,18 +72,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     one sequential test since each step consumes state (pe_id, hyp_id, job_id) produced by the one
     before it -- the same reason the bash scenario runs it as a single script."""
     # -- hl platform-experiments create / start --
-    pe_body = {
-        "name": f"cli-full-flow-{run_id}",
-        "description": f"cli-full-flow-{run_id}",
-        "budget_accelerator_hours": PE_BUDGET,
-        "max_agents": 1,
-        "report_interval_seconds": 10,
-        "metrics": [{"key": "val_accuracy", "direction": "maximize"}],
-        "ends_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    pe_create_out = api.hl("platform-experiments", "create", "-", input=yaml.safe_dump(pe_body, sort_keys=False))
-    pe_id = json.loads(pe_create_out)["id"]
-    assert pe_id, f"hl platform-experiments create: no id in response: {pe_create_out}"
+    pe_id = api.create_platform_experiment(f"cli-full-flow-{run_id}", PE_BUDGET, 1)
 
     # -- hl platform-experiments agents add --
     signup_out = api.hl("platform-experiments", "agents", "add", "--platform-experiment", pe_id, "--name", "CLI Flow Agent")
