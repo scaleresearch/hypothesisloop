@@ -44,7 +44,7 @@ func measuredBaseline() *Baseline {
 func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
-	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 		if baseline == nil || baseline.Job.ID != jobID {
 			return nil, nil

@@ -61,10 +61,7 @@ func (s *PlatformExperimentsService) checkRunLength(startsAt, endsAt, now time.T
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them and its length as ends_at.
-//
-// Its jobs must have somewhere to run now: a platform experiment no cluster can serve would stay
-// open until its baseline limit closed it.
-func (s *PlatformExperimentsService) validate(ctx context.Context, spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
+func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
 	spec = s.withSettings(spec)
 	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Description) == "" {
 		return spec, refuseUpdate(422, "invalid_experiment", "name and description are required: the description is the brief every agent works from")
@@ -103,27 +100,36 @@ func (s *PlatformExperimentsService) validate(ctx context.Context, spec CreatePl
 		}
 		spec.EndsAt = from.Add(time.Duration(spec.DurationHours * float64(time.Hour)))
 	}
-	if err := s.checkRunLength(spec.StartsAt, spec.EndsAt, now); err != nil {
-		return spec, err
-	}
-	reachable, err := s.reachable(ctx, spec.ProjectID)
+	return spec, s.checkRunLength(spec.StartsAt, spec.EndsAt, now)
+}
+
+// requireReachable refuses a platform experiment coming into being where nothing could run it:
+// a create in an org whose jobs no cluster takes now, and a proposal or an accept sized for a
+// type none of them has. sizedFor is nil for a create, which states no type. One that exists is
+// never held to it, since a cluster that reports nothing for a moment must not stop a
+// coordinator declaring its baseline or an owner renaming a run.
+func (s *PlatformExperimentsService) requireReachable(ctx context.Context, projectID string, sizedFor *domain.AcceleratorType) error {
+	reachable, err := s.reachable(ctx, projectID)
 	if err != nil {
-		return spec, fmt.Errorf("platform_experiments.validate: read capacity: %w", err)
+		return fmt.Errorf("platform_experiments.requireReachable: %w", err)
 	}
-	if spec.acceleratorType == nil && len(reachable) == 0 {
-		return spec, refuseUpdate(422, "accelerator_unreachable", "no cluster this org's jobs can be placed on reports capacity now, so nothing of it could run: register a cluster or turn a shared one on (`hl capacity` lists what is reachable)")
+	if sizedFor == nil && len(reachable) == 0 {
+		return refuseUpdate(422, "accelerator_unreachable", "no cluster this org's jobs can be placed on reports capacity now, so nothing of it could run: register a cluster or turn a shared one on (`hl capacity` lists what is reachable)")
 	}
-	if spec.acceleratorType != nil && !reachable[string(*spec.acceleratorType)] {
-		return spec, refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *spec.acceleratorType)
+	if sizedFor != nil && !reachable[string(*sizedFor)] {
+		return refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *sizedFor)
 	}
-	return spec, nil
+	return nil
 }
 
 // Create creates a new platform experiment in open status (accepting signups immediately).
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	req, err := s.validate(ctx, req, now)
+	req, err := s.validate(req, now)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
 		return nil, err
 	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
@@ -229,9 +235,8 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if patch.BaselineJobID != nil {
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
-	if _, err := s.validate(ctx, CreatePlatformExperimentRequest{
-		ProjectID: patched.ProjectID,
-		Name:      patched.Name, Description: patched.Description,
+	if _, err := s.validate(CreatePlatformExperimentRequest{
+		Name: patched.Name, Description: patched.Description,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, EndsAt: patched.EndsAt,

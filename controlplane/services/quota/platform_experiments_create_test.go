@@ -43,8 +43,8 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}
 	}
-	svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
-	spec, err := svc.validate(context.Background(), valid(), now)
+	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	spec, err := svc.validate(valid(), now)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	} {
 		req := valid()
 		c.mutate(&req)
-		_, err := svc.validate(context.Background(), req, now)
+		_, err := svc.validate(req, now)
 		var refused *api.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
@@ -79,10 +79,9 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	}
 }
 
-// A platform experiment nothing could run is refused whoever states it: a create or a patch in
-// an org whose jobs no cluster takes now, and a proposal sized for a type none of them has.
-func TestValidateRefusesWhatNoClusterCouldRun(t *testing.T) {
-	now := time.Now().UTC()
+// A platform experiment comes into being only where something could run it: a create in an org
+// whose jobs a cluster takes now, a proposal and an accept sized for a type one of them has.
+func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *testing.T) {
 	rtx, a100 := domain.AcceleratorType("rtx-4090"), domain.AcceleratorType("a100")
 	for name, c := range map[string]struct {
 		reachable []domain.AcceleratorType
@@ -96,22 +95,44 @@ func TestValidateRefusesWhatNoClusterCouldRun(t *testing.T) {
 		"a type stated while no cluster reports": {nil, &rtx, true},
 	} {
 		svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), c.reachable...)
-		_, err := svc.validate(context.Background(), CreatePlatformExperimentRequest{
-			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
-			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, acceleratorType: c.sizedFor,
-		}, now)
+		err := svc.requireReachable(context.Background(), "prj-a", c.sizedFor)
 		var refused *api.Refusal
 		if got := errors.As(err, &refused) && refused.GetStatus() == 422 && refused.Reason == "accelerator_unreachable"; got != c.refused || (!c.refused && err != nil) {
 			t.Errorf("%s: got %v, refused wanted: %v", name, err, c.refused)
 		}
 	}
 
-	unread := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
-	if _, err := unread.Create(context.Background(), CreatePlatformExperimentRequest{
+	body := CreatePlatformExperimentRequest{
 		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
 		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
-	}); !errors.Is(err, ErrLiveCapacityUnconfigured) {
+	}
+	store := &createStore{}
+	_, err := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)).Create(context.Background(), body)
+	var refused *api.Refusal
+	if !errors.As(err, &refused) || refused.Reason != "accelerator_unreachable" || store.created != nil {
+		t.Errorf("a create no cluster could run: got %v, stored %v, want 422 accelerator_unreachable and nothing stored", err, store.created)
+	}
+	unread := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	if _, err := unread.Create(context.Background(), body); !errors.Is(err, ErrLiveCapacityUnconfigured) {
 		t.Errorf("a create with no capacity to read: got %v, want ErrLiveCapacityUnconfigured", err)
+	}
+}
+
+// One that exists is changed whatever its org's clusters report: a patch reads no capacity.
+func TestAPatchPassesWithNoCapacityReported(t *testing.T) {
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+		store := &createdStore{created: []*domain.PlatformExperiment{{
+			ID: "pe-1", ProjectID: "prj-a", Name: "exp", Description: "the brief", Status: status,
+			BudgetAcceleratorHours: 5, MaxAgents: 3, ReportIntervalSeconds: 10,
+			StartsAt: time.Now().UTC(), EndsAt: time.Now().UTC().Add(24 * time.Hour),
+			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
+		}}}
+		svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute))
+		renamed := "renamed"
+		pe, err := svc.Update(context.Background(), "pe-1", PlatformExperimentPatch{Name: &renamed})
+		if err != nil || pe.Name != renamed {
+			t.Errorf("%s, a rename with no capacity reported: got %v, %v", status, pe, err)
+		}
 	}
 }
 

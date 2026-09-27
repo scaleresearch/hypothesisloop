@@ -370,8 +370,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
-			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days, " +
-			"accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now. " +
+			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and POST /platform-experiments/{id}/start takes none without one. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +
 			"brief_without_baseline (the description, as patched, names neither the job nor its code_ref: its BASELINE block does), baseline_missing_metric (a declared metric the job never reported), " +

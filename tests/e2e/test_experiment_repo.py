@@ -166,8 +166,7 @@ def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_change
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"}).status_code == 422
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {}).status_code == 422
     assert _call(a.api, "PUT", f"/platform-experiments/{pe_id}", {"name": "x"}).status_code == 405
-    with a.api.clusters_shared():
-        amended = _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"description": "amended"})
+    amended = _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"description": "amended"})
     assert amended.status_code == 200, amended.text
     after = agent.get_json(f"/platform-experiments/{pe_id}")
     assert after["description"] == "amended"

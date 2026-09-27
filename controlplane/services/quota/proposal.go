@@ -75,8 +75,10 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p Propos
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}
 	experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
-	experiment.ProjectID, experiment.acceleratorType = projectID, &p.AcceleratorType
-	if experiment, err = h.svc.validate(ctx, experiment, now); err != nil {
+	if experiment, err = h.svc.validate(experiment, now); err != nil {
+		return experiment, err
+	}
+	if err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType); err != nil {
 		return experiment, err
 	}
 	for i, agent := range p.Agents {
