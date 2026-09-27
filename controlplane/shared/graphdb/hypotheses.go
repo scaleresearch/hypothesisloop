@@ -382,6 +382,28 @@ func (s *Store) HypothesisStats(ctx context.Context, f ListFilter) (*domain.Hypo
 	return stats, nil
 }
 
+// OpenHypothesisIDs returns the ids of the hypotheses agentID owns in one platform experiment that
+// are still open, oldest first.
+func (s *Store) OpenHypothesisIDs(ctx context.Context, platformExperimentID, agentID string) ([]string, error) {
+	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe, agent_id: $agent_id, status: $status})
+RETURN h.id ORDER BY h.created_at, h.id`,
+			map[string]any{"pe": platformExperimentID, "agent_id": agentID, "status": string(domain.HypothesisOpen)})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("graphdb.OpenHypothesisIDs: %w", err)
+	}
+	var d decoder
+	ids := []string{}
+	for _, record := range out.([]*neo4j.Record) {
+		ids = append(ids, d.str(record.Values[0]))
+	}
+	if d.err != nil {
+		return nil, fmt.Errorf("graphdb.OpenHypothesisIDs: %w", d.err)
+	}
+	return ids, nil
+}
+
 // ExperimentGraph returns the whole hypothesis graph of one platform experiment: every hypothesis as a list
 // item and every edge leaving one. An edge to the objective has To = platformExperimentID.
 func (s *Store) ExperimentGraph(ctx context.Context, platformExperimentID string) ([]*domain.HypothesisListItem, []domain.GraphEdge, error) {

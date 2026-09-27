@@ -56,7 +56,14 @@ func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID str
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
 	t.Helper()
-	return reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", 3*time.Minute), domain.CPUType)
+	return reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", 3*time.Minute), domain.CPUType).WithHypotheses(openHypotheses{})
+}
+
+// openHypotheses is the hypotheses each agent left open.
+type openHypotheses map[string][]string
+
+func (o openHypotheses) OpenHypothesisIDs(_ context.Context, _, agentID string) ([]string, error) {
+	return o[agentID], nil
 }
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding

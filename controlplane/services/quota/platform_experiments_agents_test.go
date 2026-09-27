@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -840,5 +842,55 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 		if _, waits := agent["status_reason"]; waits {
 			t.Errorf("an agent of a running platform experiment carries status_reason: %v", agent)
 		}
+	}
+}
+
+// One hypothesis was left open at a close: its researcher had finished without a verdict on it.
+func TestAFinishIsRefusedWhileTheAgentOwnsAnOpenHypothesis(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpRunning, 5)
+	store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+	left := openHypotheses{"dana": {"hyp-1", "hyp-2"}}
+	svc := newSignupTestService(t, store).WithHypotheses(left)
+
+	err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing left")
+	var refused *hypothesesOpenError
+	if !errors.As(err, &refused) {
+		t.Fatalf("err = %v, want the finish refused for its open hypotheses", err)
+	}
+	if refused.GetStatus() != http.StatusConflict || refused.Reason != "hypotheses_open" || !reflect.DeepEqual(refused.HypothesisIDs, []string{"hyp-1", "hyp-2"}) {
+		t.Errorf("refusal = %d %+v, want 409 hypotheses_open naming hyp-1 and hyp-2", refused.GetStatus(), refused)
+	}
+	for _, want := range []string{"hyp-1, hyp-2", "hl hypothesis status ID inconclusive"} {
+		if !strings.Contains(refused.Message, want) {
+			t.Errorf("message %q does not say %q", refused.Message, want)
+		}
+	}
+
+	delete(left, "dana")
+	if err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing left"); err != nil {
+		t.Errorf("with every hypothesis settled: err = %v, want the finish taken", err)
+	}
+
+	// Past the close nothing is left to finish, and no verdict is asked for.
+	left["dana"] = []string{"hyp-1"}
+	store.pe.Status = domain.PlatformExpClosed
+	var closed *api.Refusal
+	if err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing left"); !errors.As(err, &closed) || closed.Reason != "experiment_closed" {
+		t.Errorf("past the close: err = %v, want experiment_closed", err)
+	}
+}
+
+func TestAFinishRefusedForOpenHypothesesAnswersTheirIds(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpRunning, 5)
+	store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+	r := chi.NewRouter()
+	caller := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}}
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	svc := newSignupTestService(t, store).WithHypotheses(openHypotheses{"dana": {"hyp-1"}})
+	RegisterAgentsHuma(doc, NewPlatformExperimentsHandler(svc, store, testPlanning, zap.NewNop()).WithAgentLaunch(agentsTestLaunch()))
+
+	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents/dana/finish", `{"reason":"nothing left"}`)
+	if code != http.StatusConflict || out["reason"] != "hypotheses_open" || !reflect.DeepEqual(out["hypothesis_ids"], []any{"hyp-1"}) {
+		t.Fatalf("got = %d %v, want 409 hypotheses_open with hypothesis_ids [hyp-1]", code, out)
 	}
 }

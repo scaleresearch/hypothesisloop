@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1149,5 +1150,29 @@ func TestFirstParentIsTheBuildsOnLinkStatedFirst(t *testing.T) {
 	links, err := s.Links(ctx, combined.ID)
 	if err != nil || len(links.Out) != 3 || links.Out[0].HypothesisID != older.ID || links.Out[0].Type != domain.LinkRelated || links.Out[1].HypothesisID != newer.ID {
 		t.Errorf("out links = %+v, %v, want them in the order stated", links.Out, err)
+	}
+}
+
+func TestOpenHypothesisIDsAreTheAgentsOwnUnsettledOnes(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	ctx := context.Background()
+	first := register(t, s, pe, "agent-a", "warmup helps small batches", onRoot(pe))
+	settled := register(t, s, pe, "agent-a", "label smoothing lowers calibration error", onRoot(pe))
+	second := register(t, s, pe, "agent-a", "a cosine schedule beats a step schedule", onRoot(pe))
+	register(t, s, pe, "agent-b", "mixed precision keeps accuracy", onRoot(pe))
+	if _, _, err := s.UpdateStatus(ctx, settled.ID, "agent-a", agentActor("agent-a"), domain.HypothesisInconclusive, stampAt(1)); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	got, err := s.OpenHypothesisIDs(ctx, pe, "agent-a")
+	if err != nil {
+		t.Fatalf("OpenHypothesisIDs: %v", err)
+	}
+	if want := []string{first.ID, second.ID}; !slices.Equal(got, want) {
+		t.Errorf("open = %v, want %v: the agent's own, without the settled one and another agent's", got, want)
+	}
+	if got, err := s.OpenHypothesisIDs(ctx, pe, "agent-c"); err != nil || len(got) != 0 {
+		t.Errorf("an agent with no hypothesis: got %v, %v, want none", got, err)
 	}
 }
