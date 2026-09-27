@@ -17,7 +17,7 @@ func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED requires MarkQueued with a reason")
 	}
-	const q = `UPDATE experiments SET status = $3, not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
+	const q = `UPDATE experiments SET status = $3, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
 	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), string(to))
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: %w", err)
@@ -32,7 +32,7 @@ func (s *ExperimentsStore) TransitionStatusFromNonTerminal(ctx context.Context, 
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatusFromNonTerminal: QUEUED requires MarkQueued with a reason")
 	}
-	const q = `UPDATE experiments SET status = $2, not_admitted_reason = NULL, updated_at = NOW()
+	const q = `UPDATE experiments SET status = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW()
 WHERE id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
 	tag, err := s.pool.pool.Exec(ctx, q, id, string(to))
 	if err != nil {
@@ -123,12 +123,13 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
 	}
 	// This statement is the one write that places a job, so the placement rule is part of it
-	// (clusterHostsJob). What admission filtered in memory only chose the candidate. Un-sharing,
+	// (clusterHostsJob), and it starts an attempt, so the reason the last one ended goes with it.
+	// What admission filtered in memory only chose the candidate. Un-sharing,
 	// removing or turning off a cluster takes the admission lock held above, so it either finds
 	// this job already placed or is committed when this statement reads the cluster. The image
 	// is decided from the same read of the cluster as the rule that lets the job onto it.
 	const q = `UPDATE experiments e
-SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, not_admitted_reason = NULL, updated_at = NOW(),
+SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
 	resolved_job_spec = $3::jsonb || jsonb_build_object('image', (
 		SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2))
 WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
@@ -269,8 +270,8 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 // not the agent's doing, and max_retries is compared against the difference — so the retry budget
 // is untouched while desired state still genuinely changes.
 //
-// The eviction reason is kept rather than cleared: it is the durable record of what ended the
-// last attempt, and the only thing that lets a stats reader say "these were infrastructure".
+// The eviction reason says what ended the attempt and stays while the job waits for its next
+// placement; the claim clears it. The record that outlives the attempt is tried_clusters.
 // not_admitted_reason is required for any QUEUED row (experiments_queue_reason_consistent).
 //
 // quota_settled_at is cleared for the same reason RequeueForRetry clears it: the row is no longer

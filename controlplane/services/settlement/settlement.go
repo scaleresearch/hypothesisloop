@@ -50,13 +50,8 @@ func New(usage UsageWriter, metricsDBURL string, gapCap time.Duration) *Settler 
 // endedInInfrastructureFault reports whether exp's FINAL outcome was the environment's fault:
 // EVICTED carrying an infrastructure-class reason, which is exactly the state
 // db.Store.ResolveTermination writes when an infrastructure fault exhausts its requeue
-// allowance. Both halves are required — see Settle for what keying on the reason alone cost.
-//
-// Deliberately derived here rather than kept true by clearing eviction_reason on every other
-// terminal write: that would put correctness in the hands of each writer remembering to clean up
-// (and any future one), and it would destroy a record other code depends on — a preempted job's
-// retained `preempted_for_guaranteed` is what marks it as having already run, which is what
-// forbids re-admitting it onto a different accelerator flavor.
+// allowance. Both halves are required: a job the environment requeued carries the same reason
+// while it is QUEUED, and has not ended.
 func endedInInfrastructureFault(exp *domain.Experiment) bool {
 	return exp.Status == domain.StatusEvicted &&
 		domain.IsInfrastructureFault(domain.EvictionReason(exp.EvictionReason))
@@ -98,14 +93,11 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	// the retries this function exists to be safe under; settling to zero cannot, because it is
 	// recomputed from scratch and written absolutely every time.
 	//
-	// The status is half of the condition and not decoration. eviction_reason is a durable record
-	// of what ended the LAST attempt and deliberately survives a requeue, so a row that was
-	// infrastructure-requeued and later completed still carries `cluster_unreachable` while being
-	// COMPLETED. Keying on the reason alone made that job — and any later workload-class failure
-	// of it — settle to zero, so a single provoked infrastructure fault bought an agent an
-	// unmetered run. Requiring EVICTED as well asks the question that actually matters, "did this
-	// job END in an infrastructure fault", and reads it off the exact state ResolveTermination
-	// writes when the requeue allowance runs out.
+	// The status is half of the condition and not decoration. The reason says what ended the last
+	// attempt and is on the row from the requeue until the next placement, so keying on it alone
+	// would settle a job to zero that is only waiting to run again. Requiring EVICTED as well asks
+	// the question that actually matters, "did this job END in an infrastructure fault", and reads
+	// it off the exact state ResolveTermination writes when the requeue allowance runs out.
 	if exp.EstimatedDurationHours > 0 && !endedInInfrastructureFault(exp) {
 		var err error
 		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, exp.CreatedAt, now, s.gapCap)

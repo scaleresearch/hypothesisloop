@@ -235,9 +235,9 @@ const (
 	// never-ran refund. See scheduler.JobWatcher.reconcileOne.
 	EvictionAcceleratorTypeUnobservable EvictionReason = "accelerator_type_unobservable"
 	// EvictionPreemptedForGuaranteed marks a burst job returned to QUEUED to free capacity for a
-	// guaranteed one. Not terminal — the job runs again — so it doubles as the durable record
-	// that this job has already executed once, which is what forbids re-admitting it onto a
-	// different accelerator flavor (see candidateAcceleratorTypes).
+	// guaranteed one. Not terminal — the job runs again — so while it waits to be placed it is
+	// also the record that this job has already executed, which is what forbids re-admitting it
+	// onto a different accelerator flavor (see candidateAcceleratorTypes).
 	EvictionPreemptedForGuaranteed EvictionReason = "preempted_for_guaranteed"
 	// EvictionScaleUpTimeout marks a job whose gang never fully bound (scheduled_nodes < Nodes())
 	// within its placement deadline on an autoscaler-enabled cluster — either the deadline

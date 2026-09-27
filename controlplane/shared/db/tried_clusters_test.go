@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,5 +142,32 @@ func TestOnlyScaleUpFailuresHoldOtherJobsOffACluster(t *testing.T) {
 	}
 	if recent[stuck] {
 		t.Fatalf("recently tried = %v: a job stuck pending on %s holds every other job off it", recent, stuck)
+	}
+}
+
+// The reason a requeue writes explains the attempt that ended. It reads while the job waits, the
+// claim that starts the next attempt takes it away, and what stays is the tried list and the
+// counts: a job that then ends by running is never explained by the attempt before.
+func TestAReasonEndsWithTheAttemptItExplains(t *testing.T) {
+	w := newTwoOrgs(t)
+	ctx := context.Background()
+	w.bound(t, w.ofA)
+	id := w.placed(t, "reason-of-attempt", w.peA, w.ofA, domain.StatusSubmitted)
+	if ok, err := w.exps.RequeueInfrastructureFault(ctx, id, domain.StatusSubmitted, string(domain.EvictionStuckPending), 2); err != nil || !ok {
+		t.Fatalf("requeue = %v, %v", ok, err)
+	}
+	if got := w.get(t, id); got.EvictionReason != string(domain.EvictionStuckPending) {
+		t.Fatalf("while it waits: reason %q, want stuck_pending", got.EvictionReason)
+	}
+	if !w.claim(t, id, w.ofA) {
+		t.Fatal("the requeued job was not placed again")
+	}
+	got := w.get(t, id)
+	if got.EvictionReason != "" || got.InfraRequeueCount != 1 || len(got.TriedClusters) != 1 {
+		t.Fatalf("placed again: reason %q, infra %d, tried %+v, want no reason and the history kept", got.EvictionReason, got.InfraRequeueCount, got.TriedClusters)
+	}
+	_, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET eviction_reason = 'stuck_pending' WHERE id = $1`, id)
+	if err == nil || !strings.Contains(err.Error(), "experiments_reason_of_attempt") {
+		t.Fatalf("a reason written onto a placed job: err = %v, want experiments_reason_of_attempt", err)
 	}
 }

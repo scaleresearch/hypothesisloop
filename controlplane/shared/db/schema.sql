@@ -221,6 +221,11 @@ CREATE TABLE IF NOT EXISTS experiments (
     estimated_cost_acch       DOUBLE PRECISION  NOT NULL DEFAULT 0,
     queued_at                TIMESTAMPTZ,
     submitted_at             TIMESTAMPTZ,
+	-- Why the job's last attempt ended, as "code" or "code: detail": written by the requeue or
+	-- the terminal write that ended it and cleared by the claim that starts the next, so it never
+	-- explains an attempt other than the one the status is about (experiments_reason_of_attempt).
+	-- Earlier attempts are counted in attempt_count and infra_requeue_count and listed in
+	-- tried_clusters.
 	eviction_reason          TEXT,
 	-- Current scheduler decision for a QUEUED job; overwritten, not historical.
 	not_admitted_reason      TEXT,
@@ -287,6 +292,19 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS not_admitted_reason TEXT;
 DO $$ BEGIN
     ALTER TABLE experiments ADD CONSTRAINT experiments_queue_reason_consistent
         CHECK ((status = 'QUEUED') = (not_admitted_reason IS NOT NULL));
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+-- A placed or completed job has no ended attempt to explain. A FAILED row from before a failure
+-- recorded its cause carries the reason of an attempt that was requeued.
+UPDATE experiments SET eviction_reason = NULL
+WHERE eviction_reason IS NOT NULL
+  AND (status IN ('SUBMITTED', 'RUNNING', 'COMPLETED')
+       OR (status = 'FAILED' AND split_part(eviction_reason, ':', 1) NOT IN ('container_failed', 'oom_killed')));
+DO $$ BEGIN
+    ALTER TABLE experiments ADD CONSTRAINT experiments_reason_of_attempt
+        CHECK (eviction_reason IS NULL OR status NOT IN ('SUBMITTED', 'RUNNING', 'COMPLETED'));
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
