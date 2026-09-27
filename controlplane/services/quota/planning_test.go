@@ -15,11 +15,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // planningAPI is the planning routes and the ones a draft passes through, over store.
@@ -141,6 +143,43 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	store.unregistered = true
 	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal}); code != http.StatusServiceUnavailable || out["reason"] != "launcher_not_registered" || len(store.created) != 1 {
 		t.Errorf("no launcher: got = %d %v with %d created, want 503 launcher_not_registered", code, out, len(store.created))
+	}
+}
+
+// draftRepositories answers the git credential service from the drafts a store holds.
+type draftRepositories struct{ store *draftStore }
+
+func (d draftRepositories) PlatformExperimentRepository(ctx context.Context, id string) (string, string, error) {
+	pe, err := d.store.GetPlatformExperiment(ctx, id)
+	if err != nil || pe == nil {
+		return "", "", db.ErrPlatformExperimentNotFound
+	}
+	return pe.ProjectID, pe.Repository, nil
+}
+
+// A planner clones its draft's repository before it proposes, so the token of a planner at work
+// is handed the git credential of that repository, and of no other.
+func TestThePlannerOfADraftIsGivenAGitCredentialForItsRepository(t *testing.T) {
+	store := &draftStore{}
+	_, call := planningAPI(t, store, planner)
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "Find out whether warmup helps"}); code != http.StatusCreated {
+		t.Fatalf("got = %d %v, want a draft", code, out)
+	}
+	pe := store.created[0]
+	host, err := githost.NewPlain("https://git.test", "platform", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	atWork := authtest.As{Kind: auth.KindAgent, PlatformExperimentID: pe.ID, AgentID: store.planners[pe.ID].ID, ProjectID: pe.ProjectID, OrgIDs: []string{"org-a"}}
+	access := auth.NewAccess(authtest.Placement{})
+	router := chi.NewRouter()
+	accounts.RegisterRepositoriesHuma(apidocs.New(router, "test", "1.0.0", "", atWork, access, zap.NewNop()),
+		accounts.NewRepositories(struct{ accounts.InstallationStore }{}, draftRepositories{store}, nil, host, access, zap.NewNop()))
+	for repository, want := range map[string]int{pe.Repository: http.StatusCreated, "acme/another": http.StatusNotFound} {
+		code, out := call2(t, router, "POST", "/git-credentials", `{"protocol":"https","host":"git.test","path":"`+repository+`.git"}`)
+		if code != want || (want == http.StatusCreated && (out["username"] != "platform" || out["password"] != "secret")) {
+			t.Errorf("a credential for %s: got = %d %v, want %d", repository, code, out, want)
+		}
 	}
 }
 
