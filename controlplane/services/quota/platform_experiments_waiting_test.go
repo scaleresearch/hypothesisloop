@@ -120,3 +120,71 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 		t.Errorf("running: got = %d %v, want a plain 404", code, out)
 	}
 }
+
+// A researcher's machine asked for 40 seconds after the start read instance.state requested with
+// nothing beside it, and was taken for a launch that failed.
+func TestAnAgentWhoseMachineIsOnItsWayCarriesInstanceStarting(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	asked := now.Add(-40 * time.Second)
+	hostedWith := func(instance domain.AgentInstance) domain.AgentSignup {
+		return domain.AgentSignup{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &instance}
+	}
+	starting := map[string]struct {
+		signup domain.AgentSignup
+		says   string
+	}{
+		"not asked for yet":  {hostedWith(domain.AgentInstance{}), "its machine is asked of its launcher at the launcher's next pass"},
+		"asked, not listed":  {hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked}), "its machine was asked for 40s ago and its launcher has not listed it yet"},
+		"listed as starting": {hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceStarting}), "its machine was asked for 40s ago and is starting"},
+	}
+	for name, c := range starting {
+		why := instanceStarting(c.signup, now)
+		if why == nil || why.Reason != "instance_starting" || !strings.HasPrefix(why.Message, c.says+": a start in progress and no failure") {
+			t.Errorf("%s: got = %+v", name, why)
+		}
+	}
+
+	ended := hostedWith(domain.AgentInstance{})
+	ended.Ended = domain.RunEndCut
+	for name, signup := range map[string]domain.AgentSignup{
+		"running":            hostedWith(domain.AgentInstance{Name: "m-1", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}),
+		"stopped":            hostedWith(domain.AgentInstance{Stopped: true}),
+		"released":           hostedWith(domain.AgentInstance{Released: true}),
+		"its run is over":    ended,
+		"not the platform's": {AgentID: "dana", Role: domain.SignupRoleCompetitor},
+	} {
+		if why := instanceStarting(signup, now); why != nil {
+			t.Errorf("%s: got = %+v, want none", name, why)
+		}
+	}
+}
+
+func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpRunning, 5)
+	asked := time.Now().Add(-40 * time.Second)
+	signups := []domain.AgentSignup{
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", AskedAt: &asked}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-2", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}},
+	}
+	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", signups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := roster[0].StatusReason; why == nil || why.Reason != "instance_starting" || !strings.Contains(why.Message, "asked for 40s ago") {
+		t.Errorf("a machine not listed yet: got = %+v", why)
+	}
+	if roster[1].StatusReason != nil {
+		t.Errorf("a running machine: got = %+v, want no status_reason", roster[1].StatusReason)
+	}
+
+	// Before the start a researcher has no machine asked for, and says that and not a start.
+	store.pe.Status = domain.PlatformExpOpen
+	store.signups = signups
+	roster, err = newSignupTestService(t, store).roster(context.Background(), "pe-1", signups[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := roster[0].StatusReason; why == nil || why.Reason == "instance_starting" || !strings.Contains(why.Message, "its machine is asked for when the platform starts the run") {
+		t.Errorf("before the start: got = %+v", why)
+	}
+}

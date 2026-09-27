@@ -103,6 +103,8 @@ type AgentInstance struct {
 	State string `json:"state" enum:"requested,starting,running,stopped"`
 	// Reported is the state the launcher last reported of the machine asked for under Name.
 	Reported string `json:"-"`
+	// AskedAt is when the machine named Name was asked of the launcher.
+	AskedAt *time.Time `json:"asked_at,omitempty"`
 	// ProgressAt is when the platform last saw the machine's command make progress.
 	ProgressAt *time.Time `json:"progress_at,omitempty"`
 	// EndReason is why the last machine that ended was given up on: "exited" (its command

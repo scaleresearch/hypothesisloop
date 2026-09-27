@@ -556,7 +556,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 
 	// Everything is still asked for: nothing is released.
 	release()
-	if got := instanceOfAgent(draft, planner); got.Name != "planner-machine" || got.EndReason != "" || got.ExitedAt != nil {
+	if got := instanceOfAgent(draft, planner); got.Name != "planner-machine" || got.EndReason != "" || got.ExitedAt != nil || got.AskedAt == nil || time.Since(*got.AskedAt) > time.Minute {
 		t.Fatalf("a planner at work was released: %+v", got)
 	}
 	if got := instanceOfAgent(closing, agent); got.Name != "agent-machine" || got.EndReason != "" {
@@ -594,7 +594,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 		t.Fatalf("coordinator of a closed experiment: got = %+v, %v", closed.Coordinator, err)
 	}
 	winding, err := pes.GetPlatformExperiment(ctx, fresh)
-	if err != nil || winding.Coordinator.Instance.Name != "fresh-coordinator-machine" || winding.Coordinator.Instance.EndReason != "" {
+	if err != nil || winding.Coordinator.Instance.Name != "fresh-coordinator-machine" || winding.Coordinator.Instance.EndReason != "" || winding.Coordinator.Instance.AskedAt == nil {
 		t.Fatalf("coordinator inside its wind-down: got = %+v, %v", winding.Coordinator, err)
 	}
 

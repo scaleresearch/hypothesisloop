@@ -48,18 +48,21 @@ type AgentLaunch struct {
 // set only in the answer to joining, and only for an agent the platform does not run.
 type JoinedAgent struct {
 	domain.AgentSignup
-	// StatusReason is why the agent has no part yet in a platform experiment that is open.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_required, starts_at_ahead, no_researchers, budget_spent, starting), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads requested until then."`
+	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
+	// not started, or its machine is asked for and not running.
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_required, starts_at_ahead, no_researchers, budget_spent, starting), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads requested until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
 	Token        string               `json:"token,omitempty"`
 }
 
 // roster is signups as the API answers them. In an open platform experiment a researcher's
 // machine is not asked for and its instance reads requested, which a coordinator took for a
-// launch that failed: each agent that waits for the start says so, and for what.
+// launch that failed: each agent that waits for the start says so, and for what. A machine that
+// is asked for and not running yet says that too (instanceStarting), in any status.
 func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
+	now := time.Now()
 	for i, signup := range signups {
-		out[i] = JoinedAgent{AgentSignup: signup}
+		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -87,6 +90,32 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message}
 	}
 	return out, nil
+}
+
+// reasonInstanceStarting is the status_reason of an agent whose machine is on its way.
+const reasonInstanceStarting = "instance_starting"
+
+// instanceStarting is the status_reason of a hosted agent whose run goes on and whose machine is
+// not running yet, nil for every other. Its instance reads requested or starting then, which is
+// a start in progress and was read as a launch that failed.
+func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusReason {
+	if !signup.Hosted || signup.Instance == nil || signup.Ended != "" {
+		return nil
+	}
+	instance := *signup.Instance
+	state := instance.Shown()
+	if state != domain.InstanceRequested && state != domain.InstanceStarting {
+		return nil
+	}
+	where := "its machine is asked of its launcher at the launcher's next pass"
+	switch {
+	case instance.Name != "" && instance.AskedAt != nil && state == domain.InstanceStarting:
+		where = fmt.Sprintf("its machine was asked for %s ago and is starting", now.Sub(*instance.AskedAt).Round(time.Second))
+	case instance.Name != "" && instance.AskedAt != nil:
+		where = fmt.Sprintf("its machine was asked for %s ago and its launcher has not listed it yet", now.Sub(*instance.AskedAt).Round(time.Second))
+	}
+	return &domain.StatusReason{Reason: reasonInstanceStarting, Message: where +
+		": a start in progress and no failure. A machine that does not come up is replaced, which restarts counts, and one given up on reads stopped with end_reason and exit_log"}
 }
 
 // refuseSignup is a join or a removal refused for a reason the caller can act on. Reason leads
@@ -398,7 +427,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Every agent that joined, in the order they did, with its role, what it was launched with and actor, whose credential added it. No token is listed. " +
 			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote. " +
-			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads requested until then, which is no failed launch.",
+			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads requested until then, which is no failed launch. A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body joinedAgentsBody }, error) {
