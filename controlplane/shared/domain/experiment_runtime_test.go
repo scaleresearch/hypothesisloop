@@ -57,7 +57,7 @@ func TestARuntimeIsHandedOnlyWhatItBuildsAWorkloadFrom(t *testing.T) {
 	handed := map[string]bool{
 		"ID": true, "AgentID": true, "ProjectID": true, "CodeRef": true, "ConfigHash": true, "DataRef": true,
 		"Job": true, "ResolvedJob": true, "AcceleratorType": true, "AcceleratorCount": true,
-		"EstimatedDurationHours": true, "CapacityTier": true, "AttemptCount": true, "Data": true, "Token": true,
+		"EstimatedDurationHours": true, "CapacityTier": true, "AttemptCount": true, "SubmittedAt": true, "Data": true, "Token": true,
 	}
 	full := filled(t)
 	view := reflect.ValueOf(full.ForRuntime()).Elem()
@@ -85,8 +85,9 @@ func TestARuntimeIsHandedOnlyWhatItBuildsAWorkloadFrom(t *testing.T) {
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("the view does not decode as the Experiment a runtime reads: %v", err)
 	}
-	if decoded.ID != full.ID || decoded.Token != full.Token || decoded.Data == nil || decoded.AttemptCount != full.AttemptCount || decoded.EffectiveJob().Image != full.ResolvedJob.Image {
-		t.Errorf("decoded view = %+v, want the id, token, data access, attempt and resolved job it was built with", decoded)
+	if decoded.ID != full.ID || decoded.Token != full.Token || decoded.Data == nil || decoded.AttemptCount != full.AttemptCount || decoded.EffectiveJob().Image != full.ResolvedJob.Image ||
+		decoded.SubmittedAt == nil || !decoded.SubmittedAt.Equal(*full.SubmittedAt) {
+		t.Errorf("decoded view = %+v, want the id, token, data access, attempt, admission time and resolved job it was built with", decoded)
 	}
 }
 

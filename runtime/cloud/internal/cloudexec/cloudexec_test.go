@@ -90,6 +90,20 @@ func on(exp *domain.Experiment, slot string) *domain.Experiment {
 	return exp
 }
 
+// asHanded is exp as a reconcile answer carries it to a runtime.
+func asHanded(t *testing.T, exp *domain.Experiment) *domain.Experiment {
+	t.Helper()
+	wire, err := json.Marshal(exp.ForRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var handed domain.Experiment
+	if err := json.Unmarshal(wire, &handed); err != nil {
+		t.Fatal(err)
+	}
+	return &handed
+}
+
 func mustCreate(t *testing.T, e *Executor, exp *domain.Experiment) {
 	t.Helper()
 	if err := e.CreateWorkload(context.Background(), exp); err != nil {

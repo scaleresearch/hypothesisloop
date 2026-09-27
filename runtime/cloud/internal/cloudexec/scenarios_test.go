@@ -165,11 +165,13 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	}
 	admitted := time.Now()
 	exp.SubmittedAt = &admitted
+	exp = asHanded(t, exp)
 	var waiting *agentexec.Waiting
 	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || waiting.Reason != domain.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
 		t.Fatalf("no offer yet: err = %v, want the job waiting for one for its shape", err)
 	}
 	admitted = time.Now().Add(-time.Hour)
+	exp.SubmittedAt = &admitted
 	var unrunnable *agentexec.Unrunnable
 	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != domain.PhaseReasonNoOffer {
 		t.Fatalf("no offer past the bound: err = %v, want no_offer", err)
