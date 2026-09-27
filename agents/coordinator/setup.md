@@ -440,10 +440,9 @@ attached in the background instead of `-d` and redirect its streams:
     podman run --name agent-1 ... localhost/hypothesisloop-experimentator-$EXPERIMENT \
       > /tmp/hlrun/<run>/agent-1.activity.log 2> /tmp/hlrun/<run>/agent-1.err &
 
-One private repository per project; each agent works on branch
-`hl/$PLATFORM_EXPERIMENT_ID/<agent_id>` (platform experiment id included so a fresh experiment always
-starts from a fresh branch off the current default branch — see the agent's own system prompt for why) so
-`code_ref` (`<clone address>@<sha>`) always resolves to a real commit. An agent's credential
+One private repository per project. Every job runs a commit on a branch under
+`hl/$PLATFORM_EXPERIMENT_ID/`, which `hl job submit` pushes, so `code_ref`
+(`<clone address>@<sha>`) always resolves to a real commit. An agent's credential
 can push, a job's and a coordinator's can only read, and none is handed out once the platform
 experiment is closed or the agent cut.
 
