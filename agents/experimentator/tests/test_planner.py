@@ -193,6 +193,13 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("What the image does not carry it installs with `uv pip install X`", flat)
         self.assertIn("`image` a job image name of `hl capacity` or a full address: any other word is refused", flat)
 
+    # hl once said an agent's next step on stderr beside the record. The record's
+    # `status_reason` says it now, and nothing else does.
+    def test_its_next_step_is_read_from_status_reason(self):
+        self.assertIn("its `metrics` and `status_reason`, your next step", render(baseline_agent())[1])
+        for cfg in (planner(), baseline_agent()):
+            self.assertNotIn("2>&1", render(cfg)[0])
+
     # A chip job that left its storage out was given a share of the node's disk and waited to
     # the run's end for room the disk never had. A submit without it is now refused.
     def test_every_job_states_its_storage(self):

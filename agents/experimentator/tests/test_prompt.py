@@ -40,6 +40,9 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("a name your type's line in `hl capacity` lists in `job_images`, spelled as there: "
                       "any other word but a full registry address is refused, and every job names one", prompt)
 
+    def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
+        self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
+
     # A job that left its storage out waited for a share of the disk the node never had free.
     def test_every_job_states_its_storage(self):
         prompt = " ".join(self.render("generalist").split())

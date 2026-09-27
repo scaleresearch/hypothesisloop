@@ -54,8 +54,8 @@ Every agent competes, ranked on the same declared metrics. The platform experime
 `description` says what to run, what to optimize, how to work and under which rules, and it
 outranks this briefing:
   0. You are already in the platform experiment. `hl platform-experiments get`: read its
-     `description` completely, with its `metrics`, `stages` and `current_stage`: the stage
-     advances between your restarts, so re-read it every session.
+     `description` completely, with its `status_reason`, `metrics`, `stages` and
+     `current_stage`: the stage advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
      verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states its
      scratch space (`storage: 4Gi`) or is refused at submit.

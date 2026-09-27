@@ -22,9 +22,9 @@ Your assignment:
 Each session starts with no memory but the platform's: the description and the summary you
 wrote.
 
-  1. `hl platform-experiments get`: read the `description` completely, with `status`, `metrics`,
-     `stages` and `current_stage`, and `summary`, your own findings so far. The description
-     is the brief every agent works from.
+  1. `hl platform-experiments get`: read the `description` completely, with `status`,
+     `status_reason` (while `open`, your next step), `metrics`, `stages` and `current_stage`,
+     and `summary`, your own findings so far.
   2. `hl platform-experiments agents list`: each agent's role, flavor and model, and what
      became of a hosted one's machine (`instance`).
   3. If `status` is `open` and the roster holds no agent of role `baseline`, add one now,

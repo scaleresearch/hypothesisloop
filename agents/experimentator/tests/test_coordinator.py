@@ -98,6 +98,7 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("Once declared, `status_reason` in `get` reads `starting` or what the start waits for: "
                       "a researcher it lacks you add, and what is the owner's goes first in the summary", flat)
         self.assertNotIn("starts_at", flat)
+        self.assertIn("`status_reason` (while `open`, your next step)", flat)
 
     # One removed the owner's researcher to "match max_agents" and cancelled the baseline
     # agent's queued job itself.
