@@ -176,6 +176,9 @@ func TestReconcilePushesFinalOutputBeforeDeletingAnUndesiredWorkload(t *testing.
 	if report.Reason != domain.PhaseReasonContainerFailed {
 		t.Errorf("final report reason = %q, want %q", report.Reason, domain.PhaseReasonContainerFailed)
 	}
+	if want := "container exited with code 1: RuntimeError: device crashed"; report.Message != want {
+		t.Errorf("final report message = %q, want %q", report.Message, want)
+	}
 	// Ordering is the whole point: the push must happen while the pod still exists.
 	if len(deletedWhenPushed) != 0 {
 		t.Errorf("workloads %v were already deleted when the final status was pushed", deletedWhenPushed)

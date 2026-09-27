@@ -6,6 +6,8 @@ package exitline
 import (
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const prefix = "hl-exec: exit-code="
@@ -31,4 +33,34 @@ func Find(lines []string) (code int, found bool) {
 		return code, true
 	}
 	return 0, false
+}
+
+// lastOutputBytes bounds the line LastOutput returns: it travels in a job's failure reason.
+const lastOutputBytes = 300
+
+// LastOutput is the last thing a job said among lines, on one printable line of at most
+// lastOutputBytes bytes: the last line that is neither blank nor the wrapper's exit line. Empty
+// when the job said nothing.
+func LastOutput(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), prefix) {
+			continue
+		}
+		printable := strings.Map(func(r rune) rune {
+			if r == utf8.RuneError || !unicode.IsPrint(r) {
+				return ' '
+			}
+			return r
+		}, lines[i])
+		line := strings.Join(strings.Fields(printable), " ")
+		if line == "" {
+			continue
+		}
+		for len(line) > lastOutputBytes {
+			_, size := utf8.DecodeLastRuneInString(line)
+			line = line[:len(line)-size]
+		}
+		return line
+	}
+	return ""
 }

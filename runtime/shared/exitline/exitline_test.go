@@ -1,6 +1,10 @@
 package exitline
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestFindReadsBackWhatFormatWrote(t *testing.T) {
 	for _, code := range []int{0, 1, 137} {
@@ -23,5 +27,35 @@ func TestFindReportsOutputWithNoExitLine(t *testing.T) {
 		if code, found := Find(lines); found {
 			t.Errorf("Find(%q) = %d, found", lines, code)
 		}
+	}
+}
+
+func TestLastOutputIsTheLastLineTheJobSaid(t *testing.T) {
+	cases := map[string]struct {
+		lines []string
+		want  string
+	}{
+		"nothing":               {nil, ""},
+		"only blank":            {[]string{"", "  \t"}, ""},
+		"only the exit line":    {[]string{Format(1)}, ""},
+		"before the exit line":  {[]string{"Traceback", "KeyError: 'lr'", Format(1), ""}, "KeyError: 'lr'"},
+		"after the exit line":   {[]string{"Traceback", Format(1), "late stderr"}, "late stderr"},
+		"made one line":         {[]string{"\x1b[31mfatal:\x1b[0m\tno  such\rfile\xff "}, "[31mfatal: [0m no such file"},
+		"section header counts": {[]string{"--- current attempt (pod a) ---", "boom"}, "boom"},
+	}
+	for name, c := range cases {
+		if got := LastOutput(c.lines); got != c.want {
+			t.Errorf("%s: LastOutput = %q, want %q", name, got, c.want)
+		}
+	}
+}
+
+func TestLastOutputIsCutOnACharacterBoundary(t *testing.T) {
+	got := LastOutput([]string{strings.Repeat("é", 400)})
+	if len(got) != lastOutputBytes || !utf8.ValidString(got) {
+		t.Fatalf("LastOutput is %d bytes, valid %v, want %d valid bytes", len(got), utf8.ValidString(got), lastOutputBytes)
+	}
+	if got := LastOutput([]string{strings.Repeat("a", 299) + "é"}); got != strings.Repeat("a", 299) {
+		t.Fatalf("a character that crosses the bound was not dropped whole: %d bytes", len(got))
 	}
 }
