@@ -15,7 +15,6 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -331,9 +330,9 @@ class API:
             "max_agents": max_agents,
             "report_interval_seconds": report_interval_seconds,
             "metrics": metrics or [{"key": "val_accuracy", "direction": "maximize"}],
-            # No starts_at: it starts when a test starts it. The end is far enough out that no
-            # test outlives it.
-            "ends_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            # No starts_at: it starts once a test declares its baseline. The run is long enough
+            # that no test outlives it.
+            "duration_hours": 7 * 24,
         }
         if stages is not None:
             body["stages"] = stages
@@ -423,12 +422,25 @@ class API:
         r.raise_for_status()
         return r.status_code, r.json().get("role")
 
-    def start_platform_experiment(self, pe_id: str, baseline_job: dict[str, Any] | None = None) -> None:
+    def declare_baseline_and_wait_running(self, pe_id: str, baseline_job: dict[str, Any] | None = None) -> None:
         """Gets an open platform experiment running: declares the baseline nothing starts without,
-        unless the test already declared one, and starts it. baseline_job is declare_baseline's."""
+        unless the test already declared one, and waits for the platform to start the run, which
+        it does within a minute when a researcher has joined. baseline_job is declare_baseline's."""
         if pe_id not in self.baseline_of:
             self.declare_baseline(pe_id, baseline_job)
-        self.hl("platform-experiments", "start", "--platform-experiment", pe_id)
+
+        def standing() -> tuple[str, dict | None]:
+            pe = self.get_json(f"/platform-experiments/{pe_id}")
+            return pe["status"], pe.get("status_reason")
+
+        eventually(
+            f"platform experiment {pe_id} to run after its baseline was declared (status, status_reason)",
+            standing,
+            accept=lambda seen: seen[0] == "running",
+            reject=lambda seen: seen[0] != "open",
+            deadline=Deadline.in_seconds(180),
+            interval=2,
+        )
 
     # What declare_baseline left in each platform experiment, for a test that asserts on all of
     # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
@@ -473,7 +485,7 @@ class API:
                 self.signup_ok(pe_id, agent_id, role, quota_tier)
             else:
                 self.signup_ok(pe_id, a)
-        self.start_platform_experiment(pe_id)
+        self.declare_baseline_and_wait_running(pe_id)
 
     def close_platform_experiment(self, pe_id: str) -> None:
         # The status is not checked: teardown also closes what the test body already closed.

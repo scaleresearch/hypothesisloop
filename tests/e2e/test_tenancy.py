@@ -205,7 +205,6 @@ def test_another_org_writes_nothing(tenants):
         ("POST", f"/platform-experiments/{b.pe_id}/agents", {"hosted": True}),
         ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
         ("PATCH", f"/platform-experiments/{b.pe_id}", {"name": "taken over"}),
-        ("POST", f"/platform-experiments/{b.pe_id}/start", None),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),
         ("POST", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/data-key", {"agent_id": a.agent}),

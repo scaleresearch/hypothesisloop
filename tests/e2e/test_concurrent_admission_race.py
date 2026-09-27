@@ -59,7 +59,7 @@ def test_concurrent_accelerator_requests_never_exceed_node_capacity(api, run_id,
     # quota_tier="guaranteed" (see test_max_resource_sentinel.py for the same override).
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
 
     def fire(agent: str) -> str:
         return api.submit_job(
@@ -129,7 +129,7 @@ def test_concurrent_same_agent_requests_race_one_quota_boundary(api, run_id, dea
     agent = make_agent(api, run_id, "agent-quota-race")
     pe_id = api.create_platform_experiment(f"concurrent-quota-race-{run_id}", 1.0, 1)
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
 
     # Phase-1 guaranteed allocation is 0.4 AccH. Each job reserves 0.24 AccH, so either job fits
     # alone but both cannot. The correct outcome is exactly one committed desired row and one 4xx;

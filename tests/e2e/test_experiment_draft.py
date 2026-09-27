@@ -70,7 +70,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
 
         # Its one agent is the planner, and the launcher is asked for its machine.
         roster = api.agents(pe_id)
-        assert [(a["name"], a["flavor"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "baseline", True)], roster
+        assert [(a["name"], a["flavor"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "planner", True)], roster
         planner_id = roster[0]["agent_id"]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None and token_scope(instance["env"]["HL_TOKEN"])[2] == planner_id, instance
@@ -99,6 +99,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         proposed = planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on))
         assert proposed.status_code == 200, proposed.text
         assert proposed.json()["proposed_at"] and proposed.json()["status"] == "draft"
+        assert api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]["reason"] == "proposed"
         assert proposed.json()["proposal"]["accelerator_type"] == on and "baseline_job_id" not in proposed.json()["proposal"], proposed.json()["proposal"]
         # Proposed, the planner's machine is only let wind down.
         instance, _ = _planner_instance(api, pe_id)
@@ -124,11 +125,12 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert (again.status_code, again.json()["reason"]) == (409, "invalid_transition"), again.text
 
         # Accepted, nothing has run and nothing starts: no researcher's machine is asked for, no
-        # researcher's job is taken, and a start is refused until there is a baseline.
+        # researcher's job is taken, and it stays open for want of a baseline.
         assert "baseline_job_id" not in pe, pe
         assert _researcher_instances(api, pe_id, researchers) == [], "a researcher's machine is asked for before there is a baseline"
-        unstarted = api.post(f"/platform-experiments/{pe_id}/start")
-        assert unstarted.status_code >= 400 and "baseline_required" in unstarted.text, unstarted.text
+        unstarted = api.get_json(f"/platform-experiments/{pe_id}")
+        assert (unstarted["status"], unstarted["status_reason"]["reason"]) == ("open", "baseline_required"), unstarted
+        assert unstarted["baseline_due_at"] and "ends_at" not in unstarted and "started_at" not in unstarted, unstarted
         too_early = api.post_experiment_body(api.submission_body_for_id(f"job-{pe_id[-8:]}-r", pe_id, researchers[0]["agent_id"]))
         assert too_early.status_code >= 400 and "experiment_not_started" in too_early.text, too_early.text
 
@@ -166,7 +168,8 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
         declined = planner.put(f"/platform-experiments/{pe_id}/decline", {"reason": why})
         assert declined.status_code == 200, declined.text
         draft = api.get_json(f"/platform-experiments/{pe_id}")
-        assert (draft["status"], draft["declined_reason"]) == ("draft", why) and draft["proposed_at"] and "proposal" not in draft, draft
+        assert (draft["status"], draft["status_reason"]["reason"], draft["declined_reason"]) == ("draft", "declined", why), draft
+        assert draft["declined_at"] and "proposed_at" not in draft and "proposal" not in draft, draft
         # Answered, the planner's machine is released, and there is nothing to accept.
         instance, _ = _planner_instance(api, pe_id)
         assert instance is None, "a machine is kept for a planner that declined"
@@ -175,7 +178,8 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
 
         # The person says what was missing: the planner is back, and the reason is still readable.
         revised = api.post(f"/platform-experiments/{pe_id}/revise", {"message": "Validation accuracy of the sample classifier."})
-        assert revised.status_code == 200 and "proposed_at" not in revised.json() and revised.json()["declined_reason"] == why, revised.text
+        assert revised.status_code == 200 and "declined_at" not in revised.json() and revised.json()["declined_reason"] == why, revised.text
+        assert api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]["reason"] == "revising"
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None, "a revised draft has no planner"
     finally:

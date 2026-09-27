@@ -170,7 +170,7 @@ def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_change
     assert amended.status_code == 200, amended.text
     after = agent.get_json(f"/platform-experiments/{pe_id}")
     assert after["description"] == "amended"
-    unchanged = ("name", "budget_accelerator_hours", "max_agents", "metrics", "report_interval_seconds", "starts_at", "ends_at")
+    unchanged = ("name", "budget_accelerator_hours", "max_agents", "metrics", "report_interval_seconds", "starts_at", "duration_hours")
     assert {key: after[key] for key in unchanged} == {key: before[key] for key in unchanged}
 
 

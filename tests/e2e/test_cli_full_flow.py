@@ -67,11 +67,11 @@ def _finish_popen(proc: subprocess.Popen, *, timeout: float) -> tuple[int, str, 
 
 def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     """A person with their own credential: platform-experiments create -> agents add, which creates
-    the agent and answers with its id -> start -> hypothesis submit --file/list ->
+    the agent and answers with its id -> update --baseline-job -> hypothesis submit --file/list ->
     job submit -> job list/status -> watch --until a terminal status -> hypothesis dedup. Ported as
     one sequential test since each step consumes state (pe_id, hyp_id, job_id) produced by the one
     before it -- the same reason the bash scenario runs it as a single script."""
-    # -- hl platform-experiments create / start --
+    # -- hl platform-experiments create --
     pe_id = api.create_platform_experiment(f"cli-full-flow-{run_id}", PE_BUDGET, 1)
 
     # -- hl platform-experiments agents add --
@@ -79,8 +79,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     agent = json.loads(signup_out)["agent_id"]  # one joined agent per line, as valid JSON
     assert agent.startswith("ag-"), f"hl platform-experiments agents add: the platform issues the id, got {signup_out}"
 
-    api.declare_baseline(pe_id)  # hl platform-experiments update --baseline-job, which start waits for
-    api.hl("platform-experiments", "start", "--platform-experiment", pe_id)  # hl platform-experiments start: succeeded
+    api.declare_baseline_and_wait_running(pe_id)  # hl platform-experiments update --baseline-job, and the platform starts the run
 
     # -- hl hypothesis submit --file / list --
     hyp_text = f"Higher batch size improves throughput without hurting val_accuracy (cli-{run_id})"

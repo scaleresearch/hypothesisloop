@@ -137,8 +137,11 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     api = with_repo
     pe_id = hosted_pe("hosted-agents", 1.0, 5)
 
-    hosted = api.add_agents(pe_id, count=2, hosted=True, name=f"hosted-{run_id}", flavor="data-search",
-                            model="claude-sonnet-5", hyperparameters={"batch_size": 64})
+    launch = {"hosted": True, "flavor": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
+    hosted = api.add_agents(pe_id, name=f"hosted-{run_id}", **launch)
+    r = api.post(f"/platform-experiments/{pe_id}/agents", {"name": f"hosted-{run_id}", **launch})
+    assert (r.status_code, r.json()["reason"]) == (409, "agent_name_taken"), f"a second agent of one name: {r.status_code} {r.text}"
+    hosted += api.add_agents(pe_id, **launch)
     self_run = api.add_agents(pe_id, flavor="generalist")
     measurer = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
     assert len(hosted) == 2 and len(self_run) == 1
@@ -146,7 +149,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     own_id, own_token = self_run[0]["agent_id"], self_run[0]["token"]
     assert all(a["hosted"] and a["launcher"] == LAUNCHER and "token" not in a for a in hosted), hosted
     assert all(a["instance"] == {"state": "requested", "restarts": 0, "stopped": False} for a in hosted), hosted
-    assert [a["name"] for a in hosted] == [f"hosted-{run_id}"] * 2
+    assert [a["name"] for a in hosted] == [f"hosted-{run_id}", "Researcher 1"]
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 2})
     assert r.status_code == 422, f"a request that still asks for several agents: {r.status_code} {r.text}"
     assert not self_run[0]["hosted"] and "launcher" not in self_run[0] and own_token.startswith("hls_")
@@ -192,7 +195,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert not instances and measurer_name in ending, f"after the baseline agent finished: {sorted(instances)}, ending {sorted(ending)}"
 
     # Started: the roster is fixed. Nobody joins, nobody is removed, and the researcher's machine is asked for.
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
     assert r.status_code == 400 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
@@ -261,7 +264,7 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     api = with_repo
     pe_id = hosted_pe("hosted-agents-exit", 1.0, 5)
     crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
     instances, _ = desired_for(api, pe_id)
     steady_name = instances[steady]["name"]
     seen = set()
@@ -304,7 +307,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     pe_id = hosted_pe("hosted-agents-cut", BUDGET, ROSTER_SIZE, report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES)
     agents = [a["agent_id"] for a in api.add_agents(pe_id, count=ROSTER_SIZE, hosted=True, quota_tier="guaranteed")]
     assert not desired_for(api, pe_id)[0], "a researcher's machine is asked for before there is a baseline"
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
     before, _ = desired_for(api, pe_id)
     assert sorted(before) == sorted(agents)
 
@@ -409,7 +412,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         assert instance["restarts"] == 1 and "SystemExit: the reason" in instance["exit_log"] and not instance["stopped"], instance
 
         # Started, it is kept and each agent gets its machine. Closed, it is told to end and is asked for no more.
-        with_repo.start_platform_experiment(pe_id)
+        with_repo.declare_baseline_and_wait_running(pe_id)
         kept, _ = coordinator_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
         assert kept is not None and kept["name"] == again["name"], f"after the start: {kept}"
         own, _ = desired_for(with_repo, pe_id, [{"name": again["name"], "state": "running"}])
@@ -455,7 +458,7 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
         # A platform experiment starts with at least one agent in it.
         with_repo.add_agents(pe_id)
-        with_repo.start_platform_experiment(pe_id)
+        with_repo.declare_baseline_and_wait_running(pe_id)
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "why it is closed")
         as_coordinator.hl("platform-experiments", "close", "--platform-experiment", pe_id)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
@@ -651,8 +654,8 @@ def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(
         agent_id = next(iter(roster(with_repo, pe_id)))
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
         live = {key: pe[key] for key in ("name", "description", "budget_accelerator_hours", "max_agents", "metrics",
-                                         "report_interval_seconds", "starts_at", "ends_at")}
-        for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("ends_at", "2199-01-01T00:00:00Z")):
+                                         "report_interval_seconds", "starts_at", "duration_hours")}
+        for field, value in (("budget_accelerator_hours", 1000.0), ("max_agents", 50), ("duration_hours", 48)):
             r = as_coordinator.patch(f"/platform-experiments/{pe_id}", {"description": "more to spend", field: value})
             assert r.status_code == 403 and field in r.text, f"a coordinator changing {field}: {r.status_code} {r.text}"
         after = with_repo.get_json(f"/platform-experiments/{pe_id}")

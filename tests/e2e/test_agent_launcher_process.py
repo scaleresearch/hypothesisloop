@@ -117,7 +117,7 @@ def test_a_launcher_process_follows_its_agents_from_joining_to_the_end_of_their_
                    accept=lambda count: count == 1, deadline=deadline)
 
         # Started: the researcher's machine is rented.
-        api.start_platform_experiment(pe_id)
+        api.declare_baseline_and_wait_running(pe_id)
         researcher_name = created(researcher)
 
         # Closed: it is told to stop on every pass, kept for its wind-down, then taken down.

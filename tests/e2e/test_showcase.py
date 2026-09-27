@@ -60,7 +60,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         hyp_id = posted.json()["id"]
         # Started, since an agent's quota exists from the start on and is one of the reads.
         with a.api.clusters_shared():
-            a.api.start_platform_experiment(pe_id)
+            a.api.declare_baseline_and_wait_running(pe_id)
 
         # What another org reads of it. Every one of these is a read route an org uses for its own.
         reads = [
@@ -85,7 +85,6 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("POST", f"/hypotheses/{hyp_id}/links", {"type": "related", "to": pe_id}),
             ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed", "despite": "an intruder settles it with a reason of its own"}),
             ("PATCH", f"/platform-experiments/{pe_id}", {"name": "taken over", "description": "taken over"}),
-            ("POST", f"/platform-experiments/{pe_id}/start", None),
             ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}),
             ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),
             ("POST", f"/platform-experiments/{pe_id}/agents", {"agent_id": agent}),

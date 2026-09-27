@@ -93,7 +93,7 @@ def test_single_node_burst_job_preempted_and_readmitted(api, run_id, deadline):
     # mirrors test_concurrent_admission_race.py's same override for the same reason.
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
 
     burst_jobs = [
         api.submit_job(
@@ -181,7 +181,7 @@ def test_concurrent_burst_saturation_and_guaranteed_arrival(api, run_id, deadlin
     pe_id = api.create_platform_experiment(f"preemption-race2-{run_id}", 50.0, len(agents))
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
 
     def fire(i: int) -> str:
         if i < 2:
@@ -289,7 +289,7 @@ def pe3(api, run_id):
     )
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
     yield pe_id, agents
     api.close_platform_experiment(pe_id)
 

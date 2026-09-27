@@ -110,8 +110,8 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
         job = listed[s["experiment_id"]]
         assert (s["hypothesis_id"], s["env"]) == (job["hypothesis_id"], job["job"]["env"]), s
         metric = job["metric"]
-        assert {k: metric[k] for k in ("name", "best", "basis")} == {"name": "val_accuracy", "best": s["best"], "basis": "raw"}, metric
-        assert metric in job["metrics"] and metric["last"] <= metric["best"], job["metrics"]
+        assert metric == {"name": "val_accuracy", "value": s["best"], "basis": "raw"}, metric
+        assert metric in job["metrics"], job["metrics"]
 
     (bests,) = results["bests"]
     assert bests["metric"] == "val_accuracy"

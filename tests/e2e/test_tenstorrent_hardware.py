@@ -171,7 +171,7 @@ def test_tenstorrent_real_dra_allocation_and_bare_node(api, run_id: str, deadlin
     # draws from (see test_node_and_daemonset_faults.py for the same override).
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
     # The baseline is this experiment's own workload, on the hardware the run is about.
-    api.start_platform_experiment(pe_id, baseline_job={**TT_JOB_OVERRIDES, "image": _k3s_image(), "command": None})
+    api.declare_baseline_and_wait_running(pe_id, baseline_job={**TT_JOB_OVERRIDES, "image": _k3s_image(), "command": None})
 
     try:
         _run(api, pe_id, agent, run_id, deadline, tmp_path)

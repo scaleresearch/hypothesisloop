@@ -126,7 +126,7 @@ def test_nvidia_bare_node_and_optional_k3s_leg(api, run_id: str, deadline, tmp_p
         )
         api.signup_ok(pe_id, agent)
         # The baseline runs where the run does: no other cluster has this accelerator.
-        api.start_platform_experiment(pe_id, baseline_job={"accelerator_type": acc_type, "accelerator_count": 1})
+        api.declare_baseline_and_wait_running(pe_id, baseline_job={"accelerator_type": acc_type, "accelerator_count": 1})
 
         _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted)
     finally:

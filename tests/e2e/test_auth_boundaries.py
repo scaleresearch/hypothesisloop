@@ -388,7 +388,6 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("GET", f"/platform-experiments/{pe_id}/results", None, 200),
         ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "what the run showed"}, 200),
         ("POST", "/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": "MATCH (h:Hypothesis) RETURN count(h)", "params": {}}, 200),
-        ("POST", f"/platform-experiments/{pe_id}/start", None, 403),
         ("PATCH", f"/platform-experiments/{pe_id}", {"description": "reopened"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/agents", {}, 403),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 403),

@@ -312,7 +312,7 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
         f"autoscaler-cap-{run_id}", 5.0, 1, max_concurrent_accelerators=2,
     )
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
-    api.start_platform_experiment(pe_id)
+    api.declare_baseline_and_wait_running(pe_id)
     try:
         j1 = api.submit_job(pe_id, agent, hours=0.02, job_overrides={"accelerator_type": SOLO_TYPE, "accelerator_count": 1})
         j2 = api.submit_job(pe_id, agent, hours=0.02, job_overrides={"accelerator_type": SOLO_TYPE, "accelerator_count": 1})

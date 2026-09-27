@@ -47,7 +47,7 @@ if CONTAINER_ENGINE_BIN is None:
     )
 
 JOB_OVERRIDE_BASE: dict = {
-    "image": "busybox",
+    "image": "docker.io/library/busybox",
     "command": ["sh", "-c"],
     # One core and no accelerator: the node offers its cores with nothing configured.
     "cpu": "1",
@@ -171,7 +171,7 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
     pe_id = org.create_platform_experiment(f"bare-e2e-{run_id}", 1.0, 1, report_interval_seconds=10)
     org.signup_ok(pe_id, agent)
     # The baseline runs on the node, the org's one cluster, in an image that has an interpreter.
-    org.start_platform_experiment(pe_id, baseline_job={**JOB_OVERRIDE_BASE, "image": "python:3.13-slim", "command": BASELINE_COMMAND})
+    org.declare_baseline_and_wait_running(pe_id, baseline_job={**JOB_OVERRIDE_BASE, "image": "docker.io/library/python:3.13-slim", "command": BASELINE_COMMAND})
 
     # A job left RUNNING forever (e.g. this test asserting out early) would outlive its bare-agent
     # process once the fixture kills it -- its cluster never reports again, so every future poll of
