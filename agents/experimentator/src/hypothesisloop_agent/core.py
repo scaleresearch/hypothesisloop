@@ -155,6 +155,16 @@ def prepare() -> RunSetup:
     return RunSetup(cfg=cfg, client=client, system_prompt=system_prompt_text, workdir=workdir, statedir=statedir)
 
 
+def revision_asked(setup: RunSetup) -> str | None:
+    """What the person last asked a planner to change, None for anyone else and for a draft
+    nobody revised. A planner's run ends with its answer, so a planner started with a session is
+    one whose answer met a revision it has not answered yet."""
+    if not config.plans(setup.cfg):
+        return None
+    revisions = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("revisions")
+    return revisions[-1]["message"] if revisions else None
+
+
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
     """The stop conditions that need no platform call: a signal or MAX_WALL_HOURS."""
     hours = setup.cfg.max_wall_hours

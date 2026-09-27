@@ -7,7 +7,7 @@ from hypothesisloop_agent import core
 
 
 def planner():
-    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="baseline", platform_experiment_id="pe-1", hyperparameters={}, max_wall_hours=0)
+    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={}, max_wall_hours=0)
 
 
 def baseline_agent():
@@ -165,6 +165,27 @@ class RunEndedTest(unittest.TestCase):
         self.assertIsNone(self.reason(planner(), {}))
         self.assertEqual(self.reason(planner(), {"ended": "planned"}), "the platform ended the run: planned")
         self.assertEqual(self.reason(planner(), {"ended": "closed"}), "the platform ended the run: closed")
+
+    # A revision reached a planner as "The machine you ran on was replaced ... Continue where you
+    # left off", and it had to find in the draft what the person wanted.
+    def test_a_revision_is_what_a_resumed_planner_is_told(self):
+        from hypothesisloop_agent.claude import run
+        asked = [{"message": "use two cores"}, {"message": "Keep the bar as I wrote it."}]
+        draft = {"status": "draft", "revisions": asked}
+
+        def setup(cfg, platform_experiment):
+            return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment))
+
+        with mock.patch.object(run, "_on_new_machine", True):
+            prompt = run._first_prompt(setup(planner(), draft), "s-1", None)
+            self.assertIn("asks for this revision:\n\nKeep the bar as I wrote it.\n\n", prompt)
+            self.assertIn("a file you wrote on it is gone", prompt)
+            for absent in ("use two cores", "was replaced", "Continue where you left off", "branch"):
+                self.assertNotIn(absent, prompt)
+            self.assertEqual(run._first_prompt(setup(planner(), draft), None, None), run._new_machine_note(planner()) + "\n\nBegin.")
+            self.assertTrue(run._first_prompt(setup(planner(), {"status": "draft"}), "s-1", None).endswith("Continue where you left off."))
+            self.assertTrue(run._first_prompt(setup(baseline_agent(), draft), "s-1", None).endswith("Continue where you left off."))
+        self.assertNotIn("gone", run._first_prompt(setup(planner(), draft), "s-1", None))
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):

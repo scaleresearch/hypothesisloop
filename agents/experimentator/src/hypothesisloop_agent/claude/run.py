@@ -292,6 +292,24 @@ def _new_machine_note(cfg) -> str:
     return _NEW_MACHINE_NOTE + (_NEW_MACHINE_COORDINATOR if config.coordinates(cfg) else _NEW_MACHINE_AGENT)
 
 
+# A planner's machine is released with its answer and a revision starts another. Told only that
+# its machine was replaced and to continue, a planner had to find the revision by itself.
+_REVISION_PROMPT = (
+    "The person read your answer and asks for this revision:\n\n{revision}\n\n"
+    "Read the draft and the capacity again and answer with a new proposal.")
+_REVISION_NEW_MACHINE = " Your machine was released with your answer: a file you wrote on it is gone."
+
+
+def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
+    """What opens a connection: a handoff, the start, or for a resumed session the revision that
+    brought a planner back, else that it goes on. A new machine is said in each."""
+    revision = core.revision_asked(setup) if resume_id and not initial_prompt else None
+    if revision:
+        return _REVISION_PROMPT.format(revision=revision) + (_REVISION_NEW_MACHINE if _on_new_machine else "")
+    prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
+    return _new_machine_note(setup.cfg) + "\n\n" + prompt if _on_new_machine else prompt
+
+
 _on_new_machine = False
 
 
@@ -433,10 +451,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         return core.stop_requested(setup, started_at, stop_flag)
 
     async with ClaudeSDKClient(options=options) as client:
-        first_prompt = initial_prompt or ("Continue where you left off." if resume_id else "Begin.")
-        if _on_new_machine:
-            first_prompt = _new_machine_note(cfg) + "\n\n" + first_prompt
-        await client.query(first_prompt)
+        await client.query(_first_prompt(setup, resume_id, initial_prompt))
         while True:
             got_result = False
             turn_is_error = False

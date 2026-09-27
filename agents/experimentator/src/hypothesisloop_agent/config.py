@@ -101,8 +101,7 @@ def plans(cfg) -> bool:
 
 
 def measures_baseline(cfg) -> bool:
-    """An agent of role baseline measures the control before the run starts. A planner has that
-    role in the roster and runs nothing."""
-    return cfg.role == BASELINE_ROLE and not plans(cfg)
+    """An agent of role baseline measures the control before the run starts."""
+    return cfg.role == BASELINE_ROLE
 
 
