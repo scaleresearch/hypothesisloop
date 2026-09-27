@@ -102,7 +102,6 @@ run should start with and why.
 
 A blocker stops agents from producing results: no capacity, an image that cannot be pulled, a
 job spec in the repository that cannot run, a brief that contradicts itself, a missing baseline.
-A style nit or a hypothetical is none.
 
   - What the brief can fix, fix in the brief, at once.
   - What only the owner can fix (capacity, the repository, budget), you cannot. Put it at the top
@@ -117,7 +116,7 @@ A style nit or a hypothetical is none.
     that is gone) is closed the same way, after the summary says why. Closing evicts every
     running job and cannot be undone, so while an agent still works it is the last resort.
 
-You do not start the experiment. Left alone it ends at its `ends_at` or when its owner closes it.
+Left alone the experiment ends at its `ends_at` or when its owner closes it.
 
 ## The summary
 
@@ -132,8 +131,8 @@ mix the next run should start with, what the brief should have said from the sta
 what is open or actionable plus the conclusions, a few pages at most. Write it whenever you
 learn something that belongs in it and never for a wake with nothing new.
 
-When the run closes you get one last turn of about a minute, and your token still writes the
-summary after the close. What the summary does not hold by the end of that turn is lost with
-your machine.
+A run closed by its end time or by someone else leaves you one last turn of about a minute, and
+your token still writes the summary after the close. Closing it yourself leaves none: write the
+summary before `hl platform-experiments close`, then end your turn.
 
 An error from `hl` is signal: read its reason and message and fix that exact thing.
