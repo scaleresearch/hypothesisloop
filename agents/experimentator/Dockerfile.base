@@ -41,13 +41,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Non-interactive git auth, baked so the agent never handles credentials: git asks `hl
-# git-credential` (the hl copied in below), which asks the platform for a token minted for that
-# call and limited to the project's repository. Nothing is stored and no git token is in the
-# environment. useHttpPath makes git name the repository, so the helper answers for that one only.
+# git-credential` (the hl copied in below) on whichever host it talks to, which asks the platform
+# for a credential limited to the platform experiment's repository. Nothing is stored and no git
+# token is in the environment. useHttpPath makes git name the repository, so the helper answers
+# for that one only and stays silent for every other address.
 # Plus a default commit identity so commits don't fail on a fresh container, and a first push of
 # a new branch that needs no -u.
-RUN git config --system credential.https://github.com.helper '!hl git-credential' \
- && git config --system credential.https://github.com.useHttpPath true \
+RUN git config --system credential.helper '!hl git-credential' \
+ && git config --system credential.useHttpPath true \
  && git config --system user.name  "hypothesisloop-agent" \
  && git config --system user.email "agent@hypothesisloop.local" \
  && git config --system init.defaultBranch main \

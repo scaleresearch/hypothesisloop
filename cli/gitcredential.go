@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,14 +16,14 @@ const gitCredentialHelp = `usage: hl git-credential get|store|erase
 
 git's credential helper for the repository your platform experiment names. git runs it, not you:
 
-  git config --global credential.https://github.com.helper '!hl git-credential'
-  git config --global credential.https://github.com.useHttpPath true
+  git config --global credential.helper '!hl git-credential'
+  git config --global credential.useHttpPath true
 
 On get it sends the platform the address git asked about. For the experiment's repository, and its
-Git LFS address, the platform mints a token for that call, good for about an hour and for the one
-repository, and this hands it to git. Nothing is stored, so store and erase do nothing. For any
-other host or repository the platform mints nothing, this prints nothing and git carries on
-without it. useHttpPath is what makes git state the repository: without it nothing is asked.`
+Git LFS address, the platform answers with the credential for that one repository and this hands
+it to git. Nothing is stored, so store and erase do nothing. For any other host or repository the
+platform has none, this prints nothing and git carries on without it. useHttpPath is what makes
+git state the repository: without it no address is the repository's and nothing is handed out.`
 
 // cmdGitCredential speaks git's credential helper protocol: attributes as key=value lines on
 // stdin, and for get the credential the same way on stdout.
@@ -53,12 +55,11 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 		fmt.Fprintf(stderr, "hl: git-credential: reading what git asked: %s\n", err)
 		return 1
 	}
-	// The token is for one repository on one host, so the platform is told which one git is
-	// talking to and decides before it mints anything.
+	// git asks this helper about every host. The credential is for one repository on one host,
+	// so an address that names none is not it, and git goes on without a credential.
 	for _, key := range []string{"protocol", "host", "path"} {
 		if asked[key] == "" {
-			fmt.Fprintf(stderr, "hl: git-credential: git did not state the %s. Set credential.https://github.com.useHttpPath to true so that it names the repository\n", key)
-			return 1
+			return 0
 		}
 	}
 	var credential struct {
@@ -67,7 +68,12 @@ func cmdGitCredential(c *apiclient.Client, args []string, stdin io.Reader, stdou
 		ExpiresAt time.Time `json:"expires_at"`
 	}
 	address := map[string]string{"protocol": asked["protocol"], "host": asked["host"], "path": asked["path"]}
-	if err := c.Do("POST", "/git-credentials", address, &credential); err != nil {
+	err := c.Do("POST", "/git-credentials", address, &credential)
+	var refused *apiclient.HTTPError
+	if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
+		return 0
+	}
+	if err != nil {
 		return fail(stderr, err)
 	}
 	if credential.Username == "" || credential.Password == "" {

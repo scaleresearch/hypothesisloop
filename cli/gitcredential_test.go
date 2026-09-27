@@ -75,8 +75,9 @@ func TestGitCredentialHandsGitAFreshTokenForTheProjectsRepository(t *testing.T) 
 	}
 }
 
-// A submodule or a dependency on another server must not be sent the repository's token. The
-// platform is told the address and mints nothing for one that is not the repository's.
+// A submodule or a dependency on another server must not be sent the repository's token. git asks
+// the helper about every host: the platform is told the address and has nothing for one that is
+// not the repository's, and the helper then says nothing, so git goes on without a credential.
 func TestGitCredentialAnswersOnlyForTheRepositoryThePlatformNames(t *testing.T) {
 	asked := platform(t)
 	for name, input := range map[string]string{
@@ -87,12 +88,12 @@ func TestGitCredentialAnswersOnlyForTheRepositoryThePlatformNames(t *testing.T) 
 		"a repository under it":      "protocol=https\nhost=github.com\npath=Acme/Model.git/extra\n\n",
 	} {
 		code, stdout, stderr := gitCredential(t, "get", input)
-		if code != 1 || stdout != "" || strings.Contains(stderr, testGitToken) || !strings.Contains(stderr, "no git credential for that address") {
-			t.Errorf("%s: exit %d, stdout %q, stderr %q, want nothing for git and the platform's reason", name, code, stdout, stderr)
+		if code != 0 || stdout != "" || stderr != "" {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q, want silence", name, code, stdout, stderr)
 		}
 	}
 	reached := len(*asked)
-	// Without the whole address there is nothing to ask about: git is not set to state the path.
+	// Without the whole address there is nothing to ask about.
 	for name, input := range map[string]string{
 		"no path":           "protocol=https\nhost=github.com\n\n",
 		"an empty path":     "protocol=https\nhost=github.com\npath=\n\n",
@@ -102,8 +103,8 @@ func TestGitCredentialAnswersOnlyForTheRepositoryThePlatformNames(t *testing.T) 
 		"nothing asked":     "\n",
 	} {
 		code, stdout, stderr := gitCredential(t, "get", input)
-		if code != 1 || stdout != "" || !strings.Contains(stderr, "useHttpPath") {
-			t.Errorf("%s: exit %d, stdout %q, stderr %q, want nothing for git and a line naming useHttpPath", name, code, stdout, stderr)
+		if code != 0 || stdout != "" || stderr != "" {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q, want silence", name, code, stdout, stderr)
 		}
 	}
 	if len(*asked) != reached {
@@ -129,7 +130,6 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		status int
 		body   string
 	}{
-		"no repository":   {http.StatusNotFound, `{"reason":"no_repository","message":"platform experiment pe-1 names no repository"}`},
 		"the run is over": {http.StatusForbidden, `{"reason":"run_over","message":"the run of this agent token in platform experiment pe-1 is over"}`},
 		"token refused":   {http.StatusUnauthorized, `{"error":"unauthenticated: job job-1 is not running"}`},
 	} {
@@ -141,6 +141,13 @@ func TestGitCredentialReportsARefusalAndPrintsNoCredential(t *testing.T) {
 		if code != 1 || stdout != "" || !strings.Contains(stderr, tc.body[10:30]) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 1 with the platform's reason", name, code, stdout, stderr)
 		}
+	}
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"reason":"no_repository","message":"platform experiment pe-1 names no repository"}`)) //nolint:errcheck
+	}))
+	if code, stdout, stderr := gitCredential(t, "get", "protocol=https\nhost=github.com\npath=Acme/Model.git\n\n"); code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("a platform experiment with no repository: exit %d, stdout %q, stderr %q, want silence", code, stdout, stderr)
 	}
 	recordingServer(t, func(int, recorded) any { return map[string]any{"protocol": "https", "host": "github.com"} })
 	if code, stdout, _ := gitCredential(t, "get", "protocol=https\nhost=github.com\npath=Acme/Model.git\n\n"); code != 1 || stdout != "" {
@@ -154,7 +161,7 @@ func TestGitCredentialUsage(t *testing.T) {
 		t.Fatalf("no operation: exit %d, stderr %q", code, stderr.String())
 	}
 	stdout.Reset()
-	if code := run([]string{"git-credential", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "credential.https://github.com.helper") {
+	if code := run([]string{"git-credential", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "credential.helper") {
 		t.Fatalf("--help: exit %d, stdout %q", code, stdout.String())
 	}
 	stdout.Reset()
@@ -184,8 +191,8 @@ func TestGitItselfTakesTheCredential(t *testing.T) {
 	platform(t)
 	helper := "!" + helperProcessEnv + "=1 " + os.Args[0] + " -test.run=TestGitCredentialHelperProcess --"
 	fill := func(url string) (string, error) {
-		cmd := exec.Command("git", "-c", "credential.helper=", "-c", "credential.https://github.com.helper="+helper,
-			"-c", "credential.https://github.com.useHttpPath=true", "credential", "fill")
+		cmd := exec.Command("git", "-c", "credential.helper=", "-c", "credential.helper="+helper,
+			"-c", "credential.useHttpPath=true", "credential", "fill")
 		cmd.Dir = t.TempDir()
 		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_ASKPASS=")
 		cmd.Stdin = strings.NewReader("url=" + url + "\n\n")
