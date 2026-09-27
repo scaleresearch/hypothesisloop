@@ -89,7 +89,7 @@ fix. Exits 0 with "ready" when there is none, 1 otherwise.
 
 A ready repository also holds the code the job spec runs and has a completed job submitted from
 that spec at the same commit (the baseline). No file shows those two, so this command does not
-check them: the baseline is checked when a draft is proposed. Nor does it know whose experiment
+check them: the baseline is checked when it is declared (hl platform-experiments update --baseline-job). Nor does it know whose experiment
 the files describe: those of an earlier experiment in the same repository read as ready.
 hl repo init adds a missing file.`, stderr)
 	if err := fs.Parse(args); err != nil {

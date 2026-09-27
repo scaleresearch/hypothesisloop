@@ -243,18 +243,24 @@ schedule and the stages answer 403 to its token); it writes those down for you.
   question the coordinator had already resolved locally, because the live description hadn't
   caught up) — a posted comment redirecting the agent is not a substitute for this and does not
   reliably stop an in-flight retry loop by itself.
-- **The `BASELINE` block must be present and answered before any agent is spawned.** It lives
-  inside the `EXPERIMENT DESCRIPTION` block you just posted, so it reaches agents verbatim through
-  the sync rule above — see `experiment-checklist.md` item 1 for the four required lines. Check
-  the posted `description`, not just the file. Either `metric:` is a real number with an
-  experiment id on `measured:`, or `measured:` says `not yet established` **and** the description
-  names establishing it as the first task. A block that is absent, or present with all four lines
-  blank, is a blocker — fix `experiment.md`, re-`PUT`, and only then spawn. An agent that reads no
-  baseline invents one, and every result it ranks is measured against a different reference than
-  its neighbour's.
+- **The baseline is measured and declared before the experiment starts, and the platform holds
+  you to it.** The `BASELINE` block lives inside the `EXPERIMENT DESCRIPTION` block you just
+  posted (see `experiment-checklist.md` item 1 for its four lines) and says
+  `measured: not yet established` at the create. While the experiment is `open`:
+  1. add one agent with `hl platform-experiments agents add --role baseline` (`--hosted` to have
+     the platform run it). It holds a quota at once, its job is the only one an open experiment
+     accepts, and it takes no share at the start;
+  2. it runs the repository's job spec, files the job's summary and finishes;
+  3. fill the block (`code_ref:`, `metric:`, `measured:` the job's id) and declare it:
+     `hl platform-experiments update --description-file FILE --baseline-job JOB`. A refusal
+     names what does not hold: the job, the brief, a gate the baseline breaks, or a budget that
+     does not cover one such trial for each of `max_agents`.
+  `hl platform-experiments start` answers `baseline_required` until then, and an experiment
+  still open without a baseline `planning.baseline_limit_minutes` after its `starts_at` is
+  closed (`baseline_limit_reached`). A hosted coordinator does steps 1 and 3 itself.
 - `starts_at` must leave time to add every agent (step 4), never "now". Agents join only while
   the status is `open`, and it flips to `running` within a minute of `starts_at` passing once at
-  least one agent has joined (`SweepAutoStart` in
+  least one agent has joined and the baseline is declared (`SweepAutoStart` in
   `controlplane/services/quota/platform_experiments_lifecycle.go`). Quota is divided at that
   moment over the agents present, and one added later is refused `signup_closed`. How long an
   agent's container takes to boot no longer matters: an agent is in the experiment from the

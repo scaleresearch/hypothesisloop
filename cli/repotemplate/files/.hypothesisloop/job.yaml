@@ -7,11 +7,9 @@
 # one with --secret-env.
 # No estimated_duration_hours is stated here. A job holds its estimate of its agent's quota from
 # submit until it ends, and a job that states none gets the one the platform measured on the
-# experiment's baseline job: what it ran plus a half. --estimated-duration-hours states it for
-# one submit: for the baseline job itself, which has nothing measured yet, and for a trial that
-# will run longer. An experiment created directly, with no planner, has no measured estimate:
-# its job spec states one under metadata, what its baseline took (observed_hours in
-# `hl job cost`) plus a half.
+# experiment's baseline job when it was declared: what it ran plus a half.
+# --estimated-duration-hours states it for one submit: for the baseline job itself, which has
+# nothing measured yet, and for a trial that will run longer.
 job:
   # REQUIRED: a job that names no image stays QUEUED and never runs. Copy the `image` of a job
   # image `hl capacity` lists for the type below, verbatim. Delete this line only where

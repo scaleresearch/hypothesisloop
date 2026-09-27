@@ -240,24 +240,40 @@ Experimentators in a fleet don't all run the same way. Each one launches with a 
 
 A platform experiment can also start from a sentence saying what to find out, on the home page
 or with `POST /platform-experiments/drafts {project_id, goal}`. That makes a **draft**, and the
-platform runs a **planner** for it: an agent that chooses the metric, writes seed code, measures
-a baseline with a real job and proposes the experiment (`hl platform-experiments propose`). The
-platform checks the proposal against what the baseline job did before it stores it, and stores
-with it the estimate of one trial: the hours that job was observed running plus a half
-(`job_estimated_duration_hours`). A job of the experiment that states no
-`estimated_duration_hours` gets that one, so the job spec a planner commits states none and
-only the baseline job is submitted with a guess (`--estimated-duration-hours`). A person
+platform runs a **planner** for it: an agent that chooses the metric and the gate, writes the
+brief and sizes the run, and proposes the experiment (`hl platform-experiments propose`). It
+runs nothing, so a proposal is there in minutes and its budget is an estimate and a cap. A person
 then accepts it, stating the budget, the duration and the researchers themselves
 (`POST /platform-experiments/{id}/accept`), or asks for a change in a sentence
 (`.../revise`), or closes the draft. A planner that cannot make the goal into an experiment
 declines with a reason (`hl platform-experiments decline --reason`), which the draft's page
 shows in place of a proposal and which a revision answers.
 
-The platform pays for planning, within the `planning` section of the settings: an allowance per
-draft, a time limit, and how many drafts an org may have. The baseline job's accelerator-hours
-are real spend under the experiment's id, so once the draft is accepted they are part of the
-run's consumed budget and of its stage progress, beside what the researchers spend: a run
-accepted with a budget of 6 after a baseline that cost 0.2 has 5.8 left to consume.
+The platform pays for planning, within the `planning` section of the settings: a time limit and
+how many drafts an org may have.
+
+### A baseline before anyone competes
+
+No platform experiment starts without a declared baseline, whether a person accepted a draft or
+created the experiment whole. While it is `open`, an agent added with `--role baseline` builds
+the harness the brief describes (or runs the repository's job spec as it is when `hl repo check`
+passes and it fits), measures the control with one real job and files what it measured. Its job
+is the only one an open experiment accepts, and no researcher's machine is rented until the run
+starts. The coordinator then declares it:
+`hl platform-experiments update --description-file FILE --baseline-job JOB`. The platform checks
+the job (completed, by a baseline agent of this experiment, with a finding, reporting every
+metric, holding every gate, named in the brief's `BASELINE` block) and that the budget covers
+one such trial for each researcher (`budget_below_baseline`), and stores the estimate of one
+trial: the hours the job was observed running plus a half (`job_estimated_duration_hours`). A
+job that states no `estimated_duration_hours` gets that one, so the committed job spec states
+none and only the baseline job is submitted with a guess. `start` answers `baseline_required`
+until then, and an experiment still open without a baseline after
+`planning.baseline_limit_minutes` is closed with `close_reason: baseline_limit_reached`.
+
+The baseline agent holds a quota from the moment it joins: what one researcher holds in the
+first stage. What it spent is real spend under the experiment's id and is taken from the budget
+before the researchers' shares are carved: a run with a budget of 6 after a baseline that cost
+0.2 shares 5.8.
 
 ## YAML files
 
@@ -321,8 +337,8 @@ with 400, and so is a job with neither an accelerator nor cores.
 A job states little else. `cpu`, `memory` and `storage` left out are the job's share of the node it
 lands on (`"max"`), one part per accelerator or per core, and `max_retries` left out is 0. The
 least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
-where the platform measured one on the experiment's baseline job, 422 `estimate_required`
-where it measured none), and in `job` a
+once the experiment's baseline is declared, 422 `estimate_required` for the baseline job
+itself), and in `job` a
 `command`, an `image` (one `hl capacity` lists, left out only on a cluster shown with
 `only_job_image`) and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
 experiment's repository at a pushed commit, filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap

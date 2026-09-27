@@ -1,5 +1,5 @@
 # The experiment, shaped like the body of POST /platform-experiments: what a create with
-# from_repo reads at the head of the default branch, and what a planner proposes. Uncomment and
+# from_repo reads at the head of the default branch, and what a baseline agent copies from the experiment. Uncomment and
 # fill in. What a run costs and how long it lasts is stated by whoever creates it, never here.
 #
 # name: a few words

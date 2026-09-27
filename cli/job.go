@@ -44,9 +44,8 @@ code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
 was billed (hl job cost ID). A job that states no estimate, in FILE or with
 --estimated-duration-hours, gets the one the platform measured on its platform experiment's
-baseline job: what that job ran plus a half, job_estimated_duration_hours in the experiment's
-proposal. Where none was measured (a draft's baseline job itself, an experiment created
-directly) a job that states none is refused. hl job status ID shows the estimate applied. A submit refused for quota fits once a job of
+baseline job when it was declared: what that job ran plus a half, job_estimated_duration_hours
+of the experiment. The baseline job itself has none measured and states one. hl job status ID shows the estimate applied. A submit refused for quota fits once a job of
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
