@@ -601,8 +601,8 @@ export function fetchStages(platformExpID: string): Promise<StagesStatus> {
 // Agents of a platform experiment
 // ---------------------------------------------------------------------------
 
-export function fetchPlatformExperimentAgents(platformExpID: string): Promise<AgentSignup[]> {
-  return apiFetch<{ agents: AgentSignup[] }>(`/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
+export function fetchPlatformExperimentAgents(platformExpID: string): Promise<JoinedAgent[]> {
+  return apiFetch<{ agents: JoinedAgent[] }>(`/platform-experiments/${platformExpID}/agents`).then(r => r.agents)
 }
 
 export interface AddAgentsRequest {

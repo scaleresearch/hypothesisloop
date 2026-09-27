@@ -646,9 +646,12 @@ export interface AgentSignup {
   instance?: AgentInstance
 }
 
-// An agent in the answer to adding it. token is set for one the platform does not run.
+// An agent as the roster and the answer to adding it carry it. token is set in the answer to
+// adding one the platform does not run. status_reason is set while the agent waits for its open
+// platform experiment to start: its instance reads requested and no machine is asked for yet.
 export interface JoinedAgent extends AgentSignup {
   token?: string
+  status_reason?: { reason: string; message: string }
 }
 
 /** The platform's GitHub App: where a person installs it and where they authorise it. */

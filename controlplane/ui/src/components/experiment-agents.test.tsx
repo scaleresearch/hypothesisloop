@@ -9,7 +9,7 @@ import {
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup, PlatformExperiment } from '@/types'
+import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   apiURL: () => 'http://api.test',
@@ -19,7 +19,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 const at = '2026-01-01T00:00:00Z'
-let roster: AgentSignup[]
+let roster: JoinedAgent[]
 
 function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
   return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, signed_up_at: at }
@@ -210,13 +210,27 @@ describe('the machines the platform runs', () => {
 })
 
 describe('an experiment waiting to start', () => {
-  const waits = { reason: 'baseline_required', message: 'platform experiment pe-1 has no baseline' }
+  const waits = { reason: 'baseline_required', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
+  const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }
+  const requested = { state: 'requested', restarts: 0, stopped: false } as const
 
-  it('says what it waits for in the API\'s words, and offers nothing to start it with', async () => {
+  it('says the reader\'s next step in the API\'s words alone, and offers nothing to start it with', async () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
-    expect(screen.getByRole('status').textContent).toBe('The platform starts the run by itself, with the agents present then. platform experiment pe-1 has no baseline')
+    expect(screen.getByRole('status').textContent).toBe(waits.message)
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
+  })
+
+  it('says beside an agent whose machine is not asked for yet why it waits', async () => {
+    roster = [
+      { ...signup('ag-waits', true), instance: requested, status_reason: agentWaits },
+      { ...signup('ag-baseline', true), role: 'baseline', instance: requested },
+    ]
+    show(PlatformExperimentStatus.OPEN, { status_reason: waits })
+    const row = (id: string) => within(screen.getByRole('cell', { name: id }).closest('tr')!)
+    expect((await screen.findByText(agentWaits.message)).closest('tr')).toBe(screen.getByRole('cell', { name: 'ag-waits' }).closest('tr'))
+    expect(row('ag-waits').getByText('requested')).toBeTruthy()
+    expect(row('ag-baseline').queryByText(/none is before/)).toBeNull()
   })
 
   it('says nothing of the kind once it runs', async () => {

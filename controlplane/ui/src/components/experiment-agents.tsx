@@ -166,9 +166,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by finishing, by being cut or by the experiment closing.</p>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {pe.status === PlatformExperimentStatus.OPEN && pe.status_reason && (
-            <p role="status" className="text-xs text-subtle">
-              The platform starts the run by itself, with the agents present then. {pe.status_reason.message}
-            </p>
+            <p role="status" className="text-xs text-subtle">{pe.status_reason.message}</p>
           )}
           {shown.map(agent => (
             <Secret
@@ -224,6 +222,9 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                       {agent.instance
                         ? <InstanceHealth instance={agent.instance} />
                         : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}
+                      {agent.status_reason && agent.instance?.state === 'requested' && (
+                        <p className="mt-1 max-w-[420px] text-xs text-subtle">{agent.status_reason.message}</p>
+                      )}
                     </td>
                     <td className="whitespace-nowrap font-mono text-xs">{agent.flavor ?? 'default'}</td>
                     <td className="whitespace-nowrap font-mono text-xs">{agent.model ?? 'default'}</td>
