@@ -151,6 +151,16 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineByEveryLaterChange(t *testin
 		t.Errorf("a budget the baseline fits: got = %d %v, want 200 and the baseline kept", code, out)
 	}
 
+	// max_agents counts the researchers that joined, so it is never set under them.
+	store, patch = declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
+	store.researchers = []string{"ag-1", "ag-2"}
+	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_researchers" || store.created[0].MaxAgents != 2 {
+		t.Errorf("max_agents under the researchers that joined: got = %d %v, want 409 max_agents_below_researchers and nothing changed", code, out)
+	}
+	if code, out := patch(map[string]any{"max_agents": 3}); code != http.StatusOK || store.created[0].MaxAgents != 3 {
+		t.Errorf("max_agents over the researchers that joined: got = %d %v, want 200", code, out)
+	}
+
 	// Once it runs the baseline is what the shares were carved after, and the brief is the
 	// coordinator's to keep true to what the run learns.
 	running := declared()

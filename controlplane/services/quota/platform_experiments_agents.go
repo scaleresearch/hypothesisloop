@@ -183,7 +183,7 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	case errors.Is(err, db.ErrSignupClosed):
 		return nil, refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
 	case errors.Is(err, db.ErrMaxAgentsReached):
-		return nil, refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
+		return nil, maxAgentsReached(pe.MaxAgents)
 	case errors.Is(err, db.ErrMaxHostedReached):
 		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	case err != nil:
@@ -281,8 +281,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
-			"role decides ranking: \"competitor\" (default) is ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
+			"role decides ranking: \"competitor\" (default) is a researcher, whatever its flavor: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
+			"400 max_agents_reached for a researcher past max_agents, which counts every researcher that joined, one that finished or was cut included, and no agent of another role and no coordinator. " +
 			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (the first stage's share of the budget over max_agents, what one researcher holds then, which follows a later change of either while the experiment is open), " +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {

@@ -175,7 +175,7 @@ type PlatformExperiment struct {
 	Name                   string  `json:"name"`
 	Description            string  `json:"description"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
-	MaxAgents              int     `json:"max_agents"`
+	MaxAgents              int     `json:"max_agents" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
 	// this platform experiment's agents' jobs) at any moment. Nil defers to
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on

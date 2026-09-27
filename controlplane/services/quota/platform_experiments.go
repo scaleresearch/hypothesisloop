@@ -31,7 +31,7 @@ type PlatformExperimentsStore interface {
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
-	// or the agent was already signed up. A competitor past max_agents is db.ErrMaxAgentsReached,
+	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
@@ -162,7 +162,7 @@ type CreatePlatformExperimentRequest struct {
 	Name                   string  `json:"name" required:"false"`
 	Description            string  `json:"description" required:"false"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"`
-	MaxAgents              int     `json:"max_agents" doc:"How many competitors may join."`
+	MaxAgents              int     `json:"max_agents" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
 	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
 	// change" on update; a present zero is rejected by domain validation, not treated as unset.
@@ -225,7 +225,7 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty"`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count. At least the researchers that already joined."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`

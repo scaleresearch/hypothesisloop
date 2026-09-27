@@ -88,7 +88,7 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 		return spec, refuseUpdate(422, "invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends")
 	}
 	if spec.MaxAgents <= 0 {
-		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many agents may join")
+		return spec, refuseUpdate(422, "invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may join")
 	}
 	if err := spec.checkLength(); err != nil {
 		return spec, err
@@ -215,6 +215,13 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		patched.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
 	}
 	if patch.MaxAgents != nil {
+		researchers, err := s.store.ListSignupsByRole(ctx, id, domain.SignupRoleCompetitor)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.Update: %w", err)
+		}
+		if *patch.MaxAgents < len(researchers) {
+			return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) that joined: remove one first, or state at least %d", *patch.MaxAgents, len(researchers), len(researchers))
+		}
 		patched.MaxAgents = *patch.MaxAgents
 	}
 	if patch.Metrics != nil {
@@ -261,6 +268,11 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	return pe, nil
 }
 
+// maxAgentsReached refuses a researcher past max_agents, which counts researchers and nothing else.
+func maxAgentsReached(limit int) error {
+	return refuseSignup(400, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) have joined. One that finished or was cut still counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+}
+
 func maxHostedReached(limit int) string {
 	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment at once. One is kept for an agent of role baseline, which measures the baseline nothing starts without, and its coordinator and its other hosted agents take the rest. An agent that finished holds none", limit)
 }
@@ -291,7 +303,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 
 	inserted, err := s.store.Signup(ctx, platformExpID, signup)
 	if errors.Is(err, db.ErrMaxAgentsReached) {
-		return refuseSignup(400, "max_agents_reached", "limit is %d", pe.MaxAgents)
+		return maxAgentsReached(pe.MaxAgents)
 	}
 	if errors.Is(err, db.ErrMaxHostedReached) {
 		return refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))

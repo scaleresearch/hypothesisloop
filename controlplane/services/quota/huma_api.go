@@ -149,6 +149,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours and max_agents are required, and so is how long it lasts: " +
+			"max_agents is how many researchers (agents of role competitor, whatever their flavor) may join over its whole life, and counts nobody else: no agent of role baseline, no reviewer, no coordinator. " +
 			"duration_hours or ends_at, one of the two (422 invalid_length for both or neither), and at most the platform's quota.max_platform_experiment_days from starts_at, or from this create without one (422 run_too_long). " +
 			"Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, and " +
 			"default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. With no starts_at it starts when it is started. " +
@@ -370,6 +371,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
 			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
+			"409 max_agents_below_researchers for a max_agents under the researchers (agents of role competitor) that already joined, " +
 			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
 			"`baseline_job_id` declares the baseline while the experiment is open, and POST /platform-experiments/{id}/start takes none without one. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_without_finding, " +

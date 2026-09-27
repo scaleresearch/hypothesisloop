@@ -15,7 +15,7 @@ import (
 
 // ---- experiment_signups ----
 
-// ErrMaxAgentsReached is a competitor signup refused because the field is full.
+// ErrMaxAgentsReached is a researcher's signup refused because max_agents researchers joined.
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
 // ErrMaxHostedReached is returned when a platform experiment would have the platform run more
@@ -188,7 +188,8 @@ WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND role <>
 	if inserted == 0 {
 		return 0, nil
 	}
-	// max_agents sizes the field being ranked, so it counts competitors only.
+	// max_agents sizes the field being ranked: it counts the researchers that joined, one that
+	// finished or was cut among them, and nobody of another role.
 	if competitors {
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2`,

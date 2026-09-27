@@ -132,6 +132,15 @@ func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ stri
 type createdStore struct {
 	PlatformExperimentsStore
 	created []*domain.PlatformExperiment
+	// researchers are the agents of role competitor that joined.
+	researchers []string
+}
+
+func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
+	if role != domain.SignupRoleCompetitor {
+		return nil, nil
+	}
+	return s.researchers, nil
 }
 
 func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment) error {
