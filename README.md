@@ -202,8 +202,8 @@ hl hypothesis checkout h-1                                 # in a clone: your br
 hl hypothesis link h-2 --type contradicts --to h-1
 hl hypothesis comment h-1 --text "..."
 hl hypothesis status h-1 confirmed --against JOB            # the control it was compared with; needs two completed jobs of its own
-hl repo init                                               # in a clone: add README.md, .hypothesisloop/experiment.yaml, .hypothesisloop/job.yaml and .gitignore where missing
-hl repo check                                              # in a clone: check the layout and that each file is valid, never whose experiment the files describe
+hl repo init                                               # in a clone: add README.md, .hypothesisloop/experiment.yaml, .hypothesisloop/job.yaml, metrics.py and .gitignore where missing
+hl repo check                                              # in a clone: check the layout and that each file is valid, never whose experiment the files describe; its metrics line fails nothing
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --env LR=0.1  # submit the base job spec against a hypothesis, overriding it
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --secret-env HF_TOKEN  # hand the job $HF_TOKEN from your environment; no read of the job shows it
 hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
@@ -713,7 +713,13 @@ frees on an earlier cluster a moment later does not move it, and running jobs ne
 that failed a job (an infrastructure fault, a scale-up that timed out) is left out of that job's
 next placement for `scheduler.tried_cluster_ttl_seconds` unless no other cluster could run it, and
 every such requeue spends the job's infrastructure allowance, so a job cannot go round its
-clusters for ever. `hl cluster list` lists the clusters in that order.
+clusters for ever. Two infrastructure faults say nothing about the cluster and leave it in:
+`code_unreachable`, a job whose command never ran because neither its repository nor the
+platform's credential for it answered (`hl-clone` exits 75), and `no_offer`, a job admitted to
+a cluster that rents machines when the one on offer was gone. Both are requeued at no cost,
+QUEUED with that reason in `eviction_reason`, and EVICTED and refunded once the allowance is
+spent. A FAILED job's `eviction_reason` is how its process ended, with up to its five last
+lines of output joined by ` | `. `hl cluster list` lists the clusters in that order.
 
 An org decides which of those clusters its jobs use. `hl cluster disable my-cluster`
 (`POST /orgs/{id}/clusters/{name}/disable`) turns a cluster off for the org's jobs, one it

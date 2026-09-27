@@ -14,10 +14,11 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[3]
 EXPERIMENTS = REPO / "agents/coordinator/experiments"
 
-# Every script that carries its own copy of post_metric: seeds are copied into an experiment's
-# repository and workloads into an image, so none of them can import a shared one.
+# Every script that carries its own copy of post_metric: the template's and the seeds' are
+# copied into an experiment's repository and workloads into an image, so none of them can import
+# a shared one.
 METRIC_HELPERS = [
-    "agents/coordinator/experiments/template/seed/metrics.py",
+    "cli/repotemplate/files/metrics.py",
     "agents/coordinator/experiments/shampoo-family-optimizers/seed/metrics.py",
     "agents/coordinator/experiments/sparse-sdpa/seed/harness.py",
     "agents/coordinator/experiments/dummy-data-search-demo/seed/train.py",
@@ -147,7 +148,6 @@ class SampleJobFilesTest(unittest.TestCase):
         self.assertIn(f"COPY {shipped} $WORKLOAD_SAMPLES/", dockerfile)
         self.assertIn("! -name seed ! -name .hypothesisloop -exec rm -rf {} +", dockerfile)
         self.assertIn("-path '*/.hypothesisloop/*' ! -name job.yaml -delete", dockerfile)
-        self.assertTrue((EXPERIMENTS / "template/seed/metrics.py").is_file())
         self.assertTrue((REPO / shipped).is_file())
         for path in samples:
             with self.subTest(path=path.name):
