@@ -29,6 +29,7 @@ import requests
 
 from support import admin
 from support.api import API, token_scope
+from support.stages import BUDGET, BURN_JOB_HOURS, REPORT_INTERVAL_SECONDS, ROSTER_SIZE, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
 pytestmark = pytest.mark.exclusive
@@ -36,14 +37,6 @@ pytestmark = pytest.mark.exclusive
 LAUNCHER = "main"
 MAX_RESTARTS = 3  # domain.MaxAgentInstanceRestarts
 
-STAGES = [
-    {"length_pct": 20, "evict_pct": 50},
-    {"length_pct": 30, "evict_pct": 25},
-    {"length_pct": 50, "evict_pct": 0},
-]
-JOB_HOURS = 0.0028
-RUN_SECONDS = 40
-BUDGET = 0.03
 
 
 @pytest.fixture(scope="module")
@@ -302,24 +295,17 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
 def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_repo: API, hosted_pe, run_id: str, deadline):
     api = with_repo
     # Six agents and a 50% first cut: above the roster floor for a cut, see test_stage_ladder_cut.
-    pe_id = hosted_pe("hosted-agents-cut", BUDGET, 6, report_interval_seconds=10, stages=STAGES)
-    agents = [a["agent_id"] for a in api.add_agents(pe_id, count=6, hosted=True, quota_tier="guaranteed")]
+    pe_id = hosted_pe("hosted-agents-cut", BUDGET, ROSTER_SIZE, report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES)
+    agents = [a["agent_id"] for a in api.add_agents(pe_id, count=ROSTER_SIZE, hosted=True, quota_tier="guaranteed")]
     before, _ = desired_for(api, pe_id)
     assert sorted(before) == sorted(agents)
     api.start_platform_experiment(pe_id)
 
-    run_env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}
-    jobs = {agent: api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides={"env": run_env}) for agent in agents}
-
-    stages = eventually(
-        "the first stage boundary",
-        lambda: api.stages(pe_id),
-        accept=lambda st: st["current_stage"] >= 2,
-        deadline=deadline,
-    )
+    stages, jobs = cross_first_boundary_ranked(api, pe_id, agents, deadline)
     cut = {c["agent_id"] for c in stages["cut_agents"]}
     survivors = set(stages["active_agents"])
     assert cut | survivors == set(agents)
+    assert cut, "the boundary cut nobody, so no cut agent's machine was looked at"
 
     # Reported as a launcher reports them, so that none is given up on as never started.
     up = [{"name": before[agent]["name"], "state": "running"} for agent in agents]
@@ -351,7 +337,7 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     instances, ending = desired_for(api, pe_id, up)
     assert done not in instances and before[done]["name"] in ending, f"the finished agent is not left to end: {sorted(instances)}"
     assert set(instances) == survivors - {done}
-    code, _ = as_done.submit_job_expect(pe_id, done, hours=JOB_HOURS)
+    code, _ = as_done.submit_job_expect(pe_id, done, hours=BURN_JOB_HOURS)
     assert code == 422, f"a finished agent's submission: {code}"
     seen = api.as_caller(admin.token(f"coordinator:{pe_id}")).hl_expect(
         "watch", "--platform-experiment", pe_id, "--kinds", "agent.finished", "--since", "1", "--timeout", "5", timeout=20)

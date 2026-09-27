@@ -3,40 +3,41 @@ ladder over a roster large enough to clear the guardrail floor crosses its first
 configured share of the field, stops the cut agents' jobs, blocks their resubmissions with 422, and
 moves their unspent budget to the survivors.
 
-Deliberately asserts the mechanism, not which agent loses. Who ranks where depends on how much of
-each agent's metric stream landed before the boundary, which depends on cluster capacity at run
-time -- the ranking arithmetic itself (worst-first order, tie groups, no-data-last, the guardrails)
-is pinned exactly by controller/stages_rank_test.go instead. API-only, parallel-safe.
+Deliberately asserts the mechanism, not which agent loses. Who ranks where depends on the values
+each agent's completed job happened to report -- the ranking arithmetic itself (worst-first order,
+tie groups, no-data-last, the guardrails) is pinned exactly by controller/stages_rank_test.go
+instead. API-only, parallel-safe.
+
+The platform experiment also declares a second ranking metric no workload ever reports. An agent
+is cut only when it ranks below the line on every ranking metric that produced usable data, so a
+metric nobody still standing reports must count as no data: counted as healthy it ranks all
+survivors as one tie group, which is kept whole, and the ladder advances through every boundary
+cutting nobody. That is the shape a mistyped or retired metric key takes in a real run.
 """
 from __future__ import annotations
 
 import pytest
 
 from conftest import make_agent
+from support.stages import BUDGET, BURN_JOB_HOURS, REPORT_INTERVAL_SECONDS, ROSTER_SIZE, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
 
-STAGES = [
-    {"length_pct": 20, "evict_pct": 50},
-    {"length_pct": 30, "evict_pct": 25},
-    {"length_pct": 50, "evict_pct": 0},
+METRICS = [
+    {"key": "val_accuracy", "direction": "maximize"},
+    {"key": "never_reported_score", "direction": "maximize"},
 ]
-# Each job declares a short estimate and then genuinely runs longer than it, which is what lets a
-# wave of jobs burn past the first stage's share of the budget at all -- see the header comment in
-# the .sh this was ported from for the full arithmetic.
-JOB_HOURS = 0.0028  # ~10s reserved
-RUN_SECONDS = 40  # ~4x that actually consumed
-# Six agents observe roughly 6 x 0.25 x 37s = 0.0154 AccH, so a 20% first stage of a 0.03 AccH
-# budget puts the boundary at 0.006 -- about 40% of the way through the wave.
-BUDGET = 0.03
 
 
 def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_id, deadline):
     # Six agents: above minSurvivorsForCut (5), and 50% of 6 is 3 cut / 3 kept, which clears
     # minSurvivorsAfterCut (2) without being clamped.
-    agents = [make_agent(api, run_id, f"ladder-{i}") for i in range(6)]
-    pe_id = experiment("stage-ladder-cut", agents, budget=BUDGET, report_interval_seconds=10, stages=STAGES)
+    agents = [make_agent(api, run_id, f"ladder-{i}") for i in range(ROSTER_SIZE)]
+    pe_id = experiment(
+        "stage-ladder-cut", agents, budget=BUDGET, report_interval_seconds=REPORT_INTERVAL_SECONDS,
+        metrics=METRICS, stages=STAGES,
+    )
 
     stages = api.stages(pe_id)
     # The ladder must come back exactly as configured -- this is the write path (POST with an
@@ -52,15 +53,7 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
         f"stage-1 allocation {first_alloc} exceeds the first stage's 20% share of {BUDGET}"
     )
 
-    run_env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}
-    jobs = [api.submit_job(pe_id, a, hours=JOB_HOURS, job_overrides={"env": run_env}) for a in agents]
-
-    stages = eventually(
-        "the first stage boundary",
-        lambda: api.stages(pe_id),
-        accept=lambda st: st["current_stage"] >= 2,
-        deadline=deadline,
-    )
+    stages, jobs = cross_first_boundary_ranked(api, pe_id, agents, deadline)
 
     cut_agents = stages["cut_agents"]
     active_agents = stages["active_agents"]
@@ -69,17 +62,24 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
     # 50% of 6 survivors. Fewer is legitimate only if a tie group straddled the line; more is a bug.
     assert cut_n <= 3, f"cut {cut_n} agents, more than floor(50% x 6) = 3"
     assert active_n >= 2, f"only {active_n} survivor(s) left -- the survivor floor was violated"
+    # Every agent completed a job that reported val_accuracy, so the field can be ranked.
+    assert cut_n >= 1, "boundary cut nobody: a ranking metric no survivor reports vetoed the whole cut"
 
-    if cut_n == 0:
-        # A tie group straddled the line -- legitimate, but nothing further to assert.
-        return
+    # Progress is monotonic and the published next boundary is the one that actually follows.
+    assert stages["next_boundary_progress"] == 0.5, (
+        f"next_boundary_progress={stages['next_boundary_progress']}, want 0.5 after advancing to stage 2"
+    )
+
+    # The endpoint must never leak standings -- an agent may see that it is cut, not how close it is.
+    leaked = [k for k in ("rank", "ranks", "standings", "scores", "metric_values") if k in stages]
+    assert not leaked, f"stages endpoint leaked ranking fields: {leaked}"
 
     bad_stage = sum(1 for c in cut_agents if c["stage_index"] != 1)
     assert bad_stage == 0, f"{bad_stage} cut record(s) attributed to the wrong stage"
 
     # A cut is terminal: further submissions are rejected platform-side, not merely discouraged.
     victim = cut_agents[0]["agent_id"]
-    code, _ = api.submit_job_expect(pe_id, victim, hours=JOB_HOURS, job_overrides={"env": run_env})
+    code, _ = api.submit_job_expect(pe_id, victim, hours=BURN_JOB_HOURS)
     assert code >= 400, f"{victim} was cut but its resubmission was accepted (HTTP {code})"
 
     # A cut agent's quota is zeroed, and its unspent share plus the incoming stage's release goes
@@ -93,35 +93,23 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
 
     # A cut job did nothing wrong: the platform decided. It must be reported as `policy`, never as
     # one of the agent's failures (domain.EvictionStageCut is FaultPolicy). Which cut agent still
-    # had a running job at the boundary is not fixed -- an agent whose job had already completed is
-    # cut without anything to stop -- so find one that really was evicted rather than assuming the
-    # first cut agent was.
-    cut_agent_ids = {c["agent_id"] for c in cut_agents}
-    agent_by_job = dict(zip(jobs, agents))
-
-    def find_cut_evicted_job():
-        for j, a in agent_by_job.items():
-            if a not in cut_agent_ids:
-                continue
-            exp = api.experiment(j)
-            reason = exp.get("eviction_reason") or ""
-            if exp["status"] == "EVICTED" and reason.startswith("stage_cut"):
-                return a, j
-        return None
-
-    found = None
-    try:
-        found = eventually(
-            "a cut agent's job to reach its stage_cut eviction",
-            find_cut_evicted_job,
-            accept=lambda v: v is not None,
-            deadline=deadline,
-        )
-    except AssertionError:
-        found = None
-
+    # had a running job at the boundary is not fixed -- an agent whose second job had already
+    # spent its share was evicted for quota_exhaustion and is cut without anything to stop -- so
+    # find one that really was evicted by the cut rather than assuming the first cut agent was.
+    cut_jobs = {c["agent_id"]: jobs[c["agent_id"]] for c in cut_agents}
+    ended = eventually(
+        "every cut agent's job to end",
+        lambda: {a: api.experiment(j) for a, j in cut_jobs.items()},
+        accept=lambda exps: all(e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED") for e in exps.values()),
+        deadline=deadline,
+    )
+    found = next(
+        ((a, cut_jobs[a]) for a, e in ended.items()
+         if e["status"] == "EVICTED" and (e.get("eviction_reason") or "").startswith("stage_cut")),
+        None,
+    )
     if found is None:
-        return  # every cut agent's job had already finished before the boundary -- nothing observable
+        return  # every cut agent's job had already ended before the boundary -- nothing observable
 
     cut_job_agent, cut_job = found
     policy_n = api.eviction_class_count(pe_id, cut_job_agent, "policy")
@@ -147,13 +135,3 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
         f"class breakdown does not account for the evictions: by_class={class_total} "
         f"by_reason={reason_total} unclassified={unclassified}"
     )
-
-    # Progress is monotonic and the published next boundary is the one that actually follows.
-    final_stages = api.stages(pe_id)
-    assert final_stages["next_boundary_progress"] == 0.5, (
-        f"next_boundary_progress={final_stages['next_boundary_progress']}, want 0.5 after advancing to stage 2"
-    )
-
-    # The endpoint must never leak standings -- an agent may see that it is cut, not how close it is.
-    leaked = [k for k in ("rank", "ranks", "standings", "scores", "metric_values") if k in final_stages]
-    assert not leaked, f"stages endpoint leaked ranking fields: {leaked}"

@@ -18,18 +18,16 @@ at signup actually reaches the ranker, the cut, the quota ledger and the summary
 
 API-only, parallel-safe (own platform experiments, own agents).
 
-PROVEN against the live stack: 3x solo green. The job-submitting tests needed
-quota_tier="guaranteed" at signup (an agent-kind participant otherwise defaults to burst_only, see
-the other exclusive-marker ports' convention for the same fix) and the stage-cut test needed
-pinning to H100 (acch_rate 1.0, matching tests/scenarios/agent-roles.sh's own ACCELERATOR_TYPE) --
-CUT_BUDGET/CUT_STAGES are sized so the first boundary lands right at 20% of budget from the 6
-jobs' real settled run time, which a lower-rate default flavor cannot reach.
+The job-submitting tests need quota_tier="guaranteed" at signup (an agent-kind participant
+otherwise defaults to burst_only, see the other exclusive-marker ports' convention for the same
+fix). The stage-cut test reaches its boundary the way support/stages.py describes.
 """
 from __future__ import annotations
 
 import pytest
 
 from conftest import make_agent
+from support.stages import BUDGET, REPORT_INTERVAL_SECONDS, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -39,15 +37,7 @@ RUN_SECONDS = 20
 HIGH_ANCHOR = "0.90"
 LOW_ANCHOR = "0.10"
 
-CUT_STAGES = [
-    {"length_pct": 20, "evict_pct": 50},
-    {"length_pct": 30, "evict_pct": 25},
-    {"length_pct": 50, "evict_pct": 0},
-]
-CUT_JOB_HOURS = 0.0028
-CUT_RUN_SECONDS = 30
 CUT_ANCHORS = [0.30, 0.40, 0.50, 0.60, 0.70]
-CUT_BUDGET = 0.10
 
 
 def _env(seconds: int, baseline: str | None = None) -> dict:
@@ -212,35 +202,15 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
     # would be 6 and the cut 3 -- and the baseline, holding the worst value in the run, would
     # certainly be one of them.
     pe_id = experiment(
-        "agent-roles-cut", roster, budget=CUT_BUDGET, max_agents=5,
-        report_interval_seconds=10, stages=CUT_STAGES,
+        "agent-roles-cut", roster, budget=BUDGET, max_agents=5,
+        report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES,
     )
 
-    # The baseline runs on the LOW anchor and every competitor on a distinct HIGH-ish anchor, so
-    # the baseline holds the single worst value in the run -- the agent a cut would take first if
-    # role were ignored.
-    # Pinned to H100 (acch_rate 1.0, see controlplane/settings/hypothesisloop.yaml), not the
-    # TEST_ACCELERATOR_TYPE default (L40, rate 0.25): CUT_BUDGET/CUT_STAGES are sized so settled
-    # cost from all 6 jobs' real run time lands the first boundary right at 20% of budget -- at a
-    # lower rate the same run time settles proportionally less and the boundary is never reached.
-    # Matches tests/scenarios/agent-roles.sh's own ACCELERATOR_TYPE choice for this exact reason.
-    CUT_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
-    api.submit_job(
-        pe_id, baseline, hours=CUT_JOB_HOURS,
-        job_overrides={"env": _env(CUT_RUN_SECONDS, LOW_ANCHOR), "accelerator_type": CUT_ACCELERATOR_TYPE},
-    )
-    for a, anchor in zip(competitors, CUT_ANCHORS):
-        api.submit_job(
-            pe_id, a, hours=CUT_JOB_HOURS,
-            job_overrides={"env": _env(CUT_RUN_SECONDS, str(anchor)), "accelerator_type": CUT_ACCELERATOR_TYPE},
-        )
-
-    stages = eventually(
-        "the first stage boundary",
-        lambda: api.stages(pe_id),
-        accept=lambda st: st["current_stage"] >= 2,
-        deadline=deadline,
-    )
+    # The baseline's completed job runs on the LOW anchor and every competitor's on a distinct
+    # HIGH-ish anchor, so the baseline holds the single worst value in the run -- the agent a cut
+    # would take first if role were ignored.
+    anchors = {baseline: LOW_ANCHOR, **{a: str(anchor) for a, anchor in zip(competitors, CUT_ANCHORS)}}
+    stages, _ = cross_first_boundary_ranked(api, pe_id, [baseline, *competitors], deadline, baselines=anchors)
 
     cut_agents = {c["agent_id"] for c in stages["cut_agents"]}
     active_agents = set(stages["active_agents"])
