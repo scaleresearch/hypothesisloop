@@ -91,36 +91,42 @@ def test_a_launcher_process_follows_its_agents_from_joining_to_the_end_of_their_
     pe_id = api.create_platform_experiment(f"launcher-process-{run_id}", 1.0, 5)
     launcher = Launcher(launcher_binary, tmp_path, api.base_url)
     try:
-        first, second = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
+        measurer = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
+        researcher = api.add_agents(pe_id, hosted=True)[0]["agent_id"]
 
-        def names() -> dict[str, str]:
-            return {a["agent_id"]: a["instance"].get("name", "") for a in api.agents(pe_id) if a["hosted"]}
+        def name_of(agent: str) -> str:
+            return next(a["instance"].get("name", "") for a in api.agents(pe_id) if a["agent_id"] == agent)
 
-        asked = eventually("the launcher asking for both agents", names,
-                           accept=lambda got: all(got.get(a) for a in (first, second)), deadline=deadline)
-        for agent in (first, second):
-            eventually(f"the instance of {agent}", lambda: launcher.said(f"created {launcher.prefix}{asked[agent]}"),
+        def created(agent: str) -> str:
+            name = eventually(f"the launcher asking for {agent}", lambda: name_of(agent), accept=bool, deadline=deadline)
+            eventually(f"the instance of {agent}", lambda: launcher.said(f"created {launcher.prefix}{name}"),
                        accept=lambda count: count == 1, deadline=deadline)
+            return name
 
+        # Open: a machine for the agent that measures the baseline, and none for the researcher.
         # Passes with nothing to do rent nothing more.
+        measurer_name = created(measurer)
         time.sleep(6)
-        assert launcher.said("created ") == 2, launcher.lines()
+        assert launcher.said("created ") == 1, launcher.lines()
         assert launcher.said("destroyed ") == 0, launcher.lines()
 
         # Removed before the start: its machine goes on the next pass.
-        assert api.remove_agent(pe_id, first).status_code == 200
+        assert api.remove_agent(pe_id, measurer).status_code == 200
         eventually("the removed agent's instance going",
-                   lambda: launcher.said(f"destroyed {launcher.prefix}{asked[first]} (no longer desired)"),
+                   lambda: launcher.said(f"destroyed {launcher.prefix}{measurer_name} (no longer desired)"),
                    accept=lambda count: count == 1, deadline=deadline)
 
-        # Closed: the survivor is told to stop on every pass, kept for its wind-down, then taken down.
+        # Started: the researcher's machine is rented.
         api.start_platform_experiment(pe_id)
+        researcher_name = created(researcher)
+
+        # Closed: it is told to stop on every pass, kept for its wind-down, then taken down.
         api.close_platform_experiment(pe_id)
         closed_at = time.monotonic()
-        stop_line = f"told {launcher.prefix}{asked[second]} to stop (ending)"
+        stop_line = f"told {launcher.prefix}{researcher_name} to stop (ending)"
         eventually("the stop that starts the last turn", lambda: launcher.said(stop_line),
                    accept=lambda count: count >= 2, deadline=deadline)
-        gone_line = f"destroyed {launcher.prefix}{asked[second]} (no longer desired)"
+        gone_line = f"destroyed {launcher.prefix}{researcher_name} (no longer desired)"
         assert launcher.said(gone_line) == 0, "an ending instance was destroyed at once"
         eventually("the instance going after its wind-down", lambda: launcher.said(gone_line),
                    accept=lambda count: count == 1, deadline=deadline, interval=5)
