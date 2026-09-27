@@ -2,10 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -130,6 +133,7 @@ type rolesStagesStore struct {
 	quotaAgents []string
 	competitors []string
 	cut         []string
+	completedBy []string
 }
 
 func (f *rolesStagesStore) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
@@ -152,6 +156,14 @@ func (f *rolesStagesStore) CompletedJobIDs(context.Context, string) (map[string]
 	return nil, nil
 }
 
+func (f *rolesStagesStore) AgentsWithCompletedJob(context.Context, string) (map[string]bool, error) {
+	agents := make(map[string]bool, len(f.completedBy))
+	for _, agentID := range f.completedBy {
+		agents[agentID] = true
+	}
+	return agents, nil
+}
+
 func (f *rolesStagesStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	if role != domain.SignupRoleCompetitor {
 		return nil, fmt.Errorf("unexpected role read: %s", role)
@@ -172,7 +184,7 @@ func bestPerAgent(values map[string]float64) fakeObserved {
 // rolesController takes an ObservedState rather than a URL, so a test that must prove no metric
 // was read can pass nil: reaching a metric read then panics.
 func rolesController(store *rolesStagesStore, observed ObservedState) *Controller {
-	return &Controller{stagesStore: store, observed: observed}
+	return &Controller{stagesStore: store, observed: observed, logger: zap.NewNop()}
 }
 
 func rankedPE(evictPct float64) (*domain.PlatformExperiment, domain.Stage) {
@@ -209,6 +221,7 @@ func TestCutWithFiveCompetitorsAndTwoNonCompetitorsCutsOnlyFromTheFive(t *testin
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5", "baseline", "reviewer"},
 		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
+		completedBy: []string{"c1", "c2", "c3", "c4", "c5", "baseline", "reviewer"},
 	}
 	pe, stage := rankedPE(30) // 30% of 5 competitors floors to 1; of all 7 it would floor to 2.
 	kept, cut, err := rolesController(store, observed).computeCut(context.Background(), pe, stage)
@@ -237,4 +250,42 @@ func TestBoundaryWithFourCompetitorsAndThreeNonCompetitorsCutsNobody(t *testing.
 		t.Fatalf("cut = %v, want %v", cut, []string{})
 	}
 	assertCut(t, kept, "c1", "c2", "c3", "c4")
+}
+
+// Only a completed job ranks. When every survivor's jobs were stopped short there is nothing to
+// compare and never will be, so the boundary resolves with the field whole instead of waiting on
+// the metrics store for values no job is left to send.
+func TestBoundaryWhereNoSurvivorCompletedAJobAdvancesWithNobodyCut(t *testing.T) {
+	store := &rolesStagesStore{
+		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5", "baseline"},
+		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
+		// A non-competitor's completed job gives the survivors nothing to be ranked on.
+		completedBy: []string{"baseline"},
+	}
+	pe, stage := rankedPE(50)
+	// No metrics store on purpose: the jobs table alone decides this, and reaching a metric read
+	// would mean the decision was left to what the metrics store happened to answer.
+	kept, cut, err := rolesController(store, nil).computeCut(context.Background(), pe, stage)
+	if err != nil {
+		t.Fatalf("computeCut err = %v, want nil", err)
+	}
+	if len(cut) != 0 {
+		t.Fatalf("cut = %v, want %v", cut, []string{})
+	}
+	assertCut(t, kept, "c1", "c2", "c3", "c4", "c5")
+}
+
+// A survivor completed a job, so there is something to rank, and the metrics store has no value
+// for it yet. That is a wait for data, and an empty answer must never pass for an empty field.
+func TestBoundaryWhereACompletedJobHasNoMetricValueYetIsPostponed(t *testing.T) {
+	store := &rolesStagesStore{
+		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5"},
+		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
+		completedBy: []string{"c3"},
+	}
+	pe, stage := rankedPE(50)
+	_, _, err := rolesController(store, fakeObserved{}).computeCut(context.Background(), pe, stage)
+	if !errors.Is(err, ErrStageMetricsUnavailable) {
+		t.Fatalf("computeCut err = %v, want %v", err, ErrStageMetricsUnavailable)
+	}
 }

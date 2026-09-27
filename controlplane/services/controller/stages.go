@@ -31,6 +31,9 @@ type StagesStore interface {
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	// CompletedJobIDs is the jobs whose metrics rank: the ones that ran to a successful end.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
+	// AgentsWithCompletedJob is who has anything to be ranked on. It is read from the jobs table
+	// so that a metrics store with no answer is never taken for a field with nothing to rank.
+	AgentsWithCompletedJob(ctx context.Context, platformExpID string) (map[string]bool, error)
 
 	// Quota. Accelerator-hours drives progress itself (GetTotalConsumedAccH); CPU/RAM/storage
 	// are released alongside it (see applyCut).
@@ -86,9 +89,8 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 
 	survivors, cut, err := c.computeCut(ctx, pe, stage)
 	if errors.Is(err, ErrStageMetricsUnavailable) {
-		// The threshold is always drawn from an observed value, so a healthy query can never
-		// produce an empty survivor set — an empty set means broken data. Postpone to the next
-		// reconcile tick rather than cutting anyone.
+		// A survivor completed a job and the metrics store has no value for it yet. Postpone to
+		// the next reconcile tick rather than cutting anyone.
 		c.logger.Warn("stages: postponing boundary, metric data unavailable",
 			zap.String("platform_experiment", pe.ID), zap.Int("stage", pe.CurrentStage))
 		return nil

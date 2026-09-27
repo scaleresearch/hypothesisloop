@@ -130,6 +130,24 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 	return completed, nil
 }
 
+// AgentsWithCompletedJob returns the agents that have at least one COMPLETED job in a platform
+// experiment: the ones a stage boundary has something to rank.
+func (s *ExperimentsStore) AgentsWithCompletedJob(ctx context.Context, platformExpID string) (map[string]bool, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT DISTINCT agent_id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED'`, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.AgentsWithCompletedJob: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.AgentsWithCompletedJob: %w", err)
+	}
+	agents := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		agents[id] = true
+	}
+	return agents, nil
+}
+
 // ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for
 // a platform experiment. Used to evict jobs when an experiment is closed.
 func (s *ExperimentsStore) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {

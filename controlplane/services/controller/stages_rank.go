@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"sort"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// ErrStageMetricsUnavailable signals that no configured metric query returned usable data, so
-// the cut cannot be trusted this cycle. Callers must postpone the boundary rather than cut.
+// ErrStageMetricsUnavailable signals that survivors completed jobs and no ranking metric has a
+// value for any of them, so the cut cannot be trusted this cycle. Callers must postpone the
+// boundary rather than cut.
 var ErrStageMetricsUnavailable = errors.New("stages: no metric produced usable ranking data")
 
 // minSurvivorsForCut is the roster size below which a boundary cuts nobody, and
@@ -41,6 +44,26 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	// metrics never cut), and a field already at the guardrail floor all mean the same thing
 	// here: advance, cut no one.
 	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < minSurvivorsForCut {
+		return survivors, nil, nil
+	}
+
+	// Only a completed job ranks, so a field in which nobody completed one is a field with nothing
+	// to compare: it is kept whole, like any other all-tied field. The jobs table decides this,
+	// because the metrics store answers the same way for values it has not received yet.
+	completedBy, err := c.stagesStore.AgentsWithCompletedJob(ctx, pe.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stages: agents with a completed job: %w", err)
+	}
+	anyCompleted := false
+	for _, agentID := range survivors {
+		if completedBy[agentID] {
+			anyCompleted = true
+			break
+		}
+	}
+	if !anyCompleted {
+		c.logger.Info("stages: no surviving competitor completed a job, advancing with nobody cut",
+			zap.String("platform_experiment", pe.ID), zap.Int("stage", pe.CurrentStage))
 		return survivors, nil, nil
 	}
 
