@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"go.uber.org/zap"
 )
 
@@ -370,6 +371,20 @@ func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domai
 
 func noResearchers(id string) error {
 	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with POST /platform-experiments/%s/agents, and the platform starts the run", id, id))
+}
+
+// Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
+// job and has none.
+func (s *PlatformExperimentsService) Spend(ctx context.Context, pe *domain.PlatformExperiment) error {
+	if pe.Status == domain.PlatformExpDraft {
+		return nil
+	}
+	consumed, err := metricsdb.TotalObservedAccH(ctx, s.usage.URL(), pe.CreatedAt, pe.ID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Spend: %w", err)
+	}
+	pe.ConsumedAcceleratorHours = &consumed
+	return nil
 }
 
 // Describe sets on an open pe why it is not running yet (StatusReason).

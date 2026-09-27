@@ -336,7 +336,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. repository is the code it works on, owner/name on GitHub, " +
+		Description: "Returns status, budget, the stage ladder and the list of signed-up agents. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. An open one carries status_reason, why it is not running yet: baseline_required, starts_at_ahead, no_researchers, budget_spent, or starting when the platform starts it within a minute. repository is the code it works on, owner/name on GitHub, " +
 			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
 			"One made from a sentence carries goal, and while it is a draft what its planner proposed (proposal, proposed_at) and what a person asked to change (revisions): " +
 			"a draft with no proposed_at is being planned, one with it waits to be accepted.",
@@ -360,6 +360,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
 		if err := peh.svc.Describe(ctx, pe); err != nil {
+			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
+		}
+		if err := peh.svc.Spend(ctx, pe); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if err := peh.nameActors(ctx, pe); err != nil {

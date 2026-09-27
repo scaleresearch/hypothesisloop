@@ -196,6 +196,10 @@ type PlatformExperiment struct {
 	Name                   string  `json:"name"`
 	Description            string  `json:"description"`
 	BudgetAcceleratorHours float64 `json:"budget_accelerator_hours"` // total compute in accelerator-hours (AccH), H100-equivalent
+	// ConsumedAcceleratorHours is what the platform experiment has spent of its budget: what its
+	// jobs that ended were billed, measuring the baseline included. Read from the metrics store
+	// when one platform experiment is read, stored nowhere, and left out of a list.
+	ConsumedAcceleratorHours *float64 `json:"consumed_accelerator_hours,omitempty" doc:"What it has spent of budget_accelerator_hours: what its jobs that ended were billed, the baseline's among them. A running job's cost joins when the job ends. On a read of one platform experiment that is no draft, and the whole spend once it is closed."`
 	MaxAgents              int     `json:"max_agents" doc:"How many researchers may join over its whole life: the agents of role competitor, whatever their flavor. One that finished or was cut still counts. Agents of role baseline, reviewers and the coordinator never count."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
 	// this platform experiment's agents' jobs) at any moment. Nil defers to

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -314,5 +316,25 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 		if err != nil || len(quotas) != 1 || quotas[0].GuaranteedAcceleratorHours != want {
 			t.Errorf("start after the baseline spent %v of 100: quotas = %+v, %v, want a first share of %v", spent, quotas, err, want)
 		}
+	}
+}
+
+// A closed platform experiment read consumed_accelerator_hours null: nothing said what it spent.
+func TestAPlatformExperimentAnswersWhatItSpent(t *testing.T) {
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"0.75"]}]}}`)
+	}))
+	defer metrics.Close()
+	svc := NewPlatformExperimentsService(&startStore{}, testSettings, zap.NewNop(), metrics.URL, time.Minute)
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning, domain.PlatformExpClosed} {
+		pe := &domain.PlatformExperiment{ID: "pe-1", Status: status, BudgetAcceleratorHours: 2, CreatedAt: time.Now().Add(-time.Hour)}
+		if err := svc.Spend(context.Background(), pe); err != nil || pe.ConsumedAcceleratorHours == nil || *pe.ConsumedAcceleratorHours != 0.75 {
+			t.Errorf("%s: consumed_accelerator_hours = %v, %v, want the 0.75 its jobs were billed", status, pe.ConsumedAcceleratorHours, err)
+		}
+	}
+	draft := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft}
+	if err := svc.Spend(context.Background(), draft); err != nil || draft.ConsumedAcceleratorHours != nil {
+		t.Errorf("a draft: consumed_accelerator_hours = %v, %v, want none: it runs no job", draft.ConsumedAcceleratorHours, err)
 	}
 }
