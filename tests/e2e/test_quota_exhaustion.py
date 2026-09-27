@@ -18,6 +18,8 @@ timescale a test can watch. API-only, parallel-safe (own PE/agent, one accelerat
 """
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from conftest import TEST_ACCH_RATE, make_agent
@@ -54,6 +56,11 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
         stages=[{"length_pct": 100, "evict_pct": 0}],
     )
 
+    # What measuring the baseline cost came out of the budget before the start, so each job is
+    # half of what the agent holds, rounded down: the two reservations fill the quota and fit it.
+    held = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
+    job_hours = math.floor(held * 1e6 / 2) / 1e6 / TEST_ACCH_RATE
+
     # Both jobs are pinned to the requested flavor: every assertion below is arithmetic on a
     # budget sized as exactly two of them, which only holds if both are actually priced at that
     # rate (an alternate acceptable type prices differently -- see pin_job_flavor's bash comment).
@@ -61,7 +68,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     job = api.submit_job(
         pe_id,
         agent,
-        hours=JOB_HOURS,
+        hours=job_hours,
         job_overrides={**pin, "env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(OVERRUN_SECONDS)}},
     )
 
@@ -78,7 +85,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     # The budget covers two jobs, so this one is admitted as a reservation rather than refused.
     # Its estimate plus the running job's now account for 100% of the quota while the running job
     # has barely consumed anything -- the exact state that used to evict the RUNNING job.
-    code, queued_job = api.submit_job_expect(pe_id, agent, hours=JOB_HOURS, job_overrides=pin)
+    code, queued_job = api.submit_job_expect(pe_id, agent, hours=job_hours, job_overrides=pin)
     assert code < 400, f"second job was refused at submission (HTTP {code}) -- no reservation exists, the budget is mis-sized"
 
     # Two full reconcile intervals (5s each). Observed consumption after this long is still far

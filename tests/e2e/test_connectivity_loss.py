@@ -70,7 +70,6 @@ def test_connectivity_loss(api, run_id, deadline):
     # jobs (matching connectivity-loss.sh's submit_job calls) and needs the reserved quota that
     # tier draws from -- see test_node_and_daemonset_faults.py for the same override.
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
-    api.declare_baseline(pe_id)
     api.start_platform_experiment(pe_id)
 
     try:

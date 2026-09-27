@@ -55,7 +55,6 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
         assert posted.status_code in (200, 201), f"hypothesis: {posted.status_code} {posted.text}"
         hyp_id = posted.json()["id"]
         # Started, since an agent's quota exists from the start on and is one of the reads.
-        a.api.declare_baseline(pe_id)
         a.api.start_platform_experiment(pe_id)
 
         # What another org reads of it. Every one of these is a read route an org uses for its own.

@@ -50,7 +50,6 @@ def test_resource_disbalance_evicts_and_explains_itself(api, run_id, deadline):
     agent = make_agent(api, run_id, "agent-disbalance")
     pe_id = api.create_platform_experiment(f"disbalance-{run_id}", 20.0, 1)
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
-    api.declare_baseline(pe_id)
     api.start_platform_experiment(pe_id)
 
     set_node_accelerators(shape.node, TEST_ACCELERATOR_TYPE, 1)

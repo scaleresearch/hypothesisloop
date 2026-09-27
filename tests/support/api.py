@@ -52,6 +52,36 @@ def token_scope(token: str) -> tuple[str, str, str]:
     return kind, pe, agent
 
 
+# 18 seconds of the default accelerator: under the per-job cap and the baseline agent's quota of
+# every platform experiment the suite creates.
+BASELINE_HOURS = 0.005
+
+# Reports each metric three times over ten seconds, moving the way the metric is ranked, so the
+# job is observed alive and nothing reads its series as declining.
+BASELINE_REPORTER = """
+import json, os, time, urllib.request
+url = f"{os.environ['HYPOTHESISLOOP_API_URL']}/experiments/{os.environ['HYPOTHESISLOOP_EXPERIMENT_ID']}/metrics"
+headers = {"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['HYPOTHESISLOOP_TOKEN']}"}
+for step in (1, 2, 3):
+    for name, (value, drift) in json.loads(os.environ["BASELINE_METRICS"]).items():
+        sample = {"metric_name": name, "fraction_complete": step / 3, "metric_value": value + drift * step}
+        urllib.request.urlopen(urllib.request.Request(url, data=json.dumps(sample).encode(), headers=headers), timeout=10)
+    time.sleep(5 if step < 3 else 0)
+"""
+BASELINE_COMMAND = ["python", "-c", BASELINE_REPORTER]
+
+
+def baseline_reporter(metrics: list[dict]) -> dict[str, Any]:
+    """The job overrides of a baseline job that reports every one of metrics. A metric with a
+    bound starts on it, which holds it."""
+    reported = {m["key"]: (m.get("bound", 0.5), -0.001 if m["direction"] == "minimize" else 0.001) for m in metrics}
+    return {
+        "command": BASELINE_COMMAND,
+        "env": {"BASELINE_METRICS": json.dumps(reported)},
+        "acceptable_accelerator_types": None,
+    }
+
+
 @dataclass
 class HLError(RuntimeError):
     cmd: list[str]
@@ -371,26 +401,31 @@ class API:
         r.raise_for_status()
         return r.status_code, r.json().get("role")
 
-    def start_platform_experiment(self, pe_id: str) -> None:
+    def start_platform_experiment(self, pe_id: str, baseline_job: dict[str, Any] | None = None) -> None:
+        """Gets an open platform experiment running: declares the baseline nothing starts without,
+        unless the test already declared one, and starts it. baseline_job is declare_baseline's."""
+        if pe_id not in self.baseline_of:
+            self.declare_baseline(pe_id, baseline_job)
         self.hl("platform-experiments", "start", "--platform-experiment", pe_id)
 
     # What declare_baseline left in each platform experiment, for a test that asserts on all of
     # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
     baseline_of: dict[str, "Baseline"] = {}
 
-    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, hours: float = 0.02, within: float = 300) -> "Baseline":
-        """Gives an open platform experiment the baseline nothing starts without, as a client
-        does: an agent of role baseline joins, its job runs to the end and gets its finding, and
-        the description that names the job is sent with the declaration.
+    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, within: float = 300) -> "Baseline":
+        """Gives an open platform experiment its baseline as a client does: an agent of role
+        baseline joins, its job runs to the end and gets its finding, and the description that
+        names the job is sent with the declaration.
 
-        The job is the generic workload cut to ten seconds, which reports the experiment's ranked
-        metric. A test whose experiment declares other metrics passes the job that reports them.
-        What the job cost is taken from the budget before the shares of the start are carved."""
+        The job reports every metric the experiment declares, on the default accelerator alone.
+        job_overrides are laid over it: where it runs, or with command None the image's own
+        workload, which then has to report them."""
+        pe = self.get_json(f"/platform-experiments/{pe_id}")
         agent = self.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]["agent_id"]
         hypothesis = self.register_hypothesis(pe_id, agent, "the control, unchanged")["id"]
         job = self.submit_job(
-            pe_id, agent, hours=hours, hyp_id=hypothesis,
-            job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": "10"}} | (job_overrides or {}),
+            pe_id, agent, hours=BASELINE_HOURS, hyp_id=hypothesis,
+            job_overrides=baseline_reporter(pe["metrics"]) | (job_overrides or {}),
         )
         eventually(
             f"baseline job {job} of {pe_id} to complete",
@@ -401,9 +436,8 @@ class API:
             interval=1,
         )
         self.file_finding(job, f"the control ran unchanged as {job}")
-        description = self.get_json(f"/platform-experiments/{pe_id}")["description"]
         with tempfile.NamedTemporaryFile("w", suffix=".md") as brief:
-            brief.write(f"{description}\n\nBASELINE\n  config: the generic workload, unchanged\n  code_ref: {self.code_ref(pe_id)}\n  measured: {job}\n")
+            brief.write(f"{pe['description']}\n\nBASELINE\n  config: the control, unchanged\n  code_ref: {self.code_ref(pe_id)}\n  measured: {job}\n")
             brief.flush()
             self.hl("platform-experiments", "update", "--platform-experiment", pe_id, "--description-file", brief.name, "--baseline-job", job)
         self.baseline_of[pe_id] = Baseline(agent=agent, hypothesis=hypothesis, job=job)
@@ -417,7 +451,6 @@ class API:
                 self.signup_ok(pe_id, agent_id, role, quota_tier)
             else:
                 self.signup_ok(pe_id, a)
-        self.declare_baseline(pe_id)
         self.start_platform_experiment(pe_id)
 
     def close_platform_experiment(self, pe_id: str) -> None:

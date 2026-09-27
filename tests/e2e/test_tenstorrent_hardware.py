@@ -170,9 +170,8 @@ def test_tenstorrent_real_dra_allocation_and_bare_node(api, run_id: str, deadlin
     # jobs (matching the bash scenario's submit_job calls) and needs the reserved quota that tier
     # draws from (see test_node_and_daemonset_faults.py for the same override).
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
-    # The baseline is this experiment's own workload: the generic one reports neither metric.
-    api.declare_baseline(pe_id, job_overrides={**TT_JOB_OVERRIDES, "image": _k3s_image()})
-    api.start_platform_experiment(pe_id)
+    # The baseline is this experiment's own workload, on the hardware the run is about.
+    api.start_platform_experiment(pe_id, baseline_job={**TT_JOB_OVERRIDES, "image": _k3s_image(), "command": None})
 
     try:
         _run(api, pe_id, agent, run_id, deadline, tmp_path)

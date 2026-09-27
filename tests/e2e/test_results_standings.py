@@ -63,7 +63,9 @@ def test_unreported_constraint_excludes_every_agent(api, experiment, run_id, dea
     ranking = next(m for m in results["metrics"] if m["metric"] == "val_accuracy")
     assert len(ranking["standings"]) == 0, "agents that never reported the declared constraint must be excluded"
 
-    bests = {b["metric"]: b["agents"] for b in results["bests"]}
+    # The baseline reports the constraint and holds it, as it must to be declared, and is no agent of the field.
+    control = api.baseline_of[pe_id].agent
+    bests = {b["metric"]: [a for a in b["agents"] if a["agent_id"] != control] for b in results["bests"]}
     assert sorted(a["agent_id"] for a in bests["val_accuracy"]) == sorted(agents), "what an excluded agent measured stays readable"
     assert bests["never_emitted_budget"] == []
 

@@ -31,6 +31,7 @@ import pytest
 
 from conftest import API_URL, REPO_ROOT, TEST_CPU_TYPE
 from support import admin
+from support.api import BASELINE_COMMAND
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -168,7 +169,9 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
 
     org.register_agent(agent)
     pe_id = org.create_platform_experiment(f"bare-e2e-{run_id}", 1.0, 1, report_interval_seconds=10)
-    org.signup_and_start(pe_id, [agent])
+    org.signup_ok(pe_id, agent)
+    # The baseline runs on the node, the org's one cluster, in an image that has an interpreter.
+    org.start_platform_experiment(pe_id, baseline_job={**JOB_OVERRIDE_BASE, "image": "python:3.13-slim", "command": BASELINE_COMMAND})
 
     # A job left RUNNING forever (e.g. this test asserting out early) would outlive its bare-agent
     # process once the fixture kills it -- its cluster never reports again, so every future poll of
