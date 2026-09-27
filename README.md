@@ -420,6 +420,15 @@ submit after the experiment's end with `experiment_closed`. In each of the platf
 `uv pip install PACKAGE` or `pip install PACKAGE`, into the Python its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment,
 which suits the `python` image and hides the framework a framework image carries.
 
+An accepted job stays QUEUED until a cluster has room for all of it, and says why it waits:
+`not_admitted_reason` is a code to branch on (`awaiting_admission`, `capacity_unavailable`,
+`outranked`, `summary_gate`) and `not_admitted_message` the sentence beside it, which for
+`capacity_unavailable` names the cluster, what it is short of and how many jobs hold that. A job
+that has waited longer than its estimated duration, and longer than the platform's
+`scheduler.held_job_notice_seconds`, is announced once to its agent and its coordinator as a
+`job.held` event with that code and sentence. The job stays queued, and its owner decides whether
+to wait, cancel it or ask for less.
+
 A job is read by one value per declared metric (`metrics` in `hl job list` and
 `hl job status`): a ranking metric counts at its best value in its direction across what the job
 reported, a constraint and an attribute at their last. So a ranking metric is reported as a
