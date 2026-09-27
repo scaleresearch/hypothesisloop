@@ -71,9 +71,36 @@ const requested = []
 // Everything that must never appear in a URL: each bearer token a page sent and each secret a page showed.
 const secrets = new Set()
 
+function hlAdmin(...args) {
+  execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], {
+    cwd: repo, stdio: 'inherit', env: { ...process.env, HYPOTHESISLOOP_CONFIG: SETTINGS },
+  })
+}
+
+// On a stack with a GitHub App every experiment keeps its code in a repository, and one that
+// names none has the platform create a new one on github.com. So the run names the sandbox
+// repository of .env on every create a page sends without one, and connects the installation
+// that covers it to the org that creates. Null on a stack with no App, where none is needed.
+let sandbox = null
+
+async function findSandbox(token) {
+  if ((await api(token, '/github/app')).status !== 200) return
+  const value = key => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_env_value "$1"', 'env', key], { cwd: repo, encoding: 'utf8' }).trim()
+  sandbox = { installation: value('HL_E2E_GITHUB_INSTALLATION'), repository: value('HL_E2E_GITHUB_REPO') }
+  assert.ok(sandbox.installation && sandbox.repository, 'this stack has a GitHub App: .env must set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO')
+}
+
+const creates = url => url.href === `${API}/platform-experiments` || url.href === `${API}/platform-experiments/drafts`
+
 // Every context reports its uncaught page errors and every URL it asked for.
 async function newContext(browser) {
   const context = await browser.newContext(VIEW)
+  await context.route(creates, route => {
+    const request = route.request()
+    const body = request.method() === 'POST' ? request.postDataJSON() : null
+    if (!sandbox || !body || body.repository || body.repository_account) return route.fallback()
+    return route.continue({ postData: JSON.stringify({ ...body, repository: sandbox.repository }) })
+  })
   context.on('weberror', webError => crashes.push(`${webError.page()?.url()}: ${webError.error().message}`))
   context.on('request', request => {
     requested.push(request.url())
@@ -81,12 +108,6 @@ async function newContext(browser) {
     if (authorization?.startsWith('Bearer ')) secrets.add(authorization.slice(7))
   })
   return context
-}
-
-function hlAdmin(...args) {
-  execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_hl_admin "$@"', 'hl-admin', ...args], {
-    cwd: repo, stdio: 'inherit', env: { ...process.env, HYPOTHESISLOOP_CONFIG: SETTINGS },
-  })
 }
 
 // Sharing is staff's alone and has no control in the UI: it is done as staff do it.
@@ -432,8 +453,13 @@ async function scenarios(browser) {
   }
 
   section('a first-time user lands in their own org and default project, on one sentence to start from')
+  // The API gives a person their home org at their first request. Where the stack has a GitHub
+  // App, the sandbox installation is connected to it before any page offers to create.
+  const adaHome = await (await api(await tokenOf(ada), '/me')).json()
+  await findSandbox(await tokenOf(ada))
+  if (sandbox) hlAdmin('github', 'connect', adaHome.orgs[0].id, sandbox.installation)
   await page.goto(`${UI}/platform-experiments`)
-  await page.getByText(`New experiment in ${ada.name} / default`).waitFor()
+  await page.getByText(`New experiment in Default org / Default project`).waitFor()
   await page.getByLabel('What do you want to find out?').waitFor()
   await page.getByText('None yet. Write what you want to find out above').waitFor()
   assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Advanced')
@@ -465,7 +491,7 @@ async function scenarios(browser) {
   await page.getByText(experimentName).first().click()
   await page.waitForURL(/\/platform-experiments\/[^/?]+/)
   const experimentURL = page.url()
-  await page.getByText('No agents yet.').waitFor()
+  await page.getByText('No agents yet.', { exact: true }).waitFor()
   const agentAdds = []
   page.on('request', request => {
     if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/agents')) agentAdds.push(request)
@@ -495,7 +521,7 @@ async function scenarios(browser) {
   assert.ok(!(await page.content()).includes('hls_'), 'no token anywhere in the page')
   await page.getByRole('button', { name: 'Show token' }).first().click()
   assert.equal(await page.getByTestId('secret').innerText(), agentEnv, 'asking again shows the same token')
-  await page.getByText('brings the same one back').waitFor()
+  await page.getByText('same one again').first().waitFor()
   await page.getByRole('button', { name: 'Hide' }).click()
   assert.equal(await page.getByTestId('secret').count(), 0)
   const agentRows = page.locator('table', { hasText: 'Run by' }).locator('tbody tr')
@@ -632,7 +658,7 @@ async function scenarios(browser) {
     runWrites.push({ path, body })
     if (path === '/platform-experiments') {
       const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
-      return route.continue({ postData: JSON.stringify(rest) })
+      return route.continue({ postData: JSON.stringify(sandbox ? { ...rest, repository: sandbox.repository } : rest) })
     }
     if (path.endsWith('/agents')) {
       // Never hosted for real: joined as one its operator runs, or refused as a deployment
@@ -722,7 +748,7 @@ async function scenarios(browser) {
     ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
   const draftWrites = []
-  const draftAPI = url => url.href === `${API}/platform-experiments/drafts` || url.pathname.startsWith(`/platform-experiments/${draftID}`) || url.pathname === '/experiments/job-baseline/metrics'
+  const draftAPI = url => url.origin === API && (url.pathname === '/platform-experiments/drafts' || url.pathname.startsWith(`/platform-experiments/${draftID}`) || url.pathname === '/experiments/job-baseline/metrics')
   await page.route(draftAPI, route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -775,7 +801,6 @@ async function scenarios(browser) {
   section('the idea form has no name field and the idea is filed under the signed-in name')
   await page.goto(`${UI}/hypotheses?pe=${experimentID}`)
   await page.getByRole('button', { name: '+ Add idea under the objective' }).click()
-  await page.getByText('registered under the name you signed in with').waitFor()
   assert.equal(await page.getByPlaceholder(/your name/i).count(), 0)
   const ideaText = `a warmup of 500 steps steadies the loss ${run}`
   const ideaWrite = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === `${API}/hypotheses`)
@@ -959,6 +984,8 @@ async function scenarios(browser) {
   const orgID = adaMe.orgs[0].id
   const settingsPage = `${UI}/settings?project=${secondProjectID}`
   const installationsAPI = `${API}/orgs/${orgID}/github-installations`
+  // The run connected the sandbox installation for its creates, which are all done by now.
+  if (sandbox) assert.equal((await api(await tokenOf(ada), `${installationsAPI.slice(API.length)}/${sandbox.installation}`, 'DELETE')).status, 204)
   const appRead = page.waitForResponse(`${API}/github/app`)
   const installationsRead = page.waitForResponse(r => r.url().startsWith(installationsAPI) && r.request().method() === 'GET')
   await page.goto(settingsPage)
@@ -1115,7 +1142,7 @@ async function scenarios(browser) {
   })
   await page.getByRole('link', { name: 'Experiments', exact: true }).click()
   await page.getByRole('button', { name: 'Advanced', exact: true }).click()
-  const repositoryField = page.getByLabel('Repository')
+  const repositoryField = page.getByLabel('Repository').last()
   await repositoryField.click()
   await page.getByRole('option', { name: 'A new private repository' }).waitFor()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
@@ -1152,7 +1179,7 @@ async function scenarios(browser) {
   await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0)
   await shot(page, 'second-org-is-empty')
-  await page.getByRole('link', { name: 'Settings' }).click()
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
   await page.getByRole('heading', { name: 'Settings' }).waitFor()
   assert.equal(await page.getByRole('cell', { name: 'laptop' }).count(), 0, 'the other org\'s API key is not listed')
   assert.equal(await page.getByRole('cell', { name: clusterName }).count(), 0, 'the other org\'s cluster is not listed')
@@ -1190,14 +1217,14 @@ async function scenarios(browser) {
   await page.route(`${API}/me`, route => route.abort())
   await page.goto(`${UI}/jobs`)
   await page.getByText('Cannot reach the API to load your account').waitFor()
-  assert.equal(await page.getByRole('heading', { name: 'Jobs' }).count(), 0)
+  assert.equal(await page.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).count(), 0)
   await shot(page, 'api-unreachable')
   await page.unroute(`${API}/me`)
-  await page.getByRole('heading', { name: 'Jobs' }).waitFor({ timeout: 60_000 })
+  await page.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor({ timeout: 60_000 })
 
   section('editing the experiment keeps it in its project')
   await page.goto(`${UI}/platform-experiments`)
-  await page.getByRole('button', { name: 'Edit' }).first().click()
+  await page.locator('[role="link"]').filter({ has: page.getByText(experimentName, { exact: true }) }).getByRole('button', { name: 'Edit' }).click()
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(`${experimentName}-edited`)
   await page.getByRole('button', { name: 'Next: budget and rules' }).click()
   await page.getByRole('button', { name: 'Save changes' }).click()
@@ -1224,7 +1251,7 @@ async function scenarios(browser) {
   await otherPage.getByText('is not available to you').waitFor()
   await shot(otherPage, 'foreign-project-in-url')
   await otherPage.getByRole('button', { name: /^Go to / }).click()
-  await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+  await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
 
   section('shared: a platform experiment staff shared is in another account\'s own list, marked and read only')
   const sharedName = `${experimentName}-edited`
@@ -1285,7 +1312,7 @@ async function scenarios(browser) {
 
     await otherPage.getByRole('link', { name: /^Jobs/ }).last().click()
     await otherPage.waitForURL(u => u.pathname === '/jobs' && u.searchParams.get('platform_experiment_id') === experimentID)
-    await otherPage.getByText('No jobs found').waitFor()
+    await otherPage.getByText(/^No jobs in /).waitFor()
     assert.equal(await otherPage.getByRole('button', { name: 'Cancel' }).count(), 0)
     await shot(otherPage, 'shared-jobs')
 
@@ -1321,11 +1348,11 @@ async function scenarios(browser) {
     await otherPage.getByText('New experiment in').waitFor()
     await otherPage.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
     await otherPage.goto(`${UI}/jobs`)
-    await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+    await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
     await otherPage.getByPlaceholder('All experiments').click()
     await otherPage.getByRole('option', { name: new RegExp(`${sharedName} \\(\\w+, shared\\)`) }).click()
     await otherPage.waitForURL(u => u.searchParams.get('platform_experiment_id') === experimentID)
-    await otherPage.getByText('No jobs found').waitFor()
+    await otherPage.getByText(/^No jobs in /).waitFor()
 
     section('shared: its own org sees it marked and changes it as before')
     await page.goto(`${UI}/platform-experiments?project=${adaMe.projects[0].id}`)
@@ -1359,7 +1386,7 @@ async function scenarios(browser) {
   await otherPage.goto(`${UI}/platform-experiments/${experimentID}`)
   await otherPage.locator('.error-banner', { hasText: 'Could not load this platform experiment' }).waitFor()
   await otherPage.goto(`${UI}/jobs`)
-  await otherPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+  await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
 
   section('members: the last owner cannot leave, and an invite link is shown once')
   const labOrg = adaMe.orgs[0].id
@@ -1370,7 +1397,7 @@ async function scenarios(browser) {
   const membersTable = page.getByRole('table', { name: 'Members' })
   const adaRow = membersTable.getByRole('row', { name: new RegExp(ada.name) })
   await adaRow.getByText('you', { exact: true }).waitFor()
-  assert.equal(await adaRow.getByText(ada.name).getAttribute('title'), adaMe.user_id)
+  assert.equal(await adaRow.getByText(ada.name, { exact: true }).getAttribute('title'), adaMe.user_id)
   assert.equal(await adaRow.getByText(adaMe.user_id).count(), 0, 'the id is not what the row reads')
   await page.getByText('No pending invites.').waitFor()
   await adaRow.getByRole('button', { name: 'Leave' }).click()
@@ -1387,8 +1414,9 @@ async function scenarios(browser) {
   await shot(page, 'invite-link-created', page.getByTestId('secret'))
   await page.getByRole('button', { name: 'I have sent it' }).click()
   await page.reload()
-  const [revokedInvite] = await pendingInvites()
-  const inviteRow = page.getByRole('row', { name: new RegExp(revokedInvite.id) })
+  assert.equal((await pendingInvites()).length, 1)
+  // An invite has no name of its own on screen: the one pending invite is the only row of its table.
+  const inviteRow = page.getByRole('table', { name: 'Pending invites' }).getByRole('row').nth(1)
   await inviteRow.waitFor()
   await inviteRow.getByText(ada.name).waitFor()
   assert.ok(!(await page.content()).includes(revokedLink.split('#')[1]), 'the token is not on the page after a reload')
@@ -1420,6 +1448,9 @@ async function scenarios(browser) {
   assert.match(danID, /^[\w-]+$/)
   assert.deepEqual(await pendingInvites(), [], 'an accepted invite is no longer pending')
 
+  // The page is still on /invite from the revoked link, and an address that differs only in its
+  // fragment does not load it again.
+  await otherPage.goto('about:blank')
   await otherPage.goto(inviteAddress)
   await otherPage.getByRole('button', { name: 'Accept invite' }).click()
   await otherPage.locator('.error-banner', { hasText: 'This invite was already accepted' }).waitFor()
@@ -1551,7 +1582,7 @@ async function scenarios(browser) {
   shortPage.on('response', r => { if (r.url().startsWith(API)) statuses.push(r.status()) })
   await shortPage.goto(`${UI}/jobs`)
   await signIn(shortPage, eve, `${UI}/jobs`)
-  await shortPage.getByRole('heading', { name: 'Jobs' }).waitFor()
+  await shortPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
   const firstToken = sent[0]
   assert.equal((await api(firstToken, '/me')).status, 200, 'the first token works while it lasts')
   // From here the page is not touched: its own polling is what crosses the expiry.

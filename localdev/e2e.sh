@@ -34,13 +34,14 @@ export API_URL="${api}" METRICS_URL="http://localhost:8084"
 HL_TOKEN="$(lib_hl_admin token staff)"
 export HL_TOKEN
 
-# The suite reads the capacity of every cluster as its own and submits jobs any cluster could
-# take, so the local cluster must be the only one connected: a job placed on another would run
-# on somebody's hardware, or rent some.
-others="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/internal/clusters/" |
-  python3 -c 'import json, sys; print(" ".join(c["cluster_name"] for c in json.load(sys.stdin)["clusters"] if c["connected"] and c["cluster_name"] != "local"))')"
+# The suite reads the capacity of every cluster as its own and submits jobs any cluster its org
+# may use could take, so the local cluster must be the only connected one that takes them: a job
+# placed on another would run on somebody's hardware, or rent some. A cluster that stays
+# connected is kept out by turning it off for the suite's org, which places no job there.
+others="$(curl -fsS -H "Authorization: Bearer ${HL_TOKEN}" "${api}/orgs/default/clusters" |
+  python3 -c 'import json, sys; print(" ".join(c["name"] for c in json.load(sys.stdin)["clusters"] if c["connected"] and c["enabled"] and c["name"] != "local"))')"
 if [[ -n "${others}" ]]; then
-  echo "e2e: other clusters are connected to this control plane (${others}); the suite's jobs could be placed on them. Stop their agents first" >&2
+  echo "e2e: other clusters are connected to this control plane and take the jobs of org default (${others}); the suite's jobs could be placed on them. Stop their agents, or turn each off for the run: hl cluster disable NAME --org default (and hl cluster enable afterwards)" >&2
   exit 1
 fi
 
