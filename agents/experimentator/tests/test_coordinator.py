@@ -131,7 +131,7 @@ class BriefingTest(unittest.TestCase):
     # job's summary with the command that files one.
     def test_it_is_told_where_comments_and_a_jobs_summary_are_read(self):
         flat = " ".join(self.render().split())
-        self.assertIn("One hypothesis with its findings and comments: `hl hypothesis get ID`. A job's summary is in `hl job status ID`", flat)
+        self.assertIn("One hypothesis with its findings and comments: `hl hypothesis get ID`, short unless `--full`. A job's summary is in `hl job status ID`", flat)
 
     # Every graph of the audited runs was three root hypotheses with nothing below them, two
     # of them varying the same knobs, and no summary said how the best result was reached.

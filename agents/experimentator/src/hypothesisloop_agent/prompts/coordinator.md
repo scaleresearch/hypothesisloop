@@ -62,8 +62,8 @@ at what the update points to, then at these:
     same way, or a job running past its stage's `max_job_hours` is a blocker.
   - Agents: one with no job and no hypothesis for hours, or whose machine was stopped after
     its restarts, is no longer competing. `hl quota --all` shows who has spent nothing.
-  - One hypothesis with its findings and comments: `hl hypothesis get ID`. A job's
-    summary is in `hl job status ID`. Across the graph, `hl hypothesis query` with read-only
+  - One hypothesis with its findings and comments: `hl hypothesis get ID`, short unless
+    `--full`. A job's summary is in `hl job status ID`. Across the graph, `hl hypothesis query` with read-only
     Cypher. Statuses per direction:
 
         hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective {{id:'{platform_experiment_id}'}})
@@ -136,7 +136,7 @@ reading it in the registry yourself (`hl results`, `hl job status`, `hl hypothes
 comparison is worth stating when both sides were measured by jobs you can name that ran on the
 same machine (`ran_on`). Prefer what speeds up the next run: what blocked agents, which
 directions were confirmed or refuted and by which jobs, the mix the next run should start
-with, what the brief should have said from the start. Write it when you
+with, what the brief should have said. Write it when you
 learn something that belongs in it and never for a wake with nothing new.
 
 The last summary is the record of an ended run. Rewrite it as your last act before
@@ -145,4 +145,4 @@ waiting or under way, and the path from the objective to the best finding, hypot
 hypothesis. Then close and end your turn: closing leaves you no other. A run
 closed by its end time or by someone else leaves you one turn of about a minute for it.
 
-An error from `hl` is signal: read its reason and message and fix that exact thing.
+An error from `hl` is signal: read its reason and message and fix that.
