@@ -7,7 +7,7 @@ import { TextLink } from '@/components/ui/link'
 import { useReactTable, getCoreRowModel, getSortedRowModel, type SortingState } from '@tanstack/react-table'
 import {
   ApiError, fetchAgentQuota, fetchAgentsPage, fetchAgentStats, fetchPlatformExperiment, fetchPlatformExperimentsPage,
-  fetchExperimentStats, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
+  fetchExperimentStats, fetchPlatformExperimentAgents, fetchPlatformExperimentResults, MAX_LIST_PAGE_SIZE,
 } from '@/lib/api'
 import type { Draft } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types'
@@ -115,6 +115,10 @@ function AgentsPageContent() {
     experimentFilter ? ['pe', experimentFilter] : null,
     () => fetchPlatformExperiment(experimentFilter),
   )
+  const { data: roster } = useSWR(
+    experimentFilter ? ['pe-agents', experimentFilter] : null,
+    () => fetchPlatformExperimentAgents(experimentFilter),
+  )
 
   // What each agent did in the selected experiment: its jobs, its best result and standing, and
   // how many of its completed jobs it left without a summary.
@@ -152,8 +156,10 @@ function AgentsPageContent() {
   })
   const sortedAgents = agentTable.getRowModel().rows.map(r => r.original)
 
-  const share = selectedPE && selectedPE.signup_count > 0
-    ? `In ${selectedPE.name} that share is ${formatAccH(selectedPE.budget_accelerator_hours / selectedPE.signup_count)} ${unitOf(selectedPE)}: ${formatAccH(selectedPE.budget_accelerator_hours)} among ${selectedPE.signup_count} ${selectedPE.signup_count === 1 ? 'agent' : 'agents'}. `
+  // The budget is shared by every agent but the baseline's and the planner.
+  const sharing = roster?.filter(a => a.role !== 'baseline' && a.role !== 'planner').length ?? 0
+  const share = selectedPE && sharing > 0
+    ? `In ${selectedPE.name} that share is ${formatAccH(selectedPE.budget_accelerator_hours / sharing)} ${unitOf(selectedPE)}: ${formatAccH(selectedPE.budget_accelerator_hours)} among ${sharing} ${sharing === 1 ? 'agent' : 'agents'}. `
     : ''
 
   return (
@@ -178,7 +184,7 @@ function AgentsPageContent() {
           />
         </FormField>
         <p className="max-w-[860px] text-xs text-muted">
-          An experiment&apos;s budget is split equally among its agents when it starts. {share}An agent that placed in the
+          An experiment&apos;s budget is split equally among its agents when it starts, the baseline agent apart. {share}An agent that placed in the
           top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
           twice that amount as burst compute, which can be preempted.
         </p>
