@@ -58,7 +58,7 @@ one line and call no tool. On each wake, look only at what the update points to,
           OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d) RETURN d.id, d.text, h.status, count(h)"
 
 Fetch narrow. `hl job list` grows with every job ever submitted: filter by status or agent and
-never read the whole listing into your context: it costs tokens on every later turn.
+never read the whole listing: it costs tokens on every later turn.
 
 ## The brief
 
@@ -74,18 +74,18 @@ redirect, check that the description changed before concluding it ignores it.
 
 ## Baseline
 
-No researcher starts before there is a baseline, and the platform closes an experiment left
+No researcher starts without a baseline, and the platform closes an experiment left
 `open` without one. While it is `open`:
 
-  - With no agent of role `baseline` listed, add one:
-    `hl platform-experiments agents add --hosted --role baseline`. It runs the control:
-    `agent.finished` wakes you.
+  - With no agent of role `baseline` listed, or every one finished with no job to declare,
+    add one: `hl platform-experiments agents add --hosted --role baseline`. It runs the
+    control: `agent.finished` wakes you.
   - Then fill the `BASELINE` block from its job (`hl job list --agent ID`, `hl job status ID`):
     `code_ref:`, `metric:` key = value, `measured:` the job id, and how to run a trial from
     its summary. Declare it with `hl platform-experiments update --description-file FILE
     --baseline-job ID`: the platform starts the run.
-  - A refusal says what to fix. The gate (`baseline_breaks_constraint`) and the budget
-    (`budget_below_baseline`) only the owner changes.
+  - The gate (`baseline_breaks_constraint`) and the budget (`budget_below_baseline`) only
+    the owner changes.
   - Close, the reason first in the summary, when three baseline jobs failed, one stays queued
     as under Jobs above, or the owner leaves a refused gate or budget.
 

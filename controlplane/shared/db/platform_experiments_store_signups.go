@@ -19,7 +19,7 @@ import (
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
 // ErrMaxHostedReached is returned when a platform experiment would have the platform run more
-// machines than its max_hosted.
+// machines than its max_hosted, or leave none of them to measure its baseline.
 var ErrMaxHostedReached = errors.New("max_hosted reached")
 
 // ErrSignupClosed is a signup or a removal refused because the platform experiment is no longer
@@ -156,18 +156,23 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 			return 0, fmt.Errorf("platform_experiments_store.Signup: allocate the quota of baseline agent %s: %w", signup.AgentID, err)
 		}
 	}
-	// max_hosted bounds the machines the platform rents for the experiment, so it counts every
-	// hosted agent whatever its role, and the coordinator.
+	// max_hosted bounds the machines the platform rents for the experiment at once. An agent that
+	// finished holds none, and a planner's is gone by the time anyone can join. One machine is
+	// kept for measuring the baseline, which nothing starts without: the coordinator and the
+	// agents that do not measure it take the others.
 	if hosted || (len(signups) == 0 && coordinatorHosted) {
-		var count int
-		// A planner's machine is gone by the time anyone can join: it is no machine of the run.
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiment_signups WHERE platform_experiment_id = $1 AND hosted AND flavor <> '`+domain.PlannerFlavor+`'`, platformExpID).Scan(&count); err != nil {
+		var measuring, others int
+		if err := tx.QueryRow(ctx, `
+SELECT COUNT(*) FILTER (WHERE role = $2), COUNT(*) FILTER (WHERE role <> $2)
+FROM experiment_signups
+WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND flavor <> '`+domain.PlannerFlavor+`'`,
+			platformExpID, string(domain.SignupRoleBaseline)).Scan(&measuring, &others); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
 		}
 		if coordinatorHosted {
-			count++
+			others++
 		}
-		if count > maxHosted {
+		if others > maxHosted-1 || measuring+others > maxHosted {
 			return 0, ErrMaxHostedReached
 		}
 	}

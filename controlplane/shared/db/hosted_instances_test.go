@@ -357,6 +357,60 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	}
 }
 
+// Nothing starts without a baseline, so one machine is the baseline's: the agents that do not
+// measure it leave it free, and one that finished without a usable baseline gives it back.
+func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	now := time.Now().UTC()
+	pe := &domain.PlatformExperiment{
+		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "kept", BudgetAcceleratorHours: 10,
+		MaxAgents: 5, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
+		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
+		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
+		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
+	}
+	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+		t.Fatal(err)
+	}
+	add := func(role domain.SignupRole) (string, error) {
+		id, err := domain.NewAgentID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := &domain.Agent{ID: id, Name: id, PerformanceScore: 0.5, CreatedAt: now}
+		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{AgentID: id, Role: role, Hosted: true, Launcher: "main", Flavor: "generalist"})
+	}
+	for i := range 2 {
+		if _, err := add(domain.SignupRoleCompetitor); err != nil {
+			t.Fatalf("researcher %d beside the coordinator: got = %v, want = nil", i+1, err)
+		}
+	}
+	for _, role := range []domain.SignupRole{domain.SignupRoleCompetitor, domain.SignupRoleReviewer} {
+		if _, err := add(role); !errors.Is(err, ErrMaxHostedReached) {
+			t.Fatalf("a hosted %s for the machine kept for the baseline: got = %v, want ErrMaxHostedReached", role, err)
+		}
+	}
+	first, err := add(domain.SignupRoleBaseline)
+	if err != nil {
+		t.Fatalf("the baseline agent in the machine kept for it: got = %v, want = nil", err)
+	}
+	if _, err := add(domain.SignupRoleBaseline); !errors.Is(err, ErrMaxHostedReached) {
+		t.Fatalf("a second baseline agent while the first holds the machine: got = %v, want ErrMaxHostedReached", err)
+	}
+	if err := pes.FinishAgent(ctx, pe.ID, first, "the control does not run"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := add(domain.SignupRoleBaseline); err != nil {
+		t.Fatalf("a second baseline agent once the first finished: got = %v, want = nil", err)
+	}
+	if _, err := add(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxHostedReached) {
+		t.Fatalf("a researcher in a full house: got = %v, want ErrMaxHostedReached", err)
+	}
+}
+
 func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()

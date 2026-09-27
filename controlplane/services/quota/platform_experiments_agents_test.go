@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -66,18 +67,34 @@ func (f *rosterStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !f.unregistered, nil
 }
 
-// machines is what the platform rents for the experiment, with more of them added.
+// machines is what the platform rents for the experiment at once, with more of them added.
 func (f *rosterStore) machines(more ...domain.AgentSignup) int {
-	n := 0
+	measuring, others := f.rented(more...)
+	return measuring + others
+}
+
+// rented counts the machines as the store does: an agent that finished holds none, and those
+// that measure the baseline are counted apart from the coordinator and the other agents.
+func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int) {
 	if f.pe.CoordinatorHosted {
-		n++
+		others++
 	}
 	for _, s := range append(append([]domain.AgentSignup{}, f.signups...), more...) {
-		if s.Hosted {
-			n++
+		switch {
+		case !s.Hosted || s.FinishedAt != nil:
+		case s.Role == domain.SignupRoleBaseline:
+			measuring++
+		default:
+			others++
 		}
 	}
-	return n
+	return measuring, others
+}
+
+// full says more would be a machine too many, or would take the one kept for the baseline.
+func (f *rosterStore) full(more domain.AgentSignup) bool {
+	measuring, others := f.rented(more)
+	return more.Hosted && (others > f.pe.MaxHosted-1 || measuring+others > f.pe.MaxHosted)
 }
 
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
@@ -125,7 +142,7 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
 	}
-	if f.machines(signup) > f.pe.MaxHosted {
+	if f.full(signup) {
 		return false, db.ErrMaxHostedReached
 	}
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, f.agents[signup.AgentID].Name
@@ -140,7 +157,7 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
 		return db.ErrMaxAgentsReached
 	}
-	if f.machines(signup) > f.pe.MaxHosted {
+	if f.full(signup) {
 		return db.ErrMaxHostedReached
 	}
 	agent.OrgID = "org-a"
@@ -432,6 +449,31 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 	}
 	// An agent its owner runs is no machine of the platform's.
 	addEach(t, r, 3, `{"role":"reviewer"}`)
+}
+
+// Nothing starts without a baseline, so the agents that do not measure it never take the machine
+// one that does needs, and the refusal says what the machines are for.
+func TestOneMachineIsKeptForAnAgentThatMeasuresTheBaseline(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpOpen, rosterMaxHosted)
+	store.pe.CoordinatorHosted = true
+	r := agentsRouter(t, store, staff)
+	addEach(t, r, rosterMaxHosted-2, `{"hosted":true}`)
+	for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`} {
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
+		message, _ := out["message"].(string)
+		if code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" || !strings.Contains(message, "One is kept for an agent of role baseline") {
+			t.Fatalf("%s for the last machine: got = %d %v, want = 400 max_hosted_reached naming the baseline", body, code, out)
+		}
+	}
+	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"baseline"}`); code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" {
+		t.Fatalf("a second baseline agent beside the first: got = %d %v, want = 400 max_hosted_reached", code, out)
+	}
+	// The first one finished without a baseline that can be declared: its machine is released,
+	// and the next takes its place.
+	finished := time.Now()
+	store.signups[len(store.signups)-1].FinishedAt = &finished
+	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
 }
 
 func TestHostingIsRefusedWhileTheLauncherConfigNamesIsNotRegistered(t *testing.T) {
