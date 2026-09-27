@@ -35,6 +35,34 @@ func TestQuota(t *testing.T) {
 	}
 }
 
+// Two researchers finished with their quota spent minutes before a stage boundary raised their
+// share: the read said nothing of the next stage. The platform now answers when it starts and
+// what the share becomes, and hl quota prints both and says in its help what they mean.
+func TestQuotaPrintsWhenTheNextStageStartsAndWhatTheShareBecomes(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"id": "q", "agent_id": "a", "platform_experiment_id": "pe-1", "share_accelerator_hours": 0.4,
+			"remaining_guaranteed_accelerator_hours": 0, "next_stage_starts_at": "2026-10-06T22:00:00Z", "next_stage_share_accelerator_hours": 1.2}
+	})
+	t.Setenv("AGENT_ID", "a")
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	for _, want := range []string{`"next_stage_starts_at":"2026-10-06T22:00:00Z"`, `"next_stage_share_accelerator_hours":1.2`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("hl quota: stdout = %s, want it to carry %s", stdout.String(), want)
+		}
+	}
+	stderr.Reset()
+	run([]string{"quota", "--help"}, &stdout, &stderr)
+	for _, want := range []string{"A share grows at each stage boundary", "next_stage_starts_at", "next_stage_share_accelerator_hours", "finish is final"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("hl quota --help lacks %q", want)
+		}
+	}
+}
+
 func TestResultsFlattensStandings(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",

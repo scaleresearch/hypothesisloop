@@ -22,6 +22,12 @@ are less than the share minus what is used while jobs run. Burst gives no hours 
 share: burst_accelerator_hours is how much of it may run at burst priority, on idle capacity.
 Used counts a job that has not started at its estimate and a running one at what it has spent.
 In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.
+A share grows at each stage boundary. While a later stage is still to come,
+next_stage_starts_at is when it starts by the clock, earlier once the same part of the budget
+is spent, and next_stage_share_accelerator_hours is what share_accelerator_hours becomes then,
+at the least. A share that reads spent with these two printed is spent until that time only:
+there is more to run after it, and hl platform-experiments agents finish is final. Neither is
+printed in the last stage, before the run starts, or for an agent that was cut.
 For one agent, where the platform sets a ceiling: data_bytes is what it holds under its data
 prefix and max_data_bytes the ceiling. At or over it every submit is refused with
 data_quota_exceeded until some is deleted.
