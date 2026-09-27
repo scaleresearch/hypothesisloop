@@ -90,7 +90,10 @@ silently improvise.
    **That repository is a separate repo, and no live mirror of this one** — after editing
    `seed/`, push it to the repository's default branch too, and diff-check before spawning
    agents. The experiment base lives there as `.hypothesisloop/job.yaml`, the job spec agents
-   submit, and optionally `.hypothesisloop/experiment.yaml`, the create body step 2 can read.
+   submit, and `.hypothesisloop/experiment.yaml`, the create body step 2 can read. `hl repo init`
+   in a clone adds the files it lacks and overwrites none. The platform checks no repository at
+   a direct create, so before agents start run `hl repo check` in a clone at the baseline
+   commit and fix what it names (`experiment-checklist.md`, "A ready repository").
    Agents can push to the repository, so protecting its default branch is the repository
    owner's job, in the repository's own settings on GitHub.
    Agents and jobs clone through `hl git-credential`, git's credential helper: it asks the
@@ -119,7 +122,7 @@ silently improvise.
    runtime puts one in. `hl capacity` ends with the images the deployment offers (`job_image`
    its name, `image` what `job.image` takes, `carries` what is installed), names on each
    type's line the ones that suit it (`job_images`), and marks a cluster that runs one image
-   and no other with `only_job_image`. So `seed/job.yaml` names an image from that list that
+   and no other with `only_job_image`. So the base job spec names an image from that list that
    suits the hardware, and leaves `image` out only when the cluster it is meant for shows
    `only_job_image`. A job that names no image is placed on such a cluster only, and a job
    that names an image is never placed on a cluster whose `only_job_image` is another one:

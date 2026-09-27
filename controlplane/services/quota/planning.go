@@ -90,7 +90,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 		MaxAgents:              1,
 		Metrics:                []domain.MetricDefinition{},
 		ReportIntervalSeconds:  30,
-		EndsAt:                 now.Add(planning.Limit),
+		PlanningEndsAt:         now.Add(planning.Limit),
 		Status:                 domain.PlatformExpDraft,
 		Stages:                 s.cfg.DefaultStages,
 		CurrentStage:           1,
@@ -147,7 +147,7 @@ func RegisterPlanningHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"allowance can be spent. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
-			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and 422 or 409 repository_not_created as on POST /platform-experiments. " +
+			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and 422, 409 or 502 repository_not_created as on POST /platform-experiments. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
 			"503 launcher_not_registered when the deployment has no launcher to run the planner. " +
 			"429 planning_limit when the org has as many drafts open, or created as many in the last 24 hours, as the platform plans for one org.",
