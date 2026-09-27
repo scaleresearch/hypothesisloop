@@ -160,18 +160,41 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     return events
 
 
-# A drain runs after every tool call, so an outage is logged by the first that fails, not by each.
-_drain_failing = False
+# When the first poll of an outage failed. An agent refused by a platform that could not be
+# reached ended its turn and, with no job in flight, heard nothing until the idle nudge.
+_unreachable_since: float | None = None
+
+
+def _clock(at: float) -> str:
+    return time.strftime("%H:%M:%S", time.gmtime(at))
+
+
+def _polled(code: int | None) -> list[dict]:
+    """Notes how a poll of the platform ended, and for the first one answered after one that
+    failed returns the event that says so."""
+    global _unreachable_since
+    if code is None:
+        return []
+    if code != 0:
+        _unreachable_since = _unreachable_since or time.time()
+        return []
+    since, _unreachable_since = _unreachable_since, None
+    if since is None:
+        return []
+    return [{"kind": "platform.reachable", "value": f"again: it could not be reached from {_clock(since)} to "
+                                                     f"{_clock(time.time())} UTC. Retry what was refused then."}]
+
+
+def _drain_command(command: list[str]) -> list[str]:
+    return [*command, "--no-wait", "--timeout", str(_DRAIN_S)]
 
 
 async def drain(env: dict[str, str], command: list[str] | None = None) -> list[dict]:
-    """The events already waiting on the cursor, without waiting for more."""
-    global _drain_failing
+    """The events already waiting on the cursor, without waiting for more. A drain runs after
+    every tool call, so an outage is logged by the first that fails."""
     command = command or watch_command(env)
-    code, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
-                                 warn=not _drain_failing)
-    _drain_failing = code != 0
-    return await _with_job_state(_events(stdout), env, command[0])
+    code, stdout = await _run_hl(_drain_command(command), env, lambda: False, warn=_unreachable_since is None)
+    return await _with_job_state([*_events(stdout), *_polled(code)], env, command[0])
 
 
 async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...]:
@@ -189,13 +212,14 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
                      command: list[str] | None = None, retry_s: float = _RETRY_S) -> list[dict]:
     """Runs hl watch until an event that wakes this role arrives, and returns it with what waited
     before it. Once idle_s passes without one, returns what waits, which may be nothing. Returns
-    [] as soon as stopped() is true. A failed hl watch is retried after retry_s."""
+    [] as soon as stopped() is true. A failed hl watch is retried after retry_s, without waiting
+    for an event, so the first one answered ends the wait with the platform reachable again."""
     command = command or watch_command(env)
     waking = [*command, "--wake", ",".join(await _wakes(env, command[0]))]
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
-        code, stdout = await _run_hl(waking, env, stopped)
-        events = _events(stdout)
+        code, stdout = await _run_hl(waking if _unreachable_since is None else _drain_command(command), env, stopped)
+        events = [*_events(stdout), *_polled(code)]
         if events:
             return await _with_job_state(events, env, command[0])
         if code not in (0, None):

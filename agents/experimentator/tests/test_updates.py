@@ -20,7 +20,8 @@ ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/
 def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
     `hl job status`, `hl job stats` and `hl quota` print status, stats and quota and record their
-    arguments."""
+    arguments. A new one has had no outage."""
+    updates._unreachable_since = None
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
     for name, text in (("status", status), ("stats", stats), ("quota", quota)):
@@ -92,8 +93,30 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
         events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
-        self.assertEqual([e["subject"] for e in events], ["exp-1"])
+        self.assertEqual([e.get("subject") for e in events], ["exp-1", None])
         self.assertEqual(runs(counter), 2)
+
+    # In an outage researchers with no job in flight retried in sleep loops: one that ended its
+    # turn would have heard nothing until the idle nudge, half an hour later.
+    async def test_the_first_poll_answered_after_a_failed_one_wakes_with_the_outage(self):
+        command, counter = fake_hl('echo "$*" >> "$0.args"\n[ $RUNS -le 2 ] && { echo unreachable >&2; exit 1; }\nexit 0\n')
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
+        self.assertRegex(updates.message(events, "agent-a"), r"^Platform updates:\nplatform\.reachable again: it could not be reached "
+                         r"from \d\d:\d\d:\d\d to \d\d:\d\d:\d\d UTC\. Retry what was refused then\.$")
+        self.assertEqual(updates._clock(3725.0), "01:02:05")
+        with open(counter.replace(".runs", ".args")) as f:
+            asked = f.read().splitlines()
+        # While it fails the poll waits for no event, so the first answer ends the wait.
+        self.assertEqual([line.split()[1] for line in asked], ["--wake", "--no-wait", "--no-wait"])
+        self.assertEqual(await updates.next_batch(ENV, lambda: False, 0.2, command=command), [])
+
+    # The poll after the refused tool call fails too, and the agent then ends its turn.
+    async def test_an_outage_seen_by_a_drain_is_ended_by_the_wait_that_follows(self):
+        command, _ = fake_hl("[ $RUNS -eq 1 ] && exit 1\nexit 0\n")
+        self.assertEqual(await updates.drain(ENV, command=command), [])
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command)
+        self.assertEqual([e["kind"] for e in events], ["platform.reachable"])
+        self.assertEqual(await updates.drain(ENV, command=command), [])
 
     async def test_stopping_ends_a_watch_in_progress(self):
         command, _ = fake_hl("exec sleep 30\n")
@@ -164,7 +187,6 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_outage_is_logged_by_the_first_failed_drain_only(self):
         command, _ = fake_hl("echo never connected >&2; exit 1\n")
-        updates._drain_failing = False
         with self.assertLogs("llm_agent", "WARNING") as logged:
             for _ in range(3):
                 await updates.drain(ENV, command=command)
