@@ -208,12 +208,11 @@ func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
 }
 
 // PlatformExperimentPatch is the body of PATCH /platform-experiments/{id}: the fields that
-// change, and no others. A field left out keeps its value, so a description is cleared only by
-// sending it empty. The project, the repository, the agent image, the stages and the default
+// change, and no others. A field left out keeps its value. The project, the repository, the agent image, the stages and the default
 // quota tier are fixed at creation and are no fields of it.
 type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
-	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from. The one field a coordinator's token changes."`
+	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty. The one field a coordinator's token changes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
 	MaxAgents                 *int                       `json:"max_agents,omitempty"`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`

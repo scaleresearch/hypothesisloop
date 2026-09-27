@@ -363,8 +363,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
 			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
 			"Once it runs only `name` and `description` do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
-			"409 experiment_not_editable for a draft or a closed one, 422 invalid_field for a value that cannot be taken, " +
-			"422 run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
+			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
+			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
+			"run_too_long for a starts_at or an ends_at that leaves it running longer than the platform's quota.max_platform_experiment_days. " +
 			"A coordinator's token changes `description` only: a body that carries any other field answers 403 coordinator_changes_description_only. " +
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, func(ctx context.Context, in *struct {

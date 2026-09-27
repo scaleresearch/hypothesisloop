@@ -58,8 +58,8 @@ func (s *PlatformExperimentsService) checkRunLength(startsAt, endsAt, now time.T
 	return nil
 }
 
-// validate is the one check of what a platform experiment is created as, whoever states it: a
-// create, a planner's proposal or the person accepting one. It returns spec as it is stored,
+// validate is the one check of what a platform experiment is, whoever states it: a create, a
+// planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them and its length as ends_at.
 func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, now time.Time) (CreatePlatformExperimentRequest, error) {
 	spec = s.withSettings(spec)
@@ -155,7 +155,8 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 	return api.Refuse(status, reason, fmt.Sprintf(format, args...))
 }
 
-// Update changes the fields the patch carries and no others. While the experiment is open every
+// Update changes the fields the patch carries and no others, and the experiment as patched has
+// to pass validate. While the experiment is open every
 // field of the patch can change. Once it runs, only the name and the description can: admission
 // and the stage ladder have already acted on the rest. A closed one, and a draft, which its
 // planner's proposal fills, take no patch.
@@ -176,64 +177,45 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	if locked := patch.beyondTheBrief(false); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
 		return nil, refuseUpdate(409, "experiment_running", "only name and description change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
 	}
-	invalid := func(format string, args ...any) error { return refuseUpdate(422, "invalid_field", format, args...) }
 	expectedStatus := pe.Status
+	patched := *pe
 	if patch.Name != nil {
-		if strings.TrimSpace(*patch.Name) == "" {
-			return nil, invalid("name must not be empty")
-		}
-		pe.Name = *patch.Name
+		patched.Name = *patch.Name
 	}
 	if patch.Description != nil {
-		pe.Description = *patch.Description
+		patched.Description = *patch.Description
 	}
 	if patch.BudgetAcceleratorHours != nil {
-		if *patch.BudgetAcceleratorHours <= 0 {
-			return nil, invalid("budget_accelerator_hours must be positive")
-		}
-		pe.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
+		patched.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
 	}
 	if patch.MaxAgents != nil {
-		if *patch.MaxAgents <= 0 {
-			return nil, invalid("max_agents must be positive")
-		}
-		pe.MaxAgents = *patch.MaxAgents
+		patched.MaxAgents = *patch.MaxAgents
 	}
 	if patch.Metrics != nil {
-		if err := domain.ValidateMetricDefinitions(*patch.Metrics); err != nil {
-			return nil, invalid("metrics: %s", err)
-		}
-		if err := domain.RequireRankingMetric(*patch.Metrics); err != nil {
-			return nil, invalid("metrics: %s", err)
-		}
-		pe.Metrics = *patch.Metrics
+		patched.Metrics = *patch.Metrics
 	}
 	if patch.ReportIntervalSeconds != nil {
-		if *patch.ReportIntervalSeconds <= 0 {
-			return nil, invalid("report_interval_seconds must be positive")
-		}
-		pe.ReportIntervalSeconds = *patch.ReportIntervalSeconds
+		patched.ReportIntervalSeconds = *patch.ReportIntervalSeconds
 	}
 	if patch.StartsAt != nil {
-		pe.StartsAt = *patch.StartsAt
+		patched.StartsAt = *patch.StartsAt
 	}
 	if patch.EndsAt != nil {
-		if patch.EndsAt.IsZero() {
-			return nil, invalid("ends_at must be a time: a platform experiment always has an end")
-		}
-		pe.EndsAt = *patch.EndsAt
+		patched.EndsAt = *patch.EndsAt
 	}
 	if patch.MaxConcurrentAccelerators != nil {
-		if *patch.MaxConcurrentAccelerators <= 0 {
-			return nil, invalid("max_concurrent_accelerators must be positive")
-		}
-		pe.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
+		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
 	}
-	if patch.StartsAt != nil || patch.EndsAt != nil {
-		if err := s.checkRunLength(pe.StartsAt, pe.EndsAt, time.Now().UTC()); err != nil {
-			return nil, err
-		}
+	if _, err := s.validate(CreatePlatformExperimentRequest{
+		Name: patched.Name, Description: patched.Description,
+		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents,
+		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
+		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, EndsAt: patched.EndsAt,
+		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
+	}, time.Now().UTC()); err != nil {
+		return nil, err
 	}
+	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}

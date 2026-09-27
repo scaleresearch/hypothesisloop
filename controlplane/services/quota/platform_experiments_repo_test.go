@@ -406,10 +406,6 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 			t.Fatalf("%s, the description alone: got = %d %v, stored %+v", status, code, out, stored)
 		}
 	}
-	// A description is cleared by sending it empty, and by nothing else.
-	if code, _, stored := patch(domain.PlatformExpOpen, map[string]any{"description": "", "name": "renamed"}); code != http.StatusOK || stored.Description != "" || stored.Name != "renamed" {
-		t.Errorf("an empty description and a name: got = %d, stored %q / %q", code, stored.Name, stored.Description)
-	}
 	// While it is open, what a run costs and how it is judged can still change.
 	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
 		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "ends_at": "2026-06-25T00:00:00Z",
@@ -430,10 +426,11 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "ends_at": "2028-01-01T00:00:00Z"}, 409, "experiment_running", "budget_accelerator_hours, ends_at"},
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
-		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_field", "name"},
+		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
+		"no brief":                      {domain.PlatformExpRunning, map[string]any{"description": " "}, 422, "invalid_experiment", "description"},
 		"an end decades out":            {domain.PlatformExpOpen, map[string]any{"ends_at": "2099-01-01T00:00:00Z"}, 422, "run_too_long", "30 days"},
-		"no ranked metric":              {domain.PlatformExpOpen, map[string]any{"metrics": []map[string]any{}}, 422, "invalid_field", "metrics"},
-		"a concurrency cap of zero":     {domain.PlatformExpOpen, map[string]any{"max_concurrent_accelerators": 0}, 422, "invalid_field", "max_concurrent_accelerators"},
+		"no ranked metric":              {domain.PlatformExpOpen, map[string]any{"metrics": []map[string]any{}}, 422, "invalid_metrics", "metrics"},
+		"a concurrency cap of zero":     {domain.PlatformExpOpen, map[string]any{"max_concurrent_accelerators": 0}, 422, "invalid_experiment", "max_concurrent_accelerators"},
 		"the repository, fixed":         {domain.PlatformExpOpen, map[string]any{"description": "d", "repository": "other/one"}, 422, "", ""},
 		"the image, fixed":              {domain.PlatformExpOpen, map[string]any{"description": "d", "agent_image": "other:1"}, 422, "", ""},
 		"from_repo, which is no update": {domain.PlatformExpOpen, map[string]any{"description": "d", "from_repo": true}, 422, "", ""},
