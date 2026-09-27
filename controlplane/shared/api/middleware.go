@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // CORSMiddleware lets one browser origin, the UI's, call the API.
@@ -64,13 +66,11 @@ func RecoveryMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					logger.Error("panic recovered",
-						zap.Any("panic", rec),
+					auth.WriteError(w, logger, auth.Internal(logger, "panic recovered", fmt.Errorf("%v", rec),
 						zap.String("stack", string(debug.Stack())),
 						zap.String("method", r.Method),
 						zap.String("path", r.URL.Path),
-					)
-					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+					))
 				}
 			}()
 			next.ServeHTTP(w, r)

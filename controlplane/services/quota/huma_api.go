@@ -10,23 +10,12 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
-
-// reasonError preserves the historical {"reason","message"} error envelope used
-// by signup (a client-facing, non-fault rejection) instead of the {"error":...}
-// envelope, matching the pre-Huma wire shape.
-type reasonError struct {
-	status  int
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-func (e *reasonError) Error() string  { return e.Message }
-func (e *reasonError) GetStatus() int { return e.status }
 
 // RegisterHuma registers every quota-service operation (agents,
 // platform-experiments, resource catalog) on the shared Huma doc.
@@ -205,7 +194,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, err
 		}
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
-			return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_agent_image", Message: err.Error()}
+			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
 		}
 		// What is wrong with a body laid over the experiment file may be the file's doing, so every
 		// such refusal has one status and names the file.
@@ -215,7 +204,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				return huma.Error422UnprocessableEntity("with " + domain.ExperimentFile + " of the repository under the request: " + reason)
 			}
 			if in.Body.Repository == "" {
-				return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "no_repository", Message: "from_repo reads " + domain.ExperimentFile + " of the repository the request names, and it names none: set repository"}
+				return nil, api.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
 			}
 			named := in.Body.Repository
 			body, err := peh.fromRepo(ctx, in.Body)
@@ -243,10 +232,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
 		pe, err := peh.svc.Create(ctx, hosting)
-		var refused *reasonError
-		if errors.As(err, &refused) {
-			return nil, refused
-		}
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
 			return nil, err
@@ -400,15 +385,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		// brief and nothing a run's cost or length follows from.
 		if caller, _ := auth.FromContext(ctx); caller.Kind == auth.KindCoordinator {
 			if others := in.Body.beyondTheBrief(true); len(others) > 0 {
-				return nil, &reasonError{status: http.StatusForbidden, Reason: "coordinator_changes_description_only",
-					Message: "a coordinator's token changes the description and nothing else, and the body also carries: " + strings.Join(others, ", ") + ". Leave them out"}
+				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 			}
 		}
 		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
-		var refused *reasonError
-		if errors.As(err, &refused) {
-			return nil, refused
-		}
 		if err != nil {
 			return nil, peh.refusal("update platform experiment", err)
 		}

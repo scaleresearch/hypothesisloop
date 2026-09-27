@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -73,7 +74,7 @@ func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID
 		return "", nil
 	}
 	if account != "" {
-		return "", &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_request", Message: "repository_account says where a new repository is created and repository names an existing one: state one of them"}
+		return "", api.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names an existing one: state one of them")
 	}
 	return h.repos.Reachable(ctx, projectID, repository)
 }
@@ -143,7 +144,7 @@ func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, project
 	}
 	base, err := decodeExperimentBase(data)
 	if err != nil {
-		return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "invalid_experiment_file", Message: domain.ExperimentFile + " of " + named + " cannot be used: " + err.Error()}
+		return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+named+" cannot be used: "+err.Error())
 	}
 	return &ExperimentFile{
 		Repository: named, Name: base.Name, Description: base.Description, Metrics: base.Metrics,

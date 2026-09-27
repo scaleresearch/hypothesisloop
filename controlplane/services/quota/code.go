@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -134,12 +135,10 @@ func RegisterCodeHuma(doc *apidocs.Doc, code CodeStore, roster CodeRoster, logge
 			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))
 		}
 		if repository != "" {
-			return nil, &reasonError{status: http.StatusConflict, Reason: "code_in_repository",
-				Message: "platform experiment " + in.ID + " keeps its code in " + domain.RepositoryURL(repository) + ": commit on your branch and `git push` it there. The platform stores code only for a platform experiment that names no repository"}
+			return nil, api.Refuse(http.StatusConflict, "code_in_repository", "platform experiment "+in.ID+" keeps its code in "+domain.RepositoryURL(repository)+": commit on your branch and `git push` it there. The platform stores code only for a platform experiment that names no repository")
 		}
 		if !bundleHolds(in.RawBody, in.SHA) {
-			return nil, &reasonError{status: http.StatusUnprocessableEntity, Reason: "not_a_bundle",
-				Message: "the body is not a git bundle whose tip is " + in.SHA + ": make it with `git bundle create <file> HEAD`, or push with `hl code push`"}
+			return nil, api.Refuse(http.StatusUnprocessableEntity, "not_a_bundle", "the body is not a git bundle whose tip is "+in.SHA+": make it with `git bundle create <file> HEAD`, or push with `hl code push`")
 		}
 		if err := code.PutCode(ctx, in.ID, in.AgentID, in.SHA, in.RawBody); err != nil {
 			return nil, auth.Internal(logger, "store code failed", err, zap.String("platformExpID", in.ID), zap.String("agentID", in.AgentID))

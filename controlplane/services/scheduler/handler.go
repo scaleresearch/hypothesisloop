@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -30,18 +31,6 @@ func NewHandler(svc *Service) *Handler {
 	}
 	return &Handler{svc: svc}
 }
-
-// reasonError preserves the historical {"reason","message"} envelope used by
-// experiment submission rejections (admission decisions), distinct from the
-// generic {"error":...} envelope.
-type reasonError struct {
-	status  int
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-func (e *reasonError) Error() string  { return e.Message }
-func (e *reasonError) GetStatus() int { return e.status }
 
 type summaryReply struct {
 	Status       string                  `json:"status"`
@@ -110,7 +99,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.svc.Submit(ctx, &exp); err != nil {
 			var admErr *AdmissionError
 			if errors.As(err, &admErr) {
-				return nil, &reasonError{status: admissionHTTPStatus(admErr.Reason), Reason: admErr.Reason, Message: admErr.Message}
+				return nil, api.Refuse(admissionHTTPStatus(admErr.Reason), admErr.Reason, admErr.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
@@ -441,16 +430,6 @@ const ReasonSummaryExists = "summary_exists"
 // job's org turned the named cluster off.
 const ReasonClusterDisabled = "cluster_disabled"
 
-// refused is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
-type refused struct {
-	status  int
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-func (e *refused) Error() string  { return e.Message }
-func (e *refused) GetStatus() int { return e.status }
-
 // admissionStatusError maps an AdmissionError to a huma error with the historical
 // status codes ({"error":...} envelope, matching the pre-Huma cancel/summary handlers).
 func admissionStatusError(err error) huma.StatusError {
@@ -464,7 +443,7 @@ func admissionStatusError(err error) huma.StatusError {
 	case "invalid_state":
 		return huma.Error409Conflict(admErr.Message)
 	case ReasonSummaryExists:
-		return &refused{status: http.StatusConflict, Reason: admErr.Reason, Message: admErr.Message}
+		return api.Refuse(http.StatusConflict, admErr.Reason, admErr.Message)
 	default:
 		return huma.Error422UnprocessableEntity(admErr.Message)
 	}
@@ -500,8 +479,7 @@ func (h *Handler) admit(ctx context.Context, id, clusterName string) (*struct{ B
 		return nil, huma.Error409Conflict("cluster " + clusterName + " takes the jobs of its own org only, and this job is another org's")
 	}
 	if !cluster.EnabledFor(exp.OrgID) {
-		return nil, &refused{status: http.StatusConflict, Reason: ReasonClusterDisabled,
-			Message: "cluster " + clusterName + " is turned off for the jobs of this job's org: an owner of that org turns it on with POST /orgs/{id}/clusters/{name}/enable"}
+		return nil, api.Refuse(http.StatusConflict, ReasonClusterDisabled, "cluster "+clusterName+" is turned off for the jobs of this job's org: an owner of that org turns it on with POST /orgs/{id}/clusters/{name}/enable")
 	}
 	// This manual admit path bypasses the ordinary tick's cluster-local "max" resolution (see
 	// loop_tick.go's resolveClusterLocalResources) entirely — it names a cluster directly rather

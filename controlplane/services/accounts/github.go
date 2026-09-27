@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -80,16 +81,6 @@ type GitCredential struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// refused is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
-type refused struct {
-	status  int
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-func (e *refused) Error() string  { return e.Message }
-func (e *refused) GetStatus() int { return e.status }
-
 // The reasons a client tells a refusal about GitHub apart by.
 const (
 	ReasonGitHubNotConfigured        = "github_not_configured"
@@ -112,20 +103,17 @@ const (
 	ReasonRunOver                    = "run_over"
 	ReasonForbidden                  = "forbidden"
 	ReasonUnavailable                = "unavailable"
-	ReasonInternal                   = "internal"
 )
 
 // choiceRequired is the refusal of a connect that named no installation while the person
 // reaches several: it carries them, for the client to ask which.
 type choiceRequired struct {
-	refused
+	api.Refusal
 	Installations []github.Installation `json:"installations"`
 }
 
-var errNoApp = &refused{
-	status: http.StatusServiceUnavailable, Reason: ReasonGitHubNotConfigured,
-	Message: "this deployment has no GitHub App configured, so GitHub cannot be connected and no repository cloned through it",
-}
+var errNoApp = api.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConfigured,
+	"this deployment has no GitHub App configured, so GitHub cannot be connected and no repository cloned through it")
 
 // errNotConnected reports a repository whose owner is no GitHub account the org connected.
 var errNotConnected = errors.New("the org has connected no installation on that GitHub account")
@@ -155,17 +143,17 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 	case errors.Is(err, github.ErrCannotCreateRepositories):
 		return invalid(ReasonRepositoryNotCreated, "the GitHub account the org connected does not let the platform's GitHub App create a repository: its owner grants the App the creation of repositories on GitHub, or the request names a repository the installation covers")
 	case errors.Is(err, github.ErrRepositoryExists):
-		return &refused{status: http.StatusConflict, Reason: ReasonRepositoryNotCreated, Message: "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository"}
+		return api.Refuse(http.StatusConflict, ReasonRepositoryNotCreated, "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
 	case errors.Is(err, github.ErrCodeRejected):
 		return invalid(ReasonCodeRejected, "GitHub did not accept the code: it works once, for ten minutes, and with the redirect_uri it was issued to, so authorise again and send the new one")
 	case errors.Is(err, errNotConnected):
-		return &refused{status: gone, Reason: ReasonInstallationNotConnected, Message: "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org connects it with POST /orgs/{id}/github-installations"}
+		return api.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org connects it with POST /orgs/{id}/github-installations")
 	case errors.Is(err, github.ErrRepositoryNotInstalled):
-		return &refused{status: gone, Reason: ReasonRepositoryNotReachable, Message: "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub"}
+		return api.Refuse(gone, ReasonRepositoryNotReachable, "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub")
 	case errors.Is(err, github.ErrInstallationGone):
-		return &refused{status: gone, Reason: ReasonInstallationGone, Message: "the GitHub App installation was removed or suspended on GitHub: its owner installs the App again and an owner of the org connects it"}
+		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed or suspended on GitHub: its owner installs the App again and an owner of the org connects it")
 	case errors.Is(err, github.ErrPermissionNotGranted):
-		return &refused{status: gone, Reason: ReasonPermissionNotGranted, Message: "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub"}
+		return api.Refuse(gone, ReasonPermissionNotGranted, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub")
 	case errors.Is(err, github.ErrFileNotFound):
 		return invalid(ReasonNoExperimentFile, "the repository has no "+domain.ExperimentFile+" on its default branch")
 	case errors.Is(err, github.ErrNotAFile):
@@ -174,13 +162,12 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 		return invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
 	case errors.Is(err, github.ErrRateLimited):
 		r.logger.Warn("github is rate limiting the platform", zap.String("operation", op))
-		return &refused{status: http.StatusServiceUnavailable, Reason: ReasonUnavailable, Message: "GitHub is rate limiting the platform: try again shortly"}
+		return api.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")
 	case errors.Is(err, github.ErrAppCredentials):
 		r.logger.Error("github refused the App's credentials", zap.String("operation", op), zap.Error(err))
-		return &refused{status: http.StatusBadGateway, Reason: ReasonUnavailable, Message: "the platform could not authenticate to GitHub"}
+		return api.Refuse(http.StatusBadGateway, ReasonUnavailable, "the platform could not authenticate to GitHub")
 	default:
-		r.logger.Error("github request failed", zap.String("operation", op), zap.Error(err))
-		return &refused{status: http.StatusInternalServerError, Reason: ReasonInternal, Message: auth.InternalError}
+		return auth.Internal(r.logger, "github request failed", err, zap.String("operation", op))
 	}
 }
 
@@ -227,10 +214,8 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 		return nil, notControlled
 	case installationID == 0 && len(controlled) > 1:
 		return nil, &choiceRequired{
-			refused: refused{
-				status: http.StatusConflict, Reason: ReasonInstallationChoiceRequired,
-				Message: "your GitHub account controls several accounts the GitHub App is installed on: authorise again and send the installation_id of the one to connect",
-			},
+			Refusal: *api.Refuse(http.StatusConflict, ReasonInstallationChoiceRequired,
+				"your GitHub account controls several accounts the GitHub App is installed on: authorise again and send the installation_id of the one to connect"),
 			Installations: controlled,
 		}
 	case installationID == 0:
@@ -415,20 +400,20 @@ func (r *Repositories) credential(ctx context.Context, protocol, host, path stri
 		access = github.Write
 	case auth.KindCoordinator, auth.KindJob:
 	default:
-		return nil, &refused{status: http.StatusForbidden, Reason: ReasonForbidden, Message: "a " + string(p.Kind) + " token has no repository of its own: a git credential goes to an agent, a coordinator or a job"}
+		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "a "+string(p.Kind)+" token has no repository of its own: a git credential goes to an agent, a coordinator or a job")
 	}
 	if p.RunOver {
-		return nil, &refused{status: http.StatusForbidden, Reason: ReasonRunOver, Message: "the run of this " + string(p.Kind) + " token in platform experiment " + p.PlatformExperimentID + " is over, and no git credential is handed out for it"}
+		return nil, api.Refuse(http.StatusForbidden, ReasonRunOver, "the run of this "+string(p.Kind)+" token in platform experiment "+p.PlatformExperimentID+" is over, and no git credential is handed out for it")
 	}
 	orgID, repository, err := r.experiments.PlatformExperimentRepository(ctx, p.PlatformExperimentID)
 	if err != nil {
 		return nil, err
 	}
 	if repository == "" {
-		return nil, &refused{status: http.StatusNotFound, Reason: ReasonNoRepository, Message: "platform experiment " + p.PlatformExperimentID + " names no repository"}
+		return nil, api.Refuse(http.StatusNotFound, ReasonNoRepository, "platform experiment "+p.PlatformExperimentID+" names no repository")
 	}
 	if protocol != "https" || !strings.EqualFold(host, domain.GitHubHost) || !servedPath(path, repository) {
-		return nil, &refused{status: http.StatusNotFound, Reason: ReasonNotFound, Message: "no git credential for that address: this token's is for " + domain.RepositoryURL(repository) + " only"}
+		return nil, api.Refuse(http.StatusNotFound, ReasonNotFound, "no git credential for that address: this token's is for "+domain.RepositoryURL(repository)+" only")
 	}
 	token, err := r.token(ctx, orgID, repository, access)
 	if err != nil {

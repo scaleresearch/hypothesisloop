@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -49,7 +50,7 @@ func (r codeRoster) Joined(_ context.Context, _, agentID string) (bool, error) {
 
 func (r codeRoster) RequireActive(_ context.Context, platformExpID, _ string) error {
 	if r.closed {
-		return &reasonError{status: http.StatusConflict, Reason: "experiment_closed", Message: "platform experiment " + platformExpID + " is closed"}
+		return api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed")
 	}
 	return nil
 }

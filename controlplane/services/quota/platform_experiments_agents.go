@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -48,18 +49,10 @@ type JoinedAgent struct {
 	Token string `json:"token,omitempty"`
 }
 
-// signupRefusal is a join or a removal refused for a reason the caller can act on. Reason leads
+// refuseSignup is a join or a removal refused for a reason the caller can act on. Reason leads
 // the message, as every signup refusal always has.
-type signupRefusal struct {
-	status int
-	reason string
-	detail string
-}
-
-func (e *signupRefusal) Error() string { return e.reason + ": " + e.detail }
-
 func refuseSignup(status int, reason, format string, args ...any) error {
-	return &signupRefusal{status: status, reason: reason, detail: fmt.Sprintf(format, args...)}
+	return api.Refuse(status, reason, reason+": "+fmt.Sprintf(format, args...))
 }
 
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
@@ -255,12 +248,12 @@ func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *Platfo
 	return h
 }
 
-// refusal answers a signupRefusal in the {"reason","message"} envelope; anything else is the
-// platform's own failure, logged and answered without detail.
+// refusal answers a refusal as it is; anything else is the platform's own failure, logged and
+// answered without detail.
 func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
-	var refused *signupRefusal
+	var refused *api.Refusal
 	if errors.As(err, &refused) {
-		return &reasonError{status: refused.status, Reason: refused.reason, Message: refused.Error()}
+		return refused
 	}
 	return auth.Internal(h.logger, op+" failed", err)
 }

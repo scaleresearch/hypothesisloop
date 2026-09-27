@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -64,7 +65,7 @@ const maxProposalTextBytes = 4000
 
 // refusedProposal is a proposal the planner can fix: reason names what is wrong.
 func refusedProposal(reason, format string, args ...any) error {
-	return &reasonError{status: http.StatusUnprocessableEntity, Reason: reason, Message: fmt.Sprintf(format, args...)}
+	return api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...))
 }
 
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
@@ -291,7 +292,7 @@ type AcceptRequest struct {
 }
 
 func invalidTransition(format string, args ...any) error {
-	return &reasonError{status: http.StatusConflict, Reason: "invalid_transition", Message: fmt.Sprintf(format, args...)}
+	return api.Refuse(http.StatusConflict, "invalid_transition", fmt.Sprintf(format, args...))
 }
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
@@ -469,9 +470,9 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 }
 
 func planningOver(pe *domain.PlatformExperiment) error {
-	return &reasonError{status: http.StatusConflict, Reason: "planning_over", Message: "the planning limit of draft " + pe.ID + " passed at " + pe.EndsAt.UTC().Format(time.RFC3339) + ": it takes no proposal and no decline, and is closed"}
+	return api.Refuse(http.StatusConflict, "planning_over", "the planning limit of draft "+pe.ID+" passed at "+pe.EndsAt.UTC().Format(time.RFC3339)+": it takes no proposal and no decline, and is closed")
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {
-	return &reasonError{status: http.StatusConflict, Reason: "not_a_draft", Message: "platform experiment " + pe.ID + " is " + string(pe.Status) + ": only a draft is proposed, revised or accepted"}
+	return api.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed, revised or accepted")
 }

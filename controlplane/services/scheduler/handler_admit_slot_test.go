@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -174,7 +175,7 @@ func TestForceAdmitOntoAClusterTheJobsOrgTurnedOffIsRefused(t *testing.T) {
 
 	_, err := admitHandler(store, workload).admit(context.Background(), "exp-1", rented)
 
-	var refusal *refused
+	var refusal *api.Refusal
 	if !errors.As(err, &refusal) || refusal.GetStatus() != http.StatusConflict || refusal.Reason != ReasonClusterDisabled {
 		t.Fatalf("err = %v, want a 409 with reason %s", err, ReasonClusterDisabled)
 	}

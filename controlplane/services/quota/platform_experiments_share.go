@@ -7,6 +7,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -19,22 +20,12 @@ type Sharing interface {
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 }
 
-type shareRefusal struct {
-	status  int
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-func (e *shareRefusal) Error() string  { return e.Message }
-func (e *shareRefusal) GetStatus() int { return e.status }
-
 // RegisterShareHuma registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
 // auth.Access's.
 func RegisterShareHuma(doc *apidocs.Doc, store Sharing, logger *zap.Logger) {
 	failed := func(id string, err error) error {
-		logger.Error("sharing a platform experiment failed", zap.String("platform_experiment_id", id), zap.Error(err))
-		return &shareRefusal{status: http.StatusInternalServerError, Reason: "internal", Message: auth.InternalError}
+		return auth.Internal(logger, "sharing a platform experiment failed", err, zap.String("platform_experiment_id", id))
 	}
 	set := func(shared bool) func(context.Context, *struct {
 		ID string `path:"id"`
@@ -42,7 +33,7 @@ func RegisterShareHuma(doc *apidocs.Doc, store Sharing, logger *zap.Logger) {
 		return func(ctx context.Context, in *struct {
 			ID string `path:"id"`
 		}) (*struct{ Body *domain.PlatformExperiment }, error) {
-			missing := &shareRefusal{status: http.StatusNotFound, Reason: "not_found", Message: "platform experiment not found"}
+			missing := api.Refuse(http.StatusNotFound, "not_found", "platform experiment not found")
 			if !domain.IdentifierShaped(in.ID) {
 				return nil, missing
 			}

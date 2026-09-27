@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -259,7 +261,7 @@ func connectBody(code string, installation int64) map[string]any {
 }
 
 // refusalOf is the reason and message of a refusal, which must be all its envelope holds
-// besides what the reason says it carries.
+// besides what the reason says it carries. The platform's own failure has no reason.
 func refusalOf(t *testing.T, rec *httptest.ResponseRecorder) (reason, message string) {
 	t.Helper()
 	var body map[string]any
@@ -268,6 +270,9 @@ func refusalOf(t *testing.T, rec *httptest.ResponseRecorder) (reason, message st
 	}
 	reason, _ = body["reason"].(string)
 	message, _ = body["message"].(string)
+	if internal, ok := body["error"].(string); ok {
+		message = internal
+	}
 	return reason, message
 }
 
@@ -415,7 +420,7 @@ func TestConnectRefusals(t *testing.T) {
 		"a negative installation":                 {connectBody("code-acme", -1), nil, 422, ReasonInvalidRequest, 0},
 		"github rate limits":                      {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrRateLimited, leak), 503, ReasonUnavailable, 1},
 		"the app key expired":                     {connectBody("code-acme", 100), fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak), 502, ReasonUnavailable, 1},
-		"something else":                          {connectBody("code-acme", 100), errors.New("dial tcp: " + leak), 500, ReasonInternal, 1},
+		"something else":                          {connectBody("code-acme", 100), errors.New("dial tcp: " + leak), 500, "", 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)
@@ -537,7 +542,7 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 		t.Fatalf("the answer repeats the failure's text: %s", message)
 	}
 	w.app.listErr[200] = errors.New("unexpected " + leak)
-	w.refused("member", "GET", path, nil, http.StatusInternalServerError, ReasonInternal)
+	w.refused("member", "GET", path, nil, http.StatusInternalServerError, "")
 }
 
 func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
@@ -582,15 +587,15 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 }
 
 func statusOf(err error) int {
-	var refusal *refused
-	if errors.As(err, &refusal) {
-		return refusal.status
+	var answered huma.StatusError
+	if errors.As(err, &answered) {
+		return answered.GetStatus()
 	}
 	return 0
 }
 
 func reasonOf(err error) string {
-	var refusal *refused
+	var refusal *api.Refusal
 	if errors.As(err, &refusal) {
 		return refusal.Reason
 	}
@@ -721,7 +726,7 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, ReasonPermissionNotGranted},
 		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, ReasonUnavailable},
 		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, ReasonUnavailable},
-		"something else":                                   {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ReasonInternal},
+		"something else":                                   {func(w *githubWorld) { w.app.tokenErr = errors.New("unexpected " + leak) }, 500, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)
@@ -848,7 +853,7 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 		"a directory":         {github.ErrNotAFile, 422, ReasonNoExperimentFile},
 		"too large":           {github.ErrFileTooLarge, 422, ReasonNoExperimentFile},
 		"github rate limits":  {github.ErrRateLimited, 503, ReasonUnavailable},
-		"something unplanned": {errors.New("unexpected " + leak), 500, ReasonInternal},
+		"something unplanned": {errors.New("unexpected " + leak), 500, ""},
 	} {
 		w.app.fileErr = tc.err
 		_, err := w.svc.ExperimentBase(ctx, w.projectA, "acme/model")

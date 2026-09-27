@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"go.uber.org/zap"
@@ -132,7 +133,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 
 // refuseUpdate is a create or a patch the caller can fix.
 func refuseUpdate(status int, reason, format string, args ...any) error {
-	return &reasonError{status: status, Reason: reason, Message: fmt.Sprintf(format, args...)}
+	return api.Refuse(status, reason, fmt.Sprintf(format, args...))
 }
 
 // Update changes the fields the patch carries and no others. While the experiment is open every
@@ -282,14 +283,14 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if pe == nil || pe.Status == domain.PlatformExpClosed {
-		return &reasonError{status: http.StatusConflict, Reason: "experiment_closed", Message: "platform experiment " + platformExpID + " is closed"}
+		return api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed")
 	}
 	cut, err := s.store.IsAgentCut(ctx, platformExpID, agentID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if cut {
-		return &reasonError{status: http.StatusConflict, Reason: "agent_held", Message: "agent " + agentID + " was cut from platform experiment " + platformExpID}
+		return api.Refuse(http.StatusConflict, "agent_held", "agent "+agentID+" was cut from platform experiment "+platformExpID)
 	}
 	return nil
 }

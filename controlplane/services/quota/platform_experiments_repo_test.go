@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -100,7 +101,7 @@ func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _
 const testRepository = "Acme/Model"
 
 func notReachable() error {
-	return &reasonError{status: http.StatusUnprocessableEntity, Reason: "repository_not_reachable", Message: "the GitHub installation the org connected does not cover that repository"}
+	return api.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "the GitHub installation the org connected does not cover that repository")
 }
 
 func (f *fakeRepositories) Reachable(_ context.Context, projectID, repository string) (string, error) {
@@ -290,7 +291,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	}
 	invalid := whole()
 	invalid["metrics"] = []map[string]any{}
-	repos.notCreated = &reasonError{status: http.StatusUnprocessableEntity, Reason: "github_not_connected", Message: "the org has connected no GitHub account"}
+	repos.notCreated = api.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
 	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusBadRequest {
 		t.Errorf("a body with no ranking metric: got = %d %s, want 400 before any repository is asked for", rec.Code, rec.Body)
 	}
@@ -340,7 +341,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 		want      int
 		namesFile bool
 	}{
-		"the repository has no such file":       {"", &reasonError{status: 422, Reason: "no_experiment_file", Message: "the repository has none"}, nil, http.StatusUnprocessableEntity, false},
+		"the repository has no such file":       {"", api.Refuse(422, "no_experiment_file", "the repository has none"), nil, http.StatusUnprocessableEntity, false},
 		"no app on this deployment":             {"", huma.Error503ServiceUnavailable("this deployment has no GitHub App configured"), nil, http.StatusServiceUnavailable, false},
 		"an empty file":                         {"", nil, nil, http.StatusUnprocessableEntity, true},
 		"a file that is not the body":           {"nmae: typo\n", nil, nil, http.StatusUnprocessableEntity, true},
