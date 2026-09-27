@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -237,7 +238,16 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 	case errors.Is(err, db.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
-		return refuseSignup(409, "not_running", "platform experiment %s is not running: an agent finishes in one that is, and one of role baseline also in an open one, once the baseline is measured", platformExpID)
+		pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
+		if err != nil {
+			return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+		}
+		// The same answer as to anything else sent past the close (RequireActive): the token's
+		// wind-down is for filing summaries, and the close already ended the agent's run.
+		if pe == nil || pe.Status == domain.PlatformExpClosed {
+			return api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
+		}
+		return refuseSignup(409, "not_running", "platform experiment %s is %s: only an agent of role baseline finishes before it runs", platformExpID, pe.Status)
 	case errors.Is(err, db.ErrWorkUnfinished):
 		return refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, or a completed job without its summary: cancel or wait for the one, write the other, then finish", agentID)
 	case err != nil:
@@ -414,7 +424,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
 			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
-			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 not_running anywhere else. Calling it again changes nothing.",
+			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`

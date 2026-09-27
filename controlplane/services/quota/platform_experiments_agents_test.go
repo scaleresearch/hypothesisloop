@@ -760,3 +760,42 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 		t.Errorf("a second agent named ablation: got = %d %v, want 409 agent_name_taken", code, out)
 	}
 }
+
+// FinishAgent refuses as the store does: an agent finishes in a running platform experiment, and
+// one of role baseline also in an open one.
+func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, _ string) error {
+	signup, _ := f.GetAgentSignup(context.Background(), f.pe.ID, agentID)
+	switch {
+	case signup == nil:
+		return db.ErrNotSignedUp
+	case f.pe.Status == domain.PlatformExpRunning, f.pe.Status == domain.PlatformExpOpen && signup.Role == domain.SignupRoleBaseline:
+		return nil
+	}
+	return db.ErrSignupClosed
+}
+
+// A baseline agent that finished after its platform experiment closed was answered 409 not_running
+// and a paragraph about roles. Its token still works then, to file summaries, and anything else it
+// sends is answered experiment_closed.
+func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
+	for status, want := range map[domain.PlatformExperimentStatus]string{
+		domain.PlatformExpClosed: "experiment_closed", domain.PlatformExpOpen: "not_running", domain.PlatformExpRunning: "",
+	} {
+		store := newRosterStore(status, 5)
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		r := agentsRouter(t, store, auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}})
+		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents/dana/finish", `{"reason":"nothing left"}`)
+		if want == "" {
+			if code != http.StatusOK || out["status"] != "finished" {
+				t.Errorf("%s: got = %d %v, want = 200 finished", status, code, out)
+			}
+			continue
+		}
+		if code != http.StatusConflict || out["reason"] != want {
+			t.Errorf("%s: got = %d %v, want = 409 %s", status, code, out, want)
+		}
+		if message, _ := out["message"].(string); status == domain.PlatformExpClosed && message != "platform experiment pe-1 is closed: your run is over and nothing is left to finish" {
+			t.Errorf("closed: message %q, want one short sentence", message)
+		}
+	}
+}
