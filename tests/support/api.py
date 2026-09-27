@@ -56,6 +56,12 @@ def token_scope(token: str) -> tuple[str, str, str]:
 # every platform experiment the suite creates.
 BASELINE_HOURS = 0.005
 
+# The two waits of declare_baseline_and_wait_running: for the baseline job to complete, then for
+# the platform to start the run, which it does within a minute. Together they stay inside the
+# default pytest timeout of 240 seconds, so a wait that fails names what it waited for.
+BASELINE_JOB_WAIT_SECONDS = 135
+RUN_START_WAIT_SECONDS = 75
+
 # Reports each metric three times over ten seconds, moving the way the metric is ranked, so the
 # job is observed alive and nothing reads its series as declining.
 BASELINE_REPORTER = """
@@ -438,7 +444,7 @@ class API:
             standing,
             accept=lambda seen: seen[0] == "running",
             reject=lambda seen: seen[0] != "open",
-            deadline=Deadline.in_seconds(180),
+            deadline=Deadline.in_seconds(RUN_START_WAIT_SECONDS),
             interval=2,
         )
 
@@ -446,7 +452,7 @@ class API:
     # an experiment's agents, hypotheses or jobs to leave out. Shared by every caller.
     baseline_of: dict[str, "Baseline"] = {}
 
-    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None, within: float = 300) -> "Baseline":
+    def declare_baseline(self, pe_id: str, job_overrides: dict[str, Any] | None = None) -> "Baseline":
         """Gives an open platform experiment its baseline as a client does: an agent of role
         baseline joins, its job runs to the end and gets its finding, and the description that
         names the job is sent with the declaration.
@@ -466,7 +472,7 @@ class API:
             lambda: self.experiment(job),
             accept=lambda e: e["status"] == "COMPLETED",
             reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
-            deadline=Deadline.in_seconds(within),
+            deadline=Deadline.in_seconds(BASELINE_JOB_WAIT_SECONDS),
             interval=1,
         )
         self.file_finding(job, f"the control ran unchanged as {job}")
