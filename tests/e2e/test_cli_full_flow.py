@@ -114,7 +114,7 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
             "hypothesis_id": hyp_id,
             "theory": "e2e scenario coverage",
             "estimated_duration_hours": JOB_HOURS,
-            "code_ref": "git://hypothesisloop@" + "a" * 40,
+            "code_ref": api.code_ref(pe_id),
             "config_hash": "",
             "data_ref": "",
             "capacity_tier": "guaranteed",

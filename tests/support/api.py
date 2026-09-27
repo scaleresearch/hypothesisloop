@@ -70,6 +70,7 @@ class JobRequest:
     agent_id: str
     platform_experiment_id: str
     hypothesis_id: str
+    code_ref: str
     hours: float
     tier: str = "guaranteed"
     job_overrides: dict[str, Any] = field(default_factory=dict)
@@ -94,7 +95,7 @@ class JobRequest:
             "platform_experiment_id": self.platform_experiment_id,
             "hypothesis_id": self.hypothesis_id,
             "theory": "e2e pytest coverage",
-            "code_ref": "git://hypothesisloop@" + "a" * 40,
+            "code_ref": self.code_ref,
             "config_hash": "",
             "data_ref": "",
             "capacity_tier": self.tier,
@@ -144,20 +145,31 @@ class API:
             self.created_platform_experiments.append(json.loads(proc.stdout)["id"])
         return proc.stdout
 
-    # Whether the stack has a GitHub App, in which case every platform experiment keeps its code
-    # in a repository, and the orgs the sandbox installation is already connected to.
+    # Whether the stack keeps its code on GitHub, the orgs the sandbox installation is already
+    # connected to, and on any other stack the repository made for the session.
     _github_app: bool | None = None
     _connected: set[str] = set()
+    local_repository: Path | None = None
 
-    def sandbox_repository(self) -> str | None:
-        """The repository a create names when the test names none: the sandbox one, on a stack
-        with a GitHub App, where a create that names none would have the platform create a new
-        repository on github.com each time. The installation that covers it is connected to this
-        caller's org first. None on a stack with no App, where no repository is needed."""
+    def sandbox_repository(self) -> str:
+        """The repository a create names when the test names none. On a stack whose git host is
+        GitHub it is the sandbox one, since a create that names none would have the platform
+        create a new repository on github.com each time, and the installation that covers it is
+        connected to this caller's org first. On any other stack it is a bare repository made
+        once for the session in the directory the local git server serves (HL_E2E_GIT_ROOT)."""
         if API._github_app is None:
             API._github_app = self.get("/github/app").status_code != 503
         if not API._github_app:
-            return None
+            if API.local_repository is None:
+                root = os.environ.get("HL_E2E_GIT_ROOT")
+                if not root:
+                    raise RuntimeError(
+                        "this stack keeps its code on its own git server, where the platform creates no repository: "
+                        "set HL_E2E_GIT_ROOT to the directory that server serves (make e2e does)")
+                created = Path(root) / f"e2e-{uuid.uuid4().hex[:8]}.git"
+                subprocess.run(["git", "init", "-q", "--bare", str(created)], check=True)
+                API.local_repository = created
+            return API.local_repository.name
         installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
         if not installation or not repository:
             raise RuntimeError(
@@ -203,8 +215,7 @@ class API:
 
     def post(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
         if path in ("/platform-experiments", "/platform-experiments/drafts") and json_body is not None and "repository" not in json_body:
-            if repository := self.repository or self.sandbox_repository():
-                json_body = {**json_body, "repository": repository}
+            json_body = {**json_body, "repository": self.repository or self.sandbox_repository()}
         return self.session.post(self._url(path), json=json_body, timeout=30, **kw)
 
     def put(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
@@ -232,6 +243,12 @@ class API:
 
     # ---- platform experiments -------------------------------------------------------------------
 
+    def code_ref(self, pe_id: str) -> str:
+        """What a job of the platform experiment names as its code: the experiment's repository
+        at a commit. Admission checks the address. The suite's workload is in its image and
+        clones nothing, so the commit is one no repository holds."""
+        return self.get_json(f"/platform-experiments/{pe_id}")["repository_url"] + "@" + "a" * 40
+
     def create_platform_experiment(
         self,
         name: str,
@@ -258,8 +275,7 @@ class API:
             body["stages"] = stages
         if max_concurrent_accelerators is not None:
             body["max_concurrent_accelerators"] = max_concurrent_accelerators
-        if named := repository or self.repository or self.sandbox_repository():
-            body["repository"] = named
+        body["repository"] = repository or self.repository or self.sandbox_repository()
         out = self.hl("platform-experiments", "create", "-", input=yaml.safe_dump(body, sort_keys=False))
         return json.loads(out)["id"]
 
@@ -474,6 +490,7 @@ class API:
             agent_id=agent_id,
             platform_experiment_id=pe_id,
             hypothesis_id=hyp_id,
+            code_ref=self.code_ref(pe_id),
             hours=hours,
             tier=tier,
             job_overrides=job_overrides or {},
@@ -502,6 +519,7 @@ class API:
             agent_id=agent_id,
             platform_experiment_id=pe_id,
             hypothesis_id=hyp_id,
+            code_ref=self.code_ref(pe_id),
             hours=hours,
             tier=tier,
             job_overrides=job_overrides or {},
@@ -512,7 +530,7 @@ class API:
 
     def submission_body_for_id(self, job_id: str, pe_id: str, agent_id: str, tier: str = "guaranteed", hours: float = 0.02) -> dict:
         hyp_id = self.register_hypothesis(pe_id, agent_id, "")["id"]
-        req = JobRequest(id=job_id, agent_id=agent_id, platform_experiment_id=pe_id, hypothesis_id=hyp_id, hours=hours, tier=tier)
+        req = JobRequest(id=job_id, agent_id=agent_id, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=self.code_ref(pe_id), hours=hours, tier=tier)
         return yaml.safe_load(req.to_yaml())
 
     def post_experiment_body(self, body: dict) -> requests.Response:

@@ -117,6 +117,11 @@ if [[ -n "${HL_GITHUB_APP_ID}" && -n "$(lib_env_value HL_E2E_GITHUB_REPO)" ]]; t
   export HL_E2E_GITHUB_INSTALLATION HL_E2E_GITHUB_REPO
 fi
 
+# On a stack with no App the suite makes its repository where the local git server serves from.
+if [[ "$(lib_git_provider)" == "plain" ]]; then
+  export HL_E2E_GIT_ROOT="${HL_GIT_ROOT}"
+fi
+
 if [[ $# -eq 0 ]]; then
   set -- e2e -m "not hardware and not real_providers"
 fi

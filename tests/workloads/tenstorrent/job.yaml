@@ -9,7 +9,8 @@ id: replace-with-a-unique-job-id
 metadata:
   hypothesis_id: REPLACE-WITH-YOUR-HYPOTHESIS-ID   # from POST /hypotheses or `hl hypothesis submit`
   theory: "your specific prediction for this run"
-  code_ref: "git://hypothesisloop@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # REPLACE with your own <git-remote-url>@<40-hex-commit-sha>
+  # code_ref is left out: hl job submit fills it from the clone of the platform experiment's
+  # repository it is run in, as <repository_url>@<40-hex-commit-sha>.
   # config_hash/data_ref: optional reproducibility pointers (hash of the resolved
   # hyperparameter config, where the input dataset lives) -- pure bookkeeping, never
   # validated. Omit both if you have nothing to point at.

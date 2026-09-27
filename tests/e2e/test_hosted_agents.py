@@ -9,10 +9,9 @@ runtime/cloud/internal/agentlaunch's own tests, one of which runs it against the
 handler. The local control plane gives hosted agents to the launcher named in its config
 (agents.launcher).
 
-A hosted agent works in its platform experiment's repository, which every experiment has on a
-stack with a GitHub App. Most tests here name the sandbox repository test_experiment_repo.py
-pushes to and are skipped without it (conftest's sandbox_repository). With no App an experiment
-has no repository and is hosted all the same, which the first test holds on either stack.
+A hosted agent works in its platform experiment's repository. Most tests here name the one
+conftest's sandbox_repository gives: on GitHub the sandbox test_experiment_repo.py pushes to,
+without which they are skipped, and on any other git host a repository made for the session.
 
 Exclusive: every test here asks as the one launcher the local control plane gives hosted agents
 to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
@@ -85,7 +84,7 @@ def _hosted_run(project: API, name: str, **more) -> requests.Response:
     body = {
         "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
         "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "ends_at": "2099-01-01T00:00:00Z",
-        **({"repository": project.repository} if project.repository else {}), **more,
+        **more,
     }
     return project.post("/platform-experiments", body)
 
@@ -94,15 +93,13 @@ def roster(api: API, pe_id: str) -> dict[str, dict]:
     return {a["agent_id"]: a for a in api.agents(pe_id)}
 
 
-def test_agents_and_a_coordinator_are_hosted_with_a_repository_exactly_where_the_stack_has_an_app(api: API, run_id: str):
+def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: API, run_id: str):
     project = api
     r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_hosted=True)
     assert r.status_code == 201 and r.json()["coordinator_hosted"] is True, f"{r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
-        # With no repository the agent starts in an empty directory and the platform keeps the
-        # code it pushes, so hosting it needs none.
-        assert ("repository_url" in r.json()) == (project.sandbox_repository() is not None), r.text
+        assert r.json()["repository"] == project.sandbox_repository() and r.json()["repository_url"], r.text
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
         assert r.status_code == 201, f"hosted: {r.status_code} {r.text}"
         hosted = r.json()["agents"][0]

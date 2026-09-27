@@ -79,7 +79,7 @@ def test_a_name_in_both_env_and_secret_env_is_refused(api, experiment, run_id):
     hyp_id = api.register_hypothesis(pe_id, agent, "")["id"]
     job_id = f"secret-clash-{uuid.uuid4().hex[:8]}"
     req = JobRequest(
-        id=job_id, agent_id=agent, platform_experiment_id=pe_id, hypothesis_id=hyp_id, hours=0.02, tier="guaranteed",
+        id=job_id, agent_id=agent, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=api.code_ref(pe_id), hours=0.02, tier="guaranteed",
         job_overrides={"env": {"HF_TOKEN": "open"}, "secret_env": {"HF_TOKEN": "the-secret-value"}},
     )
     r = api.post("/experiments", yaml.safe_load(req.to_yaml()))

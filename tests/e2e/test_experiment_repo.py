@@ -1,12 +1,11 @@
 """The repository a platform experiment works on: how an org's GitHub connection is reached, what
-an experiment may name, and who is handed a git credential.
+an experiment may name, who is handed a git credential, and what code a job may run.
 
-Every boundary around an org's installations holds whether or not the deployment has a GitHub
-App. With one every platform experiment has a repository, so the test of an experiment that names
-none runs only on a stack with no App. A real connect needs a person to authorise the App in a
-browser, so the one test that clones and pushes has hl-admin connect the installation instead,
-which asks GitHub as the App that it exists. It runs only when the environment names a sandbox
-repository:
+Every boundary around an org's installations holds whichever git host the deployment has. On a
+plain host one test names, clones and pushes a repository of the local git server. On GitHub a
+real connect needs a person to authorise the App in a browser, so the one test that clones and
+pushes has hl-admin connect the installation instead, which asks GitHub as the App that it
+exists. It runs only when the environment names a sandbox repository:
 
     HL_E2E_GITHUB_INSTALLATION    the installation of the App that covers it
     HL_E2E_GITHUB_REPO            owner/name, a repository tests may push branches to
@@ -17,12 +16,14 @@ import os
 import subprocess
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import pytest
 import requests
 
+from conftest import make_agent
 from support import admin
-from support.api import API
+from support.api import API, token_scope
 
 
 @dataclass
@@ -94,8 +95,8 @@ def test_another_orgs_github_reads_as_an_org_that_does_not_exist(orgs):
 
 @pytest.mark.parallel
 def test_connect_is_refused_without_proof_from_github(orgs):
-    """With no App the deployment says so. With one, GitHub refuses a made-up code. Either way
-    nothing is connected."""
+    """A deployment whose git host is not GitHub says it has no App. With one, GitHub refuses a
+    made-up code. Either way nothing is connected."""
     a, _ = orgs
     app = _call(a.api, "GET", "/github/app")
     connect = _call(a.api, "POST", f"/orgs/{a.org_id}/github-installations", CONNECT)
@@ -136,21 +137,16 @@ def test_a_git_credential_goes_only_to_what_the_platform_launched(api: API, orgs
 
 
 @pytest.mark.parallel
-def test_a_platform_experiment_without_a_repository_has_no_clone_address_and_hands_git_nothing(orgs, run):
-    a, _ = orgs
-    if _call(a.api, "GET", "/github/app").status_code != 503:
-        pytest.skip("this stack has a GitHub App, so every platform experiment has a repository: run on a stack with no App")
-    pe_id, agent = run
-    read = agent.get_json(f"/platform-experiments/{pe_id}")
-    assert "repository" not in read and "repository_url" not in read, read
-    nothing = _call(agent, "POST", "/git-credentials", ANY_REPO)
-    assert nothing.status_code == 404 and nothing.json()["reason"] == "no_repository", nothing.text
-    asked = "protocol=https\nhost=github.com\npath=acme/model.git\n\n"
-    got = agent.hl_expect("git-credential", "get", input=asked)
-    assert got.returncode == 1 and got.stdout == "" and "names no repository" in got.stderr, got
-    for operation in ("store", "erase"):
-        done = agent.hl_expect("git-credential", operation, input=asked + "password=secret\n")
-        assert done.returncode == 0 and done.stdout == "" and done.stderr == "", done
+def test_a_job_runs_only_a_commit_of_its_experiments_repository(api: API, experiment, run_id: str):
+    agent = make_agent(api, run_id, "code-ref")
+    pe_id = experiment("code-ref", [agent], budget=1.0)
+    job_id = f"code-ref-{uuid.uuid4().hex[:8]}"
+    body = api.submission_body_for_id(job_id, pe_id, agent)
+    body["metadata"]["code_ref"] = "https://git.example.invalid/elsewhere.git@" + "a" * 40
+    refused = api.post_experiment_body(body)
+    assert refused.status_code == 422 and refused.json()["reason"] == "code_ref_not_in_repository", refused.text
+    assert api.get_json(f"/platform-experiments/{pe_id}")["repository_url"] in refused.json()["message"], refused.text
+    assert api.get(f"/experiments/{job_id}").status_code == 404, "the refused job was stored"
 
 
 @pytest.mark.parallel
@@ -185,7 +181,7 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
 
     named = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "acme/model"})
     if _call(a.api, "GET", "/github/app").status_code == 503:
-        assert named.status_code == 503 and named.json()["reason"] == "github_not_configured", named.text
+        assert named.status_code == 422 and named.json()["reason"] == "repository_not_reachable", named.text
     else:
         assert named.status_code == 422 and named.json()["reason"] == "installation_not_connected", named.text
         address = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "https://github.com/acme/model"})
@@ -204,9 +200,52 @@ def _git(agent: API, cwd, *args: str) -> subprocess.CompletedProcess:
         "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
         "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
     }
-    cmd = ["git", "-c", "credential.helper=", "-c", f"credential.https://github.com.helper=!{agent.hl_bin} git-credential",
-           "-c", "credential.https://github.com.useHttpPath=true", *args]
+    cmd = ["git", "-c", "credential.helper=", "-c", f"credential.helper=!{agent.hl_bin} git-credential",
+           "-c", "credential.useHttpPath=true", *args]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.parallel
+def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branch_to_it(orgs, run, run_id: str, tmp_path):
+    a, _ = orgs
+    if _call(a.api, "GET", "/github/app").status_code != 503:
+        pytest.skip("this stack keeps its code on GitHub, which the sandbox test below covers")
+    pe_id, agent = run
+    read = agent.get_json(f"/platform-experiments/{pe_id}")
+    repository, address = read["repository"], read["repository_url"]
+    assert address.endswith("/" + repository), read
+
+    # The platform creates no repository on such a host and reads no file from one.
+    whole = {**RUN, "project_id": a.project_id, "name": f"repo-plain-{run_id}", "description": "names a repository",
+             "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
+    for body, reason in (
+        (whole, "repository_required"),
+        ({**whole, "repository": f"no-such-{run_id}.git"}, "repository_not_reachable"),
+        ({**whole, "repository": address}, "invalid_repository"),
+        ({**RUN, "project_id": a.project_id, "repository": repository, "from_repo": True}, "experiment_file_unsupported"),
+    ):
+        refused = _call(a.api, "POST", "/platform-experiments", body)
+        assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
+
+    # A credential is handed out for the experiment's repository and for no other address.
+    host = urlparse(address)
+    mine = {"protocol": host.scheme, "host": host.netloc, "path": host.path.lstrip("/")}
+    assert _call(agent, "POST", "/git-credentials", mine).status_code == 201
+    elsewhere = _call(agent, "POST", "/git-credentials", {**mine, "path": f"no-such-{run_id}.git"})
+    assert elsewhere.status_code == 404 and elsewhere.json()["reason"] == "not_found", elsewhere.text
+
+    cloned = _git(agent, tmp_path, "clone", address, "work")
+    assert cloned.returncode == 0, cloned.stderr
+    work = tmp_path / "work"
+    branch = f"hl/{pe_id}/{token_scope(agent.token)[2]}"
+    assert _git(agent, work, "checkout", "-b", branch).returncode == 0
+    (work / "e2e.txt").write_text(f"pushed by {run_id}\n")
+    assert _git(agent, work, "add", "e2e.txt").returncode == 0
+    assert _git(agent, work, "commit", "-m", f"e2e {run_id}").returncode == 0
+    pushed = _git(agent, work, "push", "origin", branch)
+    assert pushed.returncode == 0, pushed.stderr
+    listed = _git(agent, work, "ls-remote", "--heads", "origin", branch)
+    assert listed.returncode == 0 and branch in listed.stdout, listed.stderr
 
 
 @pytest.mark.parallel

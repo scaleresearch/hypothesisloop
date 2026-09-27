@@ -7,6 +7,7 @@ xdist-parallel tests never collide on agent ids, job ids or platform-experiment 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -108,6 +109,8 @@ def api(preflight: None):
         client.close_platform_experiment(pe_id)
     for name, org_id in admin.added_clusters:
         client.session.delete(client._url(f"/orgs/{org_id}/clusters/{name}"), timeout=30)
+    if API.local_repository:
+        shutil.rmtree(API.local_repository)
 
 
 @pytest.fixture
@@ -123,15 +126,17 @@ def deadline(request: pytest.FixtureRequest) -> Deadline:
 
 @pytest.fixture(scope="session")
 def sandbox_repository(api: API):
-    """owner/name of the GitHub repository tests may work in, reachable by the default org: an
-    agent the platform hosts works in its experiment's repository, so hosting needs one. The
-    installation that covers it is connected to the default org for the session unless it
-    already was, and what was found connected is left connected."""
+    """The repository tests may work in, reachable by the default org. On a stack whose git host
+    is GitHub it is owner/name of the sandbox: the installation that covers it is connected to
+    the default org for the session unless it already was, and what was found connected is left
+    connected. On any other stack it is the bare repository the session made on the local git
+    server (API.sandbox_repository)."""
+    if api.get("/github/app").status_code == 503:
+        yield api.sandbox_repository()
+        return
     installation, repository = os.environ.get("HL_E2E_GITHUB_INSTALLATION"), os.environ.get("HL_E2E_GITHUB_REPO")
     if not installation or not repository:
         pytest.skip("needs a repository: set HL_E2E_GITHUB_INSTALLATION and HL_E2E_GITHUB_REPO")
-    if api.get("/github/app").status_code == 503:
-        pytest.skip("this deployment has no GitHub App configured")
     installations = f"/orgs/{api.org_id}/github-installations"
     found = any(i["installation_id"] == int(installation) for i in api.get_json(installations, params={"limit": 200}))
     if not found:
