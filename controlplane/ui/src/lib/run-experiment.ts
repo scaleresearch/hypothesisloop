@@ -1,4 +1,4 @@
-import { addPlatformExperimentAgents, createPlatformExperiment, updatePlatformExperiment } from '@/lib/api'
+import { addPlatformExperimentAgents, createPlatformExperiment } from '@/lib/api'
 import type { CreatePlatformExperimentRequest } from '@/lib/api'
 import type { PlatformExperiment } from '@/types'
 
@@ -28,11 +28,11 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 
 /**
  * Creates a platform experiment the platform runs: the experiment with a hosted coordinator and
- * no start time, so that nothing starts it between two agents joining, then one hosted agent a
- * call, then its start time, now. The platform starts it from then, once its coordinator has had
- * the baseline measured and declared it. The calls are made in order and one at a time. A refused create rejects and nothing exists. Any
- * later refusal ends the run where it is: nothing is undone or tried again, and the outcome names
- * the step, for the experiment's page to finish from.
+ * no start time, then one hosted agent a call. The platform starts it by itself once its
+ * coordinator has had the baseline measured and declared it. The calls are made in order and one
+ * at a time. A refused create rejects and nothing exists. Any later refusal ends the run where it
+ * is: nothing is undone or tried again, and the outcome names the step, for the experiment's page
+ * to finish from.
  */
 export async function createAndRun(projectID: string, request: CreatePlatformExperimentRequest, researchers: number): Promise<RunOutcome> {
   const { starts_at: _unscheduled, ...unscheduled } = request
@@ -48,11 +48,6 @@ export async function createAndRun(projectID: string, request: CreatePlatformExp
     } catch (error) {
       return stopped(`adding hosted agent ${n} of ${researchers}`, error)
     }
-  }
-  try {
-    await updatePlatformExperiment(experiment.id, { starts_at: new Date().toISOString() })
-  } catch (error) {
-    return stopped('setting its start time', error)
   }
   return { experiment }
 }

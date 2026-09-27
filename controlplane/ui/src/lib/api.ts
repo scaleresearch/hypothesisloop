@@ -282,7 +282,7 @@ export function fetchExperimentLogs(id: string, n = 200): Promise<string[]> {
 }
 
 // Metric history of every job in a platform experiment over its own run, one series per job. The
-// window reaches from the start to the end, or to now while it runs: each series comes back as
+// window reaches from the run's start to its end, or to now while it runs: each series comes back as
 // about 500 points whatever the window, so a wider one costs resolution. Quarter hours keep the
 // sampling grid still from one poll to the next.
 export function fetchPlatformExperimentTimeseries(
@@ -290,9 +290,9 @@ export function fetchPlatformExperimentTimeseries(
   metricName: string,
 ): Promise<{ series: AgentMetricSeries[] }> {
   const query = new URLSearchParams({ metric_name: metricName })
-  if (!isZeroDate(pe.starts_at)) {
+  if (pe.started_at) {
     const end = Math.min(Date.now(), new Date(pe.ends_at as string).getTime())
-    const quarters = Math.ceil((end - new Date(pe.starts_at as string).getTime()) / 900_000)
+    const quarters = Math.ceil((end - new Date(pe.started_at).getTime()) / 900_000)
     query.set('lookback_hours', String(Math.max(1, quarters) / 4))
     query.set('end', new Date(pe.ends_at as string).toISOString())
   }
@@ -445,11 +445,10 @@ export interface CreatePlatformExperimentRequest {
   report_interval_seconds?: number
   /** Elimination ladder; omitted means the platform default. See docs/stages.md. */
   stages?: Stage[]
-  /** Omitted, the experiment starts when it is started. */
+  /** The earliest it may start. Omitted, the platform starts it once its baseline is declared. */
   starts_at?: string
-  /** How long it lasts: this or duration_hours, one of the two. */
-  ends_at?: string
-  duration_hours?: number
+  /** How long the run lasts, counted from the moment it starts. */
+  duration_hours: number
   /** owner/name of a repository a connected GitHub account covers. Read at creation only. */
   repository?: string
   /** The image hosted agents and the coordinator run; omitted means the platform's. Read at creation only. */
@@ -477,12 +476,6 @@ export function fetchExperimentFile(projectID: string, repository: string): Prom
 
 export function createPlatformExperiment(projectID: string, req: CreatePlatformExperimentRequest): Promise<PlatformExperiment> {
   return apiSend<PlatformExperiment>('POST', '/platform-experiments', { ...req, project_id: projectID })
-}
-
-// Closes signup and divides the budget among the agents present, once and from status open. The
-// API refuses it when nobody has joined.
-export async function startPlatformExperiment(id: string): Promise<void> {
-  await apiSend('POST', `/platform-experiments/${id}/start`)
 }
 
 export interface PlatformExperimentsParams {
@@ -565,7 +558,7 @@ export function fetchResourceCapacity(orgID: string): Promise<ResourceCapacity> 
 /** The fields of a platform experiment that can change after it is created. */
 export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
   'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'max_concurrent_accelerators' | 'metrics' |
-  'report_interval_seconds' | 'starts_at' | 'ends_at'>>
+  'report_interval_seconds' | 'starts_at' | 'duration_hours'>>
 
 /** Changes the fields the patch names and no others. */
 export function updatePlatformExperiment(id: string, patch: PlatformExperimentPatch): Promise<PlatformExperiment> {

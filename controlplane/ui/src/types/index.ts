@@ -198,9 +198,20 @@ export interface PlatformExperiment {
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Absent uses the
   // platform default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators?: number
+  // The earliest it may start: the zero time when none is stated.
   starts_at?: string
+  // The run's own clock. started_at and ends_at are absent until the platform starts the run,
+  // and ends_at is then started_at plus duration_hours. A draft has no duration_hours.
+  started_at?: string
+  duration_hours?: number
   ends_at?: string
+  // On an open one: when the platform closes it if it is not running by then.
+  baseline_due_at?: string
   status: PlatformExperimentStatus
+  // On a draft or an open one, read by itself: where it stands, in words for a person.
+  status_reason?: { reason: string; message: string }
+  // What it has spent of its budget. On a read of one that is no draft.
+  consumed_accelerator_hours?: number
   stages: Array<{ length_pct: number; evict_pct: number; max_job_hours?: number }>  // the elimination ladder
   current_stage: number               // 1-based index into stages
   signup_count: number
@@ -620,7 +631,9 @@ export interface AgentSignup {
   platform_experiment_id: string
   agent_id: string
   name: string
-  role: 'competitor' | 'baseline' | 'reviewer'
+  role: 'competitor' | 'baseline' | 'reviewer' | 'planner'
+  // Whose credential added the agent.
+  actor: Actor
   // true: the platform runs the agent on a machine of its own.
   hosted: boolean
   flavor?: string

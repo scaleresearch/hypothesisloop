@@ -65,7 +65,7 @@ function names(role: 'button' | 'textbox') {
 
 beforeEach(() => {
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', hosted: false, signed_up_at: at },
+    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, signed_up_at: at },
   ])
   vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })

@@ -8,7 +8,7 @@ import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly } from '@/lib/read-only'
 import { useTenant } from '@/lib/tenant'
 import { hypothesisActivity } from '@/lib/hypothesis-progress'
-import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { formatAccH, isZeroDate, runClock } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
 import { statusColor } from '@/lib/colors'
@@ -67,6 +67,7 @@ export function PlatformExperimentCard({
 
   const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
+  const clock = runClock(pe)
   const daysLeft = !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
@@ -86,9 +87,7 @@ export function PlatformExperimentCard({
           <SharedBadge pe={pe} />
         </div>
         <div className="flex items-center gap-3 font-normal">
-          {!isZeroDate(pe.starts_at) && (
-            <span className="text-xs text-subtle">{formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}</span>
-          )}
+          {clock && <span className="text-xs text-subtle">{clock}</span>}
           {daysLeft != null && daysLeft > 0 && (
             <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
           )}
@@ -112,7 +111,7 @@ export function PlatformExperimentCard({
           </div>
           <div>
             <Eyebrow className="block">Agents</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.signup_count} <span className="text-xs text-muted">/ {pe.max_agents}</span></div>
+            <div className="font-mono text-xl font-bold">{pe.signup_count} <span className="text-xs text-muted">joined, {pe.max_agents} researchers at most</span></div>
           </div>
           <div>
             <Eyebrow className="block">Budget Used</Eyebrow>

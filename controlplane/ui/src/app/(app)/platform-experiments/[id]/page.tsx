@@ -41,7 +41,7 @@ import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-messag
 import { LinkTr, Table, num } from '@/components/ui/table'
 import { Eyebrow, Pill } from '@/components/ui/text'
 import { semantic, chart } from '@/lib/colors'
-import { formatAccH, formatDate, isZeroDate } from '@/lib/format'
+import { formatAccH, formatDate, runClock } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -157,7 +157,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   // polls slower than the rest.
   const peMetricKeys = (pe?.metrics ?? []).map(m => m.key)
   const { data: allMetricSeries, error: metricSeriesError } = useSWR<{ key: string; series: AgentMetricSeries[] }[]>(
-    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), pe.starts_at, pe.ends_at] : null,
+    pe && peMetricKeys.length > 0 ? ['pe-all-metrics', id, peMetricKeys.join(','), pe.started_at, pe.ends_at] : null,
     () => Promise.all(peMetricKeys.map(k =>
       fetchPlatformExperimentTimeseries(pe!, k).then(r => ({ key: k, series: r.series })),
     )),
@@ -223,6 +223,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, (experiments ?? []).map(exp => exp.accelerator_type)))
+  const clock = runClock(pe)
 
   // Running experiments
   const jobsByStatus = stats?.by_status ?? {}
@@ -264,11 +265,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             <StatusBadge status={pe.status} />
             <CloseReason pe={pe} />
             <SharedBadge pe={pe} />
-            {!isZeroDate(pe.starts_at) && (
-              <span className="text-xs text-subtle">
-                {formatDate(pe.starts_at)} – {formatDate(pe.ends_at)}
-              </span>
-            )}
+            {clock && <span className="text-xs text-subtle">{clock}</span>}
             <TextLink href={graphHref(pe.id)} className="text-xs">
               {hypothesisCount} Hypotheses →
             </TextLink>
@@ -462,7 +459,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               tone={held.atCap ? 'accent' : undefined}
               sub={pe.max_concurrent_accelerators == null ? 'no cap set' : undefined}
             />
-            <StatTile label="Agents" value={`${pe.signup_count} / ${pe.max_agents}`} />
+            <StatTile label="Agents" value={pe.signup_count.toString()} sub={`at most ${pe.max_agents} researchers`} />
             <StatTile label="Budget Used" value={`${formatAccH(totalUsed)} ${unit}`} />
             <StatTile label="Jobs" value={(stats?.total ?? 0).toString()} href={`/jobs?platform_experiment_id=${pe.id}`} />
             <StatTile

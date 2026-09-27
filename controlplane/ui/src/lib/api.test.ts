@@ -59,7 +59,7 @@ describe('every request carries the session token', () => {
   it('on a write with a body', async () => {
     fetchMock().mockResolvedValue(answer(201, { id: 'pe-1' }))
     await createPlatformExperiment('prj_1', {
-      name: 'n', description: '', metrics: [], report_interval_seconds: 60, budget_accelerator_hours: 1, max_agents: 1, starts_at: 'a', ends_at: 'b',
+      name: 'n', description: '', metrics: [], report_interval_seconds: 60, budget_accelerator_hours: 1, max_agents: 1, starts_at: 'a', duration_hours: 48,
     })
     const { headers, init, body, url } = sent()
     expect(init.method).toBe('POST')

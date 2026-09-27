@@ -12,6 +12,14 @@ export function formatDate(iso: string | null | undefined): string {
   return isZeroDate(iso) ? 'N/A' : new Date(iso as string).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
+// The clock of a platform experiment: how long an open one may wait for its start, and from when
+// to when a started one runs. Null when it has neither, as a draft.
+export function runClock(pe: { started_at?: string; ends_at?: string; baseline_due_at?: string }): string | null {
+  if (pe.started_at) return `${formatDate(pe.started_at)} – ${formatDate(pe.ends_at)}`
+  if (pe.baseline_due_at) return `open until ${formatDate(pe.baseline_due_at)}`
+  return null
+}
+
 // Formats a AccH (Accelerator-hour) quantity for display. Values ≥ 1 round to the nearest
 // half-hour (readable at normal scale); smaller values keep 3 decimals instead of
 // being rounded away to "0" — small demo/test workloads consume fractions of an hour.

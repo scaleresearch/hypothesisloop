@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories, startPlatformExperiment,
+  ApiError, addPlatformExperimentAgents, createPlatformExperiment, fetchExperimentFile, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
   updatePlatformExperiment,
 } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -14,7 +14,7 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
   addPlatformExperimentAgents: vi.fn(), createPlatformExperiment: vi.fn(), fetchExperimentFile: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
-  startPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
+  updatePlatformExperiment: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
@@ -54,7 +54,6 @@ beforeEach(() => {
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockResolvedValue(created)
   vi.mocked(addPlatformExperimentAgents).mockResolvedValue([])
-  vi.mocked(startPlatformExperiment).mockResolvedValue()
 })
 
 describe('a new platform experiment whose agents the operator runs', () => {
@@ -67,12 +66,23 @@ describe('a new platform experiment whose agents the operator runs', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created))
     const sent = vi.mocked(createPlatformExperiment).mock.calls[0][1]
     expect(sent.coordinator_hosted).toBeUndefined()
-    // It starts when it is started, and the report interval is the platform's.
+    // The platform starts it once its baseline is declared, and the report interval is the platform's.
     expect(sent.starts_at).toBeUndefined()
     expect(sent.report_interval_seconds).toBeUndefined()
-    expect(new Date(sent.ends_at!).getTime()).toBeGreaterThan(Date.now())
+    expect(sent.duration_hours).toBe(48)
+    expect(sent).not.toHaveProperty('ends_at')
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
+  })
+
+  it('sends the length the person states, in hours', async () => {
+    show()
+    const duration = screen.getByLabelText('Duration (hours)')
+    await userEvent.clear(duration)
+    await userEvent.type(duration, '6')
+    await essentials()
+    await userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].duration_hours).toBe(6)
   })
 })
 
@@ -111,7 +121,7 @@ describe('a repository that brings its own experiment', () => {
 })
 
 describe('a new platform experiment with hosted agents', () => {
-  it('is created with its repository and a hosted coordinator, given its researchers and its start time', async () => {
+  it('is created with its repository and a hosted coordinator, and given its researchers', async () => {
     show()
     await essentials({ repository: 'acme/widgets' })
     await userEvent.click(screen.getByRole('button', { name: 'Hosted agents' }))
@@ -127,11 +137,10 @@ describe('a new platform experiment with hosted agents', () => {
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].starts_at).toBeUndefined()
     // Nobody else joins a run the platform staffs, so the cap is the researchers asked for.
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].max_agents).toBe(3)
-    expect(new Date(vi.mocked(createPlatformExperiment).mock.calls[0][1].ends_at!).getTime()).toBeLessThan(Date.now() + 3 * 86_400_000)
+    expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].duration_hours).toBe(48)
     expect(addPlatformExperimentAgents).toHaveBeenCalledTimes(3)
     // The platform starts it, once its coordinator declared a baseline.
-    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-new', { starts_at: expect.any(String) })
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
+    expect(updatePlatformExperiment).not.toHaveBeenCalled()
   })
 
   // Hosting needed a repository named, so a person with an idea and no repository could not start.
@@ -167,13 +176,13 @@ describe('a new platform experiment with hosted agents', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, {
       failure: { step: 'adding hosted agent 1 of 2', message: 'the platform runs at most 1 machine' },
     }))
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
   })
 })
 
 describe('editing a platform experiment', () => {
+  const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false } as unknown as PlatformExperiment
+
   it('offers no choice of who runs it, and sends the fields that changed and no others', async () => {
-    const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, ends_at: '2027-01-01T00:00:00Z', stages: [], shared: false } as unknown as PlatformExperiment
     const renamed = { ...existing, name: 'New' }
     vi.mocked(updatePlatformExperiment).mockReset().mockResolvedValue(renamed)
     show(existing)
@@ -192,5 +201,17 @@ describe('editing a platform experiment', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(renamed))
     expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { name: 'New' })
     expect(createPlatformExperiment).not.toHaveBeenCalled()
+  })
+
+  it('reads the experiment\'s duration and sends a changed one as duration_hours', async () => {
+    vi.mocked(updatePlatformExperiment).mockReset().mockResolvedValue(existing)
+    show(existing)
+    const duration = screen.getByLabelText('Duration (hours)')
+    expect(duration).toHaveProperty('value', '12')
+    await userEvent.clear(duration)
+    await userEvent.type(duration, '24')
+    await userEvent.click(screen.getByRole('tab', { name: '2. Budget and rules' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { duration_hours: 24 }))
   })
 })

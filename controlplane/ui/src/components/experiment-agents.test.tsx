@@ -4,7 +4,7 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-  startPlatformExperiment, createPlatformExperiment, updatePlatformExperiment,
+  createPlatformExperiment,
 } from '@/lib/api'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { clearRunFailure, createAndRun, runFailure } from '@/lib/run-experiment'
@@ -13,16 +13,16 @@ import type { AgentSignup, PlatformExperiment } from '@/types'
 
 vi.mock('@/lib/api', () => ({
   apiURL: () => 'http://api.test',
-  createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn(),
+  createPlatformExperiment: vi.fn(),
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
-  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), startPlatformExperiment: vi.fn(),
+  fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(),
 }))
 
 const at = '2026-01-01T00:00:00Z'
 let roster: AgentSignup[]
 
 function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', hosted, flavor, signed_up_at: at }
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, signed_up_at: at }
 }
 
 function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {
@@ -209,37 +209,20 @@ describe('the machines the platform runs', () => {
   })
 })
 
-describe('starting the experiment', () => {
-  it('asks first, says what it fixes, then starts it once', async () => {
-    vi.mocked(startPlatformExperiment).mockResolvedValue()
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
-    const question = within(screen.getByRole('dialog'))
-    expect(question.getByText(/After that no agent can join or be removed\./)).toBeTruthy()
-    await userEvent.click(question.getByRole('button', { name: 'Start' }))
-    expect(startPlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1')
-  })
+describe('an experiment waiting to start', () => {
+  const waits = { reason: 'baseline_required', message: 'platform experiment pe-1 has no baseline' }
 
-  it('does nothing when the answer is no', async () => {
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
-    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
-    expect(startPlatformExperiment).not.toHaveBeenCalled()
-  })
-
-  it('shows the API\'s refusal, as when nobody has joined', async () => {
-    vi.mocked(startPlatformExperiment).mockRejectedValue(new Error('no agents have signed up'))
-    show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Start now' }))
-    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' }))
-    expect(await screen.findByText('no agents have signed up')).toBeTruthy()
-  })
-
-  it.each([PlatformExperimentStatus.DRAFT, PlatformExperimentStatus.RUNNING, PlatformExperimentStatus.CLOSED])('is not offered while it is %s', async status => {
-    show(status)
+  it('says what it waits for in the API\'s words, and offers nothing to start it with', async () => {
+    show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
-    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('The platform starts the run by itself, with the agents present then. platform experiment pe-1 has no baseline')
+    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
+  })
+
+  it('says nothing of the kind once it runs', async () => {
+    show(PlatformExperimentStatus.RUNNING)
+    await screen.findByRole('cell', { name: 'ag-old' })
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })
 
@@ -256,23 +239,12 @@ describe('an experiment the create form went on to run, and the API stopped part
     const said = await screen.findByText(/it is not running as asked: adding hosted agent 1 of 2 failed\. the platform experiment names no repository/)
     expect(said.textContent).toContain('Nothing was undone. Finish with the controls below.')
     expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Start now' })).toBeTruthy()
   })
 
-  it('stops saying so once dismissed, and once the experiment is started from the page', async () => {
-    const first = show()
+  it('stops saying so once dismissed', async () => {
+    show()
     await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText(/is not running as asked/)).toBeNull()
     expect(runFailure('pe-1')).toBeUndefined()
-    first.unmount()
-
-    vi.mocked(updatePlatformExperiment).mockRejectedValueOnce(new Error('ends_at is in the past'))
-    vi.mocked(startPlatformExperiment).mockResolvedValue()
-    await createAndRun('prj_1', {} as never, 0)
-    show()
-    await screen.findByText(/setting its start time failed\. ends_at is in the past/)
-    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
-    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' }))
-    await waitFor(() => expect(screen.queryByText(/is not running as asked/)).toBeNull())
   })
 })

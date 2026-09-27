@@ -25,13 +25,6 @@ import { Segmented, Tabs } from '@/components/ui/tabs'
 import { Eyebrow, Pill } from '@/components/ui/text'
 import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 
-function localDatetime(offsetDays: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + offsetDays)
-  d.setSeconds(0, 0)
-  return d.toISOString().slice(0, 16)
-}
-
 interface FormState {
   name: string
   description: string
@@ -43,9 +36,9 @@ interface FormState {
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Empty string
   // means "use the platform default" — see quota.default_max_concurrent_accelerators.
   max_concurrent_accelerators: string
-  // Empty is no start time: the experiment starts when it is started.
+  // Empty is no start time: the platform starts it once its baseline is declared.
   starts_at: string
-  ends_at: string
+  duration_hours: number
   metrics: MetricDefinition[]
   // Empty is the platform's default.
   report_interval_seconds: string
@@ -57,7 +50,7 @@ interface FormState {
 }
 
 // Who runs the agents of a new experiment. 'platform' creates it with a hosted coordinator, adds
-// hosted agents and starts it; 'operator' creates it and leaves the rest to its page.
+// hosted agents; 'operator' creates it and leaves the rest to its page.
 type RunBy = 'platform' | 'operator'
 
 const RUN_BY_OPTIONS: Array<{ value: RunBy; label: string }> = [
@@ -66,7 +59,7 @@ const RUN_BY_OPTIONS: Array<{ value: RunBy; label: string }> = [
 ]
 
 const RUN_BY_HINTS: Record<RunBy, string> = {
-  operator: 'The experiment is created and nothing else. You add agents on its page, run by you or by the platform, and it starts at its start time or when you start it.',
+  operator: 'The experiment is created and nothing else. You add agents on its page, run by you or by the platform, and the platform starts it once its baseline is declared.',
   platform: 'The platform runs a coordinator and this many researcher agents on machines of its own, and the experiment starts as soon as they have joined. How many it runs for one experiment is the platform\'s limit, and it says so when it is passed.',
 }
 
@@ -298,7 +291,7 @@ interface FormProps {
   budgetKind?: TypeKind
   /**
    * Told the experiment the API answered with, once it is saved. `run` is set when the form went
-   * on to add hosted agents and start it, with what stopped that when something did.
+   * on to add hosted agents, with what stopped that when something did.
    */
   onSaved: (saved: PlatformExperiment, run?: { failure?: RunFailure }) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
@@ -323,7 +316,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     max_agents: initial?.max_agents ?? 20,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
-    ends_at: !isZeroDate(initial?.ends_at) ? new Date(initial!.ends_at!).toISOString().slice(0, 16) : localDatetime(2),
+    duration_hours: initial?.duration_hours ?? 48,
     metrics: initial?.metrics ?? [],
     report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : DEFAULT_STAGES,
@@ -380,9 +373,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   function step1Error(): string | null {
     if (!form.name.trim()) return 'Name is required.'
     if (!isEdit && !form.description.trim()) return 'Description is required: it is the brief every agent works from.'
-    if (!isEdit && new Date(form.ends_at) <= new Date()) return 'Ends at must be in the future.'
-    // An experiment the form starts itself has no start time of its own to compare with.
-    if (!hosted && form.starts_at && new Date(form.ends_at) <= new Date(form.starts_at)) return 'Ends at must be after Starts at.'
+    if (Number(form.duration_hours) <= 0) return 'Duration must be greater than 0.'
     return null
   }
 
@@ -399,11 +390,11 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
     if (form.report_interval_seconds.trim() !== '' && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
     if (form.starts_at && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
-    if (form.ends_at !== opened.ends_at) patch.ends_at = new Date(form.ends_at).toISOString()
+    if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
     return patch
   }
 
-  // Lives on step 2 now (moved alongside Max participants), so it no longer gates the step 1→2
+  // Lives on step 2 now (moved alongside Max researchers), so it no longer gates the step 1→2
   // transition — only the final submit, same as the ladder.
   function step2BudgetError(): string | null {
     return Number(form.budget_accelerator_hours) <= 0 ? 'Total compute budget must be greater than 0.' : null
@@ -436,7 +427,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         ...repositoryFields(form.repository),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
         ...(!hosted && form.starts_at ? { starts_at: new Date(form.starts_at).toISOString() } : {}),
-        ends_at: new Date(form.ends_at).toISOString(),
+        duration_hours: Number(form.duration_hours),
       }
       if (hosted) {
         const { experiment, failure } = await createAndRun(project.id, payload, Number(form.researchers))
@@ -510,8 +501,8 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   />
                 </FormField>
 
-                <FormField label="Ends at" hint={lockedWhileRunning ? 'Locked once running.' : 'Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
-                  <Input type="datetime-local" value={form.ends_at} disabled={lockedWhileRunning} onChange={e => set('ends_at', e.target.value)} />
+                <FormField label="Duration (hours)" hint={lockedWhileRunning ? 'Locked once running.' : 'Counted from the moment the run starts. Also drives the ladder clock: progress is whichever runs out first, budget or time.'}>
+                  <Input type="number" min={0} step="any" value={form.duration_hours} disabled={lockedWhileRunning} onChange={e => set('duration_hours', e.target.value)} />
                 </FormField>
 
                 <FieldGroup
@@ -555,7 +546,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   >
                     <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={lockedWhileRunning} onChange={e => set('budget_accelerator_hours', e.target.value)} />
                   </FormField>
-                  <FormField label="Max participants" hint={lockedWhileRunning ? 'Locked once running: the agents are fixed for the whole run.' : 'The most agents that can join. Nobody joins or leaves once the experiment has started.'}>
+                  <FormField label="Max researchers" hint={lockedWhileRunning ? 'Locked once running: the agents are fixed for the whole run.' : 'The most researchers that can join. Nobody joins or leaves once the experiment has started.'}>
                     <Input type="number" min={1} max={500} step={1} value={maxAgents} disabled={lockedWhileRunning} onChange={e => { setMaxAgentsStated(true); set('max_agents', e.target.value) }} />
                   </FormField>
                 </div>
@@ -592,7 +583,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                     {!hosted && (
                       <FormField
                         label="Starts at"
-                        hint={lockedWhileRunning ? 'Locked once running.' : 'Empty, it starts when you start it. With a time, it starts then: no more agents join and the budget is divided among the ones that have.'}
+                        hint={lockedWhileRunning ? 'Locked once running.' : 'Empty, the platform starts it once its baseline is declared. With a time, it starts no earlier than then. From the start no more agents join and the budget is divided among the ones that have.'}
                       >
                         <Input type="datetime-local" value={form.starts_at} disabled={lockedWhileRunning} onChange={e => set('starts_at', e.target.value)} />
                       </FormField>

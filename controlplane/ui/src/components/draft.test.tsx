@@ -54,7 +54,7 @@ function show(d: Draft) {
 beforeEach(() => {
   vi.mocked(apiSend).mockReset().mockResolvedValue({})
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
+    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, flavor: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
   ])
 })
 
@@ -71,6 +71,7 @@ describe('a draft being planned', () => {
     expect(draftState(draft())).toBe('planning')
     expect(draftState(draft({ proposal, proposed_at: '2026-10-05T12:10:00Z' }))).toBe('proposed')
     expect(draftState(draft({ proposal }))).toBe('revising')
+    expect(draftState(draft({ revisions: [{ message: 'Smaller.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))).toBe('revising')
   })
 })
 
@@ -150,7 +151,7 @@ describe('a proposed draft', () => {
 // A goal the planner could not plan left a draft with nothing on its page until it closed.
 describe('a draft the planner declined', () => {
   const why = '"Make the model better" names nothing to measure: say which model, on what data, and what better means.'
-  const declined = () => draft({ declined_reason: why, proposed_at: '2026-10-05T12:10:00Z', planning_ends_at: undefined, proposal_expires_at: '2026-10-12T12:10:00Z' })
+  const declined = () => draft({ declined_reason: why, declined_at: '2026-10-05T12:10:00Z', planning_ends_at: undefined, proposal_expires_at: '2026-10-12T12:10:00Z' })
 
   it('shows the reason, nothing to accept, and the ways to answer it or drop it', async () => {
     expect(draftState(declined())).toBe('declined')

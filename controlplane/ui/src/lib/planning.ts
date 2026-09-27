@@ -43,14 +43,15 @@ export interface PlanningRequest {
 export type Draft = PlatformExperiment & {
   goal?: string
   // When the platform closes a draft nobody acts on: the first while its planner has answered
-  // nothing, the second once it has and the answer waits for a person. A draft has no ends_at.
+  // nothing, the second once it has and the answer waits for a person.
   planning_ends_at?: string
   proposal_expires_at?: string
   proposal?: Proposal
-  // When the planner answered, with a proposal or with declined_reason. Absent while it works,
-  // on the first plan or on a revision.
+  // Set while a proposal stands. Absent while the planner works, on the first plan or on a
+  // revision, and on a draft it declined.
   proposed_at?: string
-  // Why the planner proposed nothing. It stays while a revision is planned.
+  // When and why the planner proposed nothing. The reason stays while a revision is planned.
+  declined_at?: string
   declined_reason?: string
   revisions?: PlanningRequest[]
 }
@@ -82,8 +83,9 @@ export async function acceptDraft(id: string, acceptance: Acceptance): Promise<v
 
 /** What a draft is waiting for. */
 export function draftState(draft: Draft): 'planning' | 'revising' | 'proposed' | 'declined' {
-  if (draft.proposed_at) return draft.proposal ? 'proposed' : 'declined'
-  return draft.proposal || draft.declined_reason ? 'revising' : 'planning'
+  if (draft.declined_at) return 'declined'
+  if (draft.proposed_at) return 'proposed'
+  return draft.revisions?.length || draft.proposal || draft.declined_reason ? 'revising' : 'planning'
 }
 
 /** Abandons a draft: it is closed and its planner's machine released. */

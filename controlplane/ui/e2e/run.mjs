@@ -582,34 +582,11 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Add agent' }).click()
   await page.getByTestId('secret').waitFor()
   secrets.add((await page.getByTestId('secret').innerText()).match(/HL_TOKEN=(\S+)/)[1])
-  // Starting before a baseline is declared is the API's to refuse, in its own words.
-  const homeStart = `${API}/platform-experiments/${homeExperimentID}/start`
-  const refusedStart = page.waitForResponse(r => r.url() === homeStart && r.request().method() === 'POST')
-  await page.getByRole('button', { name: 'Start now' }).click()
-  await confirmWith(page, 'Start')
-  assert.equal((await refusedStart).status(), 400)
-  await page.locator('.error-banner', { hasText: 'has no baseline' }).waitFor()
-  assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'open', 'the API did not start it')
-  // This org has no cluster to measure a baseline on, so the API's side of a start that is
-  // accepted is stood in for: the page sends it and shows the experiment the API then answers with.
-  const homeExperiment = `${API}/platform-experiments/${homeExperimentID}`
-  let homeStarted = false
-  await page.route(homeStart, route => {
-    if (route.request().method() !== 'POST') return route.fallback()
-    homeStarted = true
-    return route.fulfill({ headers: { 'access-control-allow-origin': UI }, json: { status: 'running', quotas: [] } })
-  })
-  await page.route(homeExperiment, async route => {
-    if (!homeStarted || route.request().method() !== 'GET') return route.fallback()
-    const response = await route.fetch()
-    return route.fulfill({ response, json: { ...await response.json(), status: 'running' } })
-  })
-  await page.getByRole('button', { name: 'Start now' }).click()
-  await confirmWith(page, 'Start')
-  await page.getByText('The experiment is running:').waitFor()
-  assert.equal(await page.getByRole('button', { name: 'Start now' }).count(), 0, 'a started experiment is not started again')
-  await page.unroute(homeExperiment)
-  await page.unroute(homeStart)
+  // Nothing on the page starts a run: the platform does, once a baseline is declared, and the
+  // page says what the experiment waits for in the API's words.
+  await page.getByText('has no baseline').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Start now' }).count(), 0, 'no button starts a run')
+  assert.equal((await (await api(await tokenOf(ada), `/platform-experiments/${homeExperimentID}`)).json()).status, 'open', 'it waits for its baseline')
 
   section('home: Create and run composes create, one call an agent, and a start time, and nothing is rented')
   // The stack has no GitHub account connected, and an agent the platform really hosts has a
@@ -701,7 +678,6 @@ async function scenarios(browser) {
   assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments', `/platform-experiments/${stoppedID}/agents`], 'nothing is called after the refusal, and nothing again')
   const stoppedExperiment = await (await api(await tokenOf(ada), `/platform-experiments/${stoppedID}`)).json()
   assert.equal(stoppedExperiment.status, 'open', 'the experiment exists and was not started')
-  await page.getByRole('button', { name: 'Start now' }).waitFor()
   await stoppedBanner.getByRole('button', { name: 'Dismiss' }).click()
   await stoppedBanner.waitFor({ state: 'detached' })
   await page.unroute(runWrite)
@@ -728,7 +704,7 @@ async function scenarios(browser) {
   let draftNow = {
     id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', shared: false,
     budget_accelerator_hours: 2, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
-    ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
+    planning_ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
   const draftWrites = []
   const draftAPI = url => url.origin === API && (url.pathname === '/platform-experiments/drafts' || url.pathname.startsWith(`/platform-experiments/${draftID}`))
