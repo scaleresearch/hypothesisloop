@@ -262,6 +262,9 @@ func (c *Config) build() error {
 	if c.Planning.LimitMinutes <= 0 {
 		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
 	}
+	if c.Planning.BaselineLimitMinutes <= 0 {
+		return fmt.Errorf("planning baseline_limit_minutes is required and positive: how long a platform experiment may stay open without a declared baseline")
+	}
 	if c.Planning.ProposedForDays <= 0 {
 		return fmt.Errorf("planning proposed_for_days is required and positive: how long a proposal waits for a person")
 	}

@@ -389,13 +389,15 @@ func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, 
 		reason, actor = string(domain.CloseByRequest), *by
 	}
 	// What the platform closes at ends_at is a run at its end, or a draft: one nobody proposed
-	// for inside the planning limit, or one whose answer no person took up.
+	// for inside the planning limit, or one whose answer no person took up. Before its ends_at
+	// it closes only an open one that got no baseline inside the baseline limit.
 	const q = `
 UPDATE platform_experiments
 SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
     close_reason = CASE WHEN $2 <> '' THEN $2
                         WHEN status = 'draft' AND proposed_at IS NULL THEN '` + string(domain.ClosePlanningLimitReached) + `'
                         WHEN status = 'draft' THEN '` + string(domain.CloseProposalExpired) + `'
+                        WHEN status = 'open' AND baseline_job_id = '' AND ends_at > NOW() THEN '` + string(domain.CloseBaselineLimitReached) + `'
                         ELSE '` + string(domain.CloseEndTimeReached) + `' END,
     closed_by_kind = $3, closed_by_id = $4
 WHERE id = $1 AND status <> 'closed'`
@@ -512,8 +514,8 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 		return false, nil, nil
 	}
 
-	// A draft's planner stays signed up, so that its jobs and its code keep their owner, and
-	// takes no share of the run: its work ended when the draft was accepted.
+	// An agent of role baseline takes no share of the run: it measured the baseline before the
+	// start, against the quota it joined with. A draft's planner has that role too.
 	// Signups joined against the agents they name and their top-3 history, all on this
 	// transaction's own connection. The caller must not issue its own queries while this
 	// transaction is open: several concurrent starts would each hold a connection and wait for
@@ -523,7 +525,7 @@ SELECT s.agent_id, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHE
        s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
-WHERE s.platform_experiment_id = $1 AND s.flavor <> '`+domain.PlannerFlavor+`'
+WHERE s.platform_experiment_id = $1 AND s.role <> '`+string(domain.SignupRoleBaseline)+`'
 ORDER BY s.agent_id`, id)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)

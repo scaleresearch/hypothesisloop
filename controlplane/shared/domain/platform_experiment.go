@@ -253,7 +253,7 @@ type PlatformExperiment struct {
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at EndsAt. Carried by a read of one platform experiment.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
-	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
+	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached" doc:"Absent while it is not closed, and on one closed before reasons were kept."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -261,7 +261,8 @@ type PlatformExperiment struct {
 }
 
 // ClosesAt is when the platform closes it if nobody does: EndsAt, PlanningEndsAt or
-// ProposalExpiresAt, whichever it has. It is the one moment stored.
+// ProposalExpiresAt, whichever it has. It is the one moment stored. An open one without a
+// baseline is closed earlier, at BaselineDue.
 func (p *PlatformExperiment) ClosesAt() time.Time {
 	switch {
 	case !p.PlanningEndsAt.IsZero():
@@ -270,6 +271,15 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 		return p.ProposalExpiresAt
 	}
 	return p.EndsAt
+}
+
+// BaselineDue is when an open platform experiment that has no baseline by then is closed: limit
+// after its start time, or after its creation when it states no start or one already past then.
+func (p *PlatformExperiment) BaselineDue(limit time.Duration) time.Time {
+	if p.StartsAt.After(p.CreatedAt) {
+		return p.StartsAt.Add(limit)
+	}
+	return p.CreatedAt.Add(limit)
 }
 
 // SetClosesAt records at under the name of what ends then, which Status, Goal, StartsAt and
@@ -298,6 +308,9 @@ const (
 	// limit, and CloseProposalExpired one whose proposal or decline no person took up in time.
 	ClosePlanningLimitReached CloseReason = "planning_limit_reached"
 	CloseProposalExpired      CloseReason = "proposal_expired"
+	// CloseBaselineLimitReached is an open platform experiment nobody declared a baseline for
+	// inside the baseline limit.
+	CloseBaselineLimitReached CloseReason = "baseline_limit_reached"
 )
 
 // PlanningRequest is one request to a draft's planner to change its proposal.
@@ -323,7 +336,10 @@ const (
 	// SignupRoleCompetitor is ranked, cut-eligible, takes a quota share and earns the top-3 bonus.
 	SignupRoleCompetitor SignupRole = "competitor"
 	// SignupRoleBaseline runs the experiment's declared control. Never ranked, never cut — the
-	// point of a baseline is that its numbers are visible and comparable, not that it wins.
+	// point of a baseline is that its numbers are visible and comparable, not that it wins. It
+	// holds a quota from the moment it joins and is the one role whose job an open platform
+	// experiment takes: the baseline is measured before anyone is ranked against it. It takes
+	// no share at the start, and what it spent is taken from the budget before the shares.
 	SignupRoleBaseline SignupRole = "baseline"
 	// SignupRoleReviewer re-checks other agents' claims and records agreement or dispute. Never
 	// ranked, never cut.

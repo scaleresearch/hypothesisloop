@@ -21,7 +21,8 @@ type AgentSignup struct {
 	Role                 SignupRole `json:"role"`
 	QuotaTier            QuotaTier  `json:"quota_tier,omitempty"`
 	// Hosted means the platform runs the agent: its launcher keeps one machine for it while the
-	// platform experiment is open or running and the agent is not cut.
+	// platform experiment is running and the agent is not cut, and for one that measures the
+	// baseline also while it is open.
 	Hosted bool `json:"hosted"`
 	// Launcher is the launcher that runs a hosted agent, written when it joins so that a later
 	// change of the configured launcher moves new agents only.
@@ -148,6 +149,12 @@ const CoordinatorFlavor = "coordinator"
 // goal and proposes the experiment. The platform signs it up when the draft
 // is created, and no request can ask for one: it is no member of AgentFlavors.
 const PlannerFlavor = "planner"
+
+// MeasuresBaseline says the agent is one whose job measures the platform experiment's baseline:
+// of role baseline, and no planner, which has the role and runs no job.
+func (s AgentSignup) MeasuresBaseline() bool {
+	return s.Role == SignupRoleBaseline && s.Flavor != PlannerFlavor
+}
 
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
 // run that ended at endedAt (a column or expression, NULL while the run goes on) is released:

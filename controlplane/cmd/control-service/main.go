@@ -110,6 +110,7 @@ func main() {
 		DefaultReportIntervalSeconds:     pcfg.Scheduler.DefaultReportIntervalSeconds,
 		DefaultQuotaTier:                 domain.QuotaTier(pcfg.Quota.DefaultQuotaTier),
 		MaxRunLength:                     time.Duration(pcfg.Quota.MaxPlatformExperimentDays) * 24 * time.Hour,
+		BaselineLimit:                    time.Duration(pcfg.Planning.BaselineLimitMinutes) * time.Minute,
 		MaxSubmissionsPerHour:            pcfg.Quota.MaxSubmissionsPerHour,
 		MaxAcceleratorCountPerJob:        pcfg.Quota.MaxAcceleratorCountPerJob,
 		MaxCPUCoresPerJob:                pcfg.Quota.MaxCPUCoresPerJob,

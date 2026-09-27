@@ -95,12 +95,19 @@ agents:
 #              revision. A draft with no proposal by then is closed and its machine released.
 #   proposed_for_days     how long a proposal waits for a person before the draft is closed. No
 #              machine runs while it waits.
+#   baseline_limit_minutes  how long a platform experiment may stay open without a declared
+#              baseline, counted from its starts_at, or from its creation when it states no
+#              later start. It does not start without one (PATCH baseline_job_id), so one that
+#              has none by then is closed with close_reason baseline_limit_reached and its
+#              machines are released. This holds for an accepted draft and for a platform
+#              experiment created whole alike.
 #   max_concurrent_per_org  how many drafts one org may have open at once, proposed ones included.
 #   max_per_day_per_org   how many drafts one org may create in 24 hours. Over either bound a new
 #              draft is refused with 429 planning_limit.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
+  baseline_limit_minutes: 90
   max_concurrent_per_org: 2
   max_per_day_per_org: 10
 

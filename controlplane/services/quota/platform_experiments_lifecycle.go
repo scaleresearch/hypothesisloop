@@ -453,8 +453,13 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 
 // SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, and
 // a draft whose planning limit passed or whose answer no person took up, which releases its
-// machine. One with no such moment is skipped and runs until someone calls Close.
+// machine. One with no such moment is skipped and runs until someone calls Close. An open one
+// that has no baseline is closed once its BaselineDue has passed: without a baseline it never
+// starts, and the machines that were to measure one would be rented for nothing.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
+	if s.cfg.BaselineLimit <= 0 {
+		return errors.New("sweep_expired: no baseline limit is set (planning.baseline_limit_minutes)")
+	}
 	now := time.Now()
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
@@ -462,7 +467,11 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			return fmt.Errorf("list %s platform experiments: %w", status, err)
 		}
 		for _, pe := range pes {
-			if closesAt := pe.ClosesAt(); closesAt.IsZero() || closesAt.After(now) {
+			closesAt := pe.ClosesAt()
+			if due := pe.BaselineDue(s.cfg.BaselineLimit); status == domain.PlatformExpOpen && pe.BaselineJobID == "" && (closesAt.IsZero() || due.Before(closesAt)) {
+				closesAt = due
+			}
+			if closesAt.IsZero() || closesAt.After(now) {
 				continue
 			}
 			if err := s.Close(ctx, pe.ID, nil, nil); err != nil {
@@ -471,7 +480,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 				continue
 			}
 			s.logger.Info("sweep_expired: closed platform experiment",
-				zap.String("platform_experiment_id", pe.ID), zap.Time("closes_at", pe.ClosesAt()))
+				zap.String("platform_experiment_id", pe.ID), zap.Time("closes_at", closesAt))
 		}
 	}
 	return nil

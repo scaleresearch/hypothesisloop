@@ -54,10 +54,23 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	switch pe.Status {
 	case domain.PlatformExpRunning:
-	case domain.PlatformExpDraft, domain.PlatformExpOpen:
+	// Before the start the one job there is to run is the baseline's, which every researcher
+	// starts from and is ranked against. Its agent holds a quota from the moment it joined.
+	case domain.PlatformExpOpen:
+		signup, err := s.store.GetAgentSignup(ctx, pe.ID, exp.AgentID)
+		if err != nil {
+			return fmt.Errorf("scheduler: read signup: %w", err)
+		}
+		if signup == nil || !signup.MeasuresBaseline() {
+			return &AdmissionError{
+				Reason:  "experiment_not_started",
+				Message: fmt.Sprintf("platform experiment %s has not started; until it runs it accepts only the job of an agent of role baseline, which measures its baseline", pe.ID),
+			}
+		}
+	case domain.PlatformExpDraft:
 		return &AdmissionError{
 			Reason:  "experiment_not_started",
-			Message: fmt.Sprintf("platform experiment %s has not started; jobs are accepted only while it is running", pe.ID),
+			Message: fmt.Sprintf("platform experiment %s has not started; a draft accepts no job", pe.ID),
 		}
 	default:
 		return &AdmissionError{

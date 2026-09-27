@@ -189,6 +189,45 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	}
 }
 
+// An accepted draft waited for a baseline nobody could measure, with its coordinator's machine
+// rented until the run's end time. An open experiment that has no baseline when the baseline
+// limit passes is closed, whoever created it, and one that has a baseline is left to its start.
+func TestAnOpenExperimentWithoutABaselineIsClosedAtTheBaselineLimit(t *testing.T) {
+	now := time.Now().UTC()
+	open := func(id string, created, starts time.Time, baseline string) *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{ID: id, ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: created, StartsAt: starts,
+			EndsAt: now.Add(24 * time.Hour), BaselineJobID: baseline, Stages: []domain.Stage{{LengthPct: 100}}}
+	}
+	limit := testSettings.BaselineLimit
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
+		open("pe-late", now.Add(-limit-time.Minute), time.Time{}, ""),
+		open("pe-accepted-late", now.Add(-48*time.Hour), now.Add(-limit-time.Minute), ""),
+		open("pe-in-time", now.Add(-limit+time.Minute), time.Time{}, ""),
+		open("pe-accepted-in-time", now.Add(-48*time.Hour), now.Add(-limit+time.Minute), ""),
+		open("pe-starts-later", now.Add(-48*time.Hour), now.Add(time.Hour), ""),
+		open("pe-declared", now.Add(-48*time.Hour), now.Add(-47*time.Hour), "job-1"),
+	}}}
+	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	if err := svc.SweepExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, pe := range store.created {
+		want := domain.PlatformExpOpen
+		if strings.HasSuffix(pe.ID, "-late") {
+			want = domain.PlatformExpClosed
+		}
+		if pe.Status != want || (want == domain.PlatformExpClosed && pe.ClosedBy != nil) {
+			t.Errorf("%s: status %s closed by %v, want %s by the platform", pe.ID, pe.Status, pe.ClosedBy, want)
+		}
+	}
+	// A deployment that states no limit closes nothing by guessing one.
+	unset := testSettings
+	unset.BaselineLimit = 0
+	if err := NewPlatformExperimentsService(store, unset, zap.NewNop(), "", time.Minute).SweepExpired(context.Background()); err == nil {
+		t.Error("a sweep with no baseline limit ran")
+	}
+}
+
 // statusStore is createdStore with the reads and the write a close and a sweep make.
 type statusStore struct{ createdStore }
 
@@ -292,10 +331,14 @@ func aProposal(more map[string]any) map[string]any {
 	return body
 }
 
+// draftMaxHosted leaves a draft three researchers beside its coordinator and the agent that
+// measures its baseline.
+const draftMaxHosted = 5
+
 func draftWithPlanner() *draftStore {
 	return &draftStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
-			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: hostingMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
+			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
 		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Flavor: domain.PlannerFlavor, Hosted: true}},
 		reachable: map[string]bool{"rtx-4090": true},

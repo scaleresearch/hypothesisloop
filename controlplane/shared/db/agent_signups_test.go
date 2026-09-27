@@ -209,10 +209,21 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	want := map[string]bool{}
 	expect := func(agent string, ending bool) { want[agent] = ending }
 
+	// No researcher's machine is rented before there is a baseline to start from: while a
+	// platform experiment is open its launcher runs the agents that measure the baseline and
+	// nobody else. One of them is done when it finishes, there and then.
 	open := newPE()
-	expect(spawnTestAgents(t, pes, open, hosted)[0], false)
+	measuring := hosted
+	measuring.Role = domain.SignupRoleBaseline
+	spawnTestAgents(t, pes, open, hosted)
+	baselines := spawnTestAgents(t, pes, open, measuring, measuring)
+	expect(baselines[0], false)
+	if err := pes.FinishAgent(ctx, open, baselines[1], "the baseline is measured"); err != nil {
+		t.Fatalf("a baseline agent finishing in an open experiment: got = %v, want = nil", err)
+	}
+	expect(baselines[1], true)
 	spawnTestAgents(t, pes, open, domain.AgentSignup{Flavor: "generalist"})
-	spawnTestAgents(t, pes, open, domain.AgentSignup{Hosted: true, Launcher: launcher + "-other"})
+	spawnTestAgents(t, pes, open, domain.AgentSignup{Hosted: true, Launcher: launcher + "-other", Role: domain.SignupRoleBaseline})
 
 	running := newPE()
 	runningAgents := spawnTestAgents(t, pes, running, hosted, hosted, hosted, hosted, hosted)
@@ -310,7 +321,9 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	_, otherOrg := newTestUserHome(t, accounts)
 	foreign := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, foreign, defaultProjectOf(t, accounts, otherOrg).ID)
-	expect(spawnTestAgents(t, pes, foreign, hosted)[0], false)
+	foreignAgent := spawnTestAgents(t, pes, foreign, hosted)[0]
+	setPEStatus(t, pool, foreign, domain.PlatformExpRunning, time.Hour)
+	expect(foreignAgent, false)
 
 	listed, err := pes.ListLauncherAgents(ctx, launcher, windDown)
 	if err != nil {

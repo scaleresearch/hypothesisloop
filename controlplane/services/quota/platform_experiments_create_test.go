@@ -18,7 +18,7 @@ import (
 // testSettings is the platform settings a service of these tests applies and holds a create to.
 var testSettings = domain.QuotaConfig{
 	DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30,
-	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour,
+	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour, BaselineLimit: 90 * time.Minute,
 }
 
 var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, MaxConcurrentPerOrg: 2, MaxPerDayPerOrg: 10}

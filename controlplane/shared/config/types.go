@@ -268,6 +268,9 @@ type AgentsConfig struct {
 type PlanningConfig struct {
 	// LimitMinutes is how long a planner has to propose, from the goal or from a revision.
 	LimitMinutes int `yaml:"limit_minutes"`
+	// BaselineLimitMinutes is how long a platform experiment, accepted from a draft or created
+	// whole, may stay open without a declared baseline before the platform closes it.
+	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
 	// MaxConcurrentPerOrg is how many drafts of one org may be open at once.

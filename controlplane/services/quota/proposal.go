@@ -67,9 +67,10 @@ func (h *PlatformExperimentsHandler) checkProposal(p Proposal, maxHosted int, no
 	if err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	// The coordinator the platform runs for an accepted draft is one of its machines.
-	if len(p.Agents) == 0 || len(p.Agents) > maxHosted-1 {
-		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers, got %d", maxHosted-1, len(p.Agents))
+	// The coordinator the platform runs for an accepted draft is one of its machines, and the
+	// agent that measures its baseline another.
+	if len(p.Agents) == 0 || len(p.Agents) > maxHosted-2 {
+		return experiment, refusedProposal("invalid_agents", "agents: propose between 1 and %d researchers, got %d", maxHosted-2, len(p.Agents))
 	}
 	// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 	experiment.StartsAt = time.Time{}

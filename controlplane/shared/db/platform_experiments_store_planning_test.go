@@ -307,13 +307,13 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("a refused accept left %d signups, want the planner's alone", len(joined))
 	}
 
-	pe, agents, signups = accepted(4)
+	pe, agents, signups = accepted(3)
 	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
 	got, err := pes.GetPlatformExperiment(ctx, id)
 	if err != nil || got.Status != domain.PlatformExpOpen || got.Name != "accepted" || got.Description != "the brief" || got.BudgetAcceleratorHours != 6 ||
-		got.MaxAgents != 4 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Launcher != launcher ||
+		got.MaxAgents != 3 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Launcher != launcher ||
 		got.Goal != "a goal, in a sentence" {
 		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
@@ -325,33 +325,138 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 
 	// The planner is no participant, though its signup stays in the roster.
-	if taking, err := pes.ListParticipants(ctx, id); err != nil || len(taking) != 4 || slices.Contains(taking, planner) {
-		t.Fatalf("participants after accept = %v, %v, want the 4 researchers", taking, err)
+	if taking, err := pes.ListParticipants(ctx, id); err != nil || len(taking) != 3 || slices.Contains(taking, planner) {
+		t.Fatalf("participants after accept = %v, %v, want the 3 researchers", taking, err)
 	}
 
-	// The launcher runs the coordinator and the researchers, and no longer the planner.
+	// Accepted, nothing has run. The launcher runs the coordinator, which has the baseline
+	// measured, and no researcher yet, and no longer the planner.
 	wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute)
-	if err != nil || len(wanted) != 4 {
-		t.Fatalf("the launcher is asked for %d agents, %v, want the 4 researchers", len(wanted), err)
+	if err != nil || len(wanted) != 0 {
+		t.Fatalf("the launcher is asked for %d agents, %v, want none before there is a baseline", len(wanted), err)
 	}
 	coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
 	if err != nil || len(coordinators) != 1 || coordinators[0].PlatformExperimentID != id {
 		t.Fatalf("coordinators = %+v, %v", coordinators, err)
 	}
+	// The agent the coordinator adds to measure the baseline holds, from that moment, what one
+	// researcher holds in the first stage: 40 percent of 6 over 3 places, in the one machine the draft has left.
+	baseline := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Baseline", PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	if err := pes.SpawnAgent(ctx, id, baseline, domain.AgentSignup{AgentID: baseline.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}); err != nil {
+		t.Fatalf("add the baseline agent: %v", err)
+	}
+	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 || quota.BurstAcceleratorHours != 0 {
+		t.Fatalf("the baseline agent's quota = %+v, %v, want 0.8 guaranteed accelerator-hours", quota, err)
+	}
+	if wanted, err = pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != baseline.ID {
+		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
+	}
 
-	// Started, the budget is shared among the researchers: the planner's work is over.
+	// Started, the budget is shared among the researchers: the planner and the baseline agent
+	// take no share, and the baseline agent keeps the quota it measured against.
 	started, quotas, err := pes.StartPlatformExperimentTx(ctx, id, func(participants []StartParticipant) ([]*domain.AgentQuota, error) {
 		var out []*domain.AgentQuota
 		for _, p := range participants {
-			if p.AgentID == planner {
-				t.Errorf("the planner takes a share of the run")
+			if p.AgentID == planner || p.AgentID == baseline.ID {
+				t.Errorf("%s takes a share of the run", p.AgentID)
 			}
 			out = append(out, &domain.AgentQuota{ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: id, GuaranteedAcceleratorHours: 1, CreatedAt: time.Now().UTC()})
 		}
 		return out, nil
 	})
-	if err != nil || !started || len(quotas) != 4 {
-		t.Fatalf("start: started %v with %d quotas, %v, want the 4 researchers'", started, len(quotas), err)
+	if err != nil || !started || len(quotas) != 3 {
+		t.Fatalf("start: started %v with %d quotas, %v, want the 3 researchers'", started, len(quotas), err)
+	}
+	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 {
+		t.Fatalf("the baseline agent's quota after the start = %+v, %v, want the 0.8 it joined with", quota, err)
+	}
+	if wanted, err = pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 4 {
+		t.Fatalf("the launcher of a running experiment is asked for %d agents, %v, want the 3 researchers and the baseline agent", len(wanted), err)
+	}
+}
+
+// A baseline agent's quota is its place's: it lands in the column its tier names, a second
+// signup of the same agent changes nothing, and it goes when the agent is removed.
+func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	agents := spawnTestAgents(t, pes, id,
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: "generalist"},
+		domain.AgentSignup{Role: domain.SignupRoleReviewer, Flavor: "generalist"})
+	// 40 percent of 10 over 10 places.
+	for i, want := range [][2]float64{{0.4, 0}, {0, 0.4}} {
+		if quota, err := pes.GetAgentQuota(ctx, agents[i], id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != want[0] || quota.BurstAcceleratorHours != want[1] {
+			t.Errorf("baseline agent %d: quota = %+v, %v, want %v guaranteed and %v burst", i, quota, err, want[0], want[1])
+		}
+	}
+	for _, other := range agents[2:] {
+		if quota, err := pes.GetAgentQuota(ctx, other, id); err != nil || quota != nil {
+			t.Errorf("an agent of another role: quota = %+v, %v, want none before the start", quota, err)
+		}
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE agent_quotas SET guaranteed_accelerator_hours = 0.1 WHERE platform_experiment_id = $1 AND agent_id = $2`, id, agents[0]); err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := pes.Signup(ctx, id, domain.AgentSignup{AgentID: agents[0], Role: domain.SignupRoleBaseline, Flavor: "generalist"}); err != nil || inserted {
+		t.Fatalf("signing up again: got = %v, %v, want nothing inserted", inserted, err)
+	}
+	if quota, _ := pes.GetAgentQuota(ctx, agents[0], id); quota == nil || quota.GuaranteedAcceleratorHours != 0.1 {
+		t.Errorf("a second signup rewrote the quota to %+v", quota)
+	}
+	if err := pes.FinishAgent(ctx, id, agents[2], "too early"); !errors.Is(err, ErrSignupClosed) {
+		t.Errorf("a researcher finishing before the start: got = %v, want ErrSignupClosed", err)
+	}
+	if err := pes.RemoveAgent(ctx, id, agents[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	if quota, err := pes.GetAgentQuota(ctx, agents[0], id); err != nil || quota != nil {
+		t.Errorf("a removed baseline agent's quota = %+v, %v, want none", quota, err)
+	}
+}
+
+// Without a baseline an open platform experiment never starts. One the platform closes before
+// its end time says why, and one that reached its end says that.
+func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	closed := func(prepare string, by *domain.Actor) domain.CloseReason {
+		t.Helper()
+		id := "pe-" + uuid.New().String()[:8]
+		createTestPE(t, pool, id, 10)
+		if prepare != "" {
+			if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET `+prepare+` WHERE id = $1`, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := pes.ClosePlatformExperiment(ctx, id, by); err != nil {
+			t.Fatal(err)
+		}
+		pe, err := pes.GetPlatformExperiment(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pe.CloseReason
+	}
+	for name, c := range map[string]struct {
+		prepare string
+		by      *domain.Actor
+		want    domain.CloseReason
+	}{
+		"open, no baseline, before its end": {"", nil, domain.CloseBaselineLimitReached},
+		"open, no baseline, at its end":     {"ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
+		"open with a baseline":              {"baseline_job_id = 'job-1', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
+		"running":                           {"status = 'running', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
+		"closed by a person":                {"", &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, domain.CloseByRequest},
+	} {
+		if got := closed(c.prepare, c.by); got != c.want {
+			t.Errorf("%s: close_reason = %q, want %q", name, got, c.want)
+		}
 	}
 }
 

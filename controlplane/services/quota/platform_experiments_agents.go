@@ -232,7 +232,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 	case errors.Is(err, db.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
-		return refuseSignup(409, "not_running", "platform experiment %s is not running: an agent finishes in one that is", platformExpID)
+		return refuseSignup(409, "not_running", "platform experiment %s is not running: an agent finishes in one that is, and one of role baseline also in an open one, once the baseline is measured", platformExpID)
 	case errors.Is(err, db.ErrWorkUnfinished):
 		return refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, or a completed job without its summary: cancel or wait for the one, write the other, then finish", agentID)
 	case err != nil:
@@ -273,15 +273,17 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
-		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present. " +
+		Description: "The only way an agent joins, and only while the experiment is open: quota is divided at start over the agents present, those of role baseline apart. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"The answer is agents, a list holding that one agent. " +
-			"hosted=true has the platform start and keep a machine for the agent until the experiment closes or the agent is cut. " +
+			"hosted=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
-			"\"reviewer\" are none of the three, though their jobs are billed and gated identically.",
+			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
+			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (the first stage's share of the budget over max_agents, what one researcher holds then), " +
+			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body AddAgentRequest
@@ -379,9 +381,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "finish-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents/{agent_id}/finish",
 		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,
-		Description: "Called by the agent itself, with its own token, in a running platform experiment. From then its machine, if the platform runs it, is taken down after its last turn, " +
+		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
 			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are. " +
-			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 not_running outside a running experiment. Calling it again changes nothing.",
+			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 not_running anywhere else. Calling it again changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`

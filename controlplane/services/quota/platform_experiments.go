@@ -59,7 +59,7 @@ type PlatformExperimentsStore interface {
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
 	// FinishAgent records that an agent has nothing left to do: db.ErrNotSignedUp,
-	// db.ErrSignupClosed when the experiment is not running, db.ErrWorkUnfinished.
+	// db.ErrSignupClosed where the agent has no work to finish, db.ErrWorkUnfinished.
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
 	ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error)
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)

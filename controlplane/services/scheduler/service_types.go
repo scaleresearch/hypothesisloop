@@ -29,6 +29,9 @@ type Store interface {
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
+	// GetAgentSignup is the agent's place in the platform experiment, nil when it has none: its
+	// role says whether its job is the baseline's.
+	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)
 	// IsAgentCut reports whether the agent was cut at a stage boundary (see
 	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -73,18 +74,30 @@ func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID stri
 }
 
 // enrolTx is enrol inside the caller's transaction.
+//
+// An agent of role baseline is given its quota here, with its place: its job runs while the
+// platform experiment is open, before the start divides the budget. It holds what one researcher
+// holds in the first stage, the first stage's share of the budget over max_agents, in the column
+// its tier names (domain.ApplyQuotaTier).
 func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup) (int, error) {
 	var status, orgID string
 	var maxAgents, maxHosted int
 	var coordinatorHosted bool
+	var budget float64
+	var stagesRaw []byte
+	var defaultTier domain.QuotaTier
 	if err := tx.QueryRow(ctx, `
-SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id
+SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id, pe.budget_accelerator_hours, pe.stages, pe.default_quota_tier
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID); err != nil {
+WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID, &budget, &stagesRaw, &defaultTier); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrSignupClosed
 		}
 		return 0, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
+	}
+	var stages []domain.Stage
+	if err := json.Unmarshal(stagesRaw, &stages); err != nil || len(stages) == 0 {
+		return 0, fmt.Errorf("platform_experiments_store.Signup: stages of %s: %v", platformExpID, errors.Join(err, errors.New("want at least one")))
 	}
 	if status != string(domain.PlatformExpOpen) {
 		return 0, ErrSignupClosed
@@ -125,10 +138,22 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
-		if tag.RowsAffected() == 1 {
-			inserted++
-			competitors = competitors || signup.Role == domain.SignupRoleCompetitor
-			hosted = hosted || signup.Hosted
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		inserted++
+		competitors = competitors || signup.Role == domain.SignupRoleCompetitor
+		hosted = hosted || signup.Hosted
+		if signup.Role != domain.SignupRoleBaseline {
+			continue
+		}
+		share := domain.RoundHours(budget * stages[0].LengthPct / 100 / float64(maxAgents))
+		guaranteed, burst := domain.ApplyQuotaTier(domain.ResolveQuotaTier(signup.QuotaTier, defaultTier), share, 0)
+		if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+			ID: uuid.New().String(), AgentID: signup.AgentID, PlatformExperimentID: platformExpID,
+			GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
+		})...); err != nil {
+			return 0, fmt.Errorf("platform_experiments_store.Signup: allocate the quota of baseline agent %s: %w", signup.AgentID, err)
 		}
 	}
 	// max_hosted bounds the machines the platform rents for the experiment, so it counts every
@@ -171,7 +196,8 @@ func nonNilObject(m map[string]any) map[string]any {
 }
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
-// once it has, ErrNotSignedUp when the agent is not in it. Only its place goes: the agent itself
+// once it has, ErrNotSignedUp when the agent is not in it. Only its place goes, and the quota a
+// baseline agent held with it: the agent itself
 // stays in its org however it came to be, as every agent that ever joined does, and can be added
 // again by its id. The experiment row is locked as in
 // enrol, so a removal and a start cannot both believe they came first. The signup holds the only
@@ -212,6 +238,10 @@ WHERE platform_experiment_id=$1 AND agent_id=$2 FOR UPDATE`, platformExpID, agen
 	if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 	}
+	// Only an agent of role baseline holds one before the start.
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: release quota: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: commit: %w", err)
 	}
@@ -222,9 +252,10 @@ WHERE platform_experiment_id=$1 AND agent_id=$2 FOR UPDATE`, platformExpID, agen
 // completed job without its summary.
 var ErrWorkUnfinished = errors.New("the agent has a job in flight or a summary due")
 
-// FinishAgent records that an agent of a running platform experiment has nothing left to do.
-// It answers ErrSignupClosed when the experiment is not running, ErrNotSignedUp, and
-// ErrWorkUnfinished. An agent that already finished keeps the moment and the reason it has.
+// FinishAgent records that an agent of a running platform experiment has nothing left to do, or
+// that one that measures the baseline is done in an open one, where its work is. It answers
+// ErrSignupClosed anywhere else, ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
+// finished keeps the moment and the reason it has.
 func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -240,7 +271,7 @@ func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpI
 	var running, unfinished bool
 	var finishedAt *time.Time
 	err = tx.QueryRow(ctx, `
-SELECT pe.status = 'running', s.finished_at,
+SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`' AND s.flavor <> '`+domain.PlannerFlavor+`', s.finished_at,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id
                  AND (status IN ('QUEUED', 'SUBMITTED', 'RUNNING') OR `+UnsummarizedCompletedPredicate+`))
@@ -368,7 +399,9 @@ type LauncherAgent struct {
 }
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
-// of an open or running platform experiment that were not cut and did not finish, and those
+// of a running platform experiment that were not cut and did not finish, those that measure the
+// baseline of an open one, since no researcher's machine is rented before there is a baseline to
+// start from, and those
 // whose experiment closed, who were cut or who finished less than $2 seconds ago. A stopped agent is among them: it is asked for again
 // once what it is started with changes. Both moments and the comparison are on the database's
 // clock.
@@ -384,7 +417,7 @@ LEFT JOIN agents a ON a.id = s.agent_id
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
 WHERE s.hosted AND s.launcher = $1
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
-       OR s.flavor <> '` + domain.PlannerFlavor + `' AND pe.status IN ('open', 'running')
+       OR s.flavor <> '` + domain.PlannerFlavor + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
        OR s.flavor = '` + domain.PlannerFlavor + `' AND pe.status = 'draft' AND (pe.proposed_at IS NULL OR pe.proposed_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`

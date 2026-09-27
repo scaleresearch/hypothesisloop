@@ -230,17 +230,33 @@ func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
 type unstartedStore struct {
 	poolOnlyStore
 	status domain.PlatformExperimentStatus
+	signup *domain.AgentSignup
 }
 
 func (s unstartedStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: s.status}, nil
+	return &domain.PlatformExperiment{ID: id, Status: s.status, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
+}
+
+func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain.AgentSignup, error) {
+	return s.signup, nil
 }
 
 // A draft once took its planner's baseline job. It takes none: nothing runs before a person
-// accepted, and then an open experiment says the same.
-func TestSubmitToAPlatformExperimentThatHasNotStartedSaysSo(t *testing.T) {
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen} {
-		s := &Service{codeHost: testCodeHost{}, store: unstartedStore{status: status}, hypotheses: humanHypothesis("pe-1")}
+// accepted. Open, a platform experiment takes the one job there is to run before the start, the
+// baseline's, from an agent that was added to measure it, and tells everyone else to wait.
+func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T) {
+	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, Flavor: domain.DefaultAgentFlavor}
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}
+	planner := &domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: domain.PlannerFlavor}
+	for name, store := range map[string]unstartedStore{
+		"a draft's planner":           {status: domain.PlatformExpDraft, signup: planner},
+		"an open one's researcher":    {status: domain.PlatformExpOpen, signup: researcher},
+		"an open one's reviewer":      {status: domain.PlatformExpOpen, signup: &domain.AgentSignup{Role: domain.SignupRoleReviewer}},
+		"the planner once it is open": {status: domain.PlatformExpOpen, signup: planner},
+		"nobody of the open one":      {status: domain.PlatformExpOpen},
+		"a draft's baseline agent":    {status: domain.PlatformExpDraft, signup: baseline},
+	} {
+		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: humanHypothesis("pe-1")}
 
 		// An incomplete spec too: the start is what the agent must wait for, before any field.
 		incomplete := humanIdeaSubmission()
@@ -248,16 +264,22 @@ func TestSubmitToAPlatformExperimentThatHasNotStartedSaysSo(t *testing.T) {
 		for _, exp := range []*domain.Experiment{humanIdeaSubmission(), incomplete} {
 			var admission *AdmissionError
 			if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != "experiment_not_started" || !strings.Contains(admission.Message, "has not started") {
-				t.Fatalf("Submit to a platform experiment that is %s: got = %v, want a message saying it has not started", status, err)
+				t.Fatalf("%s: got = %v, want a message saying it has not started", name, err)
 			}
 		}
+	}
+
+	s := &Service{codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: humanHypothesis("pe-1")}
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)
 	}
 }
 
 type finishedJobStore struct {
 	poolOnlyStore
-	status domain.PlatformExperimentStatus
-	filed  int
+	// role is what the job's agent was signed up as.
+	role  domain.SignupRole
+	filed int
 	// filedBy is whose credential filed each finding.
 	filedBy []domain.Actor
 }
@@ -266,8 +288,8 @@ func (*finishedJobStore) GetExperiment(_ context.Context, id string) (*domain.Ex
 	return &domain.Experiment{ID: id, AgentID: "agent-1", HypothesisID: "hyp-1", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted}, nil
 }
 
-func (s *finishedJobStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: s.status}, nil
+func (s *finishedJobStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID, Role: s.role, Flavor: domain.DefaultAgentFlavor}, nil
 }
 
 func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _ string, actor domain.Actor, _ string) (*domain.HypothesisFinding, error) {
@@ -279,20 +301,21 @@ func (s *finishedJobStore) CreateHypothesisFinding(_ context.Context, _, _, _, _
 // The summary is where an agent has the evidence in hand, so its reply names the hypothesis
 // whose verdict that agent may set, open or already given: its own or a human's, never another
 // agent's. A planner told the verdict of its baseline's hypothesis was its to set tried confirmed
-// against the baseline itself, which no rule allows: a draft's job is the control and names none.
+// against the baseline itself, which no rule allows: the job of an agent that measures the
+// baseline is the control and names none, before the start and after it.
 func TestASummaryNamesTheHypothesisWhoseVerdictIsTheAgentsToSet(t *testing.T) {
 	for _, tc := range []struct {
-		h      domain.Hypothesis
-		status domain.PlatformExperimentStatus
-		want   bool
+		h    domain.Hypothesis
+		role domain.SignupRole
+		want bool
 	}{
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.PlatformExpRunning, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, domain.PlatformExpRunning, true},
-		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, domain.PlatformExpRunning, true},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, domain.PlatformExpRunning, false},
-		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.PlatformExpDraft, false},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, true},
+		{domain.Hypothesis{ID: "hyp-1", Actor: domain.Actor{Kind: domain.ActorUser, ID: "user-jane"}, Status: domain.HypothesisConfirmed}, domain.SignupRoleCompetitor, true},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-2", Status: domain.HypothesisOpen}, domain.SignupRoleCompetitor, false},
+		{domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1", Status: domain.HypothesisOpen}, domain.SignupRoleBaseline, false},
 	} {
-		store := &finishedJobStore{status: tc.status}
+		store := &finishedJobStore{role: tc.role}
 		s := &Service{codeHost: testCodeHost{}, store: store, hypotheses: oneHypothesis{h: &tc.h}}
 		got, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorKey, ID: "key-1"}, "it held")
 		if len(store.filedBy) != 1 || store.filedBy[0] != (domain.Actor{Kind: domain.ActorKey, ID: "key-1"}) {
