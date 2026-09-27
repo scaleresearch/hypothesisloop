@@ -53,7 +53,7 @@ func startWithDefault(t *testing.T, defaultTier domain.QuotaTier, participants .
 	t.Helper()
 	store := &startStore{
 		pe: &domain.PlatformExperiment{
-			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100,
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline",
 			Stages:           []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
 			DefaultQuotaTier: defaultTier,
 		},
@@ -149,7 +149,7 @@ func TestStartLegacyExperimentDefaultsToGuaranteedWithNoKindInvolved(t *testing.
 func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *testing.T) {
 	store := &startStore{
 		pe: &domain.PlatformExperiment{
-			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100,
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline",
 			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		},
 		participants: []db.StartParticipant{
@@ -160,6 +160,56 @@ func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *tes
 	if _, err := newSignupTestService(t, store).Start(context.Background(), "pe-1"); err == nil {
 		t.Fatal("Start succeeded with an unresolvable signup, want an error — the run would begin with that agent holding no quota and no way to get one")
 	}
+}
+
+// A platform experiment started on a baseline nobody had measured, or on none: its researchers
+// were ranked against a number each of them invented. It starts only with one declared, when a
+// person starts it and when the platform does at its start time, and waits for one until then.
+func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
+	undeclared := func() *domain.PlatformExperiment {
+		return &domain.PlatformExperiment{
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, StartsAt: time.Now().Add(-time.Minute),
+			Stages: []domain.Stage{{LengthPct: 100, EvictPct: 0}},
+		}
+	}
+	store := &sweptStore{startStore: startStore{pe: undeclared(), participants: []db.StartParticipant{participant("agent-1", "")}}}
+	svc := newSignupTestService(t, store)
+
+	_, err := svc.Start(context.Background(), "pe-1")
+	if err == nil || !strings.HasPrefix(err.Error(), "baseline_required: ") || store.started != 0 {
+		t.Fatalf("starting without a baseline: got = %v with %d starts, want baseline_required and nothing started", err, store.started)
+	}
+	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 0 || store.signupsRead != 0 {
+		t.Fatalf("the sweep past starts_at without a baseline: %v, %d starts, want it left to wait", err, store.started)
+	}
+
+	store.pe.BaselineJobID = "job-baseline"
+	if err := svc.SweepAutoStart(context.Background()); err != nil || store.started != 1 {
+		t.Fatalf("the sweep once a baseline is declared: %v, %d starts, want it started", err, store.started)
+	}
+	if quotas, err := svc.Start(context.Background(), "pe-1"); err != nil || len(quotas) != 1 || quotas[0].AgentID != "agent-1" {
+		t.Fatalf("starting with a baseline: got = %+v, %v, want the researcher's share", quotas, err)
+	}
+}
+
+// sweptStore is startStore with what the sweep reads, counting the starts that got through.
+type sweptStore struct {
+	startStore
+	started, signupsRead int
+}
+
+func (f *sweptStore) ListPlatformExperimentsByStatus(context.Context, domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
+	return []*domain.PlatformExperiment{f.pe}, nil
+}
+
+func (f *sweptStore) ListSignups(context.Context, string) ([]string, error) {
+	f.signupsRead++
+	return []string{"agent-1"}, nil
+}
+
+func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, error)) (bool, []*domain.AgentQuota, error) {
+	f.started++
+	return f.startStore.StartPlatformExperimentTx(ctx, id, quotasFor)
 }
 
 // Only the first stage's share is released at the start; the rest is released at the boundaries
@@ -183,7 +233,7 @@ func TestStartReleasesOnlyTheFirstStagesShareOfTheBudget(t *testing.T) {
 			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"resource_type":"accelerator_hours","tier":"guaranteed"},"value":[1,"%v"]}]}}`, spent)
 		}))
 		store := &startStore{baselines: []string{"baseline-1"}, participants: []db.StartParticipant{participant("human-1", "")}, pe: &domain.PlatformExperiment{
-			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, CreatedAt: time.Now().Add(-time.Hour),
+			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline", CreatedAt: time.Now().Add(-time.Hour),
 			Stages: []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
 		}}
 		svc := newSignupTestService(t, store)

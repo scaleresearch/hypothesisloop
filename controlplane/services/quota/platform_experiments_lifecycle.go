@@ -330,6 +330,11 @@ func (s *PlatformExperimentsService) Start(ctx context.Context, id string) ([]*d
 	if pe.Status != domain.PlatformExpOpen {
 		return nil, fmt.Errorf("invalid_transition: experiment is %s, expected open", pe.Status)
 	}
+	// Every researcher starts from the baseline and is ranked against it, so none starts, and
+	// no machine is rented for one, before it is measured and declared.
+	if pe.BaselineJobID == "" {
+		return nil, fmt.Errorf("baseline_required: platform experiment %s has no baseline: an agent of role baseline measures it with one job while the experiment is open, and it is declared with PATCH baseline_job_id (hl platform-experiments update --baseline-job)", pe.ID)
+	}
 
 	// Only the first stage's share of the budget is released now; each later stage releases its
 	// own share at the boundary it starts (see controller.applyCut). This is what stops one agent
@@ -486,8 +491,9 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	return nil
 }
 
-// SweepAutoStart starts every Open platform experiment whose StartsAt has passed and has at
-// least one sign-up. Without this, an operator has to call POST /start by hand the moment
+// SweepAutoStart starts every Open platform experiment whose StartsAt has passed, has a declared
+// baseline and has at least one sign-up. One without a baseline waits for it, until SweepExpired
+// closes it at its BaselineDue. Without this, an operator has to call POST /start by hand the moment
 // starts_at arrives — StartsAt would otherwise be inert metadata, which breaks the case this
 // platform is actually for: agents discovering and running a platform experiment end-to-end with
 // nobody watching the clock for them. A zero StartsAt (unset) is treated as "start immediately
@@ -500,7 +506,7 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}
 	for _, pe := range pes {
-		if pe.StartsAt.IsZero() || pe.StartsAt.After(now) {
+		if pe.StartsAt.IsZero() || pe.StartsAt.After(now) || pe.BaselineJobID == "" {
 			continue
 		}
 		signedUp, err := s.store.ListSignups(ctx, pe.ID)

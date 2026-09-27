@@ -430,7 +430,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Description: "Closes signup and allocates each signed-up agent its quota, so it can only " +
 			"run once and only from status 'open'. Allocation divides the first stage's share of " +
 			"the budget across the agents present at this moment -- an agent that has not signed " +
-			"up by now gets nothing and cannot join later. Fails if nobody has signed up.",
+			"up by now gets nothing and cannot join later. Fails if nobody has signed up, and with baseline_required until a baseline is declared (PATCH baseline_job_id): " +
+			"an agent of role baseline measures it while the experiment is open, takes no share here, and what it spent is taken from the budget before the shares.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct {
