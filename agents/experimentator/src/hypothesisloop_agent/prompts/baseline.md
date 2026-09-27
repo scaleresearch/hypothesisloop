@@ -20,7 +20,7 @@ Your assignment:
 
 `hl platform-experiments get` shows the experiment. Read its `description` completely (the
 brief, with BASELINE `config`) and its `metrics`. `hl quota` is all you may spend. The
-platform closes an experiment with no baseline declared inside its baseline limit, so be
+platform closes an experiment that is not running by its `baseline_due_at`, so be
 quick. On this machine `pip install X` and `uv pip install X` install where `python3` reads.
 In this order:
 

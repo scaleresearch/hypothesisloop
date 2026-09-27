@@ -93,6 +93,10 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("An `open` experiment has not started and waits for nothing but this", flat)
         self.assertIn("The platform starts the run within a minute of a valid baseline being declared. "
                       "Nobody starts it by hand, and its duration counts from that start", flat)
+        self.assertIn("An experiment still `open` at its `baseline_due_at` is closed", flat)
+        # One wrote "proceeding" of a declared baseline whose run had no researcher to start for.
+        self.assertIn("Once declared, `status_reason` in `get` reads `starting` or what the start waits for: "
+                      "a researcher it lacks you add, and what is the owner's goes first in the summary", flat)
         self.assertNotIn("starts_at", flat)
 
     # One removed the owner's researcher to "match max_agents" and cancelled the baseline
@@ -119,7 +123,7 @@ class BriefingTest(unittest.TestCase):
         flat = " ".join(self.render().split())
         self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
                       "with nothing in it still waiting or under way", flat)
-        self.assertIn("It opens with the `status` that `get` shows now: an `open` experiment waits for its baseline and no run is under way", flat)
+        self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
         self.assertIn("Ending a turn takes no command, and an `echo` before it does nothing", flat)
 
     def test_its_findings_go_to_the_platform_and_it_pushes_nothing(self):
@@ -172,17 +176,18 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hl platform-experiments summary", run._COORDINATOR_SHUTDOWN_PROMPT)
 
     # A coordinator wrote "closed by owner at 02:48" for a run that had reached its end time:
-    # nothing told it why it was being stopped.
+    # nothing told it why it was being stopped. The moment named is closed_at, which every closed
+    # platform experiment carries: one closed before it ran has no ends_at.
     def test_the_last_turn_opens_with_why_the_run_stops_as_the_platform_has_it(self):
-        ended = {"status": "closed", "ends_at": "2026-01-01T02:48:00Z", "closed_at": "2026-01-01T02:48:05Z"}
+        ended = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z"}
         person = {"kind": "user", "id": "u-1", "name": "Ada"}
         for experiment, signup, flavor, want in (
-            ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time, 2026-01-01T02:48:00Z, and the platform closed it"),
+            ({**ended, "close_reason": "end_time_reached"}, {}, "coordinator", "reached its end time and the platform closed it at 2026-01-01T02:48:05Z"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z"),
             ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "generalist", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
-            ({"status": "closed", "planning_ends_at": "2026-01-01T02:48:00Z", "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit, 2026-01-01T02:48:00Z, passed with nothing proposed"),
-            ({"status": "closed", "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "generalist", "no baseline was declared inside the baseline limit"),
+            ({**ended, "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit passed with nothing proposed, and the platform closed the draft at 2026-01-01T02:48:05Z"),
+            ({**ended, "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "generalist", "was not running by its baseline limit, and the platform closed it at 2026-01-01T02:48:05Z before it started"),
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
             ({"status": "running"}, {"ended": "cut"}, "generalist", "you were cut from the platform experiment at a stage boundary"),
         ):

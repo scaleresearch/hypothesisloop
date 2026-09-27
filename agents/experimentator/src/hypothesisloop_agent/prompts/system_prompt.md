@@ -131,7 +131,7 @@ How to spend:
     measured: two machines of one type differ by more than most effects. Note the machine, the
     seed and the spread between repeats in your summary so others can judge it.
 
-Keep pursuing credible improvements while the experiment is open and you have quota. A spent
+Keep pursuing credible improvements while the experiment runs and you have quota. A spent
 budget closes nothing: with your quota spent or nothing worth a job left, and no job in flight or
 owing its summary, run `hl platform-experiments agents finish --reason "..."`. It is final: no
 new job of yours is admitted and your machine stops once you end your turn, so end it.

@@ -156,13 +156,15 @@ def prepare() -> RunSetup:
 
 
 def revision_asked(setup: RunSetup) -> str | None:
-    """What the person last asked a planner to change, None for anyone else and for a draft
-    nobody revised. A planner's run ends with its answer, so a planner started with a session is
-    one whose answer met a revision it has not answered yet."""
+    """The revision a planner has not answered yet, None for anyone else and for a draft with
+    none: the platform reads such a draft as revising, and as proposed or declined once the
+    last revision is answered."""
     if not config.plans(setup.cfg):
         return None
-    revisions = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id).get("revisions")
-    return revisions[-1]["message"] if revisions else None
+    draft = setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
+    if draft.get("status_reason", {}).get("reason") != "revising":
+        return None
+    return draft["revisions"][-1]["message"]
 
 
 def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
@@ -200,11 +202,11 @@ def _closed_because(setup: RunSetup) -> str | None:
     pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
     closed_at = pe.get("closed_at", "an unrecorded time")
     if pe.get("close_reason") == "end_time_reached":
-        return f"You are being stopped because the platform experiment reached its end time, {pe['ends_at']}, and the platform closed it."
+        return f"You are being stopped because the platform experiment reached its end time and the platform closed it at {closed_at}."
     if pe.get("close_reason") == "planning_limit_reached":
-        return f"You are being stopped because the planning limit, {pe['planning_ends_at']}, passed with nothing proposed, and the platform closed the draft."
+        return f"You are being stopped because the planning limit passed with nothing proposed, and the platform closed the draft at {closed_at}."
     if pe.get("close_reason") == "baseline_limit_reached":
-        return "You are being stopped because no baseline was declared inside the baseline limit, and the platform closed the platform experiment before it started."
+        return f"You are being stopped because the platform experiment was not running by its baseline limit, and the platform closed it at {closed_at} before it started."
     if pe.get("close_reason") == "proposal_expired":
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
     if pe.get("close_reason") == "closed_by_request":

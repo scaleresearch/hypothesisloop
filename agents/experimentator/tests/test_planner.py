@@ -97,9 +97,8 @@ class PlannerPromptTest(unittest.TestCase):
 
 
 class BaselinePromptTest(unittest.TestCase):
-    # The agent that measures the baseline is of role baseline, as a planner is in the roster:
-    # the flavor tells the two apart. It builds what the planner once built, after a person
-    # accepted, and competes no more than a planner does.
+    # The agent that measures the baseline is of role baseline. It builds what the planner once
+    # built, after a person accepted, and competes no more than a planner does.
     def test_the_baseline_agent_is_briefed_to_measure_the_control_and_finish(self):
         prompt, flat = render(baseline_agent())
         self.assertIn("\n\nRULES\n\n## hl commands\n\nCOMMANDS\n\n", prompt)
@@ -197,7 +196,7 @@ class RunEndedTest(unittest.TestCase):
     def test_a_revision_is_what_a_resumed_planner_is_told(self):
         from hypothesisloop_agent.claude import run
         asked = [{"message": "use two cores"}, {"message": "Keep the bar as I wrote it."}]
-        draft = {"status": "draft", "revisions": asked}
+        draft = {"status": "draft", "revisions": asked, "status_reason": {"reason": "revising"}}
 
         def setup(cfg, platform_experiment):
             return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment))
@@ -209,7 +208,11 @@ class RunEndedTest(unittest.TestCase):
             for absent in ("use two cores", "was replaced", "Continue where you left off", "branch"):
                 self.assertNotIn(absent, prompt)
             self.assertEqual(run._first_prompt(setup(planner(), draft), None, None), run._new_machine_note(planner()) + "\n\nBegin.")
-            self.assertTrue(run._first_prompt(setup(planner(), {"status": "draft"}), "s-1", None).endswith("Continue where you left off."))
+            self.assertTrue(run._first_prompt(setup(planner(), {"status": "draft", "status_reason": {"reason": "planning"}}), "s-1", None).endswith("Continue where you left off."))
+            # A machine replaced after the planner answered the revision was handed it again.
+            for answered in ("proposed", "declined"):
+                again = {"status": "draft", "revisions": asked, "status_reason": {"reason": answered}}
+                self.assertTrue(run._first_prompt(setup(planner(), again), "s-1", None).endswith("Continue where you left off."))
             self.assertTrue(run._first_prompt(setup(baseline_agent(), draft), "s-1", None).endswith("Continue where you left off."))
         self.assertNotIn("gone", run._first_prompt(setup(planner(), draft), "s-1", None))
 

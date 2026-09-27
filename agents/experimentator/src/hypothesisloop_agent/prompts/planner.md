@@ -58,8 +58,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
   - The size: the smallest plan that can reach the goal. Count the trials the goal needs (the
     levers worth trying, a control and a repeat for the verdict). Budget = the trial length
     you assume x `acch_per_hour` of the type x its count x those trials, with a fifth to
-    spare. Duration = the rounds those trials take side by side, plus a few minutes per trial
-    to read and decide. One researcher per direction that differs in kind, 2 unless there are
+    spare. Duration (the run's, after the baseline) = the rounds those trials take side by
+    side, plus a few minutes per trial to read and decide. One researcher per direction that differs in kind, 2 unless there are
     plainly more.
   - `sizing_reason`, worded as the estimate it is: nothing has run; the trial length is
     assumed; the arithmetic; the budget is a cap; the baseline is measured before any
