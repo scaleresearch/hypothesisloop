@@ -36,8 +36,9 @@ ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY TAG
-# The settings file names this variable and never holds the secret. Local development's value
-# lives in localdev/lib/auth.sh and reaches compose, the scripts and the tests from here.
+# The settings file names this variable and never holds the secret. Local development's value is
+# made by the first render in localdev/.run/signing-secret (localdev/lib/auth.sh reads it) and
+# reaches compose, the scripts and the tests from here.
 export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
 REGISTRY_TLS_VERIFY ?= false
 # Run before every push. A registry whose login expires (infra/Makefile's publish) logs in here; the
@@ -127,7 +128,7 @@ dev-hosted: render-settings
 	bash localdev/dev.sh hosted
 
 # Every request to the control plane carries a token. These two print the ones local work needs,
-# derived from auth.signing_secret in the settings file (localdev/lib/auth.sh).
+# derived from the signing secret in localdev/.run/signing-secret (localdev/lib/auth.sh).
 # Usage: export HL_TOKEN="$(make -s staff-token)"
 staff-token: render-settings
 	@bash -c '. localdev/lib/auth.sh && lib_hl_admin token staff'

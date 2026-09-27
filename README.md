@@ -163,8 +163,11 @@ Connecting takes control of the GitHub account: its own user, or an admin of the
 GitHub returns to
 `<ui origin>/settings/repository`, so the App's callback URL and its setup URL must be that
 address (`infra/github/app-manifest.json`). The page builds the address from the origin it is
-served on and takes the App's addresses from `GET /github/app`. A deployment without a GitHub App
-says so on the page.
+served on and takes the App's addresses from `GET /github/app`.
+
+Code lives in git only, and every deployment's settings name its git host (`git.provider`):
+`github`, the App above, or `plain`, any host serving repositories under one root, where a
+repository is created beforehand and named at create. `make dev` with no App runs a `plain` host.
 
 Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
 the provider switched on in Supabase.
@@ -219,7 +222,7 @@ hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
 hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the repository attached to a project, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+An ID is a positional argument; `--id ID` works too. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Reads print one compact JSON object per line. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Coordinator and researcher experiments
 
@@ -228,7 +231,7 @@ A platform experiment doesn't run itself. It's driven by two kinds of LLM agent 
 - **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
 - **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. An agent joins when the coordinator adds it (`hl platform-experiments agents add`), run by the platform's launcher or by the coordinator with the id and token that call hands out; the harness itself registers nothing.
 
-`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory with an `experiment.md` (the objective, the baseline, the open questions) and an `experiment.yaml`/`hypothesis.yaml` pair matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
+`agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and a `hypothesis.yaml`, matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
 Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from — `generalist` (no fixed axis) plus one flavor per axis of ML experimentation: `hyperparameter-search`, `architecture-search`, `data-search` (dataset composition, size, and curriculum) — plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, and revisits it by research stage: broad (generalist plus one of each targeted flavor) while no promising region exists yet, narrowing toward whichever axis a confirmed finding says is winning once one does — never picked once and forgotten. See `agents/coordinator/setup.md` step 3 for how that decision is made and recorded.
 
@@ -253,7 +256,7 @@ accepted with a budget of 6 after a baseline that cost 0.2 has 5.8 left to consu
 
 ## YAML files
 
-Three request bodies are plain YAML files rather than flags: a platform experiment, a hypothesis, and a job. Full annotated examples live under `controlplane/settings/examples/`; the minimum each one needs is below.
+Three request bodies are plain YAML files rather than flags: a platform experiment, a hypothesis, and a job. An experiment's repository keeps the first and the last as `.hypothesisloop/experiment.yaml` and `.hypothesisloop/job.yaml`; `hl repo init` adds them to a clone and `hl repo check` says what is left to fill in. Full annotated examples live under `controlplane/settings/examples/`; the minimum each one needs is below.
 
 **Platform experiment** (`hl platform-experiments create experiment.yaml`)
 
@@ -262,7 +265,7 @@ name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
 max_agents: 5
-report_interval_seconds: 10
+duration_hours: 24        # or ends_at; a run lasts 30 days at most
 metrics:
   - key: val_accuracy
     direction: maximize
@@ -313,7 +316,9 @@ with 400, and so is a job with neither an accelerator nor cores.
 A job states little else. `cpu`, `memory` and `storage` left out are the job's share of the node it
 lands on (`"max"`), one part per accelerator or per core, and `max_retries` left out is 0. The
 least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours`, and in `job` a
-`command` with `accelerator_type` and `accelerator_count`, or `cpu`. Budget, quota, fairness, the concurrency cap
+`command`, an `image` (one `hl capacity` lists, left out only on a cluster shown with
+`only_job_image`) and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
+experiment's repository at a pushed commit, filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap
 and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
 hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels
 it CPU hours. Sums show cores apart from accelerators (`in_flight_cores`, `core_busy` and
@@ -332,10 +337,10 @@ node within its cores and memory. A rented cluster takes jobs on its accelerator
 
 ## More about capabilities
 
-- **Quota-metered scheduling.** Each agent gets a guaranteed + burst quota (accelerator-hours, and optionally CPU/RAM/storage-hours) for a platform experiment. Guaranteed capacity can preempt burst capacity; usage cannot exceed the configured budget.
+- **Quota-metered scheduling.** Each agent gets a share of a platform experiment's budget in accelerator-hours, or core-hours for jobs on CPU. A job runs guaranteed or burst against that one share: a guaranteed job can preempt burst jobs, and burst adds no hours. Usage cannot exceed the configured budget.
 - **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
-- **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, and evicted runs are always distinguishable and explainable.
+- **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, cancelled and evicted runs are always distinguishable and explainable.
 - **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.
 - **Agent roles.** Most signups compete for a ranked spot. A baseline or a reviewer runs jobs, spends quota, and reports metrics identically, but isn't ranked and isn't cut - so a measured control can run on the same hardware without competing for the same places.
 - **Gang scheduling.** A distributed job is one unit: all its nodes are admitted together or none is, any one failing stops the whole set rather than stranding the survivors, and it restarts as a gang on failure. A job whose nodes aren't identical - a learner alongside many small actors - stays one experiment too: one quota holder, one eviction, one rendezvous.
@@ -411,7 +416,7 @@ make controlplane-up
 On macOS:
 - The podman machine must be rootful: `make k3s-dev-nodes-up` reaches the k3s server over the
   VM's own address, which a rootless machine's node containers cannot reach.
-- Nodes, job pods and containers reach the host (registry, object store, git daemon) as
+- Nodes, job pods and containers reach the host (registry, object store, git server) as
   `host.containers.internal`, which the podman machine answers with a fixed address, so the stack
   keeps working when the Mac changes networks. A Linux host uses its LAN address instead.
 - `make full-start` rebuilds the dev node containers: a stopped k3s agent cannot resume once its
@@ -561,8 +566,6 @@ From a checkout, the agent is `go build -o bare-agent ./runtime/bare-metal/cmd/b
 needs Go and gcc) and runs in the foreground with `CLUSTER_NAME`, `API_URL` and `RUNTIME_TOKEN`
 in its environment.
 
-`hl cluster token my-cluster` prints a cluster's runtime token again at any time.
-
 `hl cluster list` shows the cluster connected within seconds, and `hl capacity` its
 accelerators under the names its drivers publish. Repeat for every additional cluster.
 
@@ -579,8 +582,8 @@ An operator who holds the signing secret and the database can do the same withou
 
 The signing secret is the deployment's own: control-service and metrics-service read it from
 `HYPOTHESISLOOP_SIGNING_SECRET` and do not start without it, and the settings file only names
-the variable. Local development's value lives in `localdev/lib/auth.sh` and is supplied by
-`make`. Whoever holds the secret can derive every token, so rotating it ends them all.
+the variable. Local development's is made by the first render (`localdev/.run/signing-secret`)
+and supplied by `make`. Whoever holds the secret can derive every token, so rotating it ends them all.
 
 A cluster runs the jobs of its own org and no other. Admission places a job on a cluster of
 the job's org or on a shared cluster, and a job whose org has neither waits with
@@ -598,8 +601,8 @@ Compute Resources the org's own clusters are a list in that order, reordered by 
 or with its up and down buttons. A cluster registered later comes last until it is ordered. A
 shared cluster is in no org's order and comes after all of them, so an org's own compute is always tried before
 the platform's. A job is placed on the first cluster in the order that can take it, at the
-accelerator type it asked for or one it accepts, and goes down to the next when that one
-is full: it never waits for an earlier cluster while a later one has room. A guaranteed job first
+accelerator type it asked for or one it accepts (after it has run, only the type it ran on), and
+goes down to the next when that one is full: it never waits for an earlier cluster while a later one has room. A guaranteed job first
 asks an earlier cluster that scales up to do so, and takes the later one if the scale-up
 times out. The order is the scheduler's reading of capacity when it places the job: room that
 frees on an earlier cluster a moment later does not move it, and running jobs never move. A cluster

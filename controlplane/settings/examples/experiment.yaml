@@ -13,10 +13,8 @@ description: what this research program is investigating
 # are hard physical-fit-checked at admission, not hours-budgeted.
 budget_accelerator_hours: 10
 
-# How many agents may sign up. A signed-up agent submits jobs and registers hypotheses under this
-# platform experiment until it closes or the agent is eliminated by the stage ladder below.
-# Optional: omitted, it is max_hosted, the number of machines the platform runs for one platform
-# experiment.
+# How many agents may sign up. Required. A signed-up agent submits jobs and registers hypotheses
+# under this platform experiment until it closes or the agent is eliminated by the stage ladder below.
 max_agents: 5
 
 # How often (seconds) a running job is expected to report its metric. Missing this window for too
@@ -25,10 +23,11 @@ max_agents: 5
 report_interval_seconds: 10
 
 # Metric keys jobs must emit for this platform experiment. Each one declares what it's *for* via
-# role (domain.MetricRole) — omitted role defaults to "ranking" for backward compatibility:
-#   ranking    — counts for stage cuts and standings (the common case; needs `direction`).
-#   constraint — must be reported and must satisfy `bound`; a job that violates it is evicted, but
-#                it never ranks or cuts on its own.
+# role (domain.MetricRole) — omitted role defaults to "ranking" for backward compatibility. Every
+# metric states a `direction`:
+#   ranking    — counts for stage cuts and standings (the common case).
+#   constraint — a gate judged per job against `bound`. A job that ran to the end reports it and
+#                exits 0; one that breaks the bound, or reports none, is COMPLETED and ranks nowhere.
 #   attribute  — reported and shown, never ranked, cut, or bound-checked.
 # A job whose workload doesn't push one of these keys contributes no admission/leaderboard data.
 metrics:
@@ -36,13 +35,16 @@ metrics:
     direction: maximize # or minimize
     role: ranking
   # - key: max_memory_gb
+  #   direction: minimize
   #   role: constraint
-  #   bound: 40 # violating this evicts the job
+  #   bound: 40 # a job above it ranks nowhere
   # - key: batch_size
+  #   direction: maximize
   #   role: attribute
 
 # How long it lasts, stated one way: duration_hours, or ends_at as RFC3339. Both, or neither, is
-# refused. duration_hours counts from starts_at, or from the create when there is no starts_at.
+# refused, and so is a run of more than 30 days (quota.max_platform_experiment_days).
+# duration_hours counts from starts_at, or from the create when there is no starts_at.
 # The platform experiment closes at its end, and the elimination ladder advances on the clock
 # between starts_at and the end or on budget spent, whichever is ahead.
 duration_hours: 24
@@ -54,7 +56,7 @@ duration_hours: 24
 # budget alone.
 # starts_at: "2029-12-01T00:05:00Z"
 
-# stages: optional elimination ladder (docs/stages.md). Omit to get the platform default
+# stages: optional elimination ladder. Omit to get the platform default
 # (config stages.default: 40%/75%-cut then 60%/0%). length_pct sums to 100, the last stage's
 # evict_pct must be 0, and max_job_hours (0/absent = unlimited) caps how long a single job may run
 # while that stage is current.
