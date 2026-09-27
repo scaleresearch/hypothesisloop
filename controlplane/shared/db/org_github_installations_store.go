@@ -17,7 +17,7 @@ var ErrGitHubInstallationNotFound = errors.New("the org has not connected that G
 // installationColumns reads an installation with who connected it: a user or the API key it was
 // connected with, under the name each carries now or its id while it carries none, or staff, or
 // unverified with no id and no name on one whose connector was not kept.
-const installationColumns = `org_id, installation_id, account_login, connected_by_kind,
+const installationColumns = `org_id, installation_id, account_login, account_type, connected_by_kind,
        CASE WHEN connected_by_kind IN ('user', 'key') THEN connected_by ELSE '' END,
        CASE connected_by_kind
          WHEN 'user' THEN COALESCE((SELECT named.name FROM users named WHERE named.id = connected_by AND named.name <> ''), connected_by)
@@ -27,23 +27,26 @@ const installationColumns = `org_id, installation_id, account_login, connected_b
        connected_at`
 
 func scanInstallation(row rowScanner, in *domain.OrgGitHubInstallation) error {
-	return row.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.ConnectedActor.Kind, &in.ConnectedActor.ID, &in.ConnectedActor.Name, &in.ConnectedAt)
+	return row.Scan(&in.OrgID, &in.InstallationID, &in.AccountLogin, &in.AccountType, &in.ConnectedActor.Kind, &in.ConnectedActor.ID, &in.ConnectedActor.Name, &in.ConnectedAt)
 }
 
 // ConnectGitHubInstallation records an installation as connected to an org by in.ConnectedActor:
 // a user, a key or staff. One that is already connected keeps who connected it and when, and
-// takes the account's name as it stands now.
+// takes the account's name and type as they stand now.
 func (s *AccountsStore) ConnectGitHubInstallation(ctx context.Context, in *domain.OrgGitHubInstallation) error {
 	switch in.ConnectedActor.Kind {
 	case domain.ActorUser, domain.ActorKey, domain.ActorStaff:
 	default:
 		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: an installation is connected by a user, a key or staff, got %q", in.ConnectedActor.Kind)
 	}
+	if in.AccountType == "" {
+		return errors.New("accounts_store.ConnectGitHubInstallation: an installation is connected with the type of its account")
+	}
 	err := scanInstallation(s.pool.pool.QueryRow(ctx, `
-INSERT INTO org_github_installations (org_id, installation_id, account_login, connected_by_kind, connected_by)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login
-RETURNING `+installationColumns, in.OrgID, in.InstallationID, in.AccountLogin, string(in.ConnectedActor.Kind), in.ConnectedActor.ID), in)
+INSERT INTO org_github_installations (org_id, installation_id, account_login, account_type, connected_by_kind, connected_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login, account_type = EXCLUDED.account_type
+RETURNING `+installationColumns, in.OrgID, in.InstallationID, in.AccountLogin, in.AccountType, string(in.ConnectedActor.Kind), in.ConnectedActor.ID), in)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
 		return ErrOrgNotFound
@@ -90,6 +93,18 @@ ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin), in)
 		return nil, fmt.Errorf("accounts_store.GitHubInstallationOfAccount: %w", err)
 	}
 	return in, nil
+}
+
+// SetGitHubInstallationAccountType records the type of the account an installation is on, on
+// every org's record of it.
+func (s *AccountsStore) SetGitHubInstallationAccountType(ctx context.Context, installationID int64, accountType string) error {
+	if accountType == "" {
+		return errors.New("accounts_store.SetGitHubInstallationAccountType: the account's type is required")
+	}
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE org_github_installations SET account_type = $2 WHERE installation_id = $1`, installationID, accountType); err != nil {
+		return fmt.Errorf("accounts_store.SetGitHubInstallationAccountType: %w", err)
+	}
+	return nil
 }
 
 // DisconnectGitHubInstallation takes an installation away from an org.

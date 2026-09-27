@@ -131,7 +131,7 @@ func (f fakeInstallations) Installation(_ context.Context, id int64) (*github.In
 	if !ok {
 		return nil, github.ErrInstallationGone
 	}
-	return &github.Installation{ID: id, AccountLogin: login}, nil
+	return &github.Installation{ID: id, AccountLogin: login, AccountType: github.AccountOrganization}, nil
 }
 
 func TestGitHubConnectRecordsOnlyWhatGitHubConfirms(t *testing.T) {
@@ -142,7 +142,7 @@ func TestGitHubConnectRecordsOnlyWhatGitHubConfirms(t *testing.T) {
 	if err := connectGitHub(ctx, store, app, "org-1", 100, &out); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	want := domain.OrgGitHubInstallation{OrgID: "org-1", InstallationID: 100, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
+	want := domain.OrgGitHubInstallation{OrgID: "org-1", InstallationID: 100, AccountLogin: "Acme", AccountType: github.AccountOrganization, ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
 	if len(store.connected) != 1 || *store.connected[0] != want {
 		t.Fatalf("connected = %+v, want %+v with the account GitHub stated", store.connected, want)
 	}

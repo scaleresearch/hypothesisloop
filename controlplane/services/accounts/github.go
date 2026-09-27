@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 type GitHubApp interface {
 	App() github.App
 	UserInstallations(ctx context.Context, userCode, redirectURI string) ([]github.Installation, error)
+	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
 	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
 	Token(ctx context.Context, installationID int64, fullName string, access github.Access) (*github.Token, error)
 	File(ctx context.Context, token *github.Token, ref, path string) ([]byte, error)
@@ -37,7 +39,25 @@ type InstallationStore interface {
 	ConnectGitHubInstallation(ctx context.Context, installation *domain.OrgGitHubInstallation) error
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error)
 	GitHubInstallationOfAccount(ctx context.Context, orgID, accountLogin string) (*domain.OrgGitHubInstallation, error)
+	SetGitHubInstallationAccountType(ctx context.Context, installationID int64, accountType string) error
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
+}
+
+// accountType gives a record from before the type of its account was kept that type: GitHub is
+// asked, and the answer recorded for every later use.
+func accountType(ctx context.Context, store InstallationStore, app GitHubApp, installation *domain.OrgGitHubInstallation) error {
+	if installation.AccountType != "" {
+		return nil
+	}
+	found, err := app.Installation(ctx, installation.InstallationID)
+	if err != nil {
+		return err
+	}
+	if err := store.SetGitHubInstallationAccountType(ctx, installation.InstallationID, found.AccountType); err != nil {
+		return err
+	}
+	installation.AccountType = found.AccountType
+	return nil
 }
 
 // ExperimentRepositories says which repository a platform experiment names and which project
@@ -86,26 +106,29 @@ type GitCredential struct {
 
 // The reasons a client tells a refusal about GitHub apart by.
 const (
-	ReasonGitHubNotConfigured        = "github_not_configured"
-	ReasonInvalidRequest             = "invalid_request"
-	ReasonCodeRejected               = "code_rejected"
-	ReasonAppNotInstalled            = "app_not_installed"
-	ReasonInstallationChoiceRequired = "installation_choice_required"
-	ReasonInstallationNotReachable   = "installation_not_reachable"
-	ReasonInstallationNotControlled  = "installation_not_controlled"
-	ReasonInstallationNotConnected   = "installation_not_connected"
-	ReasonInstallationGone           = "installation_gone"
-	ReasonPermissionNotGranted       = "permission_not_granted"
-	ReasonInvalidRepository          = "invalid_repository"
-	ReasonRepositoryNotReachable     = "repository_not_reachable"
-	ReasonNoRepository               = "no_repository"
-	ReasonGitHubNotConnected         = "github_not_connected"
-	ReasonRepositoryNotCreated       = "repository_not_created"
-	ReasonRepositoryAccountRequired  = "repository_account_required"
-	ReasonNoExperimentFile           = "no_experiment_file"
-	ReasonRunOver                    = "run_over"
-	ReasonForbidden                  = "forbidden"
-	ReasonUnavailable                = "unavailable"
+	ReasonGitHubNotConfigured            = "github_not_configured"
+	ReasonInvalidRequest                 = "invalid_request"
+	ReasonCodeRejected                   = "code_rejected"
+	ReasonAppNotInstalled                = "app_not_installed"
+	ReasonInstallationChoiceRequired     = "installation_choice_required"
+	ReasonInstallationNotReachable       = "installation_not_reachable"
+	ReasonInstallationNotControlled      = "installation_not_controlled"
+	ReasonInstallationNotConnected       = "installation_not_connected"
+	ReasonInstallationGone               = "installation_gone"
+	ReasonPermissionNotGranted           = "permission_not_granted"
+	ReasonInvalidRepository              = "invalid_repository"
+	ReasonRepositoryNotReachable         = "repository_not_reachable"
+	ReasonNoRepository                   = "no_repository"
+	ReasonGitHubNotConnected             = "github_not_connected"
+	ReasonRepositoryNotCreated           = "repository_not_created"
+	ReasonRepositoryExists               = "repository_exists"
+	ReasonRepositoryCreationNotPermitted = "repository_creation_not_permitted"
+	ReasonRepositoryAccountPersonal      = "repository_account_personal"
+	ReasonRepositoryAccountRequired      = "repository_account_required"
+	ReasonNoExperimentFile               = "no_experiment_file"
+	ReasonRunOver                        = "run_over"
+	ReasonForbidden                      = "forbidden"
+	ReasonUnavailable                    = "unavailable"
 )
 
 // choiceRequired is the refusal of a connect that named no installation while the person
@@ -127,10 +150,13 @@ var errNoInstallation = errors.New("the org has connected no GitHub account")
 // refusal turns what GitHub or the store refused into what the caller is told. gone is the
 // status of a repository the org's installations do not reach: 422 where a request names it,
 // 409 where a platform experiment already does. Anything else is the platform's or GitHub's
-// failure: it is logged and answered without its text.
+// failure: it is logged and answered without its text, but for a create GitHub refused, whose
+// answer is GitHub's own message.
 func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var status huma.StatusError
 	var uncommitted *github.FirstCommitError
+	var notPermitted *github.CreationNotPermittedError
+	var failed *github.CreationFailedError
 	switch {
 	case errors.As(err, &status):
 		return err
@@ -147,10 +173,19 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
 	case errors.Is(err, errNoInstallation):
 		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org connects one with POST /orgs/{id}/github-installations (Settings, GitHub), and the experiment then names a repository there or the platform creates one")
-	case errors.Is(err, github.ErrCannotCreateRepositories):
-		return invalid(ReasonRepositoryNotCreated, "the GitHub account the org connected does not let the platform's GitHub App create a repository: its owner grants the App the creation of repositories on GitHub, or the request names a repository the installation covers")
+	case errors.Is(err, github.ErrPersonalAccount):
+		return invalid(ReasonRepositoryAccountPersonal, "the GitHub account the repository was asked on is a personal account, where GitHub lets no App installation create a repository: create an empty private repository on it yourself, add it to the installation when that covers selected repositories only, and name it in repository, or connect a GitHub organisation, where the platform creates one")
+	case errors.As(err, &notPermitted):
+		accepted := ""
+		if notPermitted.Accepted != "" {
+			accepted = " GitHub takes for it one of the permissions " + strconv.Quote(notPermitted.Accepted) + "."
+		}
+		return invalid(ReasonRepositoryCreationNotPermitted, "GitHub does not let the platform's GitHub App create a repository on the organisation the org connected."+accepted+" An owner of the organisation accepts the App's permissions on GitHub and lets the App create repositories there, or the request names a repository the installation covers")
 	case errors.Is(err, github.ErrRepositoryExists):
-		return api.Refuse(http.StatusConflict, ReasonRepositoryNotCreated, "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
+		return api.Refuse(http.StatusConflict, ReasonRepositoryExists, "the GitHub organisation the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
+	case errors.As(err, &failed):
+		logger.Error("github refused to create a repository", zap.String("operation", op), zap.Error(err))
+		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub did not create the repository, so nothing else was created. It answered "+strconv.Itoa(failed.Status)+": "+strconv.Quote(failed.Message)+". Name a repository the installation covers, or try again")
 	case errors.Is(err, github.ErrCodeRejected):
 		return invalid(ReasonCodeRejected, "GitHub did not accept the code: it works once, for ten minutes, and with the redirect_uri it was issued to, so authorise again and send the new one")
 	case errors.Is(err, errNotConnected):
@@ -240,7 +275,7 @@ func (r *Repositories) connect(ctx context.Context, orgID, code, redirectURI str
 			return nil, notControlled
 		}
 	}
-	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, ConnectedActor: p.Actor()}
+	installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: chosen.ID, AccountLogin: chosen.AccountLogin, AccountType: chosen.AccountType, ConnectedActor: p.Actor()}
 	if err := r.store.ConnectGitHubInstallation(ctx, installation); err != nil {
 		return nil, err
 	}
@@ -350,7 +385,9 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			"redirect_uri is the one the code was issued to. Verify state before calling (see GET /github/app). " +
 			"installation_id may be left out when GitHub did not hand one back, as when the App was installed before: the one installation the " +
 			"person controls is connected, and when they control several the answer is 409 installation_choice_required with installations, a list of " +
-			"{installation_id, account_login} to ask them about, after which they authorise again. Connecting one that is connected answers with it. " +
+			"{installation_id, account_login, account_type} to ask them about, after which they authorise again. Connecting one that is connected answers with it. " +
+			"account_type says whether the account is a person's own (User) or an organisation: the platform creates repositories on an organisation only, " +
+			"and on a personal account a platform experiment names a repository that exists. " +
 			"422 invalid_request, code_rejected, app_not_installed (the person reaches none), installation_not_reachable (not the one named) or " +
 			"installation_not_controlled (reached, and on an account that is not theirs to connect). " +
 			"503 github_not_configured.",
@@ -377,7 +414,9 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		OperationID: "list-github-installations", Method: "GET", Path: "/orgs/{id}/github-installations",
 		Summary: "List the GitHub App installations an org connected", Tags: []string{"github"},
 		Description: "For any member of the org, oldest first. What was recorded at connect: GitHub is not asked, so an installation removed there " +
-			"since still shows, and a platform experiment that names a repository of it is refused its git credential.",
+			"since still shows, and a platform experiment that names a repository of it is refused its git credential. " +
+			"account_type is User for a person's own account, where the platform creates no repository, and Organization. An installation connected before " +
+			"the type was kept gets it from GitHub the first time it is listed or a repository is asked on it, and shows without it when it was removed on GitHub.",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 		Page
@@ -393,6 +432,17 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		installations, err := r.store.ListGitHubInstallations(ctx, in.ID)
 		if err != nil {
 			return nil, refusal(r.logger, op, err, http.StatusConflict)
+		}
+		if r.github != nil {
+			for _, installation := range installations {
+				err := accountType(ctx, r.store, r.github, installation)
+				if errors.Is(err, github.ErrInstallationGone) {
+					continue
+				}
+				if err != nil {
+					return nil, refusal(r.logger, op, err, http.StatusConflict)
+				}
+			}
 		}
 		return &installationsPage{TotalCount: len(installations), Body: pageOf(installations, limit, offset)}, nil
 	})

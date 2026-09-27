@@ -38,7 +38,7 @@ func (s *memInstallations) ConnectGitHubInstallation(_ context.Context, in *doma
 	}
 	for _, have := range s.connected[in.OrgID] {
 		if have.InstallationID == in.InstallationID {
-			have.AccountLogin = in.AccountLogin
+			have.AccountLogin, have.AccountType = in.AccountLogin, in.AccountType
 			*in = *have
 			return nil
 		}
@@ -66,6 +66,17 @@ func (s *memInstallations) GitHubInstallationOfAccount(_ context.Context, orgID,
 		}
 	}
 	return nil, nil
+}
+
+func (s *memInstallations) SetGitHubInstallationAccountType(_ context.Context, id int64, accountType string) error {
+	for _, connected := range s.connected {
+		for _, have := range connected {
+			if have.InstallationID == id {
+				have.AccountType = accountType
+			}
+		}
+	}
+	return nil
 }
 
 func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID string, id int64) error {
@@ -99,8 +110,9 @@ type asked struct{ code, redirect string }
 
 const testRedirect = "http://localhost:3000/settings/github"
 
-// fakeApp is the GitHub App as the service sees it. Installation 100 is on the account Acme and
-// covers Acme/Model and acme/other; installation 200 is on rival and covers rival/secret. Each
+// fakeApp is the GitHub App as the service sees it. Installation 100 is on the organisation Acme
+// and covers Acme/Model and acme/other; installation 200 is on the organisation rival and covers
+// rival/secret; installation 300 is on carol's own account and covers carol/notes. Each
 // code belongs to a person who reaches some of them, and controls the account of each one they
 // reach unless guests says they are only a collaborator on a repository there.
 type fakeApp struct {
@@ -109,6 +121,8 @@ type fakeApp struct {
 	covers  map[int64][]github.Repository
 	asked   []asked
 	listed  []int64
+	// looked holds each installation GitHub was asked about by its id.
+	looked  []int64
 	mints   []minted
 	files   []string
 	userErr error
@@ -134,8 +148,9 @@ func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, name
 }
 
 var (
-	acme  = github.Installation{ID: 100, AccountLogin: "Acme"}
-	rival = github.Installation{ID: 200, AccountLogin: "rival"}
+	acme  = github.Installation{ID: 100, AccountLogin: "Acme", AccountType: github.AccountOrganization}
+	rival = github.Installation{ID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization}
+	carol = github.Installation{ID: 300, AccountLogin: "carol", AccountType: github.AccountUser}
 )
 
 func newFakeApp() *fakeApp {
@@ -145,6 +160,7 @@ func newFakeApp() *fakeApp {
 		covers: map[int64][]github.Repository{
 			100: {{FullName: "acme/other"}, {FullName: "Acme/Model", Private: true}},
 			200: {{FullName: "rival/secret", Private: true}},
+			300: {{FullName: "carol/notes", Private: true}},
 		},
 		listErr: map[int64]error{},
 	}
@@ -169,6 +185,16 @@ func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) ([
 		out = append(out, one)
 	}
 	return out, nil
+}
+
+func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github.Installation, error) {
+	a.looked = append(a.looked, installationID)
+	for _, one := range []github.Installation{acme, rival, carol} {
+		if _, covered := a.covers[installationID]; covered && one.ID == installationID {
+			return &one, nil
+		}
+	}
+	return nil, github.ErrInstallationGone
 }
 
 func (a *fakeApp) Repositories(_ context.Context, installationID int64) ([]github.Repository, error) {
@@ -256,7 +282,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 func (w *githubWorld) connect(orgID string, installation github.Installation) {
 	w.t.Helper()
 	err := w.installations.ConnectGitHubInstallation(context.Background(), &domain.OrgGitHubInstallation{
-		OrgID: orgID, InstallationID: installation.ID, AccountLogin: installation.AccountLogin, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"},
+		OrgID: orgID, InstallationID: installation.ID, AccountLogin: installation.AccountLogin, AccountType: installation.AccountType, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner"},
 	})
 	if err != nil {
 		w.t.Fatal(err)
@@ -351,7 +377,7 @@ func TestConnectRecordsAnInstallationThePersonReachesOnGitHub(t *testing.T) {
 	path := "/orgs/" + w.orgA + "/github-installations"
 	var connected domain.OrgGitHubInstallation
 	w.ok("owner", "POST", path, connectBody("code-both", 200), http.StatusCreated, &connected)
-	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: 200, AccountLogin: "rival", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, ConnectedAt: connected.ConnectedAt}
+	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, ConnectedAt: connected.ConnectedAt}
 	if connected != want || connected.ConnectedAt.IsZero() {
 		t.Fatalf("connected = %+v, want %+v", connected, want)
 	}
@@ -395,8 +421,8 @@ func TestConnectAsksWhichInstallationWhenThePersonReachesSeveral(t *testing.T) {
 	if body.Reason != ReasonInstallationChoiceRequired || body.Message == "" || !slices.Equal(body.Installations, []github.Installation{acme, rival}) {
 		t.Fatalf("answer = %s, want installation_choice_required with both installations", rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), `"installation_id":100`) || !strings.Contains(rec.Body.String(), `"account_login":"Acme"`) {
-		t.Fatalf("the installations are not listed by installation_id and account_login: %s", rec.Body)
+	if !strings.Contains(rec.Body.String(), `"installation_id":100`) || !strings.Contains(rec.Body.String(), `"account_login":"Acme"`) || !strings.Contains(rec.Body.String(), `"account_type":"Organization"`) {
+		t.Fatalf("the installations are not listed by installation_id, account_login and account_type: %s", rec.Body)
 	}
 	if len(w.installations.connected[w.orgA]) != 0 {
 		t.Fatal("an installation was connected though none was chosen")
@@ -823,8 +849,10 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		status    int
 		reason    string
 	}{
-		"the installation may not create": {w.projectA, github.ErrCannotCreateRepositories, 422, ReasonRepositoryNotCreated},
-		"the name is taken":               {w.projectA, github.ErrRepositoryExists, 409, ReasonRepositoryNotCreated},
+		"the installation may not create": {w.projectA, &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}, 422, ReasonRepositoryCreationNotPermitted},
+		"the name is taken":               {w.projectA, github.ErrRepositoryExists, 409, ReasonRepositoryExists},
+		"github rate limits":              {w.projectA, github.ErrRateLimited, 503, ReasonUnavailable},
+		"github refuses for its own":      {w.projectA, &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}, 502, ReasonRepositoryNotCreated},
 		"the App was removed on GitHub":   {w.projectA, github.ErrInstallationGone, 422, ReasonInstallationGone},
 		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
 	} {
@@ -833,11 +861,85 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 		}
 	}
+	// What GitHub takes for a create, and what it said of one it refused, reach the caller.
+	w.app.createErr = &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}
+	if _, err := w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles); !strings.Contains(err.Error(), "administration=write; repository_creation=write") {
+		t.Errorf("a create the installation may not make: %v, want the permissions GitHub takes for it", err)
+	}
+	w.app.createErr = &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}
+	if _, err := w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles); !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "Repository creation failed.") {
+		t.Errorf("a create GitHub refused: %v, want its status and its message", err)
+	}
 	// The repository GitHub made stays there, so the refusal names it and what to do with it.
 	w.app.createErr = &github.FirstCommitError{Repository: "Acme/another", Cause: errors.New("github: POST /repos/Acme/another/git/trees answered 409")}
 	_, err = w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles)
 	if statusOf(err) != 502 || reasonOf(err) != ReasonRepositoryNotCreated || !strings.Contains(err.Error(), "Acme/another") || !strings.Contains(err.Error(), "name it in repository") || strings.Contains(err.Error(), "409") {
 		t.Errorf("a first commit GitHub refused: Create = %v, want 502 repository_not_created naming the repository left behind and nothing GitHub said", err)
+	}
+}
+
+// GitHub lets no App installation create on a person's own account, so the platform refuses
+// there without asking it, and a repository the request names works as on any account.
+func TestNoRepositoryIsCreatedOnAPersonalAccount(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, carol)
+	named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "", firstFiles)
+	if named != "" || statusOf(err) != 422 || reasonOf(err) != ReasonRepositoryAccountPersonal || !strings.Contains(err.Error(), "name it in repository") || !strings.Contains(err.Error(), "connect a GitHub organisation") {
+		t.Fatalf("Create on a personal account = %q, %v, want 422 repository_account_personal saying what to do", named, err)
+	}
+	if len(w.app.created) != 0 || len(w.app.looked) != 0 || len(w.app.mints) != 0 {
+		t.Fatalf("GitHub was asked before a personal account was refused: created %v, looked up %v, minted %v", w.app.created, w.app.looked, w.app.mints)
+	}
+	if reached, err := w.host.Reachable(ctx, w.projectA, "carol/notes"); err != nil || reached != "carol/notes" {
+		t.Fatalf("a repository named on a personal account: Reachable = %q, %v, want it reached", reached, err)
+	}
+	w.connect(w.orgA, acme)
+	if named, err := w.host.Create(ctx, w.projectA, "carol", "on-carol", "", firstFiles); named != "" || reasonOf(err) != ReasonRepositoryAccountPersonal || len(w.app.created) != 0 {
+		t.Fatalf("naming the personal account beside an organisation: Create = %q, %v, want repository_account_personal", named, err)
+	}
+	if named, err := w.host.Create(ctx, w.projectA, "acme", "on-acme", "", firstFiles); err != nil || named != "Acme/on-acme" {
+		t.Fatalf("naming the organisation beside a personal account: Create = %q, %v, want it created", named, err)
+	}
+}
+
+// An installation connected before the type of its account was kept gets it from GitHub at its
+// next use, once, and the answer is recorded.
+func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptLearnsItFromGitHub(t *testing.T) {
+	ctx := context.Background()
+	w := newGitHubWorld(t, true)
+	untyped := func(installation github.Installation) github.Installation {
+		installation.AccountType = ""
+		return installation
+	}
+	w.connect(w.orgA, untyped(carol))
+	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAccountPersonal || len(w.app.created) != 0 {
+		t.Fatalf("Create on an untyped personal account: %v (created %v), want repository_account_personal", err, w.app.created)
+	}
+	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAccountPersonal || !slices.Equal(w.app.looked, []int64{300}) {
+		t.Fatalf("a second create: %v after asking GitHub about %v, want the type asked for once", err, w.app.looked)
+	}
+
+	w = newGitHubWorld(t, true)
+	for _, one := range []github.Installation{acme, rival, carol} {
+		w.connect(w.orgA, untyped(one))
+		w.store.clock = w.store.clock.Add(time.Minute)
+	}
+	delete(w.app.covers, 200)
+	path := "/orgs/" + w.orgA + "/github-installations"
+	var listed []domain.OrgGitHubInstallation
+	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
+	if len(listed) != 3 || listed[0].AccountType != github.AccountOrganization || listed[1].AccountType != "" || listed[2].AccountType != github.AccountUser {
+		t.Fatalf("listed = %+v, want each typed by GitHub but the one removed there", listed)
+	}
+	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
+	if !slices.Equal(w.app.looked, []int64{100, 200, 300, 200}) {
+		t.Fatalf("GitHub was asked about %v, want each once and the one it did not answer for again", w.app.looked)
+	}
+	w.app.covers[200] = nil
+	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
+	if listed[1].AccountType != github.AccountOrganization {
+		t.Fatalf("listed = %+v, want the installation typed once GitHub answers for it", listed[1])
 	}
 }
 

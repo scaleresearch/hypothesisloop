@@ -198,7 +198,7 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	if err != nil {
 		return fmt.Errorf("installation %d: %w", installationID, err)
 	}
-	connected := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: found.ID, AccountLogin: found.AccountLogin, ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
+	connected := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: found.ID, AccountLogin: found.AccountLogin, AccountType: found.AccountType, ConnectedActor: domain.Actor{Kind: domain.ActorStaff}}
 	if err := store.ConnectGitHubInstallation(ctx, connected); err != nil {
 		return err
 	}

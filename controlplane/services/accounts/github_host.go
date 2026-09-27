@@ -65,9 +65,10 @@ func (h *GitHubHost) Reachable(ctx context.Context, projectID, repository string
 	return token.Repository, nil
 }
 
-// Create makes a private repository on the GitHub account named, one the org of the project
-// connected, or with none named on the only one it connected: with several, which one is the
-// request's to say. files are its first commit.
+// Create makes a private repository on the GitHub organisation named, one the org of the project
+// connected, or with none named on the only account it connected: with several, which one is
+// the request's to say. files are its first commit. A personal account is refused before GitHub
+// is asked to create anything.
 func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error) {
 	const op = "create-repository"
 	project, err := h.store.GetProject(ctx, projectID)
@@ -97,6 +98,12 @@ func (h *GitHubHost) Create(ctx context.Context, projectID, account, name, descr
 		return "", invalid(ReasonRepositoryAccountRequired, "the org has connected several GitHub accounts ("+strings.Join(logins, ", ")+"): say in repository_account which one the new repository is created on, or name a repository")
 	case chosen == nil:
 		return "", refusal(h.logger, op, errNotConnected, http.StatusUnprocessableEntity)
+	}
+	if err := accountType(ctx, h.store, h.github, chosen); err != nil {
+		return "", refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	if chosen.AccountType != github.AccountOrganization {
+		return "", refusal(h.logger, op, github.ErrPersonalAccount, http.StatusUnprocessableEntity)
 	}
 	created, err := h.github.CreateRepository(ctx, chosen.InstallationID, name, description, files)
 	if err != nil {

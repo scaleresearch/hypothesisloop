@@ -25,14 +25,14 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 		t.Fatalf("disconnect with none connected: got = %v, want = %v", err, ErrGitHubInstallationNotFound)
 	}
 
-	first := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
+	first := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme", AccountType: "Organization", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
 	if err := accounts.ConnectGitHubInstallation(ctx, first); err != nil || first.ConnectedAt.IsZero() {
 		t.Fatalf("connect: got = %v at %v, want = nil and the moment it happened", err, first.ConnectedAt)
 	}
 	for _, more := range []*domain.OrgGitHubInstallation{
-		{OrgID: orgA, InstallationID: 8, AccountLogin: "rival", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}},
+		{OrgID: orgA, InstallationID: 8, AccountLogin: "rival", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}},
 		// The same installation serves a second org, each with a row of its own.
-		{OrgID: orgB, InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-2"}},
+		{OrgID: orgB, InstallationID: 7, AccountLogin: "Acme", AccountType: "Organization", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-2"}},
 	} {
 		if err := accounts.ConnectGitHubInstallation(ctx, more); err != nil {
 			t.Fatalf("connect %+v: %v", more, err)
@@ -40,7 +40,7 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 
 	// Connected again, it keeps who connected it and when, and takes the account's name of today.
-	again := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme-Renamed", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-9"}}
+	again := &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 7, AccountLogin: "Acme-Renamed", AccountType: "Organization", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-9"}}
 	if err := accounts.ConnectGitHubInstallation(ctx, again); err != nil {
 		t.Fatalf("connect again: %v", err)
 	}
@@ -49,8 +49,28 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 
 	listed, err := accounts.ListGitHubInstallations(ctx, orgA)
-	if err != nil || len(listed) != 2 || listed[0].InstallationID != 7 || listed[0].AccountLogin != "Acme-Renamed" || listed[1].InstallationID != 8 {
-		t.Fatalf("list: got = %+v, %v, want the org's two, oldest first, the first under its new name", listed, err)
+	if err != nil || len(listed) != 2 || listed[0].InstallationID != 7 || listed[0].AccountLogin != "Acme-Renamed" || listed[0].AccountType != "Organization" || listed[1].InstallationID != 8 || listed[1].AccountType != "User" {
+		t.Fatalf("list: got = %+v, %v, want the org's two, oldest first, the first under its new name, each with the type of its account", listed, err)
+	}
+
+	// A row from before the type was kept holds none until GitHub's answer is recorded, on
+	// every org's record of the installation.
+	if _, err := pool.pool.Exec(ctx, `UPDATE org_github_installations SET account_type = '' WHERE installation_id = 7`); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := accounts.GitHubInstallationOfAccount(ctx, orgA, "acme-renamed"); err != nil || found == nil || found.AccountType != "" {
+		t.Fatalf("a row from before the type was kept: got = %+v, %v, want it read with no type", found, err)
+	}
+	if err := accounts.SetGitHubInstallationAccountType(ctx, 7, "Organization"); err != nil {
+		t.Fatalf("set the account type: %v", err)
+	}
+	for _, org := range []string{orgA, orgB} {
+		if found, err := accounts.GitHubInstallationOfAccount(ctx, org, map[string]string{orgA: "acme-renamed", orgB: "acme"}[org]); err != nil || found == nil || found.AccountType != "Organization" {
+			t.Fatalf("after the type was recorded: got = %+v, %v, want it on each org's record", found, err)
+		}
+	}
+	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 9, AccountLogin: "untyped", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err == nil {
+		t.Fatal("an installation was connected without the type of its account")
 	}
 
 	for login, want := range map[string]int64{"acme-renamed": 7, "ACME-RENAMED": 7, "Rival": 8} {
@@ -80,7 +100,7 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 		t.Fatalf("after one org disconnected it, the other's: got = %+v, %v, want it still connected", found, err)
 	}
 
-	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: "org-nowhere", InstallationID: 7, AccountLogin: "Acme", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); !errors.Is(err, ErrOrgNotFound) {
+	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: "org-nowhere", InstallationID: 7, AccountLogin: "Acme", AccountType: "Organization", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); !errors.Is(err, ErrOrgNotFound) {
 		t.Fatalf("connect to an org that does not exist: got = %v, want = %v", err, ErrOrgNotFound)
 	}
 }

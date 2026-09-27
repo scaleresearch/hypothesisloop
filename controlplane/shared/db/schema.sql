@@ -1150,6 +1150,10 @@ BEGIN
         RAISE EXCEPTION 'org_github_installations: who connected these is neither one user nor one API key: %', unresolved;
     END IF;
 END $$;
+-- Whether the account is a person's own or an organisation, User or Organization as GitHub
+-- says: the platform creates repositories on an organisation only. Only GitHub knows it of a
+-- row from before it was kept, so that row holds '' until its next use asks GitHub.
+ALTER TABLE org_github_installations ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT '';
 -- The code a platform experiment works on, owner/name on GitHub, and the image its hosted agents
 -- and coordinator run. An empty image is the platform's own (config agents.image). Both are
 -- fixed at creation.

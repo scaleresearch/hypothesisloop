@@ -106,7 +106,7 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 	connectors := []domain.Actor{userActor(userID, "Ada King"), {Kind: domain.ActorKey, ID: key.ID, Name: "laptop"}, {Kind: domain.ActorStaff, Name: "staff"}}
 	for n, want := range connectors {
 		by := domain.Actor{Kind: want.Kind, ID: want.ID}
-		installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: int64(n + 1), AccountLogin: "acme-" + string(want.Kind), ConnectedActor: by}
+		installation := &domain.OrgGitHubInstallation{OrgID: orgID, InstallationID: int64(n + 1), AccountLogin: "acme-" + string(want.Kind), AccountType: "Organization", ConnectedActor: by}
 		if err := accounts.ConnectGitHubInstallation(ctx, installation); err != nil || installation.ConnectedActor != want {
 			t.Fatalf("installation connected by %+v: got = %+v, %v, want %+v", by, installation, err, want)
 		}
