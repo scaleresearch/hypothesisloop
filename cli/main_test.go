@@ -658,38 +658,13 @@ func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
 	}
 }
 
-func TestUnfinishedJobSaysTheResultArrivesAsAnUpdate(t *testing.T) {
-	status := "RUNNING"
-	recordingServer(t, func(int, recorded) any { return map[string]any{"id": "job-1", "status": status} })
-	note := "the result arrives as an update with its metrics when you end your turn"
-	for _, tc := range []struct {
-		status string
-		want   bool
-	}{{"RUNNING", true}, {"QUEUED", true}, {"COMPLETED", false}, {"FAILED", false}} {
-		status = tc.status
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("exit %d, stderr %s", code, stderr.String())
-		}
-		if got := strings.Contains(stderr.String(), note); got != tc.want {
-			t.Fatalf("%s: stderr = %q, note wanted %v", tc.status, stderr.String(), tc.want)
-		}
-		if strings.Contains(stdout.String(), note) {
-			t.Fatalf("%s: note on stdout: %q", tc.status, stdout.String())
-		}
-	}
-}
-
-func TestJobHeldForASummarySaysWhatReleasesIt(t *testing.T) {
+func TestJobStatusPrintsTheRecordAndNothingElse(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"id": "job-1", "status": "QUEUED", "not_admitted_reason": "summary_gate"}
 	})
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d, stderr %s", code, stderr.String())
-	}
-	if got := stderr.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, "hl job list --needs-summary") {
-		t.Fatalf("stderr = %q, want one line naming hl job list --needs-summary", got)
+	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || strings.Count(stdout.String(), "\n") != 1 {
+		t.Fatalf("exit %d, stdout %q, stderr %q: want the one JSON line and no other output", code, stdout.String(), stderr.String())
 	}
 }
 

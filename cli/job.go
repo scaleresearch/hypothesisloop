@@ -185,20 +185,6 @@ const summaryGate = "summary_gate"
 
 const resultArrives = "the result arrives as an update with its metrics when you end your turn"
 
-// progress reports whether a job can still change status, and whether an owed summary holds it.
-func progress(raw json.RawMessage) (unfinished, held bool) {
-	var job struct {
-		Status string `json:"status"`
-		Reason string `json:"not_admitted_reason"`
-	}
-	_ = json.Unmarshal(raw, &job)
-	switch job.Status {
-	case "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED":
-		return false, false
-	}
-	return true, job.Reason == summaryGate
-}
-
 // setJobEnv applies K=V pairs onto body's job.env.
 func setJobEnv(body map[string]any, pairs []string) error {
 	if len(pairs) == 0 {
@@ -421,7 +407,7 @@ list --needs-summary).`, stderr)
 	if len(ids) == 0 {
 		return parseExit(misuse(fs, "want at least one ID"))
 	}
-	code, pending, held := 0, false, false
+	code := 0
 	for _, id := range ids {
 		var out json.RawMessage
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &out); err != nil {
@@ -431,13 +417,6 @@ list --needs-summary).`, stderr)
 		if err := printLine(stdout, out, jobDrop...); err != nil {
 			return fail(stderr, err)
 		}
-		unfinished, gated := progress(out)
-		pending, held = pending || unfinished, held || gated
-	}
-	if held {
-		fmt.Fprintln(stderr, "hl: job status: summary_gate: it starts once each COMPLETED job of its agent has a summary; hl job list --needs-summary --agent A lists them")
-	} else if pending {
-		fmt.Fprintln(stderr, "hl: job status: unfinished; "+resultArrives)
 	}
 	return code
 }
