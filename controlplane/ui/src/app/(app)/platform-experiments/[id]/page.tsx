@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useState } from 'react'
+import { jobStatusLabel } from '@/lib/job-status'
 import { quotaShareAccH } from '@/lib/quota'
 import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly, ReadOnlyProvider, useRecordScope } from '@/lib/read-only'
@@ -661,7 +662,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                       </td>
                       <td className="font-mono text-xs"><AgentLabel id={exp.agent_id} /></td>
                       <td>
-                        <StatusBadge status={exp.status} />
+                        <Badge status={exp.status}>{jobStatusLabel(exp)}</Badge>
                         {exp.summary_due && <NoSummary className="ml-1.5" />}
                         {evictionText && (
                           <div className="mt-0.5 text-2xs text-subtle" title="eviction_reason">

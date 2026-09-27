@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { jobStatusLabel } from '@/lib/job-status'
 import { useProjectRouter } from '@/lib/query-state'
 import {
   FlaskConical, ListTree, Server, LineChart, Lightbulb, Search, CornerDownLeft,
@@ -97,7 +98,7 @@ export function CommandPalette() {
         setIdResult({
           id: 'resolved-job',
           label: `Job ${q.slice(0, 12)}…`,
-          sub: `${exp.status} · open job`,
+          sub: `${jobStatusLabel(exp)} · open job`,
           icon: Hash,
           action: () => { router.push(`/jobs/${q}`); close() },
         })

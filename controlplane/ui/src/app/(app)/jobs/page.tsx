@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
+import { jobStatusLabel } from '@/lib/job-status'
 import { TextLink } from '@/components/ui/link'
 import { fetchExperimentsPage, fetchExperimentStats, cancelExperiment, fetchOrgClusters } from '@/lib/api'
 import type { Experiment } from '@/types'
@@ -259,7 +260,7 @@ function JobsPageContent() {
                       </td>
                     )}
                     <td>
-                      <Badge status={status}>{status}</Badge>
+                      <Badge status={status}>{jobStatusLabel(j)}</Badge>
                       {j.summary_due && <div className="mt-0.5"><NoSummary /></div>}
                       {status === 'QUEUED' && j.not_admitted_reason && (
                         <div className="mt-0.5 text-2xs text-muted">

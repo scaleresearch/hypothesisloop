@@ -403,8 +403,11 @@ func TestAGroupListsEachCommandWithTheSynopsisOfItsOwnHelp(t *testing.T) {
 
 func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
-		return map[string]any{"$schema": "s", "id": strings.TrimPrefix(r.Path, "/experiments/"), "status": "EVICTED",
-			"eviction_reason": "silent", "not_admitted_reason": "", "phase_detail": map[string]any{},
+		id := strings.TrimPrefix(r.Path, "/experiments/")
+		// A cancelled job is stored as REJECTED or EVICTED and reads CANCELLED.
+		reason := map[string]string{"job-1": "silent", "job-2": "cancelled"}[id]
+		return map[string]any{"$schema": "s", "id": id, "status": "EVICTED",
+			"eviction_reason": reason, "not_admitted_reason": "", "phase_detail": map[string]any{},
 			"hypothesis": "long text", "resolved_job": map[string]any{"image": "i"}, "job": map[string]any{"image": "i"}, "attempt_count": 0}
 	})
 	var stdout, stderr bytes.Buffer
@@ -412,7 +415,7 @@ func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	want := `{"attempt_count":0,"eviction_reason":"silent","id":"job-1","job":{"image":"i"},"status":"EVICTED"}` + "\n" +
-		`{"attempt_count":0,"eviction_reason":"silent","id":"job-2","job":{"image":"i"},"status":"EVICTED"}` + "\n"
+		`{"attempt_count":0,"eviction_reason":"cancelled","id":"job-2","job":{"image":"i"},"status":"CANCELLED"}` + "\n"
 	if len(*got) != 2 || stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
