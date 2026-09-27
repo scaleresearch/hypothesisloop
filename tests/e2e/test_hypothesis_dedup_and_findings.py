@@ -119,7 +119,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert not agent_on_human["agent_id"] and agent_on_human["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "restating a claim changed whose it is"
 
     # Registered for an agent by another credential: the agent owns it, and who did it is kept.
-    for_agent = api.register_hypothesis(pe_id, agent_a, f"registered for the agent {run_id}")
+    for_agent = api.register_hypothesis(pe_id, agent_a, "registered on its owner's behalf")
     assert (for_agent["agent_id"], for_agent["actor"]) == (agent_a, {"kind": "staff", "id": "", "name": "staff"}), for_agent
 
     code, human_job = api.submit_job_expect(pe_id, agent_b, hours=0.02, hyp_id=human["id"])
