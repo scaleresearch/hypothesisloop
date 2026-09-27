@@ -736,3 +736,26 @@ func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
 		t.Errorf("the reason names a cluster the org turned off: %q", ineligible)
 	}
 }
+
+// A queued job that exceeds what every cluster running its image choice has installed is told
+// its size is the cause only where no other image choice would be served.
+func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
+	const platformImage = "registry.test/platform-job:7"
+	registered := map[string]domain.Cluster{
+		"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage},
+		"metal":  {Name: "metal", OrgID: "org-a"},
+	}
+	small := domain.CapacityFootprint(2, nil, 8<<30, 100<<30)
+	large := domain.CapacityFootprint(16, nil, 64<<30, 500<<30)
+	exp := &domain.Experiment{OrgID: "org-a", Job: domain.JobSpec{CPU: "8", Memory: "1Gi", Storage: "1Gi"}}
+
+	got := exceedsInstalledReason(map[string]domain.Footprint{"rented": small, "metal": large}, nil, registered, exp)
+	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image (rented), and none has installed what it asks for, " +
+		footprintStr(exp.Footprint()) + ". A cluster that runs the image a job names has (metal): set job.image (hl capacity lists the images offered)"
+	if got != want {
+		t.Errorf("a cluster the image choice rules out has it installed:\n got %q\nwant %q", got, want)
+	}
+	if got := exceedsInstalledReason(map[string]domain.Footprint{"rented": small, "metal": small}, nil, registered, exp); got != exceedsClusterCapacityReason(exp) {
+		t.Errorf("no cluster has it installed: got %q, want %q", got, exceedsClusterCapacityReason(exp))
+	}
+}

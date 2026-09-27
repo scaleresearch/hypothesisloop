@@ -49,6 +49,10 @@ type Store interface {
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
+	// ProjectOrg and RegisteredClusters say which clusters take a job's org's jobs, and which
+	// image each runs.
+	ProjectOrg(ctx context.Context, projectID string) (string, error)
+	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	MarkQuotaSettled(ctx context.Context, id string) error
 }
@@ -89,6 +93,13 @@ type CodeHost interface {
 	Serves(repository, protocol, host, path string) bool
 }
 
+// InstalledCapacity is what each connected cluster has installed and whether it scales up, as
+// the admission loop reads them (LoopWorkloadClient).
+type InstalledCapacity interface {
+	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
+	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
+}
+
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
 	store      Store
@@ -96,6 +107,7 @@ type Service struct {
 	novelty    NoveltyDetector
 	hypotheses HypothesisStore
 	codeHost   CodeHost
+	clusters   InstalledCapacity
 	// jobImages is the images the deployment offers a job to run in, which a job names by name.
 	jobImages    []domain.JobImage
 	weights      domain.SchedulingWeights
@@ -119,6 +131,7 @@ func NewService(
 	novelty NoveltyDetector,
 	hypotheses HypothesisStore,
 	codeHost CodeHost,
+	clusters InstalledCapacity,
 	settler QuotaSettler,
 	metricsDBURL string,
 	logger *zap.Logger,
@@ -126,8 +139,8 @@ func NewService(
 	if settler == nil {
 		panic("scheduler: NewService requires a quota settler — it is the only path terminal usage is written by")
 	}
-	if codeHost == nil || metricsDBURL == "" || logger == nil {
-		panic("scheduler: NewService requires the git host, the metrics store URL and a logger")
+	if codeHost == nil || clusters == nil || metricsDBURL == "" || logger == nil {
+		panic("scheduler: NewService requires the git host, the clusters' installed capacity, the metrics store URL and a logger")
 	}
 	return &Service{
 		store:        store,
@@ -135,6 +148,7 @@ func NewService(
 		novelty:      novelty,
 		hypotheses:   hypotheses,
 		codeHost:     codeHost,
+		clusters:     clusters,
 		settler:      settler,
 		metricsDBURL: metricsDBURL,
 		logger:       logger,

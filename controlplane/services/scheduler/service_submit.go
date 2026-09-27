@@ -55,6 +55,32 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 	return nil
 }
 
+// imageChoiceServed refuses a job that its image choice keeps off every cluster of its org
+// (noClusterForImageReason): no wait admits it, and the admission loop would say the same of it
+// for as long as it queued.
+func (s *Service) imageChoiceServed(ctx context.Context, exp *domain.Experiment) error {
+	registered, err := s.store.RegisteredClusters(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: registered clusters: %w", err)
+	}
+	runs, others := byImageChoice(registered, exp)
+	// What is installed decides only between clusters on both sides of the choice.
+	var installed map[string]domain.Footprint
+	var autoscalerEnabled map[string]bool
+	if len(runs) > 0 && len(others) > 0 {
+		if installed, err = s.clusters.GetTotalCapacity(ctx); err != nil {
+			return fmt.Errorf("scheduler: installed capacity: %w", err)
+		}
+		if autoscalerEnabled, err = s.clusters.GetAutoscalerCapability(ctx); err != nil {
+			return fmt.Errorf("scheduler: autoscaler capability: %w", err)
+		}
+	}
+	if reason := noClusterForImageReason(runs, others, installed, autoscalerEnabled, exp); reason != "" {
+		return &AdmissionError{Reason: domain.NotAdmittedNoClusterForImage, Message: strings.TrimPrefix(reason, domain.NotAdmittedNoClusterForImage+": ")}
+	}
+	return nil
+}
+
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
 func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
@@ -133,6 +159,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 	if err := s.resolveImage(&exp.Job); err != nil {
+		return err
+	}
+	if exp.OrgID, err = s.store.ProjectOrg(ctx, pe.ProjectID); err != nil {
+		return fmt.Errorf("scheduler: org of platform experiment: %w", err)
+	}
+	if err := s.imageChoiceServed(ctx, exp); err != nil {
 		return err
 	}
 

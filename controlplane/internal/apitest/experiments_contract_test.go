@@ -74,7 +74,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	t.Cleanup(metrics.Close)
 	r := chi.NewRouter()
 	d := apidocs.New(r, "scheduler", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, worldRepositories{}, contractSettler{}, metrics.URL, zap.NewNop()).WithLoop(noopLoop{})))
+	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithLoop(noopLoop{})))
 	return r
 }
 
@@ -242,6 +242,15 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 			t.Errorf("GET %s = %d, want 200; body=%s", q, code, body)
 		}
 	}
+}
+
+type contractCapacity struct{}
+
+func (contractCapacity) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
+	return nil, nil
+}
+func (contractCapacity) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return nil, nil
 }
 
 type contractSettler struct{}

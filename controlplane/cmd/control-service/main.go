@@ -333,7 +333,7 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
 	}
 	noveltyDetector := dedup.New()
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, noveltyDetector, graph, gitHost, queueBackend, settler, metricsDBURL, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
