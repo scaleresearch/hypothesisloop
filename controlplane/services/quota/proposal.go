@@ -207,8 +207,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), missing_explanation, too_long, and about the baseline, which is read from the platform's own records: " +
 			"no_baseline, baseline_not_completed, baseline_without_finding, brief_without_baseline, baseline_missing_metric, baseline_breaks_constraint, accelerator_unreachable, budget_below_baseline. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it. " +
-			"The stored proposal also answers what the platform read from the baseline job, and a body that states either is refused: accelerator_type, the type it ran on, " +
-			"and job_estimated_duration_hours, one and a half times the hours it was observed running. That is the estimated_duration_hours of every job of the platform experiment that states none (POST /experiments), " +
+			"The stored proposal also answers accelerator_type, the type the baseline job ran on, and a body that states it is refused. " +
+			"The platform experiment then carries baseline_job_id and job_estimated_duration_hours, one and a half times the hours the baseline job was observed running. That is the estimated_duration_hours of every job of the platform experiment that states none (POST /experiments), " +
 			"so the estimate the baseline job itself was submitted with is a guess and is held to nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -248,13 +248,11 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err := checkBaseline(in.Body, experiment, plannerID, baseline); err != nil {
 			return nil, err
 		}
-		stored, err := json.Marshal(storedProposal{Proposal: in.Body, BaselineReading: domain.BaselineReading{
-			AcceleratorType: baseline.Job.AcceleratorType, JobEstimatedDurationHours: baselineHeadroom * baseline.ObservedHours,
-		}})
+		stored, err := json.Marshal(storedProposal{Proposal: in.Body, BaselineReading: domain.BaselineReading{AcceleratorType: baseline.Job.AcceleratorType}})
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}
-		err = h.svc.store.SetProposal(ctx, in.ID, stored, time.Now().UTC().Add(h.planning.ProposedFor))
+		err = h.svc.store.SetProposal(ctx, in.ID, stored, baseline.Job.ID, baselineHeadroom*baseline.ObservedHours, time.Now().UTC().Add(h.planning.ProposedFor))
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}

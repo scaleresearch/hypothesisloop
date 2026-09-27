@@ -143,6 +143,17 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPT
 -- decline answers the goal as a proposal does, so it sets proposed_at and clears proposal, and
 -- the next proposal clears it. Empty when the planner never declined.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS declined_reason TEXT NOT NULL DEFAULT '';
+-- The completed job that measured the baseline, and the estimate of a job that states none: the
+-- hours that job was observed running, with headroom (0 when it was too short to be observed).
+-- Both are written when the baseline is declared, and a platform experiment starts only with
+-- them. A proposal stored before the two columns existed carried them, and gives them up here.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS baseline_job_id              TEXT             NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS job_estimated_duration_hours DOUBLE PRECISION NOT NULL DEFAULT 0;
+UPDATE platform_experiments
+SET baseline_job_id = proposal->>'baseline_job_id',
+    job_estimated_duration_hours = COALESCE((proposal->>'job_estimated_duration_hours')::double precision, 0),
+    proposal = proposal - 'baseline_job_id' - 'job_estimated_duration_hours'
+WHERE proposal ? 'baseline_job_id';
 
 -- What a person asked a draft's planner to change in its proposal, one row per request, and
 -- whose credential asked (domain.Actor: kind and id). A draft has no hypothesis a comment could

@@ -225,6 +225,13 @@ type PlatformExperiment struct {
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address agents and jobs clone."`
 	AgentImage    string `json:"agent_image,omitempty"`
 
+	// BaselineJobID is the completed job that measured the baseline, as the platform checked it
+	// when it was declared, and JobEstimatedDurationHours the estimate of a job that states
+	// none: the hours that job was observed running, with headroom. A platform experiment
+	// starts only with a baseline.
+	BaselineJobID             string  `json:"baseline_job_id,omitempty" doc:"The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}."`
+	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero" doc:"The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive."`
+
 	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
 	// experiment that was created whole.
 	Goal string `json:"goal,omitempty"`
@@ -294,28 +301,11 @@ const (
 )
 
 // BaselineReading is what the platform read from the baseline job of a proposal and keeps
-// beside it in Proposal. A planner states neither field.
+// beside it in Proposal. A planner does not state it.
 type BaselineReading struct {
 	// AcceleratorType is the type the baseline job ran on, which the run's jobs are sized for.
 	// On CPUType the budget is CPU core-hours.
 	AcceleratorType AcceleratorType `json:"accelerator_type"`
-	// JobEstimatedDurationHours is the estimate of a job that states none: the hours the
-	// baseline job was observed running, with headroom. Absent for a baseline too short to be
-	// observed alive.
-	JobEstimatedDurationHours float64 `json:"job_estimated_duration_hours,omitzero"`
-}
-
-// JobEstimatedDurationHours is the estimate the platform measured for a job of p that states
-// none, 0 when p has no proposal or its baseline was not observed.
-func (p *PlatformExperiment) JobEstimatedDurationHours() (float64, error) {
-	if len(p.Proposal) == 0 {
-		return 0, nil
-	}
-	var read BaselineReading
-	if err := json.Unmarshal(p.Proposal, &read); err != nil {
-		return 0, fmt.Errorf("platform experiment %s: decode stored proposal: %w", p.ID, err)
-	}
-	return read.JobEstimatedDurationHours, nil
 }
 
 // PlanningRequest is one request to a draft's planner to change its proposal.

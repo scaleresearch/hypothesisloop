@@ -29,11 +29,11 @@ func TestSubmitToADraftIsHeldBySignupAndNotByItsStatus(t *testing.T) {
 
 type measuredStore struct {
 	poolOnlyStore
-	proposal string
+	measured float64
 }
 
 func (s measuredStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Proposal: []byte(s.proposal)}, nil
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", JobEstimatedDurationHours: s.measured}, nil
 }
 
 func (measuredStore) IsSignedUp(context.Context, string, string) (bool, error) { return false, nil }
@@ -42,19 +42,17 @@ func (measuredStore) IsSignedUp(context.Context, string, string) (bool, error) {
 // time only to carry a corrected one. The estimate of a job that states none is the one the
 // platform measured on the baseline; a stated one stands, and with neither the job is refused.
 func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) {
-	const measured = `{"baseline_job_id":"job-1","job_estimated_duration_hours":0.025}`
 	for name, tc := range map[string]struct {
-		proposal string
+		measured float64
 		stated   float64
 		reason   string
 		want     float64
 	}{
-		"stated, where one was measured":   {measured, 0.5, "not_signed_up", 0.5},
-		"not stated, and one was measured": {measured, 0, "not_signed_up", 0.025},
-		"not stated, and none measured":    {`{"baseline_job_id":"job-1"}`, 0, ReasonEstimateRequired, 0},
-		"not stated, created directly":     {"", 0, ReasonEstimateRequired, 0},
+		"stated, where one was measured":   {0.025, 0.5, "not_signed_up", 0.5},
+		"not stated, and one was measured": {0.025, 0, "not_signed_up", 0.025},
+		"not stated, and none measured":    {0, 0, ReasonEstimateRequired, 0},
 	} {
-		s := &Service{codeHost: testCodeHost{}, store: measuredStore{proposal: tc.proposal}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		var admission *AdmissionError

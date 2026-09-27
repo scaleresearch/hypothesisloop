@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -70,16 +71,19 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	// A proposal is stored beside the draft, marks it proposed and moves its end.
 	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
-	if err := pes.SetProposal(ctx, pe, []byte(`{"budget_accelerator_hours":6}`), wait); err != nil {
+	if err := pes.SetProposal(ctx, pe, []byte(`{"budget_accelerator_hours":6}`), "job-1", 0.3, wait); err != nil {
 		t.Fatal(err)
 	}
 	got, err = pes.GetPlatformExperiment(ctx, pe)
 	if err != nil || got.ProposedAt == nil || string(got.Proposal) == "" || got.ProposalExpiresAt.Sub(wait).Abs() > time.Second || !got.EndsAt.IsZero() || got.Status != domain.PlatformExpDraft {
 		t.Fatalf("proposed: got = %+v, %v", got, err)
 	}
+	if got.BaselineJobID != "job-1" || got.JobEstimatedDurationHours != 0.3 {
+		t.Fatalf("proposed with baseline %q and a trial's estimate of %g, want job-1 and 0.3", got.BaselineJobID, got.JobEstimatedDurationHours)
+	}
 	open := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, open, 10)
-	if err := pes.SetProposal(ctx, open, []byte(`{}`), wait); err != ErrNotDraft {
+	if err := pes.SetProposal(ctx, open, []byte(`{}`), "", 0, wait); err != ErrNotDraft {
 		t.Fatalf("proposing an open platform experiment: got = %v, want ErrNotDraft", err)
 	}
 
@@ -238,7 +242,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != ErrPlanningOver {
+		if err := pes.SetProposal(ctx, id, []byte(`{}`), "", 0, time.Now().Add(time.Hour)); err != ErrPlanningOver {
 			t.Fatalf("proposing past the limit: got = %v, want ErrPlanningOver", err)
 		}
 		if err := pes.Decline(ctx, id, "late", time.Now().Add(time.Hour)); err != ErrPlanningOver {
@@ -256,7 +260,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
 		t.Fatalf("accepting before a proposal: got = %v, want ErrNothingProposed", err)
 	}
-	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), "", 0, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	// Declined, the draft is answered and has nothing to accept; a revision gives it back to the
@@ -281,7 +285,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.ProposedAt != nil || revised.DeclinedReason == "" {
 		t.Fatalf("revised after a decline: got = %+v, want it with the planner and the reason kept", revised)
 	}
-	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), "", 0, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil {
@@ -426,5 +430,29 @@ func TestClosingADraftEndsItsPlannersAllowance(t *testing.T) {
 		if quota, err := pes.GetAgentQuota(ctx, planner, pe); err != nil || quota != nil {
 			t.Errorf("%s: the planner's quota after the close = %+v, %v, want none", name, quota, err)
 		}
+	}
+}
+
+// A proposal stored before the baseline had its own columns carried the job and the estimate a
+// trial takes from it. Rows from then keep both, and their proposals no longer state them.
+func TestABaselineStoredInAProposalMovesToItsColumns(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposal = $2 WHERE id = $1`, id,
+		`{"budget_accelerator_hours":6,"baseline_job_id":"job-old","accelerator_type":"rtx-4090","job_estimated_duration_hours":0.3}`); err != nil {
+		t.Fatal(err)
+	}
+	applyTestSchema(t, pool)
+	applyTestSchema(t, pool)
+	got, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil || got.BaselineJobID != "job-old" || got.JobEstimatedDurationHours != 0.3 {
+		t.Fatalf("got = baseline %q with an estimate of %g, %v, want job-old and 0.3", got.BaselineJobID, got.JobEstimatedDurationHours, err)
+	}
+	var left map[string]any
+	if err := json.Unmarshal(got.Proposal, &left); err != nil || len(left) != 2 || left["accelerator_type"] != "rtx-4090" {
+		t.Fatalf("the proposal keeps %v, %v, want its budget and its type alone", left, err)
 	}
 }

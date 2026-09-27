@@ -137,11 +137,13 @@ func (s *PlatformExperimentsStore) answerDraft(ctx context.Context, id, update s
 	return ErrNotDraft
 }
 
-// SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
-// draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
-func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
+// SetProposal stores what a draft's planner proposed with the baseline it rests on, marks it
+// proposed now, and moves the draft's end to waitUntil: from then on it waits for a person, and
+// no longer for the planner.
+func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, baselineJobID string, jobEstimatedDurationHours float64, waitUntil time.Time) error {
 	err := s.answerDraft(ctx, id, `
-UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()`, proposal, waitUntil)
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3,
+    baseline_job_id = $4, job_estimated_duration_hours = $5, updated_at = now()`, proposal, waitUntil, baselineJobID, jobEstimatedDurationHours)
 	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 	}

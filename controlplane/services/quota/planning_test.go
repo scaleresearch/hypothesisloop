@@ -267,11 +267,12 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time) error {
+func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, baselineJobID string, jobEstimatedDurationHours float64, waitUntil time.Time) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
 			pe.Proposal, pe.ProposedAt, pe.DeclinedReason = proposal, &now, ""
+			pe.BaselineJobID, pe.JobEstimatedDurationHours = baselineJobID, jobEstimatedDurationHours
 			pe.SetClosesAt(waitUntil)
 			return nil
 		}
@@ -588,7 +589,7 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 		t.Errorf("a proposal that states the trial's estimate: got = %d %v, want 422 for a field the body does not have", code, out)
 	}
 	code, out = call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || math.Abs(proposal["job_estimated_duration_hours"].(float64)-0.3) > 1e-9 {
+	if estimate, _ := out["job_estimated_duration_hours"].(float64); code != http.StatusOK || out["baseline_job_id"] != "job-1" || math.Abs(estimate-0.3) > 1e-9 {
 		t.Errorf("a baseline that guessed 1 hour and ran 0.2: got = %d %v, want 200 and a trial's estimate of 0.3", code, out)
 	}
 }
