@@ -207,10 +207,8 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     assert shrink_status["status"] == "QUEUED", (
         f"8-device job became {shrink_status['status']} while only seven H100 devices were free"
     )
-    # The reason is a code optionally followed by ": <detail>" -- match the code, not the whole
-    # string.
     reason = shrink_status.get("not_admitted_reason") or ""
-    assert reason.startswith("capacity_unavailable"), (
+    assert reason == "capacity_unavailable", (
         f"reduced-capacity job has wrong not_admitted_reason={reason!r}"
     )
     # A cordoned node is still a connected cluster, so this also proves the cordon itself doesn't
@@ -218,7 +216,7 @@ def _run(api, pe_id: str, agent: str, deadline: Deadline) -> None:
     # (autoscaler.md's candidate step additionally requires connected, but cordon isn't
     # disconnection; this cluster has AUTOSCALER_ENABLED unset anyway, so it should never be a
     # speculative candidate at all).
-    assert reason.split(":", 1)[0] not in ("waiting-for-scale-up", "no_scalable_capacity"), (
+    assert reason not in ("waiting-for-scale-up", "no_scalable_capacity"), (
         f"not_admitted_reason={reason} implies a cordoned/non-autoscaler cluster was speculated on"
     )
 

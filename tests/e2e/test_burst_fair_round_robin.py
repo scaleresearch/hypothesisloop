@@ -144,7 +144,7 @@ def test_burst_fair_round_robin(api, run_id, deadline):
         # exists to catch. Anything else means B1 was ordered fine and lost its slot to a
         # transient conflict, which says nothing about interleaving.
         b1_reason = api.experiment(b1).get("not_admitted_reason") or ""
-        assert not b1_reason.startswith("outranked"), (
+        assert b1_reason != "outranked", (
             f"A2 and A3 (both agent A) were admitted together and B1 was {b1_reason!r} -- burst "
             "admission is not interleaving across agents (regression in interleaveByAgent?)"
         )

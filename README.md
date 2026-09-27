@@ -378,6 +378,7 @@ Every job holds units of a type the platform prices (`GET /resource-catalog/capa
 ```yaml
 job:
   cpu: 4        # 4 cores, no accelerator_type and no accelerator_count
+  storage: 4Gi
 ```
 
 Submission reads that as 4 units of the one built-in type `hypothesisloop.dev/cpu=core`. Naming

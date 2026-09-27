@@ -34,7 +34,7 @@ SOLO_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"
 
 
 def _reason(exp: dict) -> str:
-    return (exp.get("not_admitted_reason") or "").split(":", 1)[0]
+    return exp.get("not_admitted_reason") or ""
 
 
 @pytest.fixture(autouse=True)

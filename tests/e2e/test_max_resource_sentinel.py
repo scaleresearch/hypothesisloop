@@ -113,7 +113,7 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
             f"{impossible_job} to settle",
             lambda: api.experiment(impossible_job),
             accept=lambda e: e["status"] in ("RUNNING", "COMPLETED")
-            or (e.get("not_admitted_reason") or "").startswith("exceeds_accelerator_share"),
+            or e.get("not_admitted_reason") == "exceeds_accelerator_share",
             deadline=deadline,
         )
         assert stuck["status"] not in ("RUNNING", "COMPLETED"), (
@@ -121,9 +121,8 @@ def test_max_resource_sentinel_resolves_to_cluster_local_fair_share(api, run_id,
             f"({expected_share_milli}m) was admitted (status={stuck['status']})"
         )
         reason = stuck.get("not_admitted_reason") or ""
-        assert reason.startswith("exceeds_accelerator_share"), (
-            f"not_admitted_reason={reason!r}, expected it to start with exceeds_accelerator_share "
-            "(loop_resolve.go's shareMisfit)"
+        assert reason == "exceeds_accelerator_share", (
+            f"not_admitted_reason={reason!r}, expected exceeds_accelerator_share (loop_resolve.go's shareMisfit)"
         )
         api.cancel_job(impossible_job)
 

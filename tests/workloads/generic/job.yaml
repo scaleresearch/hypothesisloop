@@ -43,9 +43,8 @@ job:
   # node-agent-daemonset.yaml's resources comment for the full mechanism.
   cpu: "250m"
   memory: "128Mi"
-  # storage is now a required explicit request — the control plane rejects submissions with
-  # an unset resource request rather than resolving a cluster-side default pre-admission (see
-  # admission must know the complete physical footprint before selecting a cluster).
+  # storage is always a stated quantity: a submit that leaves it out, or asks for "max", is
+  # refused with 422 storage_required.
   storage: "512Mi"
   max_retries: 3
 

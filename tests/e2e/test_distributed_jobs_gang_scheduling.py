@@ -315,7 +315,7 @@ def test_gang_admission_is_all_or_nothing(api, experiment, run_id):
     # capacity_unavailable, never no_scalable_capacity (that reason only fires when at least
     # one autoscaler-enabled candidate existed and every one of them was tried and expired).
     reason = exp.get("not_admitted_reason") or ""
-    assert reason.split(":", 1)[0] == "capacity_unavailable", f"not_admitted_reason={reason}, want capacity_unavailable"
+    assert reason == "capacity_unavailable", f"not_admitted_reason={reason}, want capacity_unavailable"
 
     partial = job_pod_count(job_id)
     assert partial == 0, f"{partial} pod(s) exist for a gang that was never admitted -- admission is not atomic"

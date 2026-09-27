@@ -56,7 +56,7 @@ def test_cancel_while_queued_is_rejected_and_refunded(api, experiment, run_id, d
         deadline=deadline,
     )
     # No cluster has an H200 installed, so this is a job that waiting will not admit, and it says so.
-    assert (exp.get("not_admitted_reason") or "").startswith("exceeds_cluster_capacity"), (
+    assert exp.get("not_admitted_reason") == "exceeds_cluster_capacity", (
         f"queued unsatisfiable job has wrong not_admitted_reason={exp.get('not_admitted_reason')!r}"
     )
 
