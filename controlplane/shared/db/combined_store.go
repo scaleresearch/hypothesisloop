@@ -194,31 +194,31 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	}
 
 	var desiredGuaranteedAcc, desiredBurstAcc float64
+	var holding int
 	if err := tx.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='guaranteed'), 0),
-			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0)
+			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0),
+			COUNT(*) FILTER (WHERE estimated_cost_acch > 0)
 		FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
 		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
 		exp.AgentID, exp.PlatformExperimentID).Scan(
-		&desiredGuaranteedAcc, &desiredBurstAcc); err != nil {
+		&desiredGuaranteedAcc, &desiredBurstAcc, &holding); err != nil {
 		return AdmitRejected, "", fmt.Errorf("admit experiment: desired usage: %w", err)
 	}
 
-	guaranteed := exp.CapacityTier == domain.CapacityGuaranteed
 	usedAcc, limitAcc := observed.UsedBurstAccH+desiredBurstAcc, allocation.BurstAcceleratorHours
-	if guaranteed {
+	if exp.CapacityTier == domain.CapacityGuaranteed {
 		usedAcc, limitAcc = observed.UsedGuaranteedAccH+desiredGuaranteedAcc, allocation.GuaranteedAcceleratorHours
 	}
-	if exp.EstimatedCostAccH > 0 && usedAcc+exp.EstimatedCostAccH > limitAcc {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, have %.3g remaining. %s", exp.CapacityTier, exp.EstimatedCostAccH, limitAcc-usedAcc, heldByEstimates(usedAcc-observedOf(observed, guaranteed))), nil
-	}
 	// Burst hours are inside the agent's share of the budget, so a job at either priority is
-	// held to what is left of the share.
-	if spent := observed.Used() + desiredGuaranteedAcc + desiredBurstAcc; exp.EstimatedCostAccH > 0 && spent+exp.EstimatedCostAccH > allocation.Share() {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, the agent's share of the experiment budget has %.3g remaining. %s", exp.CapacityTier, exp.EstimatedCostAccH, allocation.Share()-spent, heldByEstimates(desiredGuaranteedAcc+desiredBurstAcc)), nil
+	// held to what is left of the share as well as of its own priority's hours.
+	spent := observed.Used() + desiredGuaranteedAcc + desiredBurstAcc
+	if exp.EstimatedCostAccH > 0 && (usedAcc+exp.EstimatedCostAccH > limitAcc || spent+exp.EstimatedCostAccH > allocation.Share()) {
+		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours, have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s",
+			exp.CapacityTier, exp.EstimatedCostAccH, max(0, min(limitAcc-usedAcc, allocation.Share()-spent)), heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err
@@ -235,18 +235,11 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 // heldByEstimates tells a refused submitter how much of what is used is only reserved: a job
 // holds its whole estimate until it ends and then only what it spent, so over-estimated jobs
 // crowd out the next one though little has been spent.
-func heldByEstimates(reserved float64) string {
-	if reserved <= 0 {
+func heldByEstimates(jobs int, reserved float64) string {
+	if jobs == 0 {
 		return "None of what is used is a reservation: it is spent."
 	}
-	return fmt.Sprintf("%.3g of what is used is reserved by the estimates of jobs that have not ended and returns, less what they spend, as each ends: wait for one, or state a shorter estimated_duration_hours.", reserved)
-}
-
-func observedOf(observed *domain.AgentQuota, guaranteed bool) float64 {
-	if guaranteed {
-		return observed.UsedGuaranteedAccH
-	}
-	return observed.UsedBurstAccH
+	return fmt.Sprintf("%d of your jobs that have not ended hold %.3g by their estimates and give back what they do not spend as each ends: wait for one, or state a lower estimated_duration_hours.", jobs, reserved)
 }
 
 // ReserveAdmittedFlavorTx rechecks the selected flavor's estimate, enforces the platform

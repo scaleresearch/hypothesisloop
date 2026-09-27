@@ -83,8 +83,20 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 		return &domain.AgentQuota{UsedGuaranteedAccH: 8}, nil
 	}
 	decision, reason, err = store.AdmitExperimentTx(ctx, &burst, spent, SubmissionRateLimit{}, func(context.Context) error { return nil })
-	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "share of the experiment budget has 2 remaining") || !strings.Contains(reason, "it is spent") {
+	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "need 3 accelerator_hours, have 2 remaining") || !strings.Contains(reason, "it is spent") {
 		t.Fatalf("burst job past the share = %v %q %v, want it refused for the share, saying none of it is a reservation", decision, reason, err)
+	}
+
+	// Both researchers of a run were refused their second trial with nothing spent: the first
+	// held its whole estimate. The refusal says how many jobs hold how much.
+	held := *exp
+	held.ID, held.EstimatedCostAccH = exp.ID+"-held", 9
+	if decision, reason, err = store.AdmitExperimentTx(ctx, &held, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("a job inside the share = %v %q %v, want inserted", decision, reason, err)
+	}
+	_, reason, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil })
+	if want := "have 1 remaining"; err != nil || !strings.Contains(reason, want) || !strings.Contains(reason, "1 of your jobs that have not ended hold 9 by their estimates") {
+		t.Fatalf("a job past what the queued one leaves = %q %v, want %q and the one job holding 9", reason, err, want)
 	}
 }
 
