@@ -84,7 +84,7 @@ Run in a clone of the experiment's repository. Checks two things in the working 
 layout, that each of the first three files below is there, and each file's validity. Prints one
 line for each failure, as NAME: what to fix, and exits 1. With none it exits 0 and prints one
 line saying what it checked and what it did not. The metrics line is printed either way and
-fails nothing.
+fails nothing, and so does the estimate line of a job spec that states one.
 
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
@@ -94,6 +94,9 @@ fails nothing.
   metrics     whether metrics.py, the Python helper hl repo init supplies, is there, and
               without it the request a job reports a metric with: a repository needs no
               helper to report
+  estimate    printed when .hypothesisloop/job.yaml states metadata.estimated_duration_hours:
+              every job submitted from it is given that, and with none stated the estimate
+              the platform measured on the baseline job applies
 
 Not checked: that the files describe this experiment. Those of an earlier experiment in the
 same repository pass, so read them against the brief. Nor the code the job spec runs or its
@@ -121,13 +124,32 @@ hl repo init adds a missing file.`, stderr)
 	} else if !errors.Is(err, iofs.ErrNotExist) {
 		return fail(stderr, err)
 	}
+	notes := []string{metrics}
+	if estimate := statedEstimate(clone); estimate != "" {
+		notes = append(notes, estimate)
+	}
 	if len(failures) > 0 {
-		fmt.Fprintln(stdout, strings.Join(append(failures, metrics), "\n"))
+		fmt.Fprintln(stdout, strings.Join(append(failures, notes...), "\n"))
 		return 1
 	}
-	fmt.Fprintln(stdout, metrics)
+	fmt.Fprintln(stdout, strings.Join(notes, "\n"))
 	fmt.Fprintln(stdout, repoChecked)
 	return 0
+}
+
+// statedEstimate notes a job spec that states an estimate, empty for one that states none: every
+// job submitted from it holds that estimate in place of the one the platform measured.
+func statedEstimate(clone iofs.FS) string {
+	var file struct {
+		Metadata struct {
+			Estimate *float64 `yaml:"estimated_duration_hours"`
+		} `yaml:"metadata"`
+	}
+	data, err := iofs.ReadFile(clone, repotemplate.JobSpec)
+	if err != nil || yaml.Unmarshal(data, &file) != nil || file.Metadata.Estimate == nil {
+		return ""
+	}
+	return fmt.Sprintf("estimate: %s states metadata.estimated_duration_hours %g, which fails nothing: every job submitted from it is given that in place of the estimate the platform measured on the baseline job. Leave it out and the measured estimate applies; --estimated-duration-hours states one for a single submit", repotemplate.JobSpec, *file.Metadata.Estimate)
 }
 
 const (

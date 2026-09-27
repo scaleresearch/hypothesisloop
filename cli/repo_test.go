@@ -132,6 +132,25 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	}
 }
 
+// A job.yaml stated estimated_duration_hours: 0.05 and all twelve jobs of a run were given that
+// in place of the estimate the platform measured. The check notes a stated estimate, failing
+// nothing, and the template states none.
+func TestRepoCheckNotesAJobSpecThatStatesAnEstimate(t *testing.T) {
+	clone := emptyClone(t)
+	repo(t, "init")
+	if data, err := os.ReadFile(filepath.Join(clone, repotemplate.JobSpec)); err != nil || statedEstimate(os.DirFS(clone)) != "" {
+		t.Fatalf("the template's job spec states an estimate (%v):\n%s", err, data)
+	}
+	write(t, clone, "README.md", "# sweep\n")
+	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
+	write(t, clone, repotemplate.JobSpec, "metadata:\n  estimated_duration_hours: 0.05\n"+filledJobSpec)
+	code, out := repo(t, "check")
+	want := "estimate: " + repotemplate.JobSpec + " states metadata.estimated_duration_hours 0.05, which fails nothing"
+	if code != 0 || !strings.Contains(out, "\n"+want) || !strings.Contains(out, "Leave it out and the measured estimate applies") || !strings.HasSuffix(out, repoChecked+"\n") {
+		t.Errorf("a job spec that states an estimate: hl repo check = %d, want a pass that notes it\n%s", code, out)
+	}
+}
+
 func TestRepoCommandsAreRefusedOutsideAClone(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(t.TempDir()))
 	t.Chdir(t.TempDir())
