@@ -8,8 +8,18 @@ import (
 	"strings"
 )
 
+// branchPrefix is what every branch of a platform experiment starts with, and baselineBranch
+// the one its baseline is measured on.
+func branchPrefix(platformExperiment string) string { return "hl/" + platformExperiment + "/" }
+
+func baselineBranch(platformExperiment string) string {
+	return branchPrefix(platformExperiment) + "baseline"
+}
+
 // fillCodeRef sets an empty metadata.code_ref to the commit at HEAD of the git repository in dir,
-// "<origin url>@<sha>", once it is pushed to origin.
+// "<origin url>@<sha>", and metadata.branch to the branch HEAD is on, which it pushes to origin.
+// The branch is one of the platform experiment's: nothing is pushed from any other, and a job
+// with no hypothesis is the baseline's and runs on the baseline's branch alone.
 func fillCodeRef(metadata map[string]any, dir string) error {
 	if v := metadata["code_ref"]; v != nil && v != "" {
 		return nil
@@ -29,14 +39,28 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 	if err != nil {
 		return err
 	}
-	pushed, err := git(dir, "for-each-ref", "--contains", "HEAD", "refs/remotes/origin")
-	if err != nil {
+	pe, _ := metadata["platform_experiment_id"].(string)
+	if pe == "" {
+		return errors.New("no platform experiment is named, so there is no branch to submit from: pass --platform-experiment PE")
+	}
+	// Empty on a detached HEAD, which is on no branch.
+	branch, _ := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	hypothesis, _ := metadata["hypothesis_id"].(string)
+	switch {
+	case hypothesis == "" && branch != baselineBranch(pe):
+		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s). Every other job names its hypothesis with --hypothesis ID", baselineBranch(pe), baselineBranch(pe))
+	case !strings.HasPrefix(branch, branchPrefix(pe)) || branch == branchPrefix(pe):
+		on := "detached"
+		if branch != "" {
+			on = "on " + branch
+		}
+		return fmt.Errorf("HEAD is %s, not on a branch under %s: hl hypothesis checkout %s puts you on your branch for this hypothesis; commit there and submit again", on, branchPrefix(pe), hypothesis)
+	}
+	if _, err := git(dir, "push", "--quiet", "origin", "refs/heads/"+branch+":refs/heads/"+branch); err != nil {
 		return err
 	}
-	if pushed == "" {
-		return fmt.Errorf("HEAD %s is not on origin: git push, then submit again", sha)
-	}
 	metadata["code_ref"] = url + "@" + sha
+	metadata["branch"] = branch
 	return nil
 }
 
@@ -55,7 +79,7 @@ func committedHead(dir string) (string, error) {
 		return "", err
 	}
 	if dirty != "" {
-		return "", errors.New("uncommitted changes to tracked files: commit and git push, then submit again (to vary only hypothesis or env, leave the spec as committed and pass --hypothesis and --env)")
+		return "", errors.New("uncommitted changes to tracked files: commit, then submit again, which pushes your branch (to vary only hypothesis or env, leave the spec as committed and pass --hypothesis and --env)")
 	}
 	return git(dir, "rev-parse", "HEAD")
 }

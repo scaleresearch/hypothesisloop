@@ -40,7 +40,7 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis, env, estimate and
 tier, with nothing to edit and nothing to commit. Prints the accepted job's id, status,
-code_ref, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
+code_ref, branch, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
 was billed (hl job cost ID). A job that states no estimate, in FILE or with
 --estimated-duration-hours, gets the one the platform measured on its platform experiment's
@@ -58,17 +58,24 @@ experiment_not_started before the platform starts the run, when only a baseline 
 taken (status_reason of hl platform-experiments get says what the start waits for and what you
 do until then); experiment_closed after the experiment's end.
 An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
-every job tests a previously-registered hypothesis (see 'hl hypothesis submit').
+every job tests a registered hypothesis (see 'hl hypothesis submit'), yours or anyone's: a
+hypothesis and a branch are two things, and any agent may run its own implementation of any.
 metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
+A baseline agent's job is the one exception: the baseline is the objective's own measurement,
+so it names no hypothesis and no theory (baseline_tests_no_hypothesis if it names one), and it
+runs on branch hl/PE/baseline, which you make with git checkout -b hl/PE/baseline. It takes
+FILE, --env, --secret-env, --capacity-tier and --estimated-duration-hours, which it must state.
 --secret-env NAME sends the value of $NAME from this command's environment as job.secret_env:
 the job gets it as an environment variable and no read of the job shows it. FILE may not carry
 job.secret_env, since a job spec is a committed file.
 An agent's token says whose job it is and where it runs, so neither is stated. A person or an
 API key names the agent with --agent and the experiment with --platform-experiment.
-An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of
-the git repository in the current directory, which must have no uncommitted changes to tracked
-files and HEAD pushed to origin, the platform experiment's repository. Commit and git push only
-after changing a tracked file.
+An empty metadata.code_ref is filled with <origin url>@<HEAD sha> of the git repository in
+the current directory, your clone of the platform experiment's repository, and metadata.branch
+with the branch HEAD is on. Commit first: uncommitted changes to tracked files are refused.
+HEAD must be on a branch under hl/PE/ (hl hypothesis checkout ID puts you on yours); on the
+default branch or a detached HEAD nothing is pushed and nothing is sent. The submit pushes that
+branch itself, so there is no git push to run. What a job ran is its code_ref, the commit.
 Minimal shape:
 
   metadata:
@@ -153,6 +160,7 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 		ID            string  `json:"id"`
 		Status        string  `json:"status,omitempty"`
 		CodeRef       string  `json:"code_ref,omitempty"`
+		Branch        string  `json:"branch,omitempty"`
 		CapacityTier  string  `json:"capacity_tier,omitempty"`
 		EstimatedCost float64 `json:"estimated_cost_acch,omitempty"`
 		Reason        string  `json:"not_admitted_reason,omitempty"`

@@ -22,7 +22,11 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// pushedClone returns a clone whose HEAD is committed and pushed to a local bare origin.
+// testBranch is the branch pushedClone leaves HEAD on: jane's implementation of h1 in pe-1.
+const testBranch = "hl/pe-1/jane/idea-abc123"
+
+// pushedClone returns a clone of a local bare origin whose default branch is pushed, with HEAD
+// on testBranch, which origin does not have yet.
 func pushedClone(t *testing.T) (clone, origin string) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -36,6 +40,7 @@ func pushedClone(t *testing.T) (clone, origin string) {
 	mustGit(t, clone, "add", ".")
 	mustGit(t, clone, "commit", "-q", "-m", "init")
 	mustGit(t, clone, "push", "-q", "origin", "HEAD")
+	mustGit(t, clone, "checkout", "-q", "-b", testBranch)
 	t.Chdir(clone)
 	return clone, origin
 }
@@ -47,30 +52,82 @@ func writeJob(t *testing.T, path, content string) {
 	}
 }
 
-// submit runs `hl job submit` on path and returns the exit code, stderr and the code_ref the API
-// received (nil when nothing was sent).
-func submit(t *testing.T, path string) (int, string, any) {
+// submit runs `hl job submit` on path in pe-1 and returns the exit code, stderr and the metadata
+// the API received (nil when nothing was sent).
+func submit(t *testing.T, path string) (int, string, map[string]any) {
 	t.Helper()
-	var sent any
+	var sent map[string]any
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		sent = body["metadata"].(map[string]any)["code_ref"]
+		sent = body["metadata"].(map[string]any)
 		_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
 	}))
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "submit", "--agent", "jane", path}, &stdout, &stderr)
+	code := run([]string{"job", "submit", "--agent", "jane", "--platform-experiment", "pe-1", path}, &stdout, &stderr)
 	return code, stderr.String(), sent
 }
 
-func TestJobSubmitFillsCodeRefFromPushedHead(t *testing.T) {
+// A submit pushes the branch HEAD is on and sends the commit and the branch, so an agent runs no
+// git push of its own and a job never names a commit origin lacks.
+func TestJobSubmitPushesItsBranchAndSendsTheCommitAndTheBranch(t *testing.T) {
 	clone, origin := pushedClone(t)
+	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "local only")
 	code, stderr, sent := submit(t, "job.yaml")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
 	}
-	if want := origin + "@" + mustGit(t, clone, "rev-parse", "HEAD"); sent != want {
-		t.Fatalf("code_ref = %v, want %s", sent, want)
+	head := mustGit(t, clone, "rev-parse", "HEAD")
+	if sent["code_ref"] != origin+"@"+head || sent["branch"] != testBranch {
+		t.Fatalf("sent code_ref %v on branch %v, want %s@%s on %s", sent["code_ref"], sent["branch"], origin, head, testBranch)
+	}
+	if pushed := mustGit(t, origin, "rev-parse", "refs/heads/"+testBranch); pushed != head {
+		t.Fatalf("origin has %s at %s, want the submitted commit %s", testBranch, pushed, head)
+	}
+}
+
+// A job runs one agent's implementation of a hypothesis, which is a branch of the platform
+// experiment. From the default branch, a detached HEAD or another experiment's branch nothing
+// is pushed and nothing is sent, and the refusal names the command that makes the branch.
+func TestJobSubmitRefusesAHeadOnNoBranchOfThePlatformExperiment(t *testing.T) {
+	clone, origin := pushedClone(t)
+	before := mustGit(t, origin, "for-each-ref")
+	defaultBranch := mustGit(t, origin, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	for name, checkout := range map[string][]string{
+		"the default branch":          {"checkout", "-q", defaultBranch},
+		"a detached HEAD":             {"checkout", "-q", "--detach"},
+		"another experiment's branch": {"checkout", "-q", "-b", "hl/pe-2/jane/idea-abc123"},
+		"a branch of no experiment":   {"checkout", "-q", "-b", "scratch"},
+	} {
+		mustGit(t, clone, "checkout", "-q", testBranch)
+		mustGit(t, clone, checkout...)
+		code, stderr, sent := submit(t, "job.yaml")
+		if code != 1 || sent != nil || !strings.Contains(stderr, "not on a branch under hl/pe-1/") || !strings.Contains(stderr, "hl hypothesis checkout h1") {
+			t.Errorf("%s: exit code = %d, sent = %v, stderr = %s, want it refused naming hl hypothesis checkout h1", name, code, sent, stderr)
+		}
+	}
+	if after := mustGit(t, origin, "for-each-ref"); after != before {
+		t.Errorf("a refused submit pushed: origin had\n%s\nand has\n%s", before, after)
+	}
+}
+
+// The baseline is the objective's and no hypothesis: its job names none and runs on the
+// baseline's branch, which the submit pushes like any other.
+func TestJobSubmitWithNoHypothesisIsTheBaselinesOnItsBranch(t *testing.T) {
+	clone, origin := pushedClone(t)
+	writeJob(t, filepath.Join(clone, "job.yaml"), "job:\n  image: foo\n")
+	mustGit(t, clone, "commit", "-q", "-am", "the baseline's spec")
+	code, stderr, sent := submit(t, "job.yaml")
+	if code != 1 || sent != nil || !strings.Contains(stderr, "git checkout -b hl/pe-1/baseline") || !strings.Contains(stderr, "--hypothesis ID") {
+		t.Fatalf("off the baseline's branch: exit code = %d, sent = %v, stderr = %s, want it refused naming the branch and --hypothesis", code, sent, stderr)
+	}
+	mustGit(t, clone, "checkout", "-q", "-b", "hl/pe-1/baseline")
+	code, stderr, sent = submit(t, "job.yaml")
+	if code != 0 || sent["branch"] != "hl/pe-1/baseline" || sent["hypothesis_id"] != nil || sent["theory"] != nil {
+		t.Fatalf("on the baseline's branch: exit code = %d, sent = %v, stderr = %s, want it sent with no hypothesis and no theory", code, sent, stderr)
+	}
+	if pushed := mustGit(t, origin, "rev-parse", "refs/heads/hl/pe-1/baseline"); pushed != mustGit(t, clone, "rev-parse", "HEAD") {
+		t.Fatalf("origin has the baseline's branch at %s, want the submitted commit", pushed)
 	}
 }
 
@@ -83,23 +140,14 @@ func TestJobSubmitRefusesDirtyTree(t *testing.T) {
 	}
 }
 
-func TestJobSubmitRefusesUnpushedHead(t *testing.T) {
-	clone, _ := pushedClone(t)
-	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "local only")
-	code, stderr, sent := submit(t, "job.yaml")
-	if code == 0 || sent != nil || !strings.Contains(stderr, "not on origin") {
-		t.Fatalf("exit code = %d, sent = %v, stderr = %s", code, sent, stderr)
-	}
-}
-
 func TestJobSubmitKeepsExplicitCodeRef(t *testing.T) {
 	clone, _ := pushedClone(t)
 	mustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "local only")
 	explicit := "git://elsewhere@" + strings.Repeat("b", 40)
 	writeJob(t, filepath.Join(clone, "job.yaml"), "metadata:\n  code_ref: "+explicit+"\njob:\n  image: foo\n")
 	code, stderr, sent := submit(t, "job.yaml")
-	if code != 0 || sent != explicit {
-		t.Fatalf("exit code = %d, code_ref = %v, stderr = %s", code, sent, stderr)
+	if code != 0 || sent["code_ref"] != explicit {
+		t.Fatalf("exit code = %d, code_ref = %v, stderr = %s", code, sent["code_ref"], stderr)
 	}
 }
 
@@ -116,6 +164,7 @@ func TestJobSubmitOutsideRepoWithoutCodeRefFails(t *testing.T) {
 
 func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
 	clone, origin := pushedClone(t)
+	mustGit(t, clone, "checkout", "-q", "-b", "hl/pe-flag/jane/idea-abc123")
 	var sent map[string]any
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&sent)
@@ -169,7 +218,7 @@ func TestJobSubmitSendsSecretEnvFromTheEnvironmentByName(t *testing.T) {
 	}))
 	t.Setenv("HF_TOKEN", "the-secret-value")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--secret-env", "HF_TOKEN"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"job", "submit", "job.yaml", "--agent", "jane", "--platform-experiment", "pe-1", "--secret-env", "HF_TOKEN"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	secret, _ := sent["job"].(map[string]any)["secret_env"].(map[string]any)
