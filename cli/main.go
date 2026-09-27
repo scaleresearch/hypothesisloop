@@ -120,7 +120,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage: hl <command> ...
 
-  platform-experiments  [list] | get | create [FILE] | start | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
+  platform-experiments  [list] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
   quota                 your share of the budget and what a job submitted now may still hold of it; --all for every agent
   results               standings on the declared metrics
   capacity              live accelerators per cluster, available and total
@@ -575,8 +575,6 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 		switch args[0] {
 		case "create":
 			return cmdPlatformExperimentsCreate(c, args[1:], stdout, stderr)
-		case "start":
-			return cmdPlatformExperimentsStart(c, args[1:], stdout, stderr)
 		case "close":
 			return cmdPlatformExperimentsClose(c, args[1:], stdout, stderr)
 		case "summary":
@@ -593,7 +591,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
 		}
 	}
-	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | start | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session", stderr)
+	fs := newFlags("platform-experiments", "usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session", stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
@@ -636,15 +634,24 @@ Minimal shape:
   name: my-platform-experiment
   description: what this research program is testing
   budget_accelerator_hours: 10
-  max_agents: 4
-  duration_hours: 24
+  max_agents: 4               # researchers only: a finished one still counts, baseline agents
+                              # and the coordinator never do
+  duration_hours: 24          # counted from the start; or ends_at, one of the two
+  coordinator_hosted: true    # optional: the platform runs the coordinator
   metrics:
     - key: val_accuracy
       direction: maximize
 
-Every field shown is required. How long it lasts is duration_hours or ends_at, one of the two.
-report_interval_seconds and starts_at may be left out: the platform's default applies, and
-without starts_at it starts when you start it.
+Every field shown is required but coordinator_hosted. report_interval_seconds may be left out:
+the platform's default applies.
+
+It is created open and nothing runs yet. Add the researchers while it is open
+(hl platform-experiments agents add). It starts on a declared baseline: with coordinator_hosted
+the coordinator adds the baseline agent and declares its job. Without it you do both: add an
+agent with --role baseline, and once its job is COMPLETED with a summary, run
+hl platform-experiments update --description-file brief.md --baseline-job JOB. The platform
+starts the run within a minute of a valid baseline, and closes an experiment still open without
+one after planning.baseline_limit_minutes (90).
 
 The experiment keeps its code in a repository on the deployment's git host. On GitHub,
 repository: owner/name names one a GitHub account connected to the org covers. Left out, the
@@ -906,24 +913,6 @@ its planner answered, when the platform closes it if nothing happened by then.`,
 			return fail(stderr, err)
 		}
 		fmt.Fprintln(stderr, "hl: platform-experiments get: "+notice)
-	}
-	printJSON(stdout, out)
-	return 0
-}
-
-func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments start", "usage: hl platform-experiments start [--platform-experiment PE]", stderr)
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
-	}
-	id, err := namedExperiment(fs, c, *pe)
-	if err != nil {
-		return parseExit(err)
-	}
-	var out any
-	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/start", map[string]any{}, &out); err != nil {
-		return fail(stderr, err)
 	}
 	printJSON(stdout, out)
 	return 0

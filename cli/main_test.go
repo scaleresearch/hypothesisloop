@@ -328,7 +328,7 @@ func TestIDIsPositionalOrFlag(t *testing.T) {
 		{[]string{"hypothesis", "link", "h-1", "--agent", "a", "--type", "related", "--to", "h-2"}, "/hypotheses/h-1/links"},
 		{[]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1"},
 		{[]string{"platform-experiments", "get"}, "/platform-experiments/pe-env"},
-		{[]string{"platform-experiments", "start", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/start"},
+		{[]string{"platform-experiments", "close", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/close"},
 		{[]string{"results", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/results"},
 	} {
 		*got = nil
@@ -552,6 +552,18 @@ func TestUnknownCommand(t *testing.T) {
 	code := run([]string{"bogus"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
+	}
+}
+
+// The platform starts a run itself once its baseline is declared, so hl has no start: the answer
+// to it is the synopsis, which names the command that declares one.
+func TestThereIsNoStartCommand(t *testing.T) {
+	calls := recordingServer(t, func(int, recorded) any { return map[string]any{} })
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"platform-experiments", "start", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if code != 2 || len(*calls) != 0 || !strings.Contains(stderr.String(), `unknown subcommand "start"`) ||
+		!strings.Contains(stderr.String(), "--baseline-job") || strings.Contains(usage, "| start |") {
+		t.Fatalf("exit %d, %d requests, stderr %q", code, len(*calls), stderr.String())
 	}
 }
 
