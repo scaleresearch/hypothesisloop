@@ -20,7 +20,8 @@ type Baseline struct {
 	Reported map[string]float64
 	// AcceleratorHours is what the job cost.
 	AcceleratorHours float64
-	// ObservedHours is how long the job ran, as it was billed.
+	// ObservedHours is how long the job ran, as it was billed. A job too short to be observed
+	// alive has none.
 	ObservedHours float64
 	// Reachable are the accelerator types the org's jobs can be placed on now.
 	Reachable map[string]bool
@@ -109,13 +110,6 @@ func checkBaseline(p Proposal, experiment CreatePlatformExperimentRequest, plann
 	}
 	if ran := string(baseline.Job.AcceleratorType); !baseline.Reachable[ran] {
 		return refusedProposal("accelerator_unreachable", "the baseline ran on %s, which no cluster this org's jobs can be placed on has now: run it again on a type `hl capacity` lists", ran)
-	}
-	// Every trial is the baseline's spec, and a job holds its whole estimate of its agent's quota
-	// until it ends: a loose one keeps researchers from running trials side by side, and one
-	// under the truth lets them reserve less than they spend. A job too short to be observed
-	// alive has no hours to hold the estimate to.
-	if estimate, ran := baseline.Job.EstimatedDurationHours, baseline.ObservedHours; ran > 0 && (estimate < ran || estimate > 2*ran) {
-		return refusedProposal("estimate_far_from_baseline", "baseline job %s states estimated_duration_hours %.3g and ran %.3g hours: every trial holds that estimate of a researcher's quota until it ends. Set estimated_duration_hours in the job spec to %.3g (what it ran plus a half), commit, and run the baseline again from that commit", baseline.Job.ID, estimate, ran, 1.5*ran)
 	}
 	if floor := baseline.AcceleratorHours * float64(len(p.Agents)); p.BudgetAcceleratorHours < floor {
 		return refusedProposal("budget_below_baseline", "the baseline cost %.3f accelerator-hours, so %d researchers each repeating it once need %.3f, and you propose %.3f", baseline.AcceleratorHours, len(p.Agents), floor, p.BudgetAcceleratorHours)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -545,11 +546,7 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 		"a metric nothing reports":        {nil, func(b *Baseline) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
 		"a gate the baseline fails":       {gated, func(b *Baseline) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		"a type nobody has now":           {nil, func(b *Baseline) { b.Reachable = map[string]bool{} }, "accelerator_unreachable"},
-		// A spec estimating 0.1 hours for a trial that ran 0.046 held twice what each job spent,
-		// and one job at a time fit a researcher's first stage.
-		"an estimate over twice the run": {nil, func(b *Baseline) { b.Job.EstimatedDurationHours = 0.41 }, "estimate_far_from_baseline"},
-		"an estimate under the run":      {nil, func(b *Baseline) { b.Job.EstimatedDurationHours = 0.19 }, "estimate_far_from_baseline"},
-		"a budget below one run apiece":  {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
+		"a budget below one run apiece":   {map[string]any{"budget_accelerator_hours": 0.3}, func(*Baseline) {}, "budget_below_baseline"},
 	} {
 		store := draftWithPlanner()
 		c.change(store.baseline)
@@ -578,6 +575,21 @@ func TestAProposalIsRefusedUnlessItsBaselineJobReallyMeasuredWhatItProposes(t *t
 	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
 	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != string(domain.CPUType) {
 		t.Errorf("a proposal whose baseline ran on cores: got = %d %v, want 200 and the CPU type answered", code, out)
+	}
+
+	// A spec estimating 0.1 hours for a trial that ran 0.046 held twice what each job spent, and
+	// one job at a time fit a researcher's first stage. Held to its own estimate, a baseline then
+	// ran twice, the second time only to carry a corrected one. The trial's estimate is the
+	// platform's, from the hours the one baseline ran, whatever that job guessed.
+	guessed := draftWithPlanner()
+	guessed.baseline.Job.EstimatedDurationHours = 1
+	_, call = planningAPI(t, guessed, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"job_estimated_duration_hours": 0.2})); code != http.StatusUnprocessableEntity {
+		t.Errorf("a proposal that states the trial's estimate: got = %d %v, want 422 for a field the body does not have", code, out)
+	}
+	code, out = call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || math.Abs(proposal["job_estimated_duration_hours"].(float64)-0.3) > 1e-9 {
+		t.Errorf("a baseline that guessed 1 hour and ran 0.2: got = %d %v, want 200 and a trial's estimate of 0.3", code, out)
 	}
 }
 

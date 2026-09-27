@@ -67,12 +67,10 @@ What you produce, in this order:
      it fails, read its logs, fix the code and run it again. When it has COMPLETED, file its
      summary with `hl job summary`: what ran, on what, and the numbers. Its hypothesis states
      the control, which claims no effect: set no status on it.
-     A job holds its whole estimate of its agent's quota from submit until it ends, so the
-     file's `estimated_duration_hours` decides how many trials a researcher runs side by
-     side. Compare it with the baseline's `observed_hours` in `hl job cost`: when the estimate
-     is under that or over twice that, set it to `observed_hours` plus a half, commit, and
-     run the baseline again. The baseline you name is a job submitted from the spec the
-     researchers get.
+     The file's `estimated_duration_hours` is a guess for this one run: state it generously,
+     inside your quota, and never run the baseline again to correct it. When you propose, the platform sets a trial's
+     estimate to the baseline's `observed_hours` (`hl job cost`) plus a half, and
+     `hl job submit` sends that, whatever the file states.
   5. The brief: the experiment's `description`, the only thing researchers read about the
      task. Write it for an agent that knows nothing of this conversation:
        - the goal in the person's terms, and the metric with why it is the goal;
@@ -94,8 +92,8 @@ What you produce, in this order:
      rank on, never a figure your own code computes. Budget = that cost x those trials, with
      a fifth to spare. Trials run side by side only while their estimates fit what a
      researcher holds: the first of the draft's `stages` releases its `length_pct` percent of
-     the budget, split evenly between the researchers, and each job holds the
-     `estimated_cost_acch` its submit printed. Say how many trials at once per researcher that
+     the budget, split evenly between the researchers, and each trial holds one
+     and a half times the baseline's `accelerator_hours`. Say how many trials at once per researcher that
      allows, and plan with that number: count the rounds in the duration before you raise the
      budget for more at once. Duration = how long those rounds take, plus a few minutes per
      trial for a researcher to read and decide, and nothing on top. One researcher per

@@ -149,6 +149,38 @@ func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
 	}
 }
 
+// Held to the estimate in its job spec, a baseline ran twice, the second time only to carry a
+// corrected one. The spec's estimate is a guess made before anything ran: a trial is submitted
+// with the one the platform measured, and the spec's serves where none was measured.
+func TestJobSubmitTakesTheEstimateItsExperimentMeasured(t *testing.T) {
+	clone, _ := pushedClone(t)
+	writeJob(t, filepath.Join(clone, "guess.yaml"), "metadata:\n  hypothesis_id: h1\n  code_ref: repo@abc\n  estimated_duration_hours: 0.1\njob:\n  image: foo\n")
+	for name, tc := range map[string]struct {
+		experiment string
+		args       []string
+		want       float64
+	}{
+		"measured":                {`{"proposal":{"job_estimated_duration_hours":0.025}}`, nil, 0.025},
+		"a longer trial":          {`{"proposal":{"job_estimated_duration_hours":0.025}}`, []string{"--estimated-duration-hours", "0.5"}, 0.5},
+		"a draft before proposal": {`{}`, nil, 0.1},
+	} {
+		var sent map[string]any
+		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && r.URL.Path == "/platform-experiments/pe-1" {
+				_, _ = w.Write([]byte(tc.experiment))
+				return
+			}
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": "job-1"})
+		}))
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"job", "submit", "guess.yaml", "--agent", "jane", "--theory", "t", "--platform-experiment", "pe-1"}, tc.args...)
+		if code := run(args, &stdout, &stderr); code != 0 || sent["metadata"].(map[string]any)["estimated_duration_hours"] != tc.want {
+			t.Errorf("%s: exit %d, sent %v, want an estimate of %g\n%s", name, code, sent["metadata"], tc.want, stderr.String())
+		}
+	}
+}
+
 func TestJobSubmitRejectsMalformedEnv(t *testing.T) {
 	pushedClone(t)
 	var stdout, stderr bytes.Buffer

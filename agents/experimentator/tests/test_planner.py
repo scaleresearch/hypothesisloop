@@ -73,6 +73,14 @@ class PlannerPromptTest(unittest.TestCase):
     def test_the_baselines_hypothesis_takes_no_verdict(self):
         self.assertIn("Its hypothesis states the control, which claims no effect: set no status on it", " ".join(self.render().split()))
 
+    # Told to hold the baseline job to its own estimate, both planners of a run ran the baseline
+    # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.
+    def test_the_baseline_runs_once_and_the_platform_sets_the_trials_estimate(self):
+        flat = " ".join(self.render().split())
+        self.assertIn("never run the baseline again to correct it", flat)
+        self.assertIn("the platform sets a trial's estimate to the baseline's `observed_hours` (`hl job cost`) plus a half", flat)
+        self.assertIn("each trial holds one and a half times the baseline's `accelerator_hours`", flat)
+
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         self.assertIn("end your turn: its result arrives as a message. Never poll, sleep or block in `hl watch`", " ".join(self.render().split()))

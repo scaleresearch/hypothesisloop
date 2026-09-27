@@ -241,7 +241,11 @@ A platform experiment can also start from a sentence saying what to find out, on
 or with `POST /platform-experiments/drafts {project_id, goal}`. That makes a **draft**, and the
 platform runs a **planner** for it: an agent that chooses the metric, writes seed code, measures
 a baseline with a real job and proposes the experiment (`hl platform-experiments propose`). The
-platform checks the proposal against what the baseline job did before it stores it. A person
+platform checks the proposal against what the baseline job did before it stores it, and stores
+with it the estimate of one trial: the hours that job was observed running plus a half
+(`job_estimated_duration_hours`). `hl job submit` sends that for every job that passes no
+`--estimated-duration-hours`, so the estimate in the job spec is only the guess the baseline ran
+with. A person
 then accepts it, stating the budget, the duration and the researchers themselves
 (`POST /platform-experiments/{id}/accept`), or asks for a change in a sentence
 (`.../revise`), or closes the draft. A planner that cannot make the goal into an experiment
