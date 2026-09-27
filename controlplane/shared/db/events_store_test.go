@@ -1023,3 +1023,39 @@ func TestAFinishedJobIsAnnouncedWithItsCause(t *testing.T) {
 		t.Errorf("a completion written with a reason: err = %v, want experiments_reason_of_attempt", err)
 	}
 }
+
+// A watcher and a reader are told the same status. A cancelled job is stored EVICTED with its
+// reason and answered CANCELLED, and its event says CANCELLED too, live and replayed.
+func TestACancelledJobIsAnnouncedAsAReadAnswersIt(t *testing.T) {
+	pool := eventsTestDB(t)
+	store := NewEventsStore(pool, noHypothesisEvents{})
+	agentID, peID, hypothesisID := seedRun(t, pool, "cancelled", true)
+	const jobID = "watch-test-job-cancelled"
+	before := insertJob(t, pool, agentID, peID, hypothesisID, jobID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	events, listening := make(chan Event, 16), make(chan struct{})
+	go store.ListenEvents(ctx, events, func() { close(listening) }) //nolint:errcheck
+	<-listening
+	exec(t, pool, `UPDATE experiments SET status = 'EVICTED', eviction_reason = 'cancelled', updated_at = now() WHERE id = $1`, jobID)
+
+	var live Event
+	for live.Subject != jobID {
+		select {
+		case live = <-events:
+		case <-ctx.Done():
+			t.Fatal("no live event for the cancelled job")
+		}
+	}
+	if live.Value != "CANCELLED" || live.Detail != "cancelled" {
+		t.Errorf("live: got = %s %q, want CANCELLED \"cancelled\"", live.Value, live.Detail)
+	}
+	replayed, err := store.Replay(ctx, EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentStatus: true}}, before)
+	if err != nil {
+		t.Fatalf("replay: got = %v, want = nil", err)
+	}
+	if last := replayed[len(replayed)-1]; last.Identity() != live.Identity() {
+		t.Errorf("replayed: got = %+v, want the live event %+v", last.Identity(), live.Identity())
+	}
+}

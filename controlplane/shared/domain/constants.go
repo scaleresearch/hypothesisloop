@@ -23,7 +23,8 @@ const (
 )
 
 // AnsweredStatus is the status the API answers for a job stored with this status and eviction
-// reason, on a job, in a count and as a filter. It is the one place a cancel is told apart.
+// reason, on a job, in a count, as a filter and in a watch event. It is the one place a cancel
+// is told apart.
 func AnsweredStatus(stored ExperimentStatus, evictionReason string) ExperimentStatus {
 	if EvictionReason(evictionReason).Code() == EvictionCancelled {
 		return StatusCancelled

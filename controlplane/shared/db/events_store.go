@@ -103,7 +103,7 @@ type EventKindDoc struct {
 // slice, so a kind cannot be documented but unaccepted, or accepted but undocumented — the two
 // failures a hand-kept second list produces the first time a kind is added.
 var EventKinds = []EventKindDoc{
-	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED",
+	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED",
 		Description: "Your job moved. detail carries why, when the platform knows: the reason a job was evicted, rejected or requeued, or how a FAILED job's process ended (container_failed: command exited with code 1). The queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the queue reason",
 		Description: "Why a job is still waiting. It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
@@ -336,11 +336,20 @@ func (s *EventsStore) ListenEvents(ctx context.Context, out chan<- Event, listen
 			return fmt.Errorf("events_store.ListenEvents: decode %q: %w", n.Payload, err)
 		}
 		select {
-		case out <- e:
+		case out <- answered(e):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+// answered gives a job's status event the status a read of the job answers
+// (domain.AnsweredStatus). The trigger and the row say the stored one.
+func answered(e Event) Event {
+	if e.Kind == EventExperimentStatus {
+		e.Value = string(domain.AnsweredStatus(domain.ExperimentStatus(e.Value), e.Detail))
+	}
+	return e
 }
 
 // Concerns completes Matches for an agent filter: of events, a hypothesis event stays only when it
@@ -547,9 +556,8 @@ WHERE platform_experiment_id = $1
 			events = append(events, Event{Kind: EventExperimentStatus, Subject: id, Value: "SUBMITTED",
 				PlatformExperimentID: peID, AgentID: agentID, Position: *submittedXid})
 		}
-		current := Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
-			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}
-		events = append(events, current)
+		events = append(events, answered(Event{Kind: EventExperimentStatus, Subject: id, Value: status, Detail: evictionReason,
+			PlatformExperimentID: peID, AgentID: agentID, Position: statusXid}))
 		if notAdmitted != "" && notAdmitted != domain.NotAdmittedAwaitingAdmission && notAdmitted != domain.NotAdmittedSummaryGate {
 			events = append(events, Event{Kind: EventExperimentBlocked, Subject: id, Value: notAdmitted,
 				PlatformExperimentID: peID, AgentID: agentID, Position: notAdmittedXid})
