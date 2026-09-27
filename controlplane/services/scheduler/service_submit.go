@@ -79,6 +79,15 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// The platform closes it at this moment (SweepExpired) and stops what runs then, so a job sent
+	// after it would be admitted only to be evicted.
+	if closesAt := pe.ClosesAt(); !closesAt.IsZero() && !closesAt.After(time.Now()) {
+		return &AdmissionError{
+			Reason:  "experiment_closed",
+			Message: fmt.Sprintf("platform experiment %s ended at %s; jobs are accepted only before its end", pe.ID, closesAt.UTC().Format(time.RFC3339)),
+		}
+	}
+
 	// The estimate is the one the submit states, and nothing replaces a stated one. A submit that
 	// states none takes what the platform measured on the experiment's baseline job, and with
 	// neither there is nothing to hold of the agent's quota.

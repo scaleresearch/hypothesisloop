@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -442,6 +443,36 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 	}
 	if strings.Contains(refused.Message, "the-secret-value") {
 		t.Fatalf("the refusal repeats the secret: %s", refused.Message)
+	}
+}
+
+type endingStore struct {
+	poolOnlyStore
+	status domain.PlatformExperimentStatus
+	endsAt time.Time
+}
+
+func (s endingStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id, Status: s.status, EndsAt: s.endsAt, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
+}
+
+func (endingStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}, nil
+}
+
+// The platform closes a platform experiment some seconds after its end and evicts what runs
+// then. A job sent in between is refused as one sent after the close is.
+func TestSubmitPastTheEndOfThePlatformExperimentIsRefused(t *testing.T) {
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpOpen} {
+		s := &Service{codeHost: testCodeHost{}, store: endingStore{status: status, endsAt: time.Now().Add(-10 * time.Second)}, hypotheses: humanHypothesis("pe-1")}
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != "experiment_closed" || !strings.Contains(refused.Message, "ended at") {
+			t.Errorf("%s, 10 s past its end: got = %v, want experiment_closed naming the end", status, err)
+		}
+		s.store = endingStore{status: status, endsAt: time.Now().Add(time.Hour)}
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+			t.Errorf("%s, an hour before its end: got = %v, want the job taken through every check", status, err)
+		}
 	}
 }
 
