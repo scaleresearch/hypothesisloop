@@ -7,8 +7,8 @@ COPY go.mod go.sum ./
 
 COPY . .
 COPY vendor ./vendor
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /control-service ./controlplane/cmd/control-service
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /hl-admin ./controlplane/cmd/hl-admin
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /control-service ./controlplane/cmd/control-service
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /hl-admin ./controlplane/cmd/hl-admin
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates

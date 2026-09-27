@@ -31,7 +31,7 @@ ENV PATH=/usr/local/go/bin:$PATH
 WORKDIR /app
 COPY . .
 COPY vendor ./vendor
-RUN set -e; \
+RUN --mount=type=cache,target=/root/.cache/go-build set -e; \
     CGO_ENABLED=1 CC=target-cc GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /bare-agent ./runtime/bare-metal/cmd/bare-agent; \
     newest="$(target-objdump -T /bare-agent | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"; \
     echo "newest glibc symbol version linked: $newest"; \

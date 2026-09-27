@@ -7,7 +7,7 @@ COPY go.mod go.sum ./
 
 COPY . .
 COPY vendor ./vendor
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /agent-launcher ./runtime/cloud/cmd/agent-launcher
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /agent-launcher ./runtime/cloud/cmd/agent-launcher
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
