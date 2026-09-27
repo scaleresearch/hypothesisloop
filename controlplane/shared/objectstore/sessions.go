@@ -12,8 +12,8 @@ import (
 )
 
 // sessionsPrefix lies outside every platform experiment's prefix, which each agent's and each
-// job's key reads whole: a session holds everything its agent said and saw, and is for the
-// platform to hand back to that agent alone.
+// job's key reads whole: a session holds everything its agent said and saw, and the platform
+// hands it to that agent and to the org that owns the platform experiment, never to another agent.
 const sessionsPrefix = "sessions/"
 
 // ErrNoSession is returned for an agent or coordinator that has stored no session.

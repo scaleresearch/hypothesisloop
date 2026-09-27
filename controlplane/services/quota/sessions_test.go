@@ -97,43 +97,75 @@ func TestAnAgentAndACoordinatorEachStoreAndReadBackTheirOwnSessionByteForByte(t 
 	}
 }
 
-func TestNobodyButItsOwnerReadsOrWritesASession(t *testing.T) {
-	store := &memorySessions{stored: map[string][]byte{"pe-1/ag-1": []byte("the agent's"), "pe-1/": []byte("the coordinator's")}}
-	inOrg := []string{"org-a"}
-	others := map[string]auth.Principal{
-		"another agent of the experiment": agentTwo,
-		"the coordinator":                 coordinator,
-		"an owner of the org":             {Kind: auth.KindUser, UserID: "u-1", OrgIDs: inOrg},
-		"an org key":                      {Kind: auth.KindKey, OrgIDs: inOrg},
-		"staff":                           {Kind: auth.KindStaff},
-		"the same agent id elsewhere":     {Kind: auth.KindAgent, OrgIDs: inOrg, ProjectID: "prj-a", PlatformExperimentID: "pe-2", AgentID: "ag-1"},
+func TestASessionIsWrittenByItsOwnerAndReadByItsOwnerAndTheOrgThatOwnsTheExperiment(t *testing.T) {
+	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{
+		"pe-1":    sessionPlacement.PlatformExperiments["pe-1"],
+		"pe-2":    sessionPlacement.PlatformExperiments["pe-2"],
+		"pe-show": {PlatformExperimentID: "pe-show", ProjectID: "prj-a", OrgID: "org-a", Shared: true},
+	}}
+	inOrg, refused := []string{"org-a"}, []int{http.StatusForbidden, http.StatusNotFound}
+	callers := []struct {
+		name               string
+		caller             auth.Principal
+		agents, coordinate int
+	}{
+		{"the agent", agentOne, http.StatusOK, http.StatusForbidden},
+		{"another agent of the experiment", agentTwo, http.StatusForbidden, http.StatusForbidden},
+		{"the coordinator", coordinator, http.StatusForbidden, http.StatusOK},
+		{"an owner of the org", auth.Principal{Kind: auth.KindUser, UserID: "u-1", OrgIDs: inOrg}, http.StatusOK, http.StatusOK},
+		{"an org key", auth.Principal{Kind: auth.KindKey, OrgIDs: inOrg}, http.StatusOK, http.StatusOK},
+		{"a key of the project", auth.Principal{Kind: auth.KindKey, OrgIDs: inOrg, ProjectID: "prj-a"}, http.StatusOK, http.StatusOK},
+		{"staff", auth.Principal{Kind: auth.KindStaff}, http.StatusOK, http.StatusOK},
+		{"a key of another project", auth.Principal{Kind: auth.KindKey, OrgIDs: inOrg, ProjectID: "prj-b"}, http.StatusNotFound, http.StatusNotFound},
+		{"a person of another org", auth.Principal{Kind: auth.KindUser, UserID: "u-2", OrgIDs: []string{"org-b"}}, http.StatusNotFound, http.StatusNotFound},
+		{"a key of another org", auth.Principal{Kind: auth.KindKey, OrgIDs: []string{"org-b"}}, http.StatusNotFound, http.StatusNotFound},
+		{"the same agent id elsewhere", auth.Principal{Kind: auth.KindAgent, OrgIDs: inOrg, ProjectID: "prj-a", PlatformExperimentID: "pe-2", AgentID: "ag-1"}, http.StatusNotFound, http.StatusForbidden},
+		{"the coordinator of another experiment", auth.Principal{Kind: auth.KindCoordinator, OrgIDs: inOrg, ProjectID: "prj-a", PlatformExperimentID: "pe-2"}, http.StatusNotFound, http.StatusNotFound},
 	}
-	for name, caller := range others {
-		for _, method := range []string{"GET", "PUT"} {
-			var body []byte
-			if method == "PUT" {
-				body = []byte("overwritten")
+	for _, c := range callers {
+		store := &memorySessions{stored: map[string][]byte{"pe-1/ag-1": []byte("the agent's"), "pe-1/": []byte("the coordinator's")}}
+		for path, want := range map[string]int{agentSession: c.agents, coordinatorSession: c.coordinate} {
+			code, out := sessionCall(t, store, placement, c.caller, "GET", path, nil)
+			if code != want {
+				t.Errorf("%s, GET %s: %d %s, want %d", c.name, path, code, out, want)
 			}
-			if code, out := sessionCall(t, store, sessionPlacement, caller, method, agentSession, body); code != http.StatusForbidden && code != http.StatusNotFound {
-				t.Errorf("%s, %s of an agent's session: %d %s, want it refused", name, method, code, out)
+			owns := c.name == "the agent" && path == agentSession || c.name == "the coordinator" && path == coordinatorSession
+			code, out = sessionCall(t, store, placement, c.caller, "PUT", path, []byte("overwritten"))
+			if owns != (code == http.StatusOK) || !owns && code != refused[0] && code != refused[1] {
+				t.Errorf("%s, PUT %s: %d %s, want only its owner to store it", c.name, path, code, out)
+			}
+		}
+		for key, was := range map[string]string{"pe-1/ag-1": "the agent's", "pe-1/": "the coordinator's"} {
+			owns := c.name == "the agent" && key == "pe-1/ag-1" || c.name == "the coordinator" && key == "pe-1/"
+			if got := string(store.stored[key]); !owns && got != was {
+				t.Errorf("%s: a refused write left %q stored", c.name, got)
 			}
 		}
 	}
-	delete(others, "the coordinator")
-	others["an agent of the experiment"] = agentOne
-	for name, caller := range others {
-		for _, method := range []string{"GET", "PUT"} {
-			var body []byte
-			if method == "PUT" {
-				body = []byte("overwritten")
-			}
-			if code, out := sessionCall(t, store, sessionPlacement, caller, method, coordinatorSession, body); code != http.StatusForbidden && code != http.StatusNotFound {
-				t.Errorf("%s, %s of the coordinator's session: %d %s, want it refused", name, method, code, out)
-			}
-		}
+
+	// What staff share with every account is the platform experiment, and no session of it.
+	store := &memorySessions{stored: map[string][]byte{"pe-show/ag-1": []byte("the agent's")}}
+	outsider := auth.Principal{Kind: auth.KindUser, UserID: "u-2", OrgIDs: []string{"org-b"}}
+	if code, out := sessionCall(t, store, placement, outsider, "GET", "/platform-experiments/pe-show/agents/ag-1/session", nil); code != http.StatusNotFound {
+		t.Errorf("a person of another org on a shared platform experiment: %d %s, want 404", code, out)
 	}
-	if string(store.stored["pe-1/ag-1"]) != "the agent's" || string(store.stored["pe-1/"]) != "the coordinator's" {
-		t.Fatalf("a refused write changed what is stored: %q", store.stored)
+}
+
+func TestTheOrgReadsASessionAfterTheExperimentClosed(t *testing.T) {
+	closedAt := time.Now().Add(-domain.AgentWindDown - time.Hour)
+	placement := authtest.Placement{PlatformExperiments: sessionPlacement.PlatformExperiments, ClosedAt: map[string]time.Time{"pe-1": closedAt}}
+	store := &memorySessions{stored: map[string][]byte{"pe-1/ag-1": []byte("the agent's")}}
+	for name, caller := range map[string]auth.Principal{
+		"an owner of the org": {Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}},
+		"an org key":          {Kind: auth.KindKey, OrgIDs: []string{"org-a"}},
+		"staff":               {Kind: auth.KindStaff},
+	} {
+		if code, out := sessionCall(t, store, placement, caller, "GET", agentSession, nil); code != http.StatusOK || string(out) != "the agent's" {
+			t.Errorf("%s, long after the close: %d %s, want the stored session", name, code, out)
+		}
+		if code, out := sessionCall(t, store, placement, caller, "PUT", agentSession, []byte("overwritten")); code != http.StatusForbidden {
+			t.Errorf("%s storing after the close: %d %s, want 403", name, code, out)
+		}
 	}
 }
 

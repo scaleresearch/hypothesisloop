@@ -75,7 +75,11 @@ func WithRead(ctx context.Context, platformExperimentID string) context.Context 
 // or a job stays within its own platform experiment.
 func readsShared(ctx context.Context, p Principal) bool {
 	_, reading := ctx.Value(readKey{}).(read)
-	return reading && (p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff)
+	return reading && holdsAccount(p)
+}
+
+func holdsAccount(p Principal) bool {
+	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
 }
 
 // reaches is the one statement of what a caller reaches: what its scope admits, and for a read
@@ -236,31 +240,66 @@ func (a *Access) ActAs(ctx context.Context, agentID string) error {
 	return a.Agent(ctx, agentID)
 }
 
-// OwnSession admits only the one a stored model session belongs to: the agent agentID with its
-// own token, or with no agentID the platform experiment's coordinator with its. Nobody else
-// reads or replaces what an agent said and saw, staff and its org's people included. Writing is
-// refused once the platform experiment has been closed for domain.AgentWindDown, when an
-// agent's token has ended and a coordinator's is left to read and to file the summary.
-func (a *Access) OwnSession(ctx context.Context, platformExperimentID, agentID string, writing bool) error {
-	if err := a.within(ctx, "platform experiment", platformExperimentID); err != nil {
-		return err
-	}
-	p, _ := FromContext(ctx)
-	own := p.Kind == KindCoordinator && agentID == "" || p.Kind == KindAgent && agentID != "" && p.AgentID == agentID
-	if !own || p.PlatformExperimentID != platformExperimentID {
-		return forbidden("a session is read and written only by the agent or the coordinator it belongs to, with its own token")
-	}
-	if !writing {
-		return nil
-	}
-	_, closedAt, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
+// A stored model session is everything its agent said and saw, so it is no part of what staff
+// share with every account: a platform experiment outside the caller's own scope is not found
+// here even to a read.
+//
+// WriteSession admits only the one the session belongs to: the agent agentID with its own
+// token, or with no agentID the platform experiment's coordinator with its. Writing is refused
+// once the platform experiment has been closed for domain.AgentWindDown, when an agent's token
+// has ended and a coordinator's is left to read and to file the summary.
+func (a *Access) WriteSession(ctx context.Context, platformExperimentID, agentID string) error {
+	p, closedAt, err := a.sessionCaller(ctx, platformExperimentID)
 	if err != nil {
 		return err
+	}
+	if !ownsSession(p, platformExperimentID, agentID) {
+		return forbidden("a session is written only by the agent or the coordinator it belongs to, with its own token")
 	}
 	if closedAt != nil && !time.Now().Before(closedAt.Add(domain.AgentWindDown)) {
 		return &Error{status: http.StatusConflict, Message: "platform experiment " + platformExperimentID + " is closed and its wind-down is over: no session is stored any more"}
 	}
 	return nil
+}
+
+// ReadSession admits the one the session belongs to, and every account that reaches the
+// platform experiment as its own: the people and the keys of the org that owns it, and staff.
+// They read it while the platform experiment runs and after it has closed. Another agent of the
+// platform experiment and its coordinator read no agent's session.
+func (a *Access) ReadSession(ctx context.Context, platformExperimentID, agentID string) error {
+	p, _, err := a.sessionCaller(ctx, platformExperimentID)
+	if err != nil {
+		return err
+	}
+	if !ownsSession(p, platformExperimentID, agentID) && !holdsAccount(p) {
+		return forbidden("a session is read only by the agent or the coordinator it belongs to, with its own token, and by the org that owns the platform experiment")
+	}
+	return nil
+}
+
+func (a *Access) sessionCaller(ctx context.Context, platformExperimentID string) (Principal, *time.Time, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return Principal{}, nil, err
+	}
+	if err := validID("platform experiment", platformExperimentID); err != nil {
+		return Principal{}, nil, err
+	}
+	tenancy, closedAt, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
+	if err != nil {
+		return Principal{}, nil, err
+	}
+	if !p.Scope().Unrestricted() && (tenancy == nil || !p.Scope().Admits(*tenancy)) {
+		return Principal{}, nil, NotFound("platform experiment")
+	}
+	return p, closedAt, nil
+}
+
+func ownsSession(p Principal, platformExperimentID, agentID string) bool {
+	if p.PlatformExperimentID != platformExperimentID {
+		return false
+	}
+	return p.Kind == KindCoordinator && agentID == "" || p.Kind == KindAgent && agentID != "" && p.AgentID == agentID
 }
 
 // Staff admits only the platform's own operators, for an operation that acts across every org.

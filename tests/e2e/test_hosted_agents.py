@@ -522,7 +522,7 @@ def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hos
     assert r.status_code == 400, f"progress of a machine that is not running: {r.status_code} {r.text}"
 
 
-def test_an_agent_and_a_coordinator_keep_their_own_session_and_nobody_else_reads_it(with_repo: API, run_id: str):
+def test_an_agent_and_a_coordinator_keep_their_own_session_and_only_their_org_reads_it(with_repo: API, run_id: str):
     api = with_repo
     r = _hosted_run(api, f"hosted-sessions-{run_id}", coordinator_hosted=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
@@ -565,10 +565,12 @@ def _sessions_are_their_owners(api: API, pe_id: str) -> None:
                     r = call(method, who, whose, body)
                     assert r.status_code == 403, f"{who} {method} the session of {whose}: {r.status_code} {r.text}"
     for whose in tokens:
-        for method, body in (("GET", None), ("PUT", b"overwritten")):
-            r = api.session.request(method, api._url(paths[whose]), data=body, timeout=30)
-            assert r.status_code == 403, f"the org's own caller {method} the session of {whose}: {r.status_code} {r.text}"
-        assert b"overwritten" not in call("GET", whose, whose).content
+        r = api.session.put(api._url(paths[whose]), data=b"overwritten", timeout=30)
+        assert r.status_code == 403, f"the org's own caller PUT the session of {whose}: {r.status_code} {r.text}"
+        stored = call("GET", whose, whose).content
+        assert b"overwritten" not in stored
+        r = api.session.get(api._url(paths[whose]), timeout=30)
+        assert r.status_code == 200 and r.content == stored, f"the org's own caller GET the session of {whose}: {r.status_code}"
 
     assert call("PUT", first, first, b"").status_code == 400
     assert call("PUT", first, first, b"x" * ((32 << 20) + 1)).status_code == 413

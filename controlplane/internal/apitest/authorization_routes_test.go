@@ -93,14 +93,27 @@ func owned(audience []string, admitted int) rule {
 	}
 }
 
-// ownSession is a stored model session: in scope, only the token of the one it belongs to
-// reaches it, an agent's for its own agent's and the coordinator's for the coordinator's.
+// ownSession is a write only the one it belongs to makes: an agent's token for its own agent's
+// session or finish, the coordinator's for the coordinator's.
 func ownSession(audience []string, owner string) rule {
 	inScope := scoped(audience, reached)
 	return func(principal, object string) int {
 		status := inScope(principal, object)
 		if status == reached && (principal != owner || owner == "agent" && object != "own") {
 			return http.StatusForbidden
+		}
+		return status
+	}
+}
+
+// sessionRead is a stored model session read: by the one it belongs to, as ownSession, and by
+// the people and the keys whose scope holds the platform experiment.
+func sessionRead(audience []string, owner string) rule {
+	own := ownSession(audience, owner)
+	return func(principal, object string) int {
+		status := own(principal, object)
+		if status == http.StatusForbidden && among(people, principal) {
+			return reached
 		}
 		return status
 	}
@@ -291,9 +304,9 @@ var routes = []route{
 	{method: "GET", path: "/platform-experiments/{id}/data-usage", request: "/platform-experiments/<pe>/data-usage", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/data-key", request: "/platform-experiments/<pe>/data-key", body: `{"agent_id":"<agent>"}`, rule: spendsAs(owned(agentAudience, reached))},
 	{method: "PUT", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", body: `session`, rule: ownSession(agentAudience, "agent")},
-	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", rule: ownSession(agentAudience, "agent"), sharedRead: true},
+	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/session", request: "/platform-experiments/<pe>/agents/<agent>/session", rule: sessionRead(agentAudience, "agent")},
 	{method: "PUT", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", body: `session`, rule: ownSession(coordinatorAudience, "coordinator")},
-	{method: "GET", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", rule: ownSession(coordinatorAudience, "coordinator"), sharedRead: true},
+	{method: "GET", path: "/platform-experiments/{id}/coordinator/session", request: "/platform-experiments/<pe>/coordinator/session", rule: sessionRead(coordinatorAudience, "coordinator")},
 	{method: "POST", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", body: `{"agent_id":"<agent>"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/agents", request: "/platform-experiments/<pe>/agents", rule: scoped(coordinatorAudience, reached), sharedRead: true},
 	{method: "POST", path: "/platform-experiments/{id}/share", request: "/platform-experiments/<pe>/share", rule: staffOnly},
@@ -457,4 +470,11 @@ var cases = []struct {
 	{"a runtime reporting for a cluster of another org", "runtime", "POST", "/internal/clusters/cluster-b/status", `{"reports":[]}`, 403},
 	{"a launcher asking as another launcher", "launcher", "POST", "/internal/launchers/other/reconcile", `{"instances":[]}`, 403},
 	{"staff reading the process metrics", "staff", "GET", "/metrics", "", 200},
+
+	{"staff reading an agent's session", "staff", "GET", "/platform-experiments/pe-a1/agents/agent-1/session", "", reached},
+	{"staff storing an agent's session", "staff", "PUT", "/platform-experiments/pe-a1/agents/agent-1/session", "session", 403},
+	{"an owner reading the session of an agent of another org", "user", "GET", "/platform-experiments/pe-b/agents/agent-9/session", "", 404},
+	{"an org key reading a session of the shared platform experiment", "org key", "GET", "/platform-experiments/pe-show/agents/agent-9/session", "", 404},
+	{"an agent reading a session under its own id in another platform experiment", "agent", "GET", "/platform-experiments/pe-a2/agents/agent-1/session", "", 404},
+	{"a coordinator reading a session of another platform experiment", "coordinator", "GET", "/platform-experiments/pe-a2/agents/agent-2/session", "", 404},
 }
