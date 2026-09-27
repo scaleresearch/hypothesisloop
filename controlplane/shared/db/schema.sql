@@ -251,6 +251,10 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- scheduler.tried_cluster_ttl_seconds. The list delays a return to a cluster;
     -- infra_requeue_count is what bounds the attempts.
     tried_clusters           JSONB             NOT NULL DEFAULT '[]'::jsonb,
+    -- The accelerator type the job ran on, written by the write that marks it RUNNING and kept
+    -- for good: what it has run is billed at the type the row carries, so every later placement
+    -- is on this type. '' for a job that has not run or holds no accelerator.
+    ran_on_accelerator_type  TEXT              NOT NULL DEFAULT '',
     -- The job's permanent object-store key, created in the store in the same transaction that
     -- inserts the row and never rotated or deleted. '' only on terminal rows that predate
     -- per-job keys (experiments_active_has_data_key).
@@ -269,6 +273,12 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL 
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS infra_requeue_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS resolved_job_spec JSONB;
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS tried_clusters JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS ran_on_accelerator_type TEXT NOT NULL DEFAULT '';
+-- Jobs that ran before the column existed and can be placed again: the ones running, and the
+-- preempted ones still waiting under the reason that used to stand for the fact.
+UPDATE experiments SET ran_on_accelerator_type = accelerator_type
+WHERE ran_on_accelerator_type = '' AND accelerator_type <> ''
+  AND (status = 'RUNNING' OR (status = 'QUEUED' AND eviction_reason = 'preempted_for_guaranteed'));
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_access_key_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS secret_env JSONB NOT NULL DEFAULT '{}'::jsonb;

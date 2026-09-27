@@ -17,7 +17,7 @@ type rowScanner interface {
 
 func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	exp := &domain.Experiment{}
-	var acceleratorType, capacityTier, status, actorKind, actorID string
+	var acceleratorType, ranOnAcceleratorType, capacityTier, status, actorKind, actorID string
 	var evictionReason, notAdmittedReason *string
 	var jobSpec, resolvedJobSpec, triedClusters []byte
 
@@ -29,7 +29,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		&exp.EstimatedDurationHours, &exp.EstimatedCostAccH,
 		&exp.PriorityScore, &exp.NoveltyScore, &capacityTier, &status,
 		&exp.QueuedAt, &exp.SubmittedAt, &evictionReason, &notAdmittedReason,
-		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters,
+		&exp.QuotaSettledAt, &exp.AttemptCount, &exp.InfraRequeueCount, &triedClusters, &ranOnAcceleratorType,
 		&exp.DataKey.AccessKeyID, &exp.DataKey.SecretAccessKey, &exp.SecretEnv,
 		&exp.CreatedAt, &exp.UpdatedAt,
 		&exp.ProjectID, &exp.OrgID,
@@ -56,6 +56,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		exp.ResolvedJob = &resolved
 	}
 	exp.AcceleratorType = domain.AcceleratorType(acceleratorType)
+	exp.RanOnAcceleratorType = domain.AcceleratorType(ranOnAcceleratorType)
 	// Recovering the per-node count by dividing the stored total works only because an ungrouped
 	// job's nodes are identical by construction. A grouped job's per-replica counts are stored
 	// on the groups exactly as written, so there is nothing to recover — and dividing its total

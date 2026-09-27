@@ -171,3 +171,51 @@ func TestAReasonEndsWithTheAttemptItExplains(t *testing.T) {
 		t.Fatalf("a reason written onto a placed job: err = %v, want experiments_reason_of_attempt", err)
 	}
 }
+
+// The type a job ran on is its own fact, written when it is marked RUNNING. It is there however
+// the attempt ended and through every later placement, one that is rolled back included, where
+// the reason the attempt ended is gone with the claim. A job that was placed and never ran has
+// none.
+func TestTheTypeAJobRanOnOutlivesEveryRequeue(t *testing.T) {
+	w := newTwoOrgs(t)
+	ctx := context.Background()
+	w.bound(t, w.ofA)
+	never := w.placed(t, "never-ran", w.peA, w.ofA, domain.StatusSubmitted)
+	if ok, err := w.exps.RequeueInfrastructureFault(ctx, never, domain.StatusSubmitted, string(domain.EvictionStuckPending), 2); err != nil || !ok {
+		t.Fatalf("requeue of a job that never ran = %v, %v", ok, err)
+	}
+	if got := w.get(t, never); got.RanOnAcceleratorType != "" {
+		t.Fatalf("a job that never ran is held to %q", got.RanOnAcceleratorType)
+	}
+
+	id := w.placed(t, "ran", w.peA, w.ofA, domain.StatusRunning)
+	ranOn := w.get(t, id).AcceleratorType
+	held := func(when string) {
+		t.Helper()
+		if got := w.get(t, id); ranOn == "" || got.RanOnAcceleratorType != ranOn {
+			t.Fatalf("%s: ran on %q, want %q", when, got.RanOnAcceleratorType, ranOn)
+		}
+	}
+	held("running")
+	if ok, err := w.exps.RequeuePreempted(ctx, id, 0.5, 0.5); err != nil || !ok {
+		t.Fatalf("preempt = %v, %v", ok, err)
+	}
+	held("preempted and waiting")
+	if !w.claim(t, id, w.ofA) {
+		t.Fatal("the preempted job was not placed again")
+	}
+	if err := w.exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); err != nil {
+		t.Fatal(err)
+	}
+	held("placed again and rolled back")
+	if !w.claim(t, id, w.ofA) {
+		t.Fatal("the rolled-back job was not placed again")
+	}
+	if started, err := w.exps.MarkStarted(ctx, id); err != nil || !started {
+		t.Fatalf("MarkStarted = %v, %v", started, err)
+	}
+	if ok, err := w.exps.RequeueInfrastructureFault(ctx, id, domain.StatusRunning, string(domain.EvictionWorkloadGone), 2); err != nil || !ok {
+		t.Fatalf("infrastructure requeue = %v, %v", ok, err)
+	}
+	held("requeued by an infrastructure fault")
+}

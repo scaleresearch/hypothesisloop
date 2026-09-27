@@ -139,6 +139,10 @@ type Experiment struct {
 	// under, and a job tried on a shared cluster would show its org the id of a cluster another
 	// org owns. No client reads the list.
 	TriedClusters []TriedCluster `json:"-"`
+	// RanOnAcceleratorType is the accelerator type the job ran on, written when it is marked
+	// RUNNING and never cleared; empty for a job that has not run. A job that ran is placed
+	// again on this type only, however its attempt ended (scheduler.candidateAcceleratorTypes).
+	RanOnAcceleratorType AcceleratorType `json:"-"`
 
 	QuotaSettledAt *time.Time `json:"quota_settled_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`

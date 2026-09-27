@@ -154,8 +154,11 @@ RETURNING e.resolved_job_spec ->> 'image'`
 // cancelled/evicted (the backend Job can report Running briefly until cluster-agent reconciles
 // it away). Returns whether the transition happened, so callers can skip onRunning side effects
 // (accelerator-type recording, flavor-substitution debit) when it didn't.
+//
+// The same write records the accelerator type the job runs on (ran_on_accelerator_type), which
+// is the type it was admitted at: from here on the job has run, whatever ends this attempt.
 func (s *ExperimentsStore) MarkStarted(ctx context.Context, id string) (bool, error) {
-	const q = `UPDATE experiments SET status = 'RUNNING', updated_at = NOW()
+	const q = `UPDATE experiments SET status = 'RUNNING', ran_on_accelerator_type = accelerator_type, updated_at = NOW()
 WHERE id = $1 AND status = 'SUBMITTED'`
 	tag, err := s.pool.pool.Exec(ctx, q, id)
 	if err != nil {

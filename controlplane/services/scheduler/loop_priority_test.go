@@ -177,7 +177,7 @@ func TestARequeuedJobIsPlacedAgainByPriority(t *testing.T) {
 	exp := holdJob("a1", domain.CapacityBurst, l40, 1, "1")
 	exp.Job.AcceleratorType = h100
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{l40}
-	exp.EvictionReason = string(domain.EvictionPreemptedForGuaranteed)
+	exp.RanOnAcceleratorType = l40
 	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {l40: 1}, "a-shared": {l40: 1}})
 
 	cluster, _ := resolveClusterAndFootprint(avail, rankedClusters(), nodes, resources, nil, exp)

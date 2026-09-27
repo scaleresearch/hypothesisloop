@@ -1024,11 +1024,12 @@ func candidateAcceleratorTypes(exp *domain.Experiment) []domain.AcceleratorType 
 	// A job that has already executed re-admits onto the flavor it actually ran on, and nothing
 	// else. Settlement bills lifetime observed hours at the rate the row carries, so moving a
 	// requeued job to a different flavor silently re-prices the stint it already ran at the new
-	// flavor's rate. Keyed on the reason the preemption wrote, which the row holds until it is
-	// placed again, rather than on observed hours: metrics are delayed, so "has it consumed
-	// anything yet" can still read zero for a job that has run.
-	if exp.EvictionReason == string(domain.EvictionPreemptedForGuaranteed) {
-		return []domain.AcceleratorType{exp.AcceleratorType}
+	// flavor's rate. Read from the type the row recorded when the job was marked RUNNING, which
+	// outlives every requeue and every placement that is rolled back, rather than from observed
+	// hours: metrics are delayed, so "has it consumed anything yet" can still read zero for a
+	// job that has run.
+	if exp.RanOnAcceleratorType != "" {
+		return []domain.AcceleratorType{exp.RanOnAcceleratorType}
 	}
 	types := make([]domain.AcceleratorType, 0, 1+len(exp.Job.AcceptableAcceleratorTypes))
 	types = append(types, exp.Job.AcceleratorType)

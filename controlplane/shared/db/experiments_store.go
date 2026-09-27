@@ -42,7 +42,7 @@ const experimentStoredColumns = `
 	estimated_duration_hours, estimated_cost_acch,
 	priority_score, novelty_score, capacity_tier, status,
 	queued_at, submitted_at, eviction_reason, not_admitted_reason,
-	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters,
+	quota_settled_at, attempt_count, infra_requeue_count, tried_clusters, ran_on_accelerator_type,
 	data_access_key_id, data_secret_access_key, secret_env,
 	created_at, updated_at`
 
