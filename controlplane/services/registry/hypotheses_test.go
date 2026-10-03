@@ -99,6 +99,25 @@ func TestABaselineAgentRegistersNoHypothesis(t *testing.T) {
 	}
 }
 
+// A person or a key reaches the agents of every platform experiment of its org, and naming one
+// was only checked to exist: a hypothesis could be registered here owned by an agent of another
+// platform experiment.
+func TestAnAgentWithNoSignupHereRegistersNoHypothesis(t *testing.T) {
+	store := newPoolStore()
+	svc := poolService(store)
+	_, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-elsewhere", adaActor, "pe-1", "warmup helps", buildOnRoot, nil)
+	if !errors.Is(err, db.ErrNotSignedUp) {
+		t.Fatalf("RegisterHypothesis for an agent of another platform experiment: got = %v, want %v", err, db.ErrNotSignedUp)
+	}
+	var refusal *api.Refusal
+	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refusal) || refusal.GetStatus() != http.StatusForbidden || refusal.Reason != "not_signed_up" {
+		t.Errorf("the refusal as answered: got = %#v, want 403 not_signed_up", answered)
+	}
+	if rows := svc.graph.(*fakeGraph).rows; len(rows) != 0 {
+		t.Errorf("hypotheses after the refusal: got = %v, want none", rows)
+	}
+}
+
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
 // beyond its id — a note is attached to a row, not authorised against its owner.
 func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {

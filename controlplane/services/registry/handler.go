@@ -93,6 +93,8 @@ func (h *Handler) hypothesisWriteError(err error) error {
 		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return api.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
+	case errors.Is(err, db.ErrNotSignedUp):
+		return api.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
 		return huma.Error403Forbidden(err.Error())
 	case errors.Is(err, ErrHypothesisNotFound):
@@ -356,7 +358,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Who registered it is the caller, answered as actor, and no field of the body names it: author is refused. " +
 			"agent_id says whose hypothesis it is: an agent token's is its own agent's, named or not, and any other caller names an agent it " +
 			"reaches to register for it, or names none and the hypothesis has no owning agent. Both sit in the same graph under the same " +
-			"dedup, and any agent may submit a job against either. 403 baseline_registers_no_hypothesis for an agent of role baseline: the baseline " +
+			"dedup, and any agent may submit a job against either. 403 not_signed_up for an agent that has no place in this platform experiment. 403 baseline_registers_no_hypothesis for an agent of role baseline: the baseline " +
 			"is the objective's own measurement and its job names no hypothesis. What one with no owning agent does not get is quota or a place in the " +
 			"standings — those key on agent_id.",
 	}, func(ctx context.Context, in *struct {

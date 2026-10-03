@@ -49,7 +49,10 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("registry.RegisterHypothesis: %w", err)
 		}
-		if signup != nil && signup.Role == domain.SignupRoleBaseline {
+		if signup == nil {
+			return nil, nil, false, db.ErrNotSignedUp
+		}
+		if signup.Role == domain.SignupRoleBaseline {
 			return nil, nil, false, ErrBaselineRegistersNoHypothesis
 		}
 	}
