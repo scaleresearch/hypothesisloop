@@ -219,7 +219,7 @@ describe('a machine on its way', () => {
 })
 
 describe('an experiment waiting to start', () => {
-  const waits = { reason: 'baseline_required', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
+  const waits = { reason: 'baseline_required', actor: 'coordinator' as const, message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline`: none has joined. platform experiment pe-1 has no baseline declared' }
   const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }
   const requested = { state: 'requested', restarts: 0, stopped: false } as const
 

@@ -109,7 +109,7 @@ interface PhaseDetail {
 }
 
 // Mirrors domain.JobMetric (shared/domain/metrics.go). value is the one figure the job is read
-// by: its best in the metric's direction on a ranking metric, its last on any other.
+// and ranked by: the last value it reported for the metric.
 export interface JobMetric {
   name: string
   value: number
@@ -165,7 +165,7 @@ export interface Experiment {
   // The runtime's latest explanation for why this job's container hasn't started or keeps
   // restarting, merged in live from the metrics store on every read.
   phase_detail?: PhaseDetail
-  // The job's best and last value on its platform experiment's first ranking metric, read live
+  // The last value the job reported on its platform experiment's first ranking metric, read live
   // from the metrics store. Absent until the job reports that metric.
   metric?: JobMetric
   // The same for every declared metric the job reported, in declared order.
@@ -196,6 +196,20 @@ export interface MetricDefinition {
   bound?: number
 }
 
+// Why a platform experiment is in its status, and whose move it is: the person's (owner), its
+// coordinator's, or the platform's own.
+export interface StatusReason {
+  reason: string
+  message: string
+  actor: 'owner' | 'coordinator' | 'platform'
+}
+
+// What an agent is doing now, in one short sentence, and when it said so.
+export interface AgentActivity {
+  text: string
+  at: string
+}
+
 export interface PlatformExperiment {
   id: string
   project_id: string
@@ -208,16 +222,20 @@ export interface PlatformExperiment {
   max_concurrent_accelerators?: number
   // The earliest it may start: the zero time when none is stated.
   starts_at?: string
-  // The run's own clock. started_at and ends_at are absent until the platform starts the run,
-  // and ends_at is then started_at plus duration_hours. A draft has no duration_hours.
+  // The run's own clock. started_at and ends_at are absent until the first researcher is at
+  // work in the running experiment, and ends_at is then started_at plus duration_hours. A draft
+  // has no duration_hours.
   started_at?: string
   duration_hours?: number
   ends_at?: string
+  // On a running one with no started_at: when the platform closes it if no researcher's machine
+  // is running by then.
+  agents_due_at?: string
   // On an open one: when the platform closes it if it is not running by then.
   baseline_due_at?: string
   status: PlatformExperimentStatus
-  // On a draft or an open one, read by itself: where it stands, in words for a person.
-  status_reason?: { reason: string; message: string }
+  // On every read of one, in every status, and never in a list.
+  status_reason?: StatusReason
   // What it has spent of its budget. On a read of one that is no draft.
   consumed_accelerator_hours?: number
   stages: Array<{ length_pct: number; evict_pct: number; max_job_hours?: number }>  // the elimination ladder
@@ -242,8 +260,10 @@ export interface PlatformExperiment {
   // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
   // closed before reasons were kept.
   closed_at?: string
-  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached'
+  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started'
   closed_by?: Actor
+  // The coordinator's closing summary of the run. Absent until one is filed.
+  summary?: string
   created_at: string
 }
 
@@ -672,6 +692,8 @@ export interface AgentSignup {
   finished_reason?: string
   // Absent for an agent the platform does not run.
   instance?: AgentInstance
+  // Absent on an agent that has not reported yet.
+  activity?: AgentActivity
 }
 
 // An agent as the roster and the answer to adding it carry it. token is set in the answer to

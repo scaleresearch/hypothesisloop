@@ -583,6 +583,8 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                                 {settings(standing.env, standingKeys)}
                               </div>
                             </>
+                          ) : standing?.objective ? (
+                            <span className="text-xs text-muted">The baseline: it measures the objective and tests no hypothesis</span>
                           ) : <span className="text-xs text-muted">—</span>}
                         </td>
                         <td className={num}>{jobs?.total ?? 0}</td>

@@ -502,8 +502,10 @@ interface AgentStanding {
   agent_id: string
   best: number
   experiment_id?: string
-  // The hypothesis that job tested and the env it ran with.
+  // The hypothesis that job tested and the env it ran with. The baseline's job tested none:
+  // objective is true in place of hypothesis_id.
   hypothesis_id?: string
+  objective?: boolean
   env?: Record<string, string>
 }
 
