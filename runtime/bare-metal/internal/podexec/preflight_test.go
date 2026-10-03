@@ -1,7 +1,9 @@
 package podexec
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,11 +153,48 @@ func TestPreflightStopsANodeWhoseNVIDIACardsItCannotRead(t *testing.T) {
 		t.Fatalf("a node that reads its GPU: %v", err)
 	}
 
-	// A device whose attributes cannot be read may be the GPU: the count is not taken without it.
-	if err := os.Remove(filepath.Join(bus, "0000:01:00.0", "class")); err != nil {
-		t.Fatal(err)
+}
+
+// An entry of the bus that cannot be identified may be any device of the host, and an NVIDIA
+// device that cannot be read fully is skipped as the probe skips a GPU it cannot read. Neither
+// stops the node: a box with a chip of another vendor must start beside an unreadable entry.
+func TestPreflightSkipsAndNamesAPCIDeviceItCannotRead(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+	server := healthy(t)
+	bus := t.TempDir()
+	for name, attributes := range map[string][2]string{
+		"0000:01:00.0": {"0x10de", ""},
+		"0000:02:00.0": {"", "0x030000"},
+		"0000:03:00.0": {"0x1e52", "0x120000"},
+	} {
+		if err := os.MkdirAll(filepath.Join(bus, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for file, value := range map[string]string{"vendor": attributes[0], "class": attributes[1]} {
+			if value != "" {
+				os.WriteFile(filepath.Join(bus, name, file), []byte(value+"\n"), 0o644)
+			}
+		}
 	}
-	if _, err := preflightExecutor(server.URL, gpu).Preflight(context.Background(), server.Client()); err == nil || !strings.Contains(err.Error(), "0000:01:00.0") {
-		t.Fatalf("an unreadable PCI device: err = %v, want it named", err)
+	old := pciDevicesDir
+	pciDevicesDir = bus
+	defer func() { pciDevicesDir = old }()
+
+	chip := acceleratorDevice{DevicePath: "/dev/tenstorrent/0", Labels: []string{"tenstorrent.com/chipArch=blackhole"}}
+	if _, err := preflightExecutor(server.URL, chip).Preflight(context.Background(), server.Client()); err != nil {
+		t.Fatalf("a node with unreadable PCI entries beside its chip: %v, want it to start", err)
+	}
+	for _, want := range []string{
+		"skipping NVIDIA PCI device " + filepath.Join(bus, "0000:01:00.0"),
+		"skipping PCI device " + filepath.Join(bus, "0000:02:00.0") + ", which cannot be identified",
+	} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, logged.String())
+		}
+	}
+	if strings.Contains(logged.String(), "0000:03:00.0") {
+		t.Errorf("a readable device of another vendor was logged:\n%s", logged.String())
 	}
 }

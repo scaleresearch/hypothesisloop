@@ -70,7 +70,10 @@ func probeNVIDIA(_ context.Context) ([]acceleratorDevice, error) {
 // pciDevicesDir lists every PCI device of the host, whether or not a driver is loaded for it.
 var pciDevicesDir = "/sys/bus/pci/devices"
 
-// nvidiaCardsOnTheBus counts the NVIDIA display and 3D controllers the kernel enumerated.
+// nvidiaCardsOnTheBus counts the NVIDIA display and 3D controllers the kernel enumerated. An
+// entry whose vendor cannot be read may be any device of the host and is skipped. An NVIDIA
+// device whose class cannot be read is skipped as probeNVIDIA skips a GPU it cannot read. Both
+// are logged with their path.
 func nvidiaCardsOnTheBus() (int, error) {
 	entries, err := os.ReadDir(pciDevicesDir)
 	if os.IsNotExist(err) {
@@ -81,15 +84,21 @@ func nvidiaCardsOnTheBus() (int, error) {
 	}
 	cards := 0
 	for _, entry := range entries {
-		vendor, err := os.ReadFile(filepath.Join(pciDevicesDir, entry.Name(), "vendor"))
+		device := filepath.Join(pciDevicesDir, entry.Name())
+		vendor, err := os.ReadFile(filepath.Join(device, "vendor"))
 		if err != nil {
-			return 0, fmt.Errorf("read the vendor of PCI device %s: %w", entry.Name(), err)
+			log.Printf("podexec: skipping PCI device %s, which cannot be identified: %v", device, err)
+			continue
 		}
-		class, err := os.ReadFile(filepath.Join(pciDevicesDir, entry.Name(), "class"))
+		if strings.TrimSpace(string(vendor)) != "0x10de" {
+			continue
+		}
+		class, err := os.ReadFile(filepath.Join(device, "class"))
 		if err != nil {
-			return 0, fmt.Errorf("read the class of PCI device %s: %w", entry.Name(), err)
+			log.Printf("podexec: skipping NVIDIA PCI device %s: %v", device, err)
+			continue
 		}
-		if strings.TrimSpace(string(vendor)) == "0x10de" && strings.HasPrefix(strings.TrimSpace(string(class)), "0x03") {
+		if strings.HasPrefix(strings.TrimSpace(string(class)), "0x03") {
 			cards++
 		}
 	}
