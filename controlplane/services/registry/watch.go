@@ -562,9 +562,9 @@ func RegisterWatchHuma(doc *apidocs.Doc) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
-		Description: "GET /watch is a WebSocket that pushes small typed records (kind, subject, value, detail, position, cursor) " +
+		Description: "GET /watch is a WebSocket that pushes small typed records (kind, subject, value, detail, position, occurred_at, cursor) " +
 			"so you can wait on a change instead of polling for it. Every event is a pointer, never a copy: follow one " +
-			"with the ordinary GET when you want detail.\n\n" +
+			"with the ordinary GET when you want detail. `occurred_at` is when the change was made, the same on a live event and on its replay, and absent on the replay of a change from before the platform kept it.\n\n" +
 			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
 			"`agent` and a comma-separated `kinds`, and resume it with `since=<largest cursor you saw>`. A resume never " +
 			"skips an event; it can repeat ones you already have, which carry the same `position` (the transaction " +

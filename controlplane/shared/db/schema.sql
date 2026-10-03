@@ -687,11 +687,21 @@ UPDATE platform_experiments SET description_changed_xid = pg_current_xact_id()::
 UPDATE experiments SET queued_xid = pg_current_xact_id()::text::bigint WHERE queued_at IS NOT NULL AND queued_xid IS NULL;
 UPDATE experiments SET submitted_xid = pg_current_xact_id()::text::bigint WHERE submitted_at IS NOT NULL AND submitted_xid IS NULL;
 
+-- When the transaction at an event's position began. Replay re-derives events from rows, and a
+-- row keeps a time beside few of its *_xid columns, so the time of a position is kept here once,
+-- by the one function every event passes through. It holds no event: one row per transaction.
+CREATE TABLE IF NOT EXISTS event_times (
+    xid         BIGINT      PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE OR REPLACE FUNCTION hypothesisloop_notify_event(
     kind TEXT, subject TEXT, new_value TEXT, detail TEXT,
     pe_id TEXT, owner_agent_id TEXT
 ) RETURNS void AS $$
 BEGIN
+    INSERT INTO event_times (xid, occurred_at) VALUES (pg_current_xact_id()::text::bigint, now())
+        ON CONFLICT (xid) DO NOTHING;
     PERFORM pg_notify('hypothesisloop_events', json_build_object(
         'kind', kind,
         'subject', subject,
@@ -700,6 +710,7 @@ BEGIN
         'platform_experiment_id', pe_id,
         'agent_id', COALESCE(owner_agent_id, ''),
         'position', pg_current_xact_id()::text::bigint,
+        'occurred_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'cursor', pg_snapshot_xmin(pg_current_snapshot())::text::bigint
     )::text);
 END;

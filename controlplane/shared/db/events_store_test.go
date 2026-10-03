@@ -1076,6 +1076,51 @@ func TestACancelledJobIsAnnouncedAsAReadAnswersIt(t *testing.T) {
 	}
 }
 
+// A watcher prints when a change was made. A replayed event said nothing of it, so a client could
+// print only when it read the event, and a replay of an hour-old change looked new.
+func TestAnEventCarriesWhenItsChangeWasMadeLiveAndReplayed(t *testing.T) {
+	pool := eventsTestDB(t)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	agentID, peID, hypothesisID := seedRun(t, pool, "times", true)
+	before := cursorNow(t, pool)
+	started := time.Now().Add(-time.Second)
+	exec(t, pool, `INSERT INTO experiments
+(actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
+ hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
+ estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
+VALUES ('agent', 'times-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator',
+        'QUEUED', 'capacity_unavailable: no room', 1, now(), 'AK', 'SK')`, agentID, peID, hypothesisID)
+	live := awaitEvent(t, events, EventExperimentBlocked, "times-job")
+	if live.OccurredAt.Before(started) || live.OccurredAt.After(time.Now().Add(time.Second)) || live.OccurredAt.Location() != time.UTC {
+		t.Fatalf("live event occurred_at = %v, want the moment of the write, in UTC", live.OccurredAt)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}, before)
+	if err != nil || len(replayed) != 1 {
+		t.Fatalf("replay: got = %+v, %v, want the one blocked event", replayed, err)
+	}
+	if !replayed[0].OccurredAt.Equal(live.OccurredAt) || replayed[0].Identity() != live.Identity() {
+		t.Errorf("replayed event = %+v, want the live event's time %v and identity", replayed[0], live.OccurredAt)
+	}
+	payload, err := json.Marshal(replayed[0])
+	if err != nil || !strings.Contains(string(payload), `"occurred_at":"`+live.OccurredAt.Format(time.RFC3339Nano)+`"`) {
+		t.Errorf("delivered event = %s, %v, want occurred_at in RFC3339 UTC", payload, err)
+	}
+
+	// A change from before positions kept a time replays without one, and says so by leaving
+	// the field out.
+	exec(t, pool, `DELETE FROM event_times WHERE xid = $1`, live.Position)
+	replayed, err = NewEventsStore(pool, noHypothesisEvents{}).Replay(context.Background(), EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventExperimentBlocked: true}}, before)
+	if err != nil || len(replayed) != 1 || !replayed[0].OccurredAt.IsZero() {
+		t.Fatalf("replay of a change with no kept time: got = %+v, %v", replayed, err)
+	}
+	if payload, _ := json.Marshal(replayed[0]); strings.Contains(string(payload), "occurred_at") {
+		t.Errorf("delivered event = %s, want no occurred_at", payload)
+	}
+}
+
 // The summary gate is the one hold the job's owner lifts itself, so it is told as soon as the
 // scheduler holds the job, with the jobs it owes a summary for. The same job is announced once
 // more when it has then waited past its estimate for something else.

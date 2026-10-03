@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -27,6 +28,9 @@ type Event struct {
 	// on its replayed twin. With the fields above it identifies the event; transaction ids are
 	// not commit ordered, so it does not order the stream.
 	Position int64 `json:"position"`
+	// OccurredAt is when the transaction at Position began, the same on a live event and on its
+	// replayed twin. It is absent on the replay of a change made before positions kept a time.
+	OccurredAt time.Time `json:"occurred_at,omitzero"`
 	// Cursor is where to resume: every transaction below it had finished when this event was
 	// written, so its events were already delivered. A client hands the largest cursor it has
 	// seen back as `since`, and Replay returns every event at or above it. That can repeat an
@@ -34,10 +38,12 @@ type Event struct {
 	Cursor int64 `json:"cursor"`
 }
 
-// Identity is the event without its cursor: a live event and its replayed twin carry different
-// cursors, so a client dropping repeats compares identities.
+// Identity is the event without its cursor and its time: a live event and its replayed twin carry
+// different cursors, so a client dropping repeats compares identities, and the position already
+// says which transaction it is.
 func (e Event) Identity() Event {
 	e.Cursor = 0
+	e.OccurredAt = time.Time{}
 	return e
 }
 
@@ -532,7 +538,35 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		}
 	}
 	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Position < kept[j].Position })
+	if err := occurredAt(ctx, tx, kept); err != nil {
+		return nil, err
+	}
 	return kept, nil
+}
+
+// occurredAt sets on each event the time its position's transaction began (event_times).
+func occurredAt(ctx context.Context, tx pgx.Tx, events []Event) error {
+	positions := make([]int64, len(events))
+	for i, e := range events {
+		positions[i] = e.Position
+	}
+	rows, err := tx.Query(ctx, `SELECT xid, occurred_at FROM event_times WHERE xid = ANY($1)`, positions)
+	if err != nil {
+		return fmt.Errorf("events_store.Replay: event times: %w", err)
+	}
+	times := map[int64]time.Time{}
+	var xid int64
+	var at time.Time
+	if _, err := pgx.ForEachRow(rows, []any{&xid, &at}, func() error {
+		times[xid] = at.UTC()
+		return nil
+	}); err != nil {
+		return fmt.Errorf("events_store.Replay: event times: %w", err)
+	}
+	for i := range events {
+		events[i].OccurredAt = times[events[i].Position]
+	}
+	return nil
 }
 
 func replayExperiments(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
