@@ -181,15 +181,24 @@ func (c *Config) build() error {
 	if c.Quota.BurstFraction <= 0 {
 		return fmt.Errorf("quota burst_fraction must be positive")
 	}
-	// A negative bonus silently *shrinks* a winning agent's allocation, and a negative per-job or
-	// per-hour limit reads downstream as "unlimited" — both are misconfigurations that produce no
-	// error and no log line, only wrong quota.
+	// A negative bonus silently shrinks a winning agent's allocation.
 	if c.Quota.Top3BonusFraction < 0 {
 		return fmt.Errorf("quota top3_bonus_fraction must not be negative")
 	}
-	if c.Quota.MaxSubmissionsPerHour < 0 || c.Quota.MaxAcceleratorCountPerJob < 0 ||
-		c.Quota.MaxCPUCoresPerJob < 0 || c.Quota.MaxRAMGBPerJob < 0 || c.Quota.MaxStorageGBPerJob < 0 {
-		return fmt.Errorf("quota per-job and per-hour limits must not be negative (0 means unlimited)")
+	// Every limit is stated: a key left out would otherwise lift its limit with no word said.
+	for _, limit := range []struct {
+		key   string
+		value float64
+	}{
+		{"max_submissions_per_hour", float64(c.Quota.MaxSubmissionsPerHour)},
+		{"max_accelerator_count_per_job", float64(c.Quota.MaxAcceleratorCountPerJob)},
+		{"max_cpu_cores_per_job", c.Quota.MaxCPUCoresPerJob},
+		{"max_ram_gb_per_job", c.Quota.MaxRAMGBPerJob},
+		{"max_storage_gb_per_job", c.Quota.MaxStorageGBPerJob},
+	} {
+		if limit.value <= 0 {
+			return fmt.Errorf("quota %s is required and must be positive", limit.key)
+		}
 	}
 	if c.Quota.DefaultMaxConcurrentAccelerators <= 0 {
 		return fmt.Errorf("quota default_max_concurrent_accelerators must be positive")
@@ -228,8 +237,8 @@ func (c *Config) build() error {
 	if own, err := url.Parse(c.DataStore.ControlPlaneEndpoint); err != nil || own.Host == "" || (own.Scheme != "http" && own.Scheme != "https") {
 		return fmt.Errorf("data_store control_plane_endpoint %q must be an http(s) URL with a host", c.DataStore.ControlPlaneEndpoint)
 	}
-	if c.DataStore.MaxBytesPerAgent < 0 {
-		return fmt.Errorf("data_store max_bytes_per_agent must not be negative (0 means unlimited)")
+	if c.DataStore.MaxBytesPerAgent <= 0 {
+		return fmt.Errorf("data_store max_bytes_per_agent is required and must be positive")
 	}
 	// A job pod resolves endpoint from inside its own network namespace, which is not the
 	// control plane's. A loopback address works from every container that shares the host's

@@ -32,13 +32,13 @@ type QuotaConfig struct {
 	Top3BonusFraction float64 `yaml:"top3_bonus_fraction"`
 	BurstFraction     float64 `yaml:"burst_fraction"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour
-	// within a single platform experiment. 0 means unlimited.
+	// within a single platform experiment. Required and positive.
 	MaxSubmissionsPerHour int `yaml:"max_submissions_per_hour"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap how much of
 	// each resource dimension a single job may request (per node × num_nodes total), on top
 	// of the guaranteed/burst quota check — this is what actually prevents one absurd
-	// submission from blowing through an entire budget in one debit. 0 means unlimited.
+	// submission from blowing through an entire budget in one debit. Each is required and positive.
 	// Operators must size these sanely relative to burst-pool sizing: a cap alone doesn't
 	// replace correct budget sizing, it only bounds a single job's blast radius.
 	// DefaultMaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING) per
@@ -210,7 +210,7 @@ type DataStoreConfig struct {
 	// MaxBytesPerAgent caps how many bytes one agent may hold within one platform experiment,
 	// checked at admission against what the store reports right now. Deliberately not enforced
 	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses
-	// the run it was about to preserve. 0 means unlimited.
+	// the run it was about to preserve. Required and positive.
 	MaxBytesPerAgent int64 `yaml:"max_bytes_per_agent"`
 }
 

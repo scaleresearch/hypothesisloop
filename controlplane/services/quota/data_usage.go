@@ -69,7 +69,7 @@ func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
 		Summary: "Get durable-data bytes held, per agent", Tags: []string{"platform-experiments"},
 		Description: "Checkpoint and dataset bytes stored under this platform experiment, totalled and broken down by " +
 			"agent, read live from the object store. max_bytes_per_agent is the ceiling admission refuses a submission " +
-			"against (reason data_quota_exceeded); 0 means unlimited.",
+			"against (reason data_quota_exceeded).",
 	}, func(ctx context.Context, in *struct {
 		ID string `path:"id"`
 	}) (*struct{ Body *DataUsage }, error) {

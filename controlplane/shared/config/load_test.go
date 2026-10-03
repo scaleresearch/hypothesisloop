@@ -494,6 +494,27 @@ func TestLoadRejectsMissingPlatformExperimentSettings(t *testing.T) {
 	}
 }
 
+// A limit left out read as zero, and zero as no limit at all.
+func TestLoadRequiresEveryLimitToBeStated(t *testing.T) {
+	for _, line := range []string{
+		"  max_submissions_per_hour: 100\n", "  max_accelerator_count_per_job: 16\n", "  max_cpu_cores_per_job: 64\n",
+		"  max_ram_gb_per_job: 512\n", "  max_storage_gb_per_job: 1000\n", "  max_bytes_per_agent: 214748364800\n",
+	} {
+		key := strings.SplitN(strings.TrimSpace(line), ":", 2)[0]
+		if !strings.Contains(productionConfig(t), line) {
+			t.Fatalf("the committed settings do not hold %q", strings.TrimSpace(line))
+		}
+		for _, text := range []string{
+			strings.Replace(productionConfig(t), line, "", 1),
+			strings.Replace(productionConfig(t), line, "  "+key+": 0\n", 1),
+		} {
+			if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), key+" is required") {
+				t.Errorf("%s left out or 0: Load = %v, want it named as required", key, err)
+			}
+		}
+	}
+}
+
 // What a type always needs beside the device is the catalog's to say, so no job spec has to: the
 // committed settings give every Blackhole job its 1 GiB hugepages.
 func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {

@@ -246,7 +246,7 @@ data_store:
   # How many bytes one agent may hold within one platform experiment. Checked at admission
   # against what the store reports right now, never mid-write: enforcing a ceiling mid-write
   # needs a gateway in the data path, and a job killed as it saves loses the run it was about to
-  # preserve. 0 = unlimited.
+  # preserve. Required and positive.
   max_bytes_per_agent: 214748364800
 
 
@@ -334,7 +334,7 @@ quota:
   burst_fraction: 2.0
 
   # Maximum number of experiments an agent may submit per hour within a single platform
-  # experiment. Prevents queue flooding. 0 = unlimited.
+  # experiment. Prevents queue flooding. Required and positive.
   max_submissions_per_hour: 100
 
   # Accelerators-in-flight (SUBMITTED+RUNNING) a platform experiment may hold at once when it
@@ -355,7 +355,7 @@ quota:
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest
-  # expected burst pool, not just to "a sane job." 0 = unlimited.
+  # expected burst pool, not just to "a sane job." Each is required and positive.
   max_accelerator_count_per_job: 16
   max_cpu_cores_per_job: 64
   max_ram_gb_per_job: 512

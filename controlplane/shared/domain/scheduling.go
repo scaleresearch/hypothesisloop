@@ -36,12 +36,12 @@ type QuotaConfig struct {
 	// it: the time it has to get its baseline declared and its run started.
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
-	// a single platform experiment. 0 means unlimited.
+	// a single platform experiment.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a job's
 	// total resource request (per node × num_nodes) at admission, before any quota debit.
-	// 0 means unlimited. See config.QuotaConfig for the operator-facing doc.
+	// See config.QuotaConfig for the operator-facing doc.
 	MaxAcceleratorCountPerJob int     `json:"max_accelerator_count_per_job,omitempty"`
 	MaxCPUCoresPerJob         float64 `json:"max_cpu_cores_per_job,omitempty"`
 	MaxRAMGBPerJob            float64 `json:"max_ram_gb_per_job,omitempty"`
