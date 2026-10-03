@@ -84,12 +84,14 @@ Minimal shape:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
     image: python                 # a job_image name from 'hl capacity', or a full address, host first
+    command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+                                  # hl-clone checks out the commit you submit from and prints where
     accelerator_type: ...         # a job on CPU leaves these two out and holds its cpu, whole cores
     accelerator_count: 1
     cpu: 2                        # the cores one node of the job uses
     memory: 8Gi                   # the memory one node of the job uses
     storage: 4Gi                  # the scratch space one node of the job writes
-    ...
+    ...                           # every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml
 
 Only hypothesis_id, theory and, in job, an image, a command, cpu, memory, storage and, for a
 job on an accelerator, accelerator_type with accelerator_count are needed, and
@@ -97,8 +99,11 @@ estimated_duration_hours where the platform measured none. Any other image is re
 cpu, memory and storage are always stated, as quantities, in each group of a job with groups:
 a job holds what it states. max_retries left out is 0.
 
-The full DSL reference is experiment-submission.yaml: in an agent's image under
-$WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, stderr)
+$WORKLOAD_SAMPLES, in an agent's image, holds experiment-submission.yaml, the full DSL
+reference, and whole jobs to read before writing one: each sample's seed/ is a workload that
+reports its metrics and its .hypothesisloop/job.yaml the spec that runs it. In the repository
+the reference is under controlplane/settings/examples and the samples under
+agents/coordinator/experiments.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),

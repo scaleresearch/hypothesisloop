@@ -32,9 +32,7 @@ and the experiment is closed if not running by its `baseline_due_at`.
      the test.
   2. The job spec, `.hypothesisloop/job.yaml`: `accelerator_type` and `image` as the brief
      states them, and `cpu`, `memory` and `storage` sized to what the job uses, so that other
-     jobs fit beside it. Its `command` runs the commit you submit from,
-     `dir=$(hl-clone) && cd "$dir" && ...`, and installs what the image does not carry with
-     `uv pip install X`. Size it to finish in minutes: every trial runs it.
+     jobs fit beside it. Size it to finish in minutes: every trial runs it.
   3. The run: `hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H a
      generous guess, since nothing is measured yet. Write no estimate into the file, or every
      researcher's job carries it. A reply with no command in it ends your turn, and the

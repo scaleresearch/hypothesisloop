@@ -121,7 +121,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 4_150)
+        self.assertLess(len(prompt.encode()), 4_000)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -193,9 +193,12 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("the coordinator is sent it and acts on it", flat)
         self.assertNotIn("three jobs failed", flat)
 
-    def test_it_is_told_how_a_job_gets_its_code_and_what_the_image_lacks(self):
-        self.assertIn("Its `command` runs the commit you submit from, `dir=$(hl-clone) && cd \"$dir\" && ...`, and installs what "
-                      "the image does not carry with `uv pip install X`", render(baseline_agent())[1])
+    # The help of hl job submit, listed in its briefing, and the job.yaml hl repo init adds
+    # both give the command that runs the submitted commit and how a job installs a package.
+    def test_how_a_job_gets_its_code_is_left_to_the_help_of_submit_and_the_job_spec(self):
+        flat = render(baseline_agent())[1]
+        for said_there in ("hl-clone", "pip install"):
+            self.assertNotIn(said_there, flat)
 
     # One spent twelve minutes proving a GPU harness on its own machine: a three-minute timeout,
     # four slow reruns on CPU and two failed installs of torch.

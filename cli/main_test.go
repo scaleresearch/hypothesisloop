@@ -388,6 +388,23 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 	}
 }
 
+// A baseline agent reads this help in its briefing and writes the first job spec from it: the
+// command that runs the submitted commit and where the full reference and the samples are stand
+// in the shape, where a spec is written, and no briefing repeats them.
+func TestTheHelpOfSubmitShowsTheCommandAndWhereTheReferenceIs(t *testing.T) {
+	var stdout, help bytes.Buffer
+	run([]string{"job", "submit", "--help"}, &stdout, &help)
+	for _, want := range []string{
+		`command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]`,
+		"...                           # every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml",
+		"each sample's seed/ is a workload that\nreports its metrics and its .hypothesisloop/job.yaml the spec that runs it",
+	} {
+		if !strings.Contains(help.String(), want) {
+			t.Errorf("hl job submit --help: got = no %q, want it", want)
+		}
+	}
+}
+
 // The briefing of an agent carries the group listings, so each names the flags of its commands,
 // taken from the command's own --help.
 func TestAGroupListsEachCommandWithTheSynopsisOfItsOwnHelp(t *testing.T) {
