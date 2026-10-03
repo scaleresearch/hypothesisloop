@@ -1,8 +1,7 @@
 'use client'
 
-import { Suspense, useId, useRef, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import useSWR from 'swr'
-import { clsx } from 'clsx'
 import { clustersInUse } from '@/lib/clusters'
 import { semantic } from '@/lib/colors'
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
@@ -14,13 +13,14 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { Dot } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Chip } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { Select } from '@/components/ui/select'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Pagination } from '@/components/ui/pagination'
+import { Segmented } from '@/components/ui/tabs'
 
 const PAGE_SIZE = 10
 
@@ -31,56 +31,36 @@ const SORT_OPTIONS = [
   { value: '-name', label: 'Name (Z–A)' },
 ]
 
+const PLAN = 'Plan it for me'
+const CONFIGURE = 'Configure it myself'
+
+/** The project's running jobs and agents, each only while there are some. */
 function LiveStrip() {
   const { project } = useTenant()
-  // Both counts are server-side totals, not the length of a fetched page — see
+  // Both counts are server-side totals, not the length of a fetched page: see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
   const { data: stats, error: statsError } = useSWR(['experiment-stats', project.id], () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: 15_000 })
   const { data: agents, error: agentsError } = useSWR(['agent-count', project.id], () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: 30_000 })
 
-  // A count that failed to load says so, and one still loading has no colour to mislead with.
-  function item(label: string, error: Error | undefined, value: string | undefined, color: string) {
-    if (error) return { label, value: 'unknown', color: semantic.danger, title: error.message }
-    if (value === undefined) return { label, value: '…', color: semantic.subtle, title: 'Loading' }
-    return { label, value, color, title: undefined }
-  }
+  // A status no job holds is absent from the answer.
+  const running = stats?.by_status?.RUNNING ?? 0
   const items = [
-    // A status no job holds is absent from the answer.
-    item('Jobs running', statsError, stats && String(stats.by_status?.RUNNING ?? 0), semantic.success),
-    item('Agents', agentsError, agents && String(agents.total), semantic.neutral),
-  ]
+    statsError ? { key: 'jobs', text: 'Jobs running unknown', color: semantic.danger, title: statsError.message }
+      : running > 0 && { key: 'jobs', text: `${running} ${running === 1 ? 'job' : 'jobs'} running`, color: semantic.success, title: undefined },
+    agentsError ? { key: 'agents', text: 'Agents unknown', color: semantic.danger, title: agentsError.message }
+      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'}`, color: semantic.neutral, title: undefined },
+  ].filter(item => !!item)
+  if (items.length === 0) return null
 
   return (
-    <div className="mb-6 flex flex-wrap gap-5">
+    <div className="-mt-2 mb-4 flex flex-wrap gap-4 text-xs tabular-nums text-muted">
       {items.map(item => (
-        <div key={item.label} title={item.title} className="flex items-center gap-2">
+        <span key={item.key} title={item.title} className="flex items-center gap-1.5">
           <Dot color={item.color} />
-          <span className="font-mono text-sm font-medium text-foreground">{item.value}</span>
-          <span className="text-xs text-subtle">{item.label}</span>
-        </div>
+          {item.text}
+        </span>
       ))}
     </div>
-  )
-}
-
-/** One of the two ways to a new experiment, side by side and alike. */
-function WayIn({ pressed, title, line, onClick }: { pressed: boolean; title: string; line: string; onClick: () => void }) {
-  const id = useId()
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      aria-labelledby={`${id}-title`}
-      aria-describedby={`${id}-line`}
-      onClick={onClick}
-      className={clsx(
-        'grid gap-0.5 rounded border px-3 py-2 text-left transition-colors',
-        pressed ? 'border-primary bg-primary/10' : 'border-border-control hover:bg-foreground/5',
-      )}
-    >
-      <span id={`${id}-title`} className="text-sm font-semibold text-foreground">{title}</span>
-      <span id={`${id}-line`} className="text-xs text-muted">{line}</span>
-    </button>
   )
 }
 
@@ -144,25 +124,26 @@ function PlatformExperimentsPageContent() {
       <LiveStrip />
 
       <Card className="mb-6 max-w-[720px]">
-        <CardHeader><CardTitle>New experiment in {org.name} / {project.name}</CardTitle></CardHeader>
-        <CardContent className="grid gap-4">
-          {clusters && clustersInUse(clusters).online === 0 && (
-            <p className="text-sm text-warning">
-              No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
-            </p>
-          )}
-          <div role="group" aria-label="How to start" className="grid gap-2 sm:grid-cols-2">
-            <WayIn pressed={!configuring} title="Let us plan it" line="Say what to find out. We propose, you approve." onClick={() => planning.current?.querySelector('textarea')?.focus()} />
-            <WayIn pressed={configuring} title="Configure it yourself" line="Set the metrics, budget and agents in a form." onClick={() => setDialog({ editing: null })} />
-          </div>
+        <CardContent className="grid gap-3">
+          <Segmented
+            label="How to start"
+            options={[{ value: 'plan', label: PLAN }, { value: 'configure', label: CONFIGURE }]}
+            value={configuring ? 'configure' : 'plan'}
+            onChange={way => way === 'configure' ? setDialog({ editing: null }) : planning.current?.querySelector('textarea')?.focus()}
+          />
           <div ref={planning}>
             <GoalInput projectID={project.id} onCreated={open} />
           </div>
+          {clusters && clustersInUse(clusters).online === 0 && (
+            <p className="text-xs text-muted">
+              No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
+            </p>
+          )}
         </CardContent>
       </Card>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-1.5">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-1">
           {statuses.map(s => (
             <Chip key={s} active={statusFilter === s} onClick={() => { setStatusFilter(s); setPage(0) }}>
               {s || 'All'}
@@ -172,14 +153,14 @@ function PlatformExperimentsPageContent() {
 
         <Input
           fieldSize="sm"
-          mono
-          className="min-w-[220px]"
+          className="w-40"
+          aria-label="Search"
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(0) }}
-          placeholder="Search name or description…"
+          placeholder="Search"
         />
 
-        <Select fieldSize="sm" aria-label="Sort" prefix="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
+        <Select fieldSize="sm" aria-label="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
       </div>
 
       {isLoading && <Loading />}
@@ -188,8 +169,8 @@ function PlatformExperimentsPageContent() {
       {data && experiments.length === 0 && (
         <p className="text-sm text-muted">
           {statusFilter || search
-            ? `No experiments in this project match${search ? ` "${search}"` : ' this filter'}.`
-            : 'None yet. Write what you want to find out above and the platform proposes the first.'}
+            ? `No experiments match${search ? ` "${search}"` : ' this filter'}.`
+            : 'No experiments yet.'}
         </p>
       )}
 

@@ -1,13 +1,13 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { Field, Label } from '@headlessui/react'
 import { repositoryNotProvided } from '@/lib/api'
 import { GITHUB_CARD } from '@/lib/github-connect'
 import { matchingGoals } from '@/lib/goal-examples'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { Button } from '@/components/ui/button'
-import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { InlineError } from '@/components/ui/status-message'
@@ -15,6 +15,7 @@ import { useGitHub } from '@/components/connect-github-step'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 
 const CONNECT_FIRST = 'Connect GitHub in Settings to start'
+const ASK = 'What do you want to find out?'
 
 /**
  * The shortest way to an experiment: one sentence saying what to find out. The platform plans
@@ -49,29 +50,31 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   }
 
   return (
-    <div className="grid gap-3">
-      <FormField label="What do you want to find out?">
-        <Textarea
-          ref={box}
-          rows={2}
-          maxLength={MAX_GOAL_LENGTH}
-          value={goal}
-          onChange={e => setGoal(e.target.value)}
-          onKeyDown={e => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            e.preventDefault()
-            void plan()
-          }}
-          placeholder="Describe your goal in one sentence"
-        />
-      </FormField>
+    <div className="grid gap-2.5">
+      <Textarea
+        ref={box}
+        rows={2}
+        maxLength={MAX_GOAL_LENGTH}
+        aria-label={ASK}
+        placeholder={ASK}
+        // The page's styled scrollbars give an empty textarea a horizontal one; the sentence wraps instead.
+        className="w-full overflow-x-hidden break-words"
+        value={goal}
+        onChange={e => setGoal(e.target.value)}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+          e.preventDefault()
+          void plan()
+        }}
+      />
       {suggestions.length > 0 && (
-        <ul aria-label="Suggestions" className="grid justify-items-start gap-1">
+        <ul aria-label="Suggestions" className="flex min-w-0 flex-wrap gap-1.5">
           {suggestions.map(example => (
-            <li key={example}>
+            <li key={example} className="min-w-0 max-w-full">
               <button
                 type="button"
-                className="rounded text-left text-xs text-muted hover:text-foreground hover:underline"
+                title={example}
+                className="block max-w-full truncate rounded-full border border-border-control px-2.5 py-0.5 text-xs text-muted transition-colors hover:bg-foreground/5 hover:text-foreground"
                 onClick={() => { setGoal(example); box.current?.focus() }}
               >
                 {example}
@@ -80,13 +83,8 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
           ))}
         </ul>
       )}
-      {github === 'connected' && (
-        <FormField label="Repository">
-          <RepositorySelect compact value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
-        </FormField>
-      )}
       {github === 'unconnected' && (
-        <p className="text-sm text-muted">
+        <p className="text-xs text-muted">
           <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink> to start.
         </p>
       )}
@@ -97,7 +95,12 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
             Plan it
           </Button>
         </span>
-        <span className="text-xs text-subtle">Nothing runs or is spent until you approve.</span>
+        {github === 'connected' && (
+          <Field className="grid gap-1">
+            <Label className="sr-only">Repository</Label>
+            <RepositorySelect compact value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
+          </Field>
+        )}
         {error && <InlineError>{error}</InlineError>}
       </div>
     </div>

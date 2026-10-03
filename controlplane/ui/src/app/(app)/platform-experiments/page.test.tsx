@@ -75,9 +75,9 @@ describe('the experiments page', () => {
       navigation.push.mockReset()
       vi.mocked(apiSend).mockClear()
       const { unmount } = show()
-      expect(screen.getByText('New experiment in Lab / default')).toBeTruthy()
+      expect(screen.queryByText(/New experiment in/)).toBeNull()
       expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
-      if (existing.length === 0) expect(await screen.findByText(/None yet\. Write what you want to find out above/)).toBeTruthy()
+      if (existing.length === 0) expect(await screen.findByText('No experiments yet.')).toBeTruthy()
       await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
       await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
       expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
@@ -112,15 +112,15 @@ describe('the experiments page', () => {
     expect(navigation.push).not.toHaveBeenCalled()
   })
 
-  it('keeps the full form behind Configure it yourself: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
+  it('keeps the full form behind Configure it myself: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
     show()
-    await userEvent.click(screen.getByRole('button', { name: 'Configure it yourself' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(createPlatformExperiment).not.toHaveBeenCalled()
 
     vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new Error('the org has reached its limit of platform experiments'))
-    await userEvent.click(screen.getByRole('button', { name: 'Configure it yourself' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
     await userEvent.type(dialog.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
@@ -158,28 +158,37 @@ describe('the two ways to a new experiment', () => {
   it('offers both side by side, planning pressed, and the form pressed while it is open', async () => {
     show()
     expect(within(screen.getByRole('group', { name: 'How to start' })).getAllByRole('button').map(b => b.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
-    expect(way('Let us plan it').getAttribute('aria-pressed')).toBe('true')
+    expect(way('Plan it for me').getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByText(/Advanced/)).toBeNull()
-    await userEvent.click(way('Configure it yourself'))
+    await userEvent.click(way('Configure it myself'))
     expect(screen.getByRole('dialog')).toBeTruthy()
-    expect(way('Configure it yourself').getAttribute('aria-pressed')).toBe('true')
+    expect(way('Configure it myself').getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('takes the person to the goal box from Let us plan it', async () => {
+  it('takes the person to the goal box from Plan it for me', async () => {
     show()
-    await userEvent.click(way('Let us plan it'))
+    await userEvent.click(way('Plan it for me'))
     expect(document.activeElement).toBe(screen.getByLabelText('What do you want to find out?'))
   })
 
-  it('plans from a button beside the box, which waits for a sentence, and says nothing is spent before approval', async () => {
+  it('plans from a button under the box, which waits for a sentence, with no label or line of its own', async () => {
     vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
     show()
     expect(way('Plan it')).toHaveProperty('disabled', true)
-    expect(screen.getByText('Nothing runs or is spent until you approve.')).toBeTruthy()
-    expect(screen.queryByText(/Shift\+Enter/)).toBeNull()
+    expect(screen.queryByText(/until you approve|Shift\+Enter/)).toBeNull()
+    expect(screen.getByLabelText('What do you want to find out?').getAttribute('placeholder')).toBe('What do you want to find out?')
+    expect(screen.queryByText('What do you want to find out?')).toBeNull()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
     await userEvent.click(way('Plan it'))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
+  })
+
+  it('wraps a long goal in the box and never scrolls it sideways', () => {
+    show()
+    const box = screen.getByLabelText('What do you want to find out?')
+    expect(box.className).toContain('overflow-x-hidden')
+    expect(box.className).toContain('break-words')
+    expect(box.className).not.toMatch(/overflow-x-(auto|scroll)|whitespace-nowrap/)
   })
 
   it('says in one line that no compute is online, and nothing of compute while a cluster is', async () => {
@@ -263,7 +272,9 @@ describe('the repository of a planned experiment', () => {
     })
     show()
     const field = await screen.findByLabelText('Repository')
-    expect(field.getAttribute('placeholder')).toBe('A new private repository')
+    expect(field.getAttribute('placeholder')).toBe('New private repo')
+    expect(field.className).not.toContain('font-mono')
+    expect(screen.getByText('Repository').className).toContain('sr-only')
     expect(screen.queryByRole('link', { name: 'create it on GitHub' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Connect GitHub in Settings' })).toBeNull()
   })

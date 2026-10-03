@@ -72,6 +72,7 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
     )
   }
 
+  const newLabel = compact ? 'New private repo' : 'A new private repository'
   const listed = data?.items ?? []
   const more = (data?.total ?? 0) - listed.length
   // What is chosen stays an option while a search leaves it out.
@@ -83,7 +84,7 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   const creating = accounts.filter(a => a.account_type != null)
   const createsUnasked = accounts.length === 1 && creating.length === 1
   if (accounts.length > 1) {
-    options.unshift(...creating.map(a => ({ value: ON_ACCOUNT + a.account_login, label: `A new private repository on ${a.account_login}`, badge: undefined })))
+    options.unshift(...creating.map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
   }
   async function refresh() {
     setRefreshing(true)
@@ -96,14 +97,14 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   return (
     <>
       <SearchableSelect
-        mono
-        fieldSize="default"
-        className="w-full"
+        mono={!compact}
+        fieldSize={compact ? 'sm' : 'default'}
+        className={compact ? 'w-56' : 'w-full'}
         value={value}
         onChange={onChange}
         onSearch={setQ}
-        allLabel="A new private repository"
-        placeholder={createsUnasked ? 'A new private repository' : 'Choose a repository'}
+        allLabel={newLabel}
+        placeholder={createsUnasked ? newLabel : compact ? 'Choose a repo' : 'Choose a repository'}
         hideAllOption={!createsUnasked}
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}
