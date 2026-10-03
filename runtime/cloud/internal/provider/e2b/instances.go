@@ -101,8 +101,8 @@ func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox,
 //   - No state file: the command has not started. Its Create is still under way, or broke off
 //     before the start.
 //   - A read that failed (the sandbox's token or its envd did not answer, or answered with a
-//     refusal): running. The vendor says the sandbox exists, nothing says its command ended, and
-//     the next pass reads again.
+//     refusal): unknown. The vendor says the sandbox exists, nothing says whether its command
+//     started or ended, and the next pass reads again.
 //   - A state file the supervisor did not write: exited. The file is the command's user's to
 //     change, so the supervisor's word is gone for good and the caller should replace the
 //     instance.
@@ -121,12 +121,12 @@ func (p *Provider) stateOf(ctx context.Context, found sandbox) provider.State {
 	defer cancel()
 	inside, exists, err := p.inside(ctx, id)
 	if err != nil {
-		log.Printf("e2b: the token of sandbox %s (%s) could not be read; reporting it as running: %v", id, name, err)
-		return provider.StateRunning
+		log.Printf("e2b: the token of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
+		return provider.StateUnknown
 	}
 	if !exists {
-		log.Printf("e2b: sandbox %s (%s) is in the list and was not found when read; reporting it as running", id, name)
-		return provider.StateRunning
+		log.Printf("e2b: sandbox %s (%s) is in the list and was not found when read; reporting it as unknown", id, name)
+		return provider.StateUnknown
 	}
 	written, started, err := inside.readFile(ctx, statePath, maxStateBytes)
 	if errors.Is(err, vendorapi.ErrTooLarge) {
@@ -134,8 +134,8 @@ func (p *Provider) stateOf(ctx context.Context, found sandbox) provider.State {
 		return provider.StateExited
 	}
 	if err != nil {
-		log.Printf("e2b: the state of sandbox %s (%s) could not be read; reporting it as running: %v", id, name, err)
-		return provider.StateRunning
+		log.Printf("e2b: the state of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
+		return provider.StateUnknown
 	}
 	if !started {
 		return provider.StateStarting
