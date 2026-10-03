@@ -47,7 +47,7 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, att
 		return domain.PhaseReasonInstanceStarting, fmt.Sprintf("a machine is rented and has not started the job yet; it is replaced by another if it has not within %s", e.startup), 0, 0, "", nil
 	}
 	if i.State == provider.StateUnknown {
-		return "", "the provider lists the job's machine and does not say whether the job runs on it: its host is unreachable or the provider is moving it", 0, 1, "", nil
+		return domain.PhaseReasonInstanceUnknown, "the provider lists the job's machine and does not say whether the job runs on it: its host is unreachable or the provider is moving it", 0, 1, "", nil
 	}
 	if i.State != provider.StateExited {
 		return "", "", 0, 1, "", nil

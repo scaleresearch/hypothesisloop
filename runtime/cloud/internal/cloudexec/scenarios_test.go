@@ -94,7 +94,7 @@ func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testi
 		matches, err := e.WorkloadMatchesDesired(ctx, exp)
 		reason, message, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 		phase, attempt := status(t, e, "exp-1")
-		if err != nil || detailErr != nil || !matches || phase != workload.JobPhasePending || attempt != 0 || scheduled != 1 || reason != "" || !strings.Contains(message, "does not say whether the job runs") {
+		if err != nil || detailErr != nil || !matches || phase != workload.JobPhasePending || attempt != 0 || scheduled != 1 || reason != domain.PhaseReasonInstanceUnknown || !strings.Contains(message, "does not say whether the job runs") {
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, reason %q, message %q, %v %v", pass, matches, phase, attempt, scheduled, reason, message, err, detailErr)
 		}
 		if tail, err := e.FetchLogTail(ctx, "exp-1", 10); err != nil || tail != nil {
