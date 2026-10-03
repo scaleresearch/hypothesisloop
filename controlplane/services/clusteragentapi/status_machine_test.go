@@ -58,3 +58,43 @@ func TestAStatusReportMayNameTheMachineBehindItsNodeAndNeedNot(t *testing.T) {
 		t.Errorf("a machine described in a vendor's field = %d, want 422", code)
 	}
 }
+
+// The phase that ends a job is what its workload is deleted on. A push whose log tail or phase
+// detail cannot be written records no phase and is refused, so the runtime pushes it again and
+// the reason the job ended is not lost.
+func TestAStatusPushWhoseLogTailOrPhaseDetailCannotBeWrittenIsRefused(t *testing.T) {
+	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
+		return placedStore{base, map[string]domain.Placement{"job-1": {ClusterName: "of-a"}}}
+	})
+	push := func(extra map[string]any) int {
+		t.Helper()
+		report := map[string]any{"experiment_id": "job-1", "phase": "failed"}
+		for k, v := range extra {
+			report[k] = v
+		}
+		body, err := json.Marshal(map[string]any{"reports": []any{report}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := authtest.Authorize(httptest.NewRequest("POST", "/of-a/status", bytes.NewReader(body)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		w.router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for name, extra := range map[string]map[string]any{
+		"a log tail":     {"log_tail": []string{"Traceback (most recent call last):"}},
+		"a phase detail": {"reason": domain.PhaseReasonContainerFailed, "message": "exit code 1"},
+	} {
+		w.sqlDown.Store(false)
+		writes := w.metricsWrites.Load()
+		if code := push(extra); code != 200 || w.metricsWrites.Load() != writes+1 {
+			t.Errorf("%s the store takes = %d with %d phases recorded, want 200 and one", name, code, w.metricsWrites.Load()-writes)
+		}
+		w.sqlDown.Store(true)
+		writes = w.metricsWrites.Load()
+		if code := push(extra); code != 500 || w.metricsWrites.Load() != writes {
+			t.Errorf("%s the store refuses = %d with %d phases recorded, want 500 and none", name, code, w.metricsWrites.Load()-writes)
+		}
+	}
+}

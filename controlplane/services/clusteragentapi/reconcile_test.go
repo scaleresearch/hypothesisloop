@@ -33,6 +33,15 @@ type reconcileStore struct {
 	bindErr   error
 	binds     []string
 	jobImages []string
+	// runReportedAt is when the end of each job's run was first reported, and runsAsked the jobs
+	// each status push asked it of.
+	runReportedAt map[string]time.Time
+	runsAsked     [][]string
+}
+
+func (s *reconcileStore) RunFirstReportedAt(_ context.Context, ids []string) (map[string]time.Time, error) {
+	s.runsAsked = append(s.runsAsked, ids)
+	return s.runReportedAt, nil
 }
 
 func (s *reconcileStore) ListDesiredWorkloads(_ context.Context, cluster string) ([]*domain.Experiment, error) {
@@ -58,9 +67,12 @@ func (s *reconcileStore) BindReportedID(_ context.Context, name, id string) erro
 }
 
 type reconcileWorld struct {
-	store         *reconcileStore
-	router        http.Handler
+	store  *reconcileStore
+	router http.Handler
+	// metricsWrites counts the series written, and sqlDown fails the statements that write a
+	// job's log tail and phase detail.
 	metricsWrites atomic.Int32
+	sqlDown       atomic.Bool
 }
 
 func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
@@ -72,7 +84,15 @@ func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) Store) *reconcileWorld {
 	t.Helper()
 	w := &reconcileWorld{store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{}}}
-	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/sql" {
+			answer := `{"output":[{"affectedrows":1}]}`
+			if w.sqlDown.Load() {
+				answer = `{"code":1003,"error":"the store is down"}`
+			}
+			_, _ = rw.Write([]byte(answer))
+			return
+		}
 		w.metricsWrites.Add(1)
 		rw.WriteHeader(http.StatusNoContent)
 	}))

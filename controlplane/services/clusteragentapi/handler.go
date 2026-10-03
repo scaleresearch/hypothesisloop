@@ -48,6 +48,10 @@ type Store interface {
 	// status push is a whole-cluster snapshot, so this is asked once per push rather than once
 	// per job.
 	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
+	// RunFirstReportedAt is when the end of each job's run was first reported under its current
+	// admission, which this call is for a job no report had named. A job that holds no capacity
+	// has none.
+	RunFirstReportedAt(ctx context.Context, ids []string) (map[string]time.Time, error)
 	// BindReportedID records, once, the identity a registered cluster's runtime states about
 	// itself. It refuses one another cluster holds (db.ErrClusterIDBound) and one other than
 	// the cluster's own (db.ErrClusterIDChanged).
@@ -473,6 +477,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
+		accepted := make([]statusReport, 0, len(in.Body.Reports))
+		var ended []string
 		for _, rep := range in.Body.Reports {
 			// A report for an experiment this cluster no longer owns is dropped, not a reason to
 			// reject the push. Mid-reschedule that is the ordinary state — the experiment has
@@ -486,17 +492,33 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 					zap.Int("current_attempt", placementByID[rep.ExperimentID].AttemptCount))
 				continue
 			}
+			accepted = append(accepted, rep)
+			if rep.EndedAt != nil {
+				ended = append(ended, rep.ExperimentID)
+			}
+		}
+		// A runtime reports an ended run on every push until its workload is deleted. The run is
+		// placed by the time of the first of them, so the later ones write the same observations.
+		runReportedAt, err := h.store.RunFirstReportedAt(ctx, ended)
+		if err != nil {
+			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
+		}
+		for _, rep := range accepted {
 			statusSamples = append(statusSamples, metricsdb.JobStatusSample{
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
 				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: rep.AdmittedMachine, At: now,
 			})
-			observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, clusterName, now, h.observationCadence)...)
+			observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, runReportedAt[rep.ExperimentID], clusterName, now, h.observationCadence)...)
 			// LogTail is optional per report (nil when the executor has nothing new)
 			// -- only write when the agent actually sent one, so a
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
+			//
+			// A tail or a phase detail that cannot be written fails the push before any phase is
+			// recorded: the phase that ends a job is what its workload is deleted on, and the
+			// reason it ended would be gone with it. The runtime pushes the snapshot again.
 			if rep.LogTail != nil {
 				if err := metricsdb.RecordLogTail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, h.maxLogLineChars), now); err != nil {
-					h.logger.Error("record log tail", zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName), zap.Error(err))
+					return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
 				}
 			}
 			// Reason/Message/RestartCount are optional the same way: only write when the
@@ -505,7 +527,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			// prior explanation with silence.
 			if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
 				if err := metricsdb.RecordPhaseDetail(ctx, h.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
-					h.logger.Error("record phase detail", zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName), zap.Error(err))
+					return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
 				}
 			}
 		}
@@ -675,14 +697,15 @@ type statusReport struct {
 
 // measuredRun places the run a machine timed by its own clock on this one. How long the command
 // ran is the machine's word, since a clock that is wrong is wrong at both ends alike. When it ran
-// is held between the job's admission and now, which is all the platform saw of it: a run told
-// by a clock that is ahead ends now, one told by a clock that is behind starts at the admission,
-// and none is longer than the time between the two.
-func measuredRun(startedAt, endedAt, admittedAt, now time.Time) (from, to time.Time) {
-	ran := min(endedAt.Sub(startedAt), now.Sub(admittedAt))
+// is held between the job's admission and the first report of its end, which is all the platform
+// saw of it: a run told by a clock that is ahead ends at that report, one told by a clock that is
+// behind starts at the admission, and none is longer than the time between the two. Both bounds
+// are stored, so every report of one run places it the same.
+func measuredRun(startedAt, endedAt, admittedAt, reportedAt time.Time) (from, to time.Time) {
+	ran := min(endedAt.Sub(startedAt), reportedAt.Sub(admittedAt))
 	to = endedAt
-	if to.After(now) {
-		to = now
+	if to.After(reportedAt) {
+		to = reportedAt
 	}
 	if to.Add(-ran).Before(admittedAt) {
 		to = admittedAt.Add(ran)
@@ -693,8 +716,9 @@ func measuredRun(startedAt, endedAt, admittedAt, now time.Time) (from, to time.T
 // observationsOf is when rep shows its job alive: now for a job reported running, and the whole
 // of the run its runtime measured, as observations no further apart than cadence, so that the
 // span every reader computes (metricsdb.ObserveSpan) holds the run whole however rarely the job
-// was seen running. A run reported for a job that holds no capacity is nobody's.
-func observationsOf(rep statusReport, admittedAt time.Time, clusterName string, now time.Time, cadence time.Duration) []metricsdb.Observation {
+// was seen running. A run reported for a job that holds no capacity is nobody's. runReportedAt is
+// when the end of the run was first reported (Store.RunFirstReportedAt).
+func observationsOf(rep statusReport, admittedAt, runReportedAt time.Time, clusterName string, now time.Time, cadence time.Duration) []metricsdb.Observation {
 	labels := map[string]string{"cluster_name": clusterName}
 	if rep.AdmittedNode != "" {
 		labels["node"] = rep.AdmittedNode
@@ -706,10 +730,10 @@ func observationsOf(rep statusReport, admittedAt time.Time, clusterName string, 
 	if rep.Phase == metricsdb.PhaseRunning {
 		observations = append(observations, at(now))
 	}
-	if rep.EndedAt == nil || admittedAt.IsZero() || !now.After(admittedAt) {
+	if rep.EndedAt == nil || admittedAt.IsZero() || !runReportedAt.After(admittedAt) {
 		return observations
 	}
-	from, to := measuredRun(*rep.StartedAt, *rep.EndedAt, admittedAt, now)
+	from, to := measuredRun(*rep.StartedAt, *rep.EndedAt, admittedAt, runReportedAt)
 	for t := from; t.Before(to); t = t.Add(cadence) {
 		observations = append(observations, at(t))
 	}
