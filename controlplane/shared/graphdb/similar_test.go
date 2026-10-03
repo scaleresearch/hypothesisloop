@@ -47,6 +47,37 @@ func TestSimilaritiesFlagRewordedDuplicatesOnly(t *testing.T) {
 	}
 }
 
+// The first hypotheses of an experiment share its vocabulary whatever they claim, so in a graph of
+// one or two a claim reads alike only to its own restatement, never to one that moves another lever.
+func TestSimilaritiesTellLeversApartInATinyExperiment(t *testing.T) {
+	const (
+		workers      = "Holding chunk size fixed at the baseline, raising num_workers from 1 to 8 raises throughput."
+		chunks       = "Holding num_workers fixed, a larger chunk size raises throughput."
+		workersAtLen = "With chunk size fixed at the baseline of 64 rows, raising num_workers from 1 to 8 raises throughput in rows per second, because decoding is CPU bound and parallelises across cores until the disk saturates."
+		chunksAtLen  = "With num_workers pinned at the baseline of 1, growing the chunk size from 64 to 1024 rows raises throughput in rows per second, because each read amortises the per-request overhead over more rows."
+	)
+	for _, tc := range []struct {
+		name  string
+		text  string
+		docs  []string
+		alike []bool
+	}{
+		{"another lever", chunks, []string{workers}, []bool{false}},
+		{"another lever, the other way round", workers, []string{chunks}, []bool{false}},
+		{"another lever, with its mechanism", chunksAtLen, []string{workersAtLen}, []bool{false}},
+		{"restated", "With chunk size held at the baseline, raising num_workers from 1 to 8 raises throughput.", []string{workers}, []bool{true}},
+		{"restated in another order", "Raising num_workers from 1 to 8 raises throughput while chunk size stays fixed at the baseline.", []string{workers}, []bool{true}},
+		{"the first restated beside the second", "Throughput rises when num_workers goes from 1 to 8 and chunk size is fixed at the baseline.", []string{workers, chunks}, []bool{true, false}},
+		{"the second restated beside the first", "A larger chunk size raises throughput when num_workers is held fixed.", []string{workers, chunks}, []bool{false, true}},
+	} {
+		for i, score := range similarities(tc.text, tc.docs) {
+			if alike := score >= similarThreshold; alike != tc.alike[i] {
+				t.Errorf("%s: doc %d scored %.3f, want alike=%v", tc.name, i, score, tc.alike[i])
+			}
+		}
+	}
+}
+
 func TestSimilaritiesIgnoreCaseStopWordsAndEmptyText(t *testing.T) {
 	scores := similarities("The LR of 0.2 beats the baseline", []string{"lr 0.2 BEATS baseline", "", "the of a"})
 	if scores[0] < 0.99 || scores[1] != 0 || scores[2] != 0 {

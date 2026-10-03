@@ -158,6 +158,19 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 	}
 }
 
+func TestRegisterTakesTheSecondClaimOfAnExperimentWhenItMovesAnotherLever(t *testing.T) {
+	s := testStore(t)
+	pe := testExperiment(t, s)
+	workers := register(t, s, pe, "agent-1", "Holding chunk size fixed at the baseline, raising num_workers from 1 to 8 raises throughput.", onRoot(pe))
+	register(t, s, pe, "agent-2", "Holding num_workers fixed, a larger chunk size raises throughput.", onRoot(pe))
+
+	_, _, _, _, err := s.Register(context.Background(), NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe,
+		Text: "With chunk size held at the baseline, raising num_workers from 1 to 8 raises throughput.", Links: onRoot(pe)})
+	if got := similarIDs(t, err); len(got) != 1 || got[workers.ID] != "close_text" {
+		t.Fatalf("similar: got = %v, want %s as close_text", got, workers.ID)
+	}
+}
+
 func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)

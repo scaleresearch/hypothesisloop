@@ -31,10 +31,13 @@ func (e *SimilarError) Error() string {
 func (e *SimilarError) Unwrap() error { return ErrSimilar }
 
 const (
-	// similarThreshold is the TF-IDF cosine at which two hypotheses read alike. Chosen on the
-	// dummy demo agent runs: reworded duplicates scored 0.37 to 0.45.
-	similarThreshold = 0.35
+	// similarThreshold is the score of similarities at which two hypotheses read alike. Chosen on
+	// the dummy demo agent runs: reworded duplicates scored 0.069 and 0.107, the closest other
+	// hypothesis 0.021.
+	similarThreshold = 0.05
 	maxSimilar       = 5
+	// pairReach is how many following words a word is paired with.
+	pairReach = 2
 )
 
 var (
@@ -59,41 +62,51 @@ func words(text string) []string {
 	return out
 }
 
-// similarities returns the TF-IDF cosine between text and each of docs, with document frequencies
-// taken over docs and text together.
+// pairs counts each word of text followed within pairReach words by another, in that order. Two
+// claims that change different levers of one experiment use the same words and differ in which
+// word goes with which, so the pairs tell them apart where the words alone cannot.
+func pairs(text string) map[string]float64 {
+	ws := words(text)
+	out := map[string]float64{}
+	for i, w := range ws {
+		for _, next := range ws[i+1 : min(i+1+pairReach, len(ws))] {
+			out[w+" "+next]++
+		}
+	}
+	return out
+}
+
+// similarities returns the cosine between the word pairs of text and of each of docs. A pair found
+// in df of the n texts weighs log((n+1)/df), so what every text says, the experiment's own
+// vocabulary, weighs least at any n, two included. A floor under that weight makes the first
+// hypotheses of an experiment all read alike.
 func similarities(text string, docs []string) []float64 {
 	all := append(slices.Clone(docs), text)
-	df := map[string]int{}
-	counts := make([]map[string]float64, len(all))
-	for i, d := range all {
-		counts[i] = map[string]float64{}
-		for _, w := range words(d) {
-			if counts[i][w] == 0 {
-				df[w]++
-			}
-			counts[i][w]++
-		}
-	}
-	n := float64(len(all))
+	df := map[string]float64{}
 	vecs := make([]map[string]float64, len(all))
-	for i, c := range counts {
-		var norm float64
-		for w, tf := range c {
-			c[w] = tf * (math.Log((1+n)/(1+float64(df[w]))) + 1)
-			norm += c[w] * c[w]
+	for i, d := range all {
+		vecs[i] = pairs(d)
+		for p := range vecs[i] {
+			df[p]++
 		}
-		norm = math.Sqrt(norm)
-		for w := range c {
-			c[w] /= norm
-		}
-		vecs[i] = c
 	}
-	query := vecs[len(all)-1]
+	norms := make([]float64, len(all))
+	for i, v := range vecs {
+		for p, count := range v {
+			v[p] = count * math.Log(float64(len(all)+1)/df[p])
+			norms[i] += v[p] * v[p]
+		}
+	}
+	query := len(all) - 1
 	out := make([]float64, len(docs))
 	for i := range docs {
-		for w, x := range query {
-			out[i] += x * vecs[i][w]
+		if norms[i] == 0 || norms[query] == 0 {
+			continue
 		}
+		for p, x := range vecs[query] {
+			out[i] += x * vecs[i][p]
+		}
+		out[i] /= math.Sqrt(norms[i] * norms[query])
 	}
 	return out
 }
