@@ -31,18 +31,23 @@ type Object struct {
 	LastModified time.Time `json:"last_modified"`
 }
 
-// Client addresses one bucket on one S3-compatible endpoint.
+// Client addresses one bucket on one S3-compatible store.
 type Client struct {
+	// Endpoint is the address handed to jobs and agents. No request of this client goes there:
+	// those go to the address New was given.
 	Endpoint        string
 	Region          string
 	Bucket          string
 	AccessKeyID     string
 	SecretAccessKey string
 	HTTP            *http.Client
+	address         string
 }
 
-// New returns a Client for the given endpoint/bucket. Every field is required: a half-configured
-// store has no usable behaviour, so it fails at construction rather than at the first listing.
+// New returns a Client that reaches the store at endpoint and hands that address out. A process
+// whose jobs reach the store by another address sets Endpoint to it. Every field is required: a
+// half-configured store has no usable behaviour, so it fails at construction rather than at the
+// first listing.
 func New(endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
 	if endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
 		return nil, fmt.Errorf("objectstore: endpoint, region, bucket, access_key_id and secret_access_key are all required")
@@ -54,10 +59,12 @@ func New(endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: unreachableAfter}).DialContext
 	transport.ResponseHeaderTimeout = unreachableAfter
+	address := strings.TrimSuffix(endpoint, "/")
 	return &Client{
-		Endpoint: strings.TrimSuffix(endpoint, "/"), Region: region, Bucket: bucket,
+		Endpoint: address, Region: region, Bucket: bucket,
 		AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
-		HTTP: &http.Client{Timeout: 20 * time.Second, Transport: transport},
+		HTTP:    &http.Client{Timeout: 20 * time.Second, Transport: transport},
+		address: address,
 	}, nil
 }
 
@@ -177,7 +184,7 @@ const emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 // signedRequest signs one request with SigV4 in the s3 scope, which the admin API shares.
 func (c *Client) signedRequest(ctx context.Context, method, path string, query map[string]string, body []byte) (*http.Request, error) {
 	canonicalQuery := encodeCanonicalQuery(query)
-	url := c.Endpoint + path
+	url := c.address + path
 	if canonicalQuery != "" {
 		url += "?" + canonicalQuery
 	}

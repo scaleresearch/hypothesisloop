@@ -220,10 +220,18 @@ func (c *Config) build() error {
 		c.DataStore.AccessKeyID == "" || c.DataStore.SecretAccessKey == "" {
 		return fmt.Errorf("data_store endpoint, region, bucket, access_key_id and secret_access_key are all required")
 	}
+	// Neither address stands in for the other: the control plane's is often one no job reaches,
+	// and a job's is often one that is down while the control plane's own store is up.
+	if c.DataStore.ControlPlaneEndpoint == "" {
+		return fmt.Errorf("data_store control_plane_endpoint is required: the address the control plane itself reaches the object store at, on its own network. endpoint is only what jobs and agents are handed")
+	}
+	if own, err := url.Parse(c.DataStore.ControlPlaneEndpoint); err != nil || own.Host == "" || (own.Scheme != "http" && own.Scheme != "https") {
+		return fmt.Errorf("data_store control_plane_endpoint %q must be an http(s) URL with a host", c.DataStore.ControlPlaneEndpoint)
+	}
 	if c.DataStore.MaxBytesPerAgent < 0 {
 		return fmt.Errorf("data_store max_bytes_per_agent must not be negative (0 means unlimited)")
 	}
-	// A job pod resolves this endpoint from inside its own network namespace, which is not the
+	// A job pod resolves endpoint from inside its own network namespace, which is not the
 	// control plane's. A loopback address works from every container that shares the host's
 	// network and from nothing else, so it fails only once a real job tries to save — hours in,
 	// with nothing to show for the run. Same failure the shared code repo's URL has (see

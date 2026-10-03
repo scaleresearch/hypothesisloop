@@ -64,9 +64,12 @@ control-service has made the tables the init container fails and the pod waits.
   and the API takes API keys and derived tokens only. `auth.uiOrigin` is the one browser origin
   allowed to call the API.
 - **Object store.** `objectStore.enabled=true` runs Silo and a Job that creates the bucket named
-  by `data_store.bucket`. `objectStore.endpoint` is required either way and is the one address
-  the control plane and every job use: the in-cluster Service when all jobs run in this cluster,
-  an outside address (a tunnel to the NodePort, a load balancer) when they do not.
+  by `data_store.bucket`. `objectStore.endpoint` is required either way and is the address every
+  job and agent is handed: the in-cluster Service when all jobs run in this cluster, an outside
+  address (a tunnel to the NodePort, a load balancer) when they do not. The control plane sends
+  its own requests to the store's Service, so they keep working while that outside address is
+  down. With `objectStore.enabled=false` name the store's address on the control plane's network
+  in `objectStore.controlPlaneEndpoint`, which is then required.
 - **Reaching it from outside.** The API (8081), metrics (8084), the object store (9000) and the
   UI (3000) are NodePort Services on 30081, 30084, 30900 and 30300. Set `service.type` to
   `ClusterIP` on any of them to keep it inside the cluster.

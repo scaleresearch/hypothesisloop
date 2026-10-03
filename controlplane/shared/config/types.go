@@ -197,11 +197,16 @@ type ServicesConfig struct {
 // store's root user does). Expiring a closed platform
 // experiment's prefix is a lifecycle rule configured on the bucket itself, not a sweeper here.
 type DataStoreConfig struct {
-	Endpoint        string `yaml:"endpoint"`
-	Region          string `yaml:"region"`
-	Bucket          string `yaml:"bucket"`
-	AccessKeyID     string `yaml:"access_key_id"`
-	SecretAccessKey string `yaml:"secret_access_key"`
+	// Endpoint is the address handed to every job and agent, which reach the store from other
+	// machines. The control plane sends none of its own requests there.
+	Endpoint string `yaml:"endpoint"`
+	// ControlPlaneEndpoint is where the control plane itself reaches the store, on its own
+	// network, so its reads and writes depend on nothing between it and a rented machine.
+	ControlPlaneEndpoint string `yaml:"control_plane_endpoint"`
+	Region               string `yaml:"region"`
+	Bucket               string `yaml:"bucket"`
+	AccessKeyID          string `yaml:"access_key_id"`
+	SecretAccessKey      string `yaml:"secret_access_key"`
 	// MaxBytesPerAgent caps how many bytes one agent may hold within one platform experiment,
 	// checked at admission against what the store reports right now. Deliberately not enforced
 	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses

@@ -130,6 +130,18 @@ http://greptimedb:4000
 {{- end -}}
 {{- end -}}
 
+{{/* Where the control plane itself reaches the object store: the chart's own Service, or the store run elsewhere. */}}
+{{- define "hypothesisloop.objectStoreControlPlaneEndpoint" -}}
+{{- if .Values.objectStore.enabled -}}
+{{- if .Values.objectStore.controlPlaneEndpoint -}}
+{{- fail "objectStore.controlPlaneEndpoint is set while objectStore.enabled is true: the control plane reaches the store the chart runs at its Service" -}}
+{{- end -}}
+http://object-store:9000
+{{- else -}}
+{{ required "objectStore.controlPlaneEndpoint is required while objectStore.enabled is false: the address the control plane itself reaches the store at" .Values.objectStore.controlPlaneEndpoint }}
+{{- end -}}
+{{- end -}}
+
 {{- define "hypothesisloop.graphDBURL" -}}
 {{- if .Values.memgraph.external.enabled -}}
 {{ required "memgraph.external.enabled is true but memgraph.external.url is not set" .Values.memgraph.external.url }}

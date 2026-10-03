@@ -189,11 +189,12 @@ type apiGate struct {
 func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
-	dataStore, err := objectstore.New(pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
+	dataStore, err := objectstore.New(pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
 		pcfg.DataStore.AccessKeyID, pcfg.DataStore.SecretAccessKey)
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
+	dataStore.Endpoint = pcfg.DataStore.Endpoint
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
 	svc := quota.NewService(store, logger)
 	handler := quota.NewHandler(svc, logger)

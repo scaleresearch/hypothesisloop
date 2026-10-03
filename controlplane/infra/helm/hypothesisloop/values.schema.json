@@ -235,6 +235,9 @@
         "endpoint": {
           "type": "string"
         },
+        "controlPlaneEndpoint": {
+          "type": "string"
+        },
         "image": {
           "type": "string"
         },

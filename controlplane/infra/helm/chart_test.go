@@ -80,6 +80,9 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	if got := inCluster.DataStore.Endpoint; got != "http://object-store.hypothesisloop.svc:9000" {
 		t.Errorf("in-cluster data_store.endpoint = %q", got)
 	}
+	if got := inCluster.DataStore.ControlPlaneEndpoint; got != "http://object-store:9000" {
+		t.Errorf("in-cluster data_store.control_plane_endpoint = %q, want the chart's own Service", got)
+	}
 	if got := inCluster.Services; got.MetricsDBURL != "http://greptimedb:4000" || got.GraphDBURL != "bolt://memgraph:7687" || got.PublicAPIURL != "http://api.example.invalid:30081" {
 		t.Errorf("in-cluster services = %+v, want the in-cluster stores and the API's public address", got)
 	}
@@ -91,6 +94,14 @@ func TestEachValueLandsInItsOwnSectionOfTheConfig(t *testing.T) {
 	wantProviders := []config.IdentityProvider{{Issuer: "https://project.supabase.example.invalid/auth/v1", Audience: "authenticated", JWTKeys: []config.JWTKey{wantKey}}}
 	if !reflect.DeepEqual(auth.IdentityProviders, wantProviders) || auth.UIOrigin != "https://ui.example.invalid" {
 		t.Errorf("external auth = %+v, want the identity provider of the values", auth)
+	}
+	// Jobs elsewhere are handed the outside address, and the control plane still uses the Service.
+	if got := external.DataStore; got.Endpoint != "https://object-store.example.invalid" || got.ControlPlaneEndpoint != "http://object-store:9000" {
+		t.Errorf("external data_store = %s for jobs and %s for the control plane, want the values' address and the chart's own Service", got.Endpoint, got.ControlPlaneEndpoint)
+	}
+	elsewhere := loadRendered(t, charttest.Render(t, charttest.External, `objectStore.enabled=false`, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`), charttest.External, configLoaders[0])
+	if got := elsewhere.DataStore.ControlPlaneEndpoint; got != "http://store.example.invalid:9000" {
+		t.Errorf("a store run elsewhere: data_store.control_plane_endpoint = %q, want the values' address", got)
 	}
 }
 
@@ -257,6 +268,8 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
+		"a store elsewhere, unnamed":  {charttest.InCluster, `objectStore.enabled=false`, "objectStore.controlPlaneEndpoint is required"},
+		"two addresses for one store": {charttest.InCluster, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`, "objectStore.controlPlaneEndpoint is set while"},
 		"no Supabase address":         {charttest.InCluster, `ui.supabaseURL=""`, "ui.supabaseURL is required"},
 		"no publishable key":          {charttest.InCluster, `ui.supabasePublishableKey=""`, "ui.supabasePublishableKey is required"},
 		"cloud-agent without config":  {charttest.InCluster, `cloudAgent.enabled=true`, "cloudAgent.config is required"},

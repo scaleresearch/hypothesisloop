@@ -15,7 +15,8 @@ written as ${NAME}: both services replace it from their environment, which the S
   (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
   (list "runtimes" "registry" (required "images.registry is required: pass the REGISTRY `make images` pushed to" .Values.images.registry))
   (list "runtimes" "image_tag" (required "images.tag is required: pass the TAG `make images` built" .Values.images.tag))
-  (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address the control plane and every job reach the object store at" .Values.objectStore.endpoint))
+  (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address every job and agent is handed to reach the object store at" .Values.objectStore.endpoint))
+  (list "data_store" "control_plane_endpoint" (include "hypothesisloop.objectStoreControlPlaneEndpoint" .))
   (list "data_store" "access_key_id" "${OBJECT_STORE_ACCESS_KEY_ID}")
   (list "data_store" "secret_access_key" "${OBJECT_STORE_SECRET_ACCESS_KEY}")
 }}

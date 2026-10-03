@@ -90,6 +90,25 @@ func TestASessionIsKeptOutsideEveryPrefixAnAgentOrAJobKeyReads(t *testing.T) {
 	}
 }
 
+// The address jobs are handed is often a tunnel. While it is down the control plane still reads
+// and writes its own store.
+func TestASessionIsReadWhileTheAddressHandedToJobsIsDown(t *testing.T) {
+	client, _ := bucketServer(t)
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	client.Endpoint = down.URL
+	ctx := context.Background()
+	if err := client.PutSession(ctx, "pe-1", "ag-1", []byte("kept")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if got, err := client.GetSession(ctx, "pe-1", "ag-1", 1<<20); err != nil || string(got) != "kept" {
+		t.Fatalf("read back %q, %v, want the bytes stored", got, err)
+	}
+	if client.Endpoint != down.URL {
+		t.Fatalf("hands out %s, want the address it was told to", client.Endpoint)
+	}
+}
+
 func TestASessionIsStoredOnlyUnderIdentifiers(t *testing.T) {
 	client, objects := bucketServer(t)
 	ctx := context.Background()

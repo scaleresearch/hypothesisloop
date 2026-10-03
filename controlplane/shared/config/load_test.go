@@ -216,6 +216,22 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 	}
 }
 
+func TestLoadRequiresTheControlPlanesOwnAddressOfTheDataStore(t *testing.T) {
+	const own = "  control_plane_endpoint: http://minio:9000"
+	rendered := productionConfig(t)
+	if !strings.Contains(rendered, own) {
+		t.Fatalf("the settings file has no %q", own)
+	}
+	if err := loadText(t, strings.Replace(rendered, own, "  control_plane_endpoint: http://localhost:9000", 1)); err != nil {
+		t.Errorf("a store on the control plane's own machine: Load = %v, want it accepted", err)
+	}
+	for name, line := range map[string]string{"no key": "", "empty": `  control_plane_endpoint: ""`, "no host": "  control_plane_endpoint: /store", "not http": "  control_plane_endpoint: s3://bucket"} {
+		if err := loadText(t, strings.Replace(rendered, own, line, 1)); err == nil || !strings.Contains(err.Error(), "control_plane_endpoint") {
+			t.Errorf("%s: Load = %v, want it refused by the key's name with no value taken from endpoint", name, err)
+		}
+	}
+}
+
 func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	const api, metrics = "  public_api_url: http://host.example.invalid:8081", "  metrics_url: http://host.example.invalid:8084"
 	for name, edit := range map[string][2]string{

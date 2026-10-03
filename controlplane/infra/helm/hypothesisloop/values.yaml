@@ -142,10 +142,14 @@ objectStore:
   # a store run elsewhere.
   enabled: true
   image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
-  # data_store.endpoint: the one address both the control plane and every job reach the store at.
+  # data_store.endpoint: the address every job and agent is handed to reach the store at.
   # Required. Jobs in this cluster only: http://object-store.<namespace>.svc:9000. Jobs on other
   # clusters or rented hosts: an address they can reach, such as a tunnel URL to the NodePort.
   endpoint: ""
+  # data_store.control_plane_endpoint: where the control plane itself reaches the store. With
+  # enabled it is the chart's own Service and this stays empty. With a store run elsewhere it is
+  # required: that store's address on the control plane's network.
+  controlPlaneEndpoint: ""
   storage: 20Gi
   storageClassName: ""
   resources:
