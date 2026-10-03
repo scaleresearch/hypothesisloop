@@ -339,12 +339,10 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
             accept=lambda s: s in ("COMPLETED", "FAILED", "EVICTED"),
             deadline=deadline,
         )
-        # The summary gate (an unrelated, pre-existing admission check: an agent with an
-        # unsummarized completed job is blocked from new admissions) sits ahead of the
-        # concurrency-cap check in the same filter pass -- j1 and j2 both finish around the same
-        # time here, and either one left unsummarized would mask the cap behaviour this test is
-        # actually after. File findings for whichever of j1/j2 already finished before waiting on
-        # j3, so the only gate left between j3 and admission is the concurrency cap itself.
+        # The summary gate holds only a job its agent submits after a completed one ended with no
+        # summary. j3 was queued while j1 and j2 ran, so neither holds it and the concurrency cap
+        # is all that stands between j3 and admission. The findings are filed as each ends so that
+        # nothing submitted later is held either.
         summarized = set()
 
         def _j3_status_after_filing_findings():

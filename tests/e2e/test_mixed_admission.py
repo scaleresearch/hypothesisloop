@@ -25,8 +25,8 @@ def mixed_pe(api, experiment, run_id):
 
 
 def _finish_if_completed(api, job_id, deadline):
-    """Files a finding once a job completes -- otherwise the next job of the same agent+PE
-    is held in the queue with not_admitted_reason summary_gate."""
+    """Files a finding once a job completes -- otherwise a job the same agent submits to the PE
+    afterwards is held in the queue with not_admitted_reason summary_gate."""
     final = eventually(
         f"{job_id} to reach a terminal status",
         lambda: api.experiment(job_id),
@@ -134,6 +134,9 @@ def test_a_job_on_cores_states_whole_cores_and_one_count_and_no_accelerator(api,
 def test_unset_required_resource_is_rejected_not_defaulted(api, mixed_pe):
     pe_id, agent = mixed_pe
     body = api.submission_body_for_id(api._job_id(), pe_id, agent, hours=PROBE_JOB_HOURS)
-    del body["job"]["cpu"]
-    r = api.post_experiment_body(body)
-    assert r.status_code == 422 and r.json()["reason"] == "cpu_required", f"a job that states no cpu: {r.status_code} {r.text}"
+    for field in ("cpu", "memory", "storage", "image"):
+        job = {key: value for key, value in body["job"].items() if key != field}
+        r = api.post_experiment_body({**body, "job": job})
+        assert r.status_code == 422 and r.json()["reason"] == f"{field}_required", f"a job that states no {field}: {r.status_code} {r.text}"
+        assert f"job.{field} is required" in r.json()["message"], r.text
+    assert api.get(f"/experiments/{body['id']}").status_code == 404, "a refused job was stored"

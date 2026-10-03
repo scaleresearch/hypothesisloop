@@ -80,9 +80,9 @@ def test_burst_fair_round_robin(api, run_id, deadline):
     b1 = api.submit_job(pe_id, agent_b, hours=HOURS, tier="burst", job_overrides=pinned(4))
 
     # The filler frees the whole node in one transition. It belongs to neither contending agent,
-    # so its own summary-gate requirement (a COMPLETED job without a filed summary blocks further
-    # admission for that same (agent, platform experiment) pair -- loop_tick.go 3a) never touches
-    # agent A or agent B; only file it so the filler's own agent doesn't matter for cleanup.
+    # so the summary it owes (a COMPLETED job without one holds what its own agent submits after
+    # it ended, in that platform experiment) never touches agent A or agent B; it is filed so
+    # that the filler's agent owes nothing at cleanup.
     filler_final = eventually(
         f"{filler} (filler) to reach a terminal state",
         lambda: api.experiment(filler),

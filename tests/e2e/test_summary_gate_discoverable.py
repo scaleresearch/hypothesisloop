@@ -1,9 +1,9 @@
 """The summary gate must be answerable, not just enforceable. Ported 1:1 from
 tests/scenarios/summary-gate-discoverable.sh.
 
-An agent's queued jobs are not admitted while it still has a finished job in the platform
-experiment with no write-up filed. Submission itself is accepted: a job that completed during the
-agent's turn is unknown to it until the turn ends, so a refusal would hit every submit of a batch.
+A completed job of an agent with no write-up filed holds the jobs that agent submits after it
+ended, and no other: a job queued before then is admitted as if nothing were owed, since its
+agent could not have known. Submission itself is accepted and the job waits in the queue.
 A rule an agent cannot inspect is a dead end -- so the same set the gate reads is listable:
 GET /experiments?needs_summary=true. This checks the two halves agree -- the job that holds the
 queue is exactly the job the filter returns, and clearing it clears both.
@@ -29,11 +29,13 @@ pytestmark = pytest.mark.parallel
 
 def test_summary_gate_matches_needs_summary_listing(api, experiment, run_id, deadline):
     agent = make_agent(api, run_id, "summary-gate")
-    pe_id = experiment("summary-gate", [(agent, None, "guaranteed")], budget=5.0)
+    # One accelerator at a time, so the second job of the batch is still queued when the first ends.
+    pe_id = experiment("summary-gate", [(agent, None, "guaranteed")], budget=5.0, max_concurrent_accelerators=1)
 
     assert api.needs_summary(agent, pe_id) == [], "needs_summary must be empty before anything finished"
 
     job = api.submit_job(pe_id, agent, hours=0.01)
+    batched = api.submit_job(pe_id, agent, hours=0.01)
     final = eventually(
         f"{job} to finish",
         lambda: api.experiment(job),
@@ -48,6 +50,17 @@ def test_summary_gate_matches_needs_summary_listing(api, experiment, run_id, dea
         accept=lambda ids: job in ids,
         deadline=deadline,
     )
+
+    # Submitted before that job ended, the batch's other job is not held by it.
+    eventually(
+        f"{batched}, queued before {job} ended, to be admitted while its summary is owed",
+        lambda: api.experiment(batched),
+        accept=lambda e: e["status"] != "QUEUED",
+        reject=lambda e: e.get("not_admitted_reason") == "summary_gate",
+        deadline=deadline,
+    )
+    assert api.needs_summary(agent, pe_id) == [job], "the batch's second job ran after the first's summary was filed"
+    api.cancel_job(batched)
 
     held_code, held = api.submit_job_expect(pe_id, agent, hours=0.01)
     assert held_code < 400, f"a further submission answered {held_code}; it must be accepted and held in the queue"
