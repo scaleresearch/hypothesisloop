@@ -2,38 +2,29 @@
 
 import useSWR from 'swr'
 import { clsx } from 'clsx'
-import { fetchPlatformExperimentQuotas, fetchExperimentStats, fetchHypothesisStats, HYPOTHESIS_STATUSES } from '@/lib/api'
-import type { PlatformExperiment, AgentQuota, MetricDefinition } from '@/types'
+import { fetchPlatformExperimentQuotas, fetchHypothesisStats } from '@/lib/api'
+import { PlatformExperimentStatus } from '@/types'
+import type { PlatformExperiment, AgentQuota } from '@/types'
 import { useProjectRouter } from '@/lib/query-state'
 import { isReadOnly } from '@/lib/read-only'
-import { useTenant } from '@/lib/tenant'
-import { hypothesisActivity } from '@/lib/hypothesis-progress'
-import { formatAccH, isZeroDate, runClock } from '@/lib/format'
+import { formatAccH, isZeroDate } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
-import { statusColor } from '@/lib/colors'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
+import { useTenant } from '@/lib/tenant'
+import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
 import { Button } from '@/components/ui/button'
-import { Eyebrow, Pill } from '@/components/ui/text'
-import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 
-function StatusBadge({ status }: { status: string }) {
-  return <Badge status={status}>{status}</Badge>
-}
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
-// The primary metric ranks the leaderboard, so its pill carries the accent ring.
-function MetricChip({ m, primary }: { m: MetricDefinition; primary?: boolean }) {
-  return (
-    <Pill active={primary} title={primary ? 'Primary metric — used for ranking' : undefined}>
-      {primary && <span className="opacity-80">★</span>}
-      {m.key} {m.direction === 'maximize' ? '↑' : '↓'}
-    </Pill>
-  )
-}
+// The API takes an edit of an open or a running experiment only.
+const EDITABLE: string[] = [PlatformExperimentStatus.OPEN, PlatformExperimentStatus.RUNNING]
 
-/** One platform experiment in a list, opening its page. One the caller only reads offers no edit. */
+/**
+ * One platform experiment in a list, on one line, opening its page. It shows the figures its
+ * state gives a meaning to and none that are zero. One the caller only reads offers no edit.
+ */
 export function PlatformExperimentCard({
   pe,
   onEdit,
@@ -45,94 +36,67 @@ export function PlatformExperimentCard({
   const { me } = useTenant()
   const readOnly = isReadOnly(me, pe)
   const href = `/platform-experiments/${pe.id}`
+  const started = pe.status !== PlatformExperimentStatus.DRAFT
 
   const { data: quotas } = useSWR<AgentQuota[]>(
-    ['pe-quotas', pe.id],
+    started ? ['pe-quotas', pe.id] : null,
     () => fetchPlatformExperimentQuotas(pe.id),
     { refreshInterval: 10_000 },
   )
-
   const { data: verdicts } = useSWR(
-    ['pe-hypothesis-stats', pe.id],
+    started ? ['pe-hypothesis-stats', pe.id] : null,
     () => fetchHypothesisStats(pe.id),
     { refreshInterval: 15_000 },
   )
-  const { data: hypothesisStats } = useSWR(
-    ['pe-stats-by-hypothesis', pe.id],
-    () => fetchExperimentStats({ project_id: pe.project_id, platform_experiment_id: pe.id, group_by: 'hypothesis' }),
-    { refreshInterval: 15_000 },
-  )
-  const hypothesisCount = verdicts?.total ?? 0
-  const activity = hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}, pe.id)
 
-  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
+  const used = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
-  const clock = runClock(pe)
-  const daysLeft = !isZeroDate(pe.ends_at)
+  const live = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
+  const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
 
+  const figures: string[] = []
+  if (live && pe.budget_accelerator_hours > 0) {
+    figures.push(used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}`)
+  } else if (used > 0) {
+    figures.push(`${formatAccH(used)} ${unit} used`)
+  }
+  if (live && pe.signup_count > 0) figures.push(`${pe.signup_count} ${pe.signup_count === 1 ? 'agent' : 'agents'}`)
+  const hypotheses = verdicts?.total ?? 0
+  if (hypotheses > 0) {
+    figures.push(`${hypotheses} ${hypotheses === 1 ? 'hypothesis' : 'hypotheses'}`)
+    for (const v of ['confirmed', 'refuted'] as const) {
+      const n = verdicts?.by_status[v] ?? 0
+      if (n > 0) figures.push(`${n} ${v}`)
+    }
+  }
+
+  const when = pe.status === PlatformExperimentStatus.CLOSED && !isZeroDate(pe.closed_at)
+    ? day(pe.closed_at!)
+    : !live && !isZeroDate(pe.created_at) ? day(pe.created_at) : null
+
   return (
-    <Card className="cursor-pointer">
-      <CardHeader
-        className="justify-between"
+    <Card className="mb-2 cursor-pointer transition-colors hover:border-border-strong">
+      <div
+        className="flex items-center gap-3 px-4 py-2.5"
         onClick={() => router.push(href)}
         tabIndex={0}
         role="link"
         onKeyDown={e => { if (e.key === 'Enter') router.push(href) }}
       >
-        <div className="flex items-center gap-2.5">
-          <StatusBadge status={pe.status} />
-          <CardTitle>{pe.name}</CardTitle>
-          <SharedBadge pe={pe} />
-        </div>
-        <div className="flex items-center gap-3 font-normal">
-          {clock && <span className="text-xs text-subtle">{clock}</span>}
-          {daysLeft != null && daysLeft > 0 && (
-            <span className={clsx('text-2xs', daysLeft < 2 ? 'text-danger' : 'text-muted')}>{daysLeft}d remaining</span>
+        <Badge status={pe.status}>{pe.status}</Badge>
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">{pe.name}</span>
+        <SharedBadge pe={pe} />
+        <span className="ml-auto flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted">
+          {figures.map(f => <span key={f}>{f}</span>)}
+          {daysLeft != null && daysLeft > 0 && <span className={clsx(daysLeft < 2 && 'text-danger')}>{daysLeft}d left</span>}
+          {when && <span>{when}</span>}
+          {!readOnly && EDITABLE.includes(pe.status) && (
+            <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
           )}
-          {!readOnly && <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>}
-        </div>
-      </CardHeader>
-
-      <CardContent onClick={() => router.push(href)}>
-        {pe.description && <CollapsibleDescription text={pe.description} className="mb-3" />}
-
-        {pe.metrics && pe.metrics.length > 0 && (
-          <div className="mb-3.5 flex flex-wrap gap-1.5">
-            {pe.metrics.map((m, i) => <MetricChip key={m.key} m={m} primary={i === 0} />)}
-          </div>
-        )}
-
-        <div className="grid grid-cols-4 gap-4">
-          <div>
-            <Eyebrow className="block">Budget</Eyebrow>
-            <div className="font-mono text-xl font-medium">{pe.budget_accelerator_hours} <span className="text-xs text-muted">{unit}</span></div>
-          </div>
-          <div>
-            <Eyebrow className="block">Agents</Eyebrow>
-            <div className="font-mono text-xl font-medium">{pe.signup_count} <span className="text-xs text-muted">joined, {pe.max_agents} researchers at most</span></div>
-          </div>
-          <div>
-            <Eyebrow className="block">Budget Used</Eyebrow>
-            <div className={'font-mono text-xl font-medium'}>
-              {formatAccH(totalUsed)} <span className="text-xs text-muted">{unit}</span>
-            </div>
-          </div>
-          <div>
-            <Eyebrow className="block">Hypotheses</Eyebrow>
-            <div className="flex flex-wrap items-baseline gap-2.5">
-              {HYPOTHESIS_STATUSES.map(v => (
-                <span key={v} className="font-mono text-sm" style={{ color: statusColor(v) }}>
-                  {verdicts?.by_status[v] ?? 0} <span className="text-2xs text-muted">{v}</span>
-                </span>
-              ))}
-            </div>
-            {activity && <div className="text-2xs text-muted">{activity}</div>}
-          </div>
-        </div>
-
-      </CardContent>
+        </span>
+      </div>
     </Card>
   )
 }

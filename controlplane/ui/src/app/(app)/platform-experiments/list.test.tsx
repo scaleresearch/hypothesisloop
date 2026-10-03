@@ -77,11 +77,41 @@ describe('the platform experiments of a project', () => {
     expect(card('Mine').getByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 
-  it('read a shared one\'s figures within its own project, never the reader\'s', async () => {
-    vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({ items: [experiment('pe-x', 'Vision benchmark', 'prj_platform', true)], total: 1 })
+  it('each show on one line the figures that mean something in their state, and none that are zero', async () => {
+    const closedAt = '2026-02-03T10:00:00Z'
+    vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({
+      items: [
+        experiment('pe-run', 'Busy', 'prj_1', false),
+        { ...experiment('pe-closed', 'Empty closed', 'prj_1', false), status: PlatformExperimentStatus.CLOSED, closed_at: closedAt, signup_count: 0 },
+        { ...experiment('pe-draft', 'Idea', 'prj_1', false), status: PlatformExperimentStatus.DRAFT, signup_count: 0 },
+      ],
+      total: 3,
+    })
+    vi.mocked(fetchPlatformExperimentQuotas).mockImplementation(async id => id === 'pe-run'
+      ? [{ used_guaranteed_acch: 10, used_burst_acch: 2.5 }] as never
+      : [])
+    vi.mocked(fetchHypothesisStats).mockImplementation(async id => id === 'pe-run'
+      ? { total: 4, by_status: { open: 3, confirmed: 1 } }
+      : { total: 0, by_status: {} })
     show()
-    await screen.findByText('Vision benchmark')
-    expect(fetchExperimentStats).toHaveBeenCalledWith({ project_id: 'prj_platform', platform_experiment_id: 'pe-x', group_by: 'hypothesis' })
+
+    await screen.findByText('Busy')
+    await card('Busy').findByText('12.5 of 100 AccH')
+    expect(card('Busy').getByText('3 agents')).toBeTruthy()
+    expect(card('Busy').getByText('4 hypotheses')).toBeTruthy()
+    expect(card('Busy').getByText('1 confirmed')).toBeTruthy()
+    expect(card('Busy').queryByText(/refuted|inconclusive|at most/)).toBeNull()
+    expect(card('Busy').getByRole('button', { name: 'Edit' })).toBeTruthy()
+
+    const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
+    const closed = screen.getByText('Empty closed').closest('[role="link"]') as HTMLElement
+    expect(closed.textContent).toBe(`closedEmpty closed${date(closedAt)}`)
+    const draft = screen.getByText('Idea').closest('[role="link"]') as HTMLElement
+    expect(draft.textContent).toBe(`draftIdea${date('2026-01-01T00:00:00Z')}`)
+    expect(fetchPlatformExperimentQuotas).not.toHaveBeenCalledWith('pe-draft')
+    const figures = card('Busy').getByText('3 agents').parentElement!
+    expect(figures.className).toContain('tabular-nums')
+    expect(figures.querySelector('.font-mono')).toBeNull()
   })
 
   it('keep the way to start one\'s own when all there is is shared', async () => {
@@ -89,7 +119,7 @@ describe('the platform experiments of a project', () => {
     show()
     await screen.findByText('Vision benchmark')
     expect(screen.getByRole('button', { name: 'Plan it' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Configure it yourself' })).toBeTruthy()
-    expect(screen.queryByText(/None yet/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Configure it myself' })).toBeTruthy()
+    expect(screen.queryByText('No experiments yet.')).toBeNull()
   })
 })
