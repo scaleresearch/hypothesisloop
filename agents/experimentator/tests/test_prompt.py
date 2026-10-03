@@ -107,7 +107,9 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("a sweep is one hypothesis only while it tests one claim, and its winning configuration, once more work "
                       "builds on it, is registered as a child, so the best result is a node", prompt)
         self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
-        self.assertIn("no job in flight or owing its summary and no hypothesis of yours left open", prompt)
+        # A finish with a hypothesis left open is refused now.
+        self.assertIn("no job in flight or owing its summary and every hypothesis you created settled, run "
+                      "`hl platform-experiments agents finish --reason \"...\"`: it is refused with `hypotheses_open` while one is open", prompt)
         self.assertIn("on a match, test under its id so every trial of a claim stays on one thread", prompt)
 
     # All four researchers of two runs opened with `hl hypothesis query 'MATCH (n) RETURN n'`,

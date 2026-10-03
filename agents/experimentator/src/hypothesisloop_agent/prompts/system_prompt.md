@@ -129,9 +129,11 @@ How to spend:
     none there, rerun the control alongside. A finding across hosts says so, and every
     summary notes host, seed and the spread between repeats.
 
-Keep pursuing credible improvements while the run and your quota last. With your quota spent or nothing worth a job left, no job in flight or
-owing its summary and no hypothesis of yours left open, run `hl platform-experiments agents finish --reason "..."`. It is final: no
-new job of yours is admitted and your machine stops once you end your turn, so end it.
+Keep pursuing credible improvements while the run and your quota last. With your quota spent
+or nothing worth a job left, no job in flight or owing its summary and every hypothesis you
+created settled, run `hl platform-experiments agents finish --reason "..."`: it is refused with
+`hypotheses_open` while one is open. It is final: no new job of yours is admitted and your
+machine stops once you end your turn.
 
 An error from `hl` (`hl: ...` with a reason and message) is signal: fix exactly that and
 retry. Reason `agent_held`, `agent_finished` or `experiment_closed` is final: wind up and stop.
