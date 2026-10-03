@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -39,27 +41,54 @@ func (e *Executor) slots(ctx context.Context) ([]slot, error) {
 	return e.slotsAgainst(v, rentable), nil
 }
 
+// counted is one answer of the market about a shape: how many machines it had to rent, how many
+// instances of the shape the account held then, and when it was asked.
+type counted struct {
+	offers, held int
+	at           time.Time
+}
+
+// offerCounts keeps the market's last answer per shape for the executors of every pass, so the
+// vendor is searched once per shape and OfferWait and not once per pass. It saves requests and
+// nothing else: a process that starts without it asks again.
+type offerCounts struct {
+	mu      sync.Mutex
+	byShape map[string]counted
+}
+
 // rentable is how many more instances of each shape the vendor has a machine for, at the size
 // Create rents a slot at. It is nil for a provider with no market, where every slot no instance
 // holds can be rented.
 //
-// The market is asked about every shape once per view, so a slot is reported free on what the
-// vendor has right now. A count kept from an earlier pass reports a slot free after the market
-// dried up, and the job placed on it waits and goes back to the queue.
+// The market is asked about a shape when its last answer is OfferWait old, the time a job is
+// given to find a machine anyway, and in between that answer stands less every instance of the
+// shape rented since: each took one of the machines counted. An instance that left is not added
+// back, since its machine need not be on offer again.
 func (e *Executor) rentable(ctx context.Context, v *view) (map[string]int, error) {
 	if e.market == nil || v.rentable != nil {
 		return v.rentable, nil
 	}
+	held := map[string]int{}
+	for _, i := range v.instances {
+		held[i.shape]++
+	}
+	e.offers.mu.Lock()
+	defer e.offers.mu.Unlock()
 	rentable := make(map[string]int, len(e.shapes))
 	for _, shape := range e.shapes {
-		count, err := e.market.Rentable(ctx, provider.Spec{
-			AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
-			CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
-		}, shape.MaxInstances)
-		if err != nil {
-			return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
+		last, asked := e.offers.byShape[shape.Name]
+		if !asked || e.now().Sub(last.at) >= e.offerWait {
+			count, err := e.market.Rentable(ctx, provider.Spec{
+				AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
+				CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
+			}, shape.MaxInstances)
+			if err != nil {
+				return nil, fmt.Errorf("cloudexec: count what there is to rent for shape %s: %w", shape.Name, err)
+			}
+			last = counted{offers: count, held: held[shape.Name], at: e.now()}
+			e.offers.byShape[shape.Name] = last
 		}
-		rentable[shape.Name] = count
+		rentable[shape.Name] = max(0, last.offers-max(0, held[shape.Name]-last.held))
 	}
 	v.rentable = rentable
 	return rentable, nil
