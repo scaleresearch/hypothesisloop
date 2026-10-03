@@ -129,6 +129,12 @@ type Experiment struct {
 	// SecretEnv is the secret_env the job was submitted with, stored with the row and apart from
 	// Job. Never serialized: ForRuntime alone puts it back on the spec, for the runtime.
 	SecretEnv map[string]string `json:"-"`
+	// SubmissionKey is the key the submit stated to be safe to repeat: a later submit of the same
+	// agent with it is answered with this job. Written with the row and read back by no one.
+	SubmissionKey string `json:"-"`
+	// MaxEstimateHours bounds the estimate admission gives a job that reaches it with none
+	// (EstimatedDurationHours 0), 0 for no bound. Read by the admission transaction alone.
+	MaxEstimateHours float64 `json:"-"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.

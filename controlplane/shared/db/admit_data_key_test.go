@@ -122,6 +122,102 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	}
 }
 
+// A submit stored after its client gave up waiting was sent again, and two jobs held quota. One
+// agent's submits with one submission key are one job: the second creates nothing, asks the store
+// for no key and names the first. Another key, and another agent's same key, are other jobs.
+func TestASubmissionKeySeenFromTheAgentAnswersItsJobAndCreatesNothing(t *testing.T) {
+	store, exp := admitDataKeyFixture(t)
+	ctx := context.Background()
+	exp.SubmissionKey, exp.EstimatedCostAccH, exp.CapacityTier = "key-1", 6, domain.CapacityGuaranteed
+	created := 0
+	createKey := func(context.Context) error { created++; return nil }
+	if decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, createKey); err != nil || decision != AdmitInserted {
+		t.Fatalf("first submit = %v %v, want inserted", decision, err)
+	}
+
+	// 6 of the agent's 10 hours are held, so a second job of 6 would be refused: the repeat is not.
+	again := *exp
+	again.ID = exp.ID + "-again"
+	decision, err := store.AdmitExperimentTx(ctx, &again, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, createKey)
+	if err != nil || decision != AdmitRepeated || again.ID != exp.ID || created != 1 {
+		t.Fatalf("repeat = %v %v naming %s with %d keys created, want repeated, naming %s, with 1", decision, err, again.ID, created, exp.ID)
+	}
+	var jobs int
+	if err := store.ExperimentsStore.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM experiments WHERE agent_id = $1`, exp.AgentID).Scan(&jobs); err != nil || jobs != 1 {
+		t.Fatalf("the agent has %d jobs (%v), want 1", jobs, err)
+	}
+
+	other := *exp
+	other.ID, other.SubmissionKey, other.EstimatedCostAccH = exp.ID+"-other", "key-2", 1
+	if decision, err := store.AdmitExperimentTx(ctx, &other, noUsage, SubmissionRateLimit{}, createKey); err != nil || decision != AdmitInserted {
+		t.Fatalf("another key = %v %v, want inserted", decision, err)
+	}
+
+	second := exp.AgentID + "-b"
+	createTestAgent(t, store.ExperimentsStore.pool, second)
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+		ID: uuid.New().String(), AgentID: second, PlatformExperimentID: exp.PlatformExperimentID, GuaranteedAcceleratorHours: 10, CreatedAt: time.Now().UTC(),
+	})...); err != nil {
+		t.Fatal(err)
+	}
+	theirs := *exp
+	theirs.ID, theirs.AgentID, theirs.Actor.ID = exp.ID+"-theirs", second, second
+	if decision, err := store.AdmitExperimentTx(ctx, &theirs, noUsage, SubmissionRateLimit{}, createKey); err != nil || decision != AdmitInserted || theirs.ID != exp.ID+"-theirs" {
+		t.Fatalf("another agent's same key = %v %v naming %s, want a job of its own", decision, err, theirs.ID)
+	}
+}
+
+// A baseline job that states no estimate was sized outside the transaction from a figure that
+// counts a running job at what it spent, and refused 402 inside it, where the job counts at its
+// estimate. The transaction sizes it from the figure it admits on.
+func TestAJobWithNoEstimateTakesTheLargestTheAdmissionsOwnFigureHolds(t *testing.T) {
+	domain.SetAcceleratorRates(map[string]float64{"cpu": 0.5})
+	unsized := func(exp *domain.Experiment, id string, limit float64) *domain.Experiment {
+		job := *exp
+		job.ID, job.AcceleratorCount, job.EstimatedDurationHours, job.EstimatedCostAccH, job.MaxEstimateHours = exp.ID+id, 2, 0, 0, limit
+		return &job
+	}
+	ctx := context.Background()
+	noKey := func(context.Context) error { return nil }
+
+	// 2 cores at 0.5 hold 1 an hour. With 4 spent and a running job holding 3.33337 of the 10,
+	// 2.66663 remain: 2.6666 hours, rounded down to a step.
+	store, exp := admitDataKeyFixture(t)
+	exp.CapacityTier = domain.CapacityGuaranteed
+	running := *exp
+	running.ID, running.EstimatedCostAccH = exp.ID+"-running", 3.33337
+	if _, err := store.AdmitExperimentTx(ctx, &running, noUsage, SubmissionRateLimit{}, noKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'RUNNING', not_admitted_reason = NULL WHERE id = $1`, running.ID); err != nil {
+		t.Fatal(err)
+	}
+	spent := func(context.Context) (*domain.AgentQuota, error) {
+		return &domain.AgentQuota{UsedGuaranteedAccH: 4}, nil
+	}
+	job := unsized(exp, "-sized", 0)
+	if decision, err := store.AdmitExperimentTx(ctx, job, spent, SubmissionRateLimit{}, noKey); err != nil || decision != AdmitInserted || job.EstimatedDurationHours != 2.6666 || job.EstimatedCostAccH != 2.6666 {
+		t.Fatalf("got = %v %v with %g h holding %g, want inserted with 2.6666 h holding 2.6666", decision, err, job.EstimatedDurationHours, job.EstimatedCostAccH)
+	}
+	stored, err := store.GetExperiment(ctx, job.ID)
+	if err != nil || stored.EstimatedDurationHours != 2.6666 || stored.EstimatedCostAccH != 2.6666 {
+		t.Fatalf("stored %+v (%v), want the estimate it was admitted with", stored, err)
+	}
+
+	// Nothing is left now but a sliver under one step.
+	var refusal *AdmitRefusal
+	if _, err := store.AdmitExperimentTx(ctx, unsized(exp, "-none", 0), spent, SubmissionRateLimit{}, noKey); !errors.As(err, &refusal) || refusal.Reason != RefusedInsufficientQuota || !strings.Contains(refusal.Message, "no estimated_duration_hours fits it now") || !strings.Contains(refusal.Message, "2 of your jobs that have not ended hold 6") {
+		t.Fatalf("with nothing remaining = %v, want %s saying nothing fits and what the two jobs hold", err, RefusedInsufficientQuota)
+	}
+
+	store, exp = admitDataKeyFixture(t)
+	exp.CapacityTier = domain.CapacityGuaranteed
+	limited := unsized(exp, "-limited", 0.125)
+	if _, err := store.AdmitExperimentTx(ctx, limited, noUsage, SubmissionRateLimit{}, noKey); err != nil || limited.EstimatedDurationHours != 0.125 || limited.EstimatedCostAccH != 0.125 {
+		t.Fatalf("within a limit of 0.125 h: %v with %g h holding %g, want 0.125 of each", err, limited.EstimatedDurationHours, limited.EstimatedCostAccH)
+	}
+}
+
 // A store that cannot create the key refuses this submission alone: nothing is queued that would
 // run with a key the store does not know.
 func TestAdmitExperimentTxRollsBackWhenTheStoreCannotCreateTheKey(t *testing.T) {

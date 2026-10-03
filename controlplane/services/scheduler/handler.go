@@ -40,8 +40,9 @@ type summaryReply struct {
 
 // submitRequest is the wire shape for POST /experiments.
 type submitRequest struct {
-	ID       string         `json:"id,omitempty" required:"false" doc:"Left out: the platform issues the job's id and answers it."`
-	Metadata submitMeta     `json:"metadata"`
+	ID            string         `json:"id,omitempty" required:"false" doc:"Left out: the platform issues the job's id and answers it."`
+	SubmissionKey string         `json:"submission_key,omitempty" required:"false" maxLength:"128" pattern:"^[A-Za-z0-9._:-]+$" doc:"Makes the submit safe to repeat: a later submit of the same agent in the same platform experiment with this key creates nothing and is answered with the job this one created, as it is then. hl derives it from the request."`
+	Metadata      submitMeta     `json:"metadata"`
 	Job      domain.JobSpec `json:"job"`
 }
 
@@ -59,6 +60,7 @@ func newJob(req submitRequest, meta submitMeta, actor domain.Actor) (*domain.Exp
 	}
 	return &domain.Experiment{
 		ID:                     id,
+		SubmissionKey:          req.SubmissionKey,
 		ParentID:               meta.ParentID,
 		AgentID:                meta.AgentID,
 		Actor:                  actor,
@@ -96,6 +98,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
 		Description: "Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. " +
+			"submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. " +
 			"metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. " +
 			"An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. " +
 			"metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 estimate_required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit, and what the job does not spend is given back when it ends. " +

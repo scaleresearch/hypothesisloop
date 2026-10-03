@@ -36,49 +36,27 @@ func (baselineStore) GetAgentSignup(_ context.Context, _, agentID string) (*doma
 	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, Flavor: domain.DefaultAgentFlavor}, nil
 }
 
-// shareQuota answers one agent's quota as admission counts it, nil for an agent with none.
-type shareQuota struct {
-	QuotaService
-	quota *domain.AgentQuota
-}
-
-func (q shareQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
-	return q.quota, nil
-}
-
-// Nothing is measured before the baseline, so its agent guessed: 0.25 h against a small share was
-// refused 402, and the job then ran 10 s. A baseline job that states no estimate takes the largest
-// its agent's quota admits, within the stage's per-job limit, and a stated one stands.
-func TestABaselineJobThatStatesNoEstimateTakesTheLargestItsQuotaAdmits(t *testing.T) {
-	share := func(guaranteed, used float64) *domain.AgentQuota {
-		return &domain.AgentQuota{GuaranteedAcceleratorHours: guaranteed, UsedGuaranteedAccH: used}
-	}
+// A baseline job that states no estimate was sized from a read of the quota that counts a running
+// job at what it spent, and then refused 402 by the admission, which counts it at its estimate.
+// The submit leaves such a job unsized for the admission transaction, with the stage's limit, and
+// a stated estimate stands.
+func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 	for name, tc := range map[string]struct {
-		stated      float64
-		quota       *domain.AgentQuota
-		maxJobHours float64
-		want        float64
-		reason      string
+		stated, maxJobHours float64
 	}{
-		"all that remains of the share": {0, share(0.5, 0.25), 0, 0.25, ""},
-		"rounded down to a step":        {0, share(0.33337, 0), 0, 0.3333, ""},
-		"within the per-job limit":      {0, share(0.5, 0.25), 0.125, 0.125, ""},
-		"a stated one stands":           {0.0625, nil, 0, 0.0625, ""},
-		"nothing remains":               {0, share(0.5, 0.5), 0, 0, ReasonInsufficientCredits},
-		"no quota":                      {0, nil, 0, 0, "no_quota"},
+		"no estimate":                  {0, 0},
+		"no estimate, a per-job limit": {0, 0.125},
+		"a stated one stands":          {0.0625, 0.125},
 	} {
-		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: baselineStore{maxJobHours: tc.maxJobHours}, quota: shareQuota{quota: tc.quota}, hypotheses: oneHypothesis{}}
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: baselineStore{maxJobHours: tc.maxJobHours}, hypotheses: oneHypothesis{}}
 		exp := baselineSubmission()
 		exp.EstimatedDurationHours = tc.stated
-		err := s.Submit(context.Background(), exp)
-		var refused *AdmissionError
-		switch {
-		case tc.reason != "":
-			if !errors.As(err, &refused) || refused.Reason != tc.reason {
-				t.Errorf("%s: got = %v, want %s", name, err, tc.reason)
-			}
-		case !errors.Is(err, errReachedScoring) || exp.EstimatedDurationHours != tc.want || exp.EstimatedCostAccH != tc.want:
-			t.Errorf("%s: got = %v with an estimate of %g holding %g, want the job taken with %g", name, err, exp.EstimatedDurationHours, exp.EstimatedCostAccH, tc.want)
+		wantLimit := tc.maxJobHours
+		if tc.stated != 0 {
+			wantLimit = 0
+		}
+		if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) || exp.EstimatedDurationHours != tc.stated || exp.MaxEstimateHours != wantLimit {
+			t.Errorf("%s: got = %v with an estimate of %g within %g, want the job taken with %g within %g", name, err, exp.EstimatedDurationHours, exp.MaxEstimateHours, tc.stated, wantLimit)
 		}
 	}
 	if got := admissionHTTPStatus(ReasonInsufficientCredits); got != 402 {
@@ -87,7 +65,7 @@ func TestABaselineJobThatStatesNoEstimateTakesTheLargestItsQuotaAdmits(t *testin
 
 	// A researcher's job has the measured estimate or states one: the largest that fits would hold
 	// its whole share for one trial.
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, quota: shareQuota{quota: share(0.5, 0)}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.EstimatedDurationHours = 0
 	var refused *AdmissionError

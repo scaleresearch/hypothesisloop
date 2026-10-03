@@ -85,6 +85,9 @@ const (
 	AdmitAlreadyQueued
 	// AdmitRejected: nothing was written; the error says why.
 	AdmitRejected
+	// AdmitRepeated: the agent already submitted with this submission key. Nothing was written
+	// and the experiment's ID is now that of the job the first submit created.
+	AdmitRepeated
 )
 
 // AdmitRefusal is why AdmitExperimentTx wrote nothing for a submission it understood: the reason
@@ -130,6 +133,18 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(exp.AgentID, exp.PlatformExperimentID)); err != nil {
 		return AdmitRejected, fmt.Errorf("admit experiment: lock: %w", err)
+	}
+	// A submit that was stored and whose answer was lost is sent again with its key. Read under
+	// the agent's lock, so of two that race one inserts and the other finds its row here.
+	if exp.SubmissionKey != "" {
+		err := tx.QueryRow(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND agent_id = $2 AND submission_key = $3`,
+			exp.PlatformExperimentID, exp.AgentID, exp.SubmissionKey).Scan(&exp.ID)
+		if err == nil {
+			return AdmitRepeated, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return AdmitRejected, fmt.Errorf("admit experiment: submission key: %w", err)
+		}
 	}
 	// The one place that decides whether this id is new, a legal re-submission, or taken. It is
 	// read here rather than before the transaction because only here is it atomic with the insert
@@ -223,7 +238,12 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 
 	allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
 	allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
-	if remaining := allocation.Remaining(exp.CapacityTier); exp.EstimatedCostAccH > remaining {
+	remaining := allocation.Remaining(exp.CapacityTier)
+	if exp.EstimatedDurationHours == 0 {
+		if err := takeLargestEstimate(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc); err != nil {
+			return AdmitRejected, err
+		}
+	} else if exp.EstimatedCostAccH > remaining {
 		return AdmitRejected, &AdmitRefusal{Reason: RefusedInsufficientQuota, Message: quotaRefusal(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc)}
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
@@ -251,12 +271,41 @@ func quotaRefusal(exp *domain.Experiment, remaining float64, holding int, reserv
 // is 0.36 s.
 const fitSteps = 1e4
 
+// fitHours is the longest estimate a job holding perHour may have within remaining. A job's hold
+// is its hours times what its size costs an hour, so the hours that fit are remaining over that,
+// rounded down.
+func fitHours(remaining, perHour float64) float64 {
+	return math.Floor(remaining/perHour*fitSteps) / fitSteps
+}
+
+// takeLargestEstimate gives a job that reaches admission with no estimate, a baseline agent's,
+// the largest its agent's quota admits, within exp.MaxEstimateHours. Nothing is measured before
+// the baseline, so its agent has nothing to estimate from, and a job gives back what it does not
+// spend when it ends. remaining is the figure every admission decides on, so the job fits it.
+func takeLargestEstimate(exp *domain.Experiment, remaining float64, holding int, reserved float64) error {
+	exp.EstimatedDurationHours = 1
+	perHour, err := exp.EstimateHeld()
+	if err != nil {
+		return fmt.Errorf("admit experiment: %w", err)
+	}
+	hours := fitHours(remaining, perHour)
+	if exp.MaxEstimateHours > 0 {
+		hours = min(hours, exp.MaxEstimateHours)
+	}
+	if hours <= 0 {
+		exp.EstimatedDurationHours = 0
+		return &AdmitRefusal{Reason: RefusedInsufficientQuota, Message: fmt.Sprintf("the agent has %.3g accelerator_hours remaining, and a job of %d of %s holds %.3g an hour: no estimated_duration_hours fits it now. %s",
+			remaining, exp.AcceleratorCount, exp.AcceleratorType, perHour, heldByEstimates(holding, reserved))}
+	}
+	exp.EstimatedDurationHours = hours
+	exp.EstimatedCostAccH = perHour * hours
+	return nil
+}
+
 // largestEstimateThatFits names the longest estimated_duration_hours a job of exp's size may
-// state within remaining. A job's hold is its hours times what its size costs an hour, so the
-// hours that fit are remaining over that, rounded down so that stating them is admitted.
+// state within remaining, rounded down so that stating them is admitted.
 func largestEstimateThatFits(exp *domain.Experiment, remaining float64) string {
-	perHour := exp.EstimatedCostAccH / exp.EstimatedDurationHours
-	fits := math.Floor(remaining/perHour*fitSteps) / fitSteps
+	fits := fitHours(remaining, exp.EstimatedCostAccH/exp.EstimatedDurationHours)
 	if fits <= 0 {
 		return "No estimated_duration_hours fits a job of this size now."
 	}

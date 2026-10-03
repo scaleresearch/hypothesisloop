@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -264,10 +263,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 
+	// A baseline agent's job that states no estimate is sized by the admission transaction, from
+	// the figure it admits on: the largest the agent's quota holds, within the stage's limit.
 	if exp.EstimatedDurationHours == 0 {
-		if err := s.takeLargestEstimate(ctx, exp, pe); err != nil {
-			return err
-		}
+		exp.MaxEstimateHours = pe.CurrentMaxJobHours()
 	}
 
 	// 3aa. Stage job-length cap. Rejecting at submit is the honest half of the gate — the agent
@@ -376,6 +375,20 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 	}
 
+	// A submit repeated with its key is answered with the job the first one created, as it is
+	// now, and changes nothing.
+	if decision == db.AdmitRepeated {
+		stored, err := s.store.GetExperiment(ctx, exp.ID)
+		if err != nil {
+			return fmt.Errorf("scheduler: read the job of a repeated submit: %w", err)
+		}
+		if stored == nil {
+			return fmt.Errorf("scheduler: job %s of a repeated submit is gone", exp.ID)
+		}
+		*exp = *stored
+		return nil
+	}
+
 	// Re-submitting a job that is already QUEUED is legal and only refreshes its priority: it is
 	// still waiting for capacity, so there is nothing to insert and nothing to debit.
 	if decision == db.AdmitAlreadyQueued {
@@ -384,41 +397,11 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
+	// The row keeps why a job waits as "code: sentence", and an answer states the two apart.
+	exp.NotAdmittedReason, exp.NotAdmittedMessage = domain.SplitQueueReason(exp.NotAdmittedReason)
+
 	// 8. Wake the scheduler loop.
 	s.loop.Trigger()
-	return nil
-}
-
-// estimateSteps is how many steps of an hour the estimate given to a baseline job is rounded down
-// to: one is 0.36 s.
-const estimateSteps = 1e4
-
-// takeLargestEstimate gives a baseline agent's job that states no estimate the largest one its
-// agent's quota admits now, within the stage's per-job limit. Nothing is measured before the
-// baseline, so its agent has nothing to estimate from, and a job gives back what it does not spend
-// when it ends.
-func (s *Service) takeLargestEstimate(ctx context.Context, exp *domain.Experiment, pe *domain.PlatformExperiment) error {
-	quota, err := s.quota.GetAgentQuota(ctx, exp.AgentID, exp.PlatformExperimentID)
-	if err != nil {
-		return fmt.Errorf("scheduler: quota of the baseline agent: %w", err)
-	}
-	if quota == nil {
-		return &AdmissionError{Reason: db.RefusedNoQuota, Message: "the agent holds no quota in this platform experiment, and a job spends its agent's quota"}
-	}
-	exp.EstimatedDurationHours = 1
-	heldPerHour, err := exp.EstimateHeld()
-	if err != nil {
-		return fmt.Errorf("scheduler: %w", err)
-	}
-	remaining := quota.Remaining(exp.CapacityTier)
-	hours := math.Floor(remaining/heldPerHour*estimateSteps) / estimateSteps
-	if limit := pe.CurrentMaxJobHours(); limit > 0 {
-		hours = min(hours, limit)
-	}
-	if hours <= 0 {
-		return &AdmissionError{Reason: ReasonInsufficientCredits, Message: fmt.Sprintf("the agent has %.3g accelerator_hours remaining, and a job of %d of %s holds %.3g an hour: no estimated_duration_hours fits it now. A job of the agent that has not ended gives back what it does not spend when it ends", remaining, exp.AcceleratorCount, exp.AcceleratorType, heldPerHour)}
-	}
-	exp.EstimatedDurationHours = hours
 	return nil
 }
 
