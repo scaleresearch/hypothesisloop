@@ -309,6 +309,13 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 		}
 	}
 
+	// The refusal is worded for its caller, so a request with none is the platform's failure.
+	nobody := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: researcher}, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
+	var admission *AdmissionError
+	if err := nobody.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errNoCaller) || errors.As(err, &admission) {
+		t.Errorf("a submit with no caller in its context: got = %v, want the platform's error and no refusal", err)
+	}
+
 	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: oneHypothesis{}}
 	if err := s.Submit(context.Background(), baselineSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)

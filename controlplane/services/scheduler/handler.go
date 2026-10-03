@@ -89,7 +89,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if meta.PlatformExperimentID, meta.AgentID, err = access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
 			return nil, err
 		}
-		caller, _ := auth.FromContext(ctx)
+		caller, ok := auth.FromContext(ctx)
+		if !ok {
+			return nil, auth.Internal(h.svc.logger, "submit experiment", errNoCaller)
+		}
 		exp := domain.Experiment{
 			ID:                     req.ID,
 			ParentID:               meta.ParentID,
@@ -365,7 +368,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Body.Summary == "" {
 			return nil, huma.Error400BadRequest("summary is required")
 		}
-		caller, _ := auth.FromContext(ctx)
+		caller, ok := auth.FromContext(ctx)
+		if !ok {
+			return nil, auth.Internal(h.svc.logger, "write experiment summary", errNoCaller, zap.String("id", in.ID))
+		}
 		hypothesis, err := h.svc.WriteExperimentSummary(ctx, in.ID, caller.Actor(), in.Body.Summary)
 		if err != nil {
 			if e := admissionStatusError(err); e != nil {
