@@ -247,7 +247,7 @@ def test_registration_waits_until_close_hypotheses_are_told_apart(api, graph_pe,
     body = held.json()
     assert [(h["id"], h["reason"]) for h in body["similar"]] == [(bs8["id"], "close_text")], body
     assert body["similar"][0]["builds_on"] == [pe_id] and body["similar"][0]["agent_id"] == agent_a
-    assert "distinct_from" in body["detail"]
+    assert body["reason"] == "similar_hypotheses" and "distinct_from" in body["message"] and "detail" not in body, body
     assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"]] == [bs8["id"]], "a held-back registration created a node"
 
     submit = ["hypothesis", "submit", "--agent", agent_b, "--platform-experiment", pe_id, "--text", reworded, "--builds-on", "root"]
@@ -371,6 +371,18 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
     assert bad.status_code == 400, f"malformed Cypher answered {bad.status_code}"
     assert "mismatched input" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
 
+    # Refused before it reaches the graph, each with its reason: a statement that reads a file on
+    # the database's host, and a rune outside printable ASCII anywhere but in a string or a
+    # backtick name, where it is text.
+    for cypher, reason in (
+        ("UNWIND [1] AS i LOAD CSV FROM '/etc/hostname' NO HEADER AS row RETURN row", "LOAD is not available"),
+        ("MATCH (h:Hypothesis) RETURN h.id AS id", "printable ASCII"),
+        ("MATCH (h:Hypothesis)‐[:BUILDS_ON]->(p:Hypothesis) RETURN h.id", "printable ASCII"),
+    ):
+        refused = api.query(pe_id, cypher)
+        assert refused.status_code == 400 and reason in refused.json()["error"], f"{cypher!r}: {refused.status_code} {refused.text}"
+    assert api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN 'déjà vu' AS said", id=hyp["id"]) == [{"said": "déjà vu"}]
+
     capped = api.query(pe_id, "UNWIND range(1, 1000) AS i RETURN i")
     assert capped.status_code == 200, capped.text
     body = capped.json()
@@ -465,8 +477,9 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
 
 
 def _watch_as(api, agent: str, pe_id: str, state_dir: Path) -> subprocess.CompletedProcess:
-    env = {**api.hl_env(), "AGENT_ID": agent, "PLATFORM_EXPERIMENT_ID": pe_id, "HL_STATE_DIR": str(state_dir)}
-    return subprocess.run([str(api.hl_bin), "watch", "--timeout", "10"],
+    # hl takes who watches and where from its flags or its token, and from no other variable.
+    env = {**api.hl_env(), "HL_STATE_DIR": str(state_dir)}
+    return subprocess.run([str(api.hl_bin), "watch", "--agent", agent, "--platform-experiment", pe_id, "--timeout", "10"],
                           capture_output=True, text=True, env=env, timeout=30)
 
 
