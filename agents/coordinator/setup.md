@@ -68,13 +68,14 @@ silently improvise.
    where helm reaches the cluster and give it the token when it asks: the command holds none.
    `--bare-metal` prints the command for a bare-metal node instead. `hl cluster remove <name>` ends a cluster and requeues its jobs. The local stack registers its own clusters for the
    org `default`.
-   **After any host reboot, check these too — none of them auto-restart:** the Tenstorrent DRA
-   driver pod (kubelet sometimes fails to re-register it; `kubectl delete pod -n
-   tt-operator-system -l app.kubernetes.io/name=tt-dra-driver` forces a clean re-register — job
-   pods fail with `CDI device injection failed` until this is done), and any
-   bare-metal node's `bare-agent` process (no systemd unit — restart its `start.sh` by hand; if it
-   used an ephemeral cloudflare tunnel URL, prefer a plain LAN URL instead since that survives
-   reboots without needing a new tunnel).
+   **After any host reboot, check the Tenstorrent DRA driver pod.** The kubelet sometimes fails
+   to register it again, and job pods fail with `CDI device injection failed` until
+   `kubectl delete pod -n tt-operator-system -l app.kubernetes.io/name=tt-dra-driver` forces a
+   clean registration. A bare-metal node's agent is a systemd unit, enabled at boot and
+   restarted when it fails (`journalctl -u hypothesisloop-agent -f` follows it). One run in the
+   foreground from a checkout has no unit and is started again by hand. An agent installed with
+   a tunnel's address loses the platform when the tunnel's address changes, so install it with
+   an address that outlives a reboot.
 3. **Code repository**: a repository on the deployment's git host that the platform experiment
    names. Its default branch starts as a copy of three things from
    `agents/coordinator/experiments/$EXPERIMENT/`: `README.md`, `.hypothesisloop/` and `seed/`,
