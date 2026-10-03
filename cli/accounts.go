@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -15,56 +14,48 @@ import (
 // to the one org the token reaches; --project defaults to $HL_PROJECT.
 
 var orgCommands = []subcommand{
-	{"list", "the orgs this token reaches, with your role in each", orgList},
-	{"create", "create an org you own, with its default project", orgCreate},
-	{"rename", "rename an org; its id stays", orgRename},
-	{"members", "the people of an org: list them, change a role, remove one or leave", orgMembers},
-	{"invites", "invite people into an org by a token, and accept one", orgInvites},
+	{"list", "the orgs this token reaches, with your role in each", orgList, ofPeople},
+	{"create", "create an org you own, with its default project", orgCreate, ofPeople},
+	{"rename", "rename an org; its id stays", orgRename, ofPeople},
+	{"members", "the people of an org: list them, change a role, remove one or leave", group("org members", orgMemberCommands), ofPeople},
+	{"invites", "invite people into an org by a token, and accept one", group("org invites", orgInviteCommands), ofPeople},
 }
 
 var orgMemberCommands = []subcommand{
-	{"list", "an org's members and the role each holds", orgMembersList},
-	{"set-role", "make a member an owner, or an owner a member", orgMembersSetRole},
-	{"remove", "remove a member, or leave by naming yourself", orgMembersRemove},
+	{"list", "an org's members and the role each holds", orgMembersList, ofPeople},
+	{"set-role", "make a member an owner, or an owner a member", orgMembersSetRole, ofPeople},
+	{"remove", "remove a member, or leave by naming yourself", orgMembersRemove, ofPeople},
 }
 
 var orgInviteCommands = []subcommand{
-	{"create", "create an invite; its token is printed once and never again", orgInvitesCreate},
-	{"list", "an org's pending invites, never their tokens", orgInvitesList},
-	{"revoke", "end an invite that was not accepted", orgInvitesRevoke},
-	{"accept", "join the org an invite is for, as the person signed in", orgInvitesAccept},
-}
-
-func orgMembers(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	return runGroup("org members", orgMemberCommands, c, args, stdout, stderr)
-}
-
-func orgInvites(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	return runGroup("org invites", orgInviteCommands, c, args, stdout, stderr)
+	{"create", "create an invite; its token is printed once and never again", orgInvitesCreate, ofPeople},
+	{"list", "an org's pending invites, never their tokens", orgInvitesList, ofPeople},
+	{"revoke", "end an invite that was not accepted", orgInvitesRevoke, ofPeople},
+	{"accept", "join the org an invite is for, as the person signed in", orgInvitesAccept, ofPeople},
 }
 
 var projectCommands = []subcommand{
-	{"list", "an org's projects", projectList},
-	{"create", "create a project in an org", projectCreate},
-	{"rename", "rename a project; its id stays", projectRename},
+	{"list", "an org's projects", projectList, ofPeople},
+	{"create", "create a project in an org", projectCreate, ofPeople},
+	{"rename", "rename a project; its id stays", projectRename, ofPeople},
 }
 
 var apiKeyCommands = []subcommand{
-	{"create", "create an API key; its token is printed once and never again", apiKeyCreate},
-	{"list", "an org's API keys, revoked ones included, never their tokens", apiKeyList},
-	{"revoke", "end an API key and every key minted from it", apiKeyRevoke},
+	{"create", "create an API key; its token is printed once and never again", apiKeyCreate, ofPeople},
+	{"list", "an org's API keys, revoked ones included, never their tokens", apiKeyList, ofPeople},
+	{"revoke", "end an API key and every key minted from it", apiKeyRevoke, ofPeople},
 }
 
 var clusterCommands = []subcommand{
-	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd},
-	{"list", "the clusters an org's jobs run on, whether each is connected and whether the org has it enabled", clusterList},
-	{"token", "print the runtime token of a cluster the org registered", clusterToken},
-	{"order", "set the order the org's jobs are placed on the clusters it registered, first placed first", clusterOrder},
-	{"settings", "set a cluster's own scale-up timeout, speculative cap or stuck-pending timeout in place of the scheduler's defaults", clusterSettings},
-	{"disable", "turn a cluster off for the org's jobs: none is placed there, the ones running finish", clusterDisable},
-	{"enable", "turn a cluster on again for the org's jobs", clusterEnable},
-	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity},
-	{"remove", "end a cluster: requeue its jobs and refuse its runtime token", clusterRemove},
+	{"add", "register a cluster for an org and print the command that starts its agent", clusterAdd, ofPeople},
+	{"list", "the clusters an org's jobs run on, whether each is connected and whether the org has it enabled", clusterList, ofPeople},
+	{"token", "print the runtime token of a cluster the org registered", clusterToken, ofPeople},
+	{"order", "set the order the org's jobs are placed on the clusters it registered, first placed first", clusterOrder, ofPeople},
+	{"settings", "set a cluster's own scale-up timeout, speculative cap or stuck-pending timeout in place of the scheduler's defaults", clusterSettings, ofPeople},
+	{"disable", "turn a cluster off for the org's jobs: none is placed there, the ones running finish", clusterDisable, ofPeople},
+	{"enable", "turn a cluster on again for the org's jobs", clusterEnable, ofPeople},
+	{"forget-identity", "let a cluster whose machines were rebuilt bind to the identity they report now", clusterForgetIdentity, ofPeople},
+	{"remove", "end a cluster: requeue its jobs and refuse its runtime token", clusterRemove, ofPeople},
 }
 
 const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
@@ -74,10 +65,6 @@ const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
 func resolveOrg(c *apiclient.Client, flagValue string) (string, error) {
 	if org := orEnv(flagValue, orgEnv); org != "" {
 		return org, nil
-	}
-	if kind := kindOf(c.Token); kind != callerOther {
-		return "", errors.New("this is a command of an org's people, and HL_TOKEN is the token of an agent or a coordinator of one platform experiment, which reaches no org. " +
-			"hl capacity shows the clusters its jobs can run on, hl platform-experiments get its experiment")
 	}
 	var me struct {
 		Orgs []struct {

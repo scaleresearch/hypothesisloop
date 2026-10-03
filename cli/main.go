@@ -75,72 +75,62 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if args[0] == "exec" {
-		return cmdExec(args[1:], stdout, stderr)
+	client := apiclient.New(os.Getenv("API_URL"), token)
+	for _, command := range commands {
+		if command.name != args[0] {
+			continue
+		}
+		if kind := kindOf(token); !command.who.admits(kind) {
+			return fail(stderr, fmt.Errorf("%s: %w", command.name, command.who.refusal(kind)))
+		}
+		return command.run(client, args[1:], stdout, stderr)
 	}
+	fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", args[0], usage(token))
+	return 2
+}
 
-	apiURL := os.Getenv("API_URL")
-	client := apiclient.New(apiURL, token)
+// subcommand is one command of hl or of a group. who says whose token runs it: the listing a
+// caller reads holds the commands that admit it, and runGroup refuses the others, so the help
+// cannot name a command its reader is refused. A group's listing takes each synopsis from the
+// command's own --help, so those two cannot drift either.
+type subcommand struct {
+	name, about string
+	run         func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
+	who         callers
+}
 
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "platform-experiments":
-		return cmdPlatformExperiments(client, rest, stdout, stderr)
-	case "quota":
-		return cmdQuota(client, rest, stdout, stderr)
-	case "results":
-		return cmdResults(client, rest, stdout, stderr)
-	case "capacity":
-		return cmdCapacity(client, rest, stdout, stderr)
-	case "data-key":
-		return cmdDataKey(client, rest, stdout, stderr)
-	case "git-credential":
-		return cmdGitCredential(client, rest, os.Stdin, stdout, stderr)
-	case "hypothesis":
-		return cmdHypothesis(client, rest, stdout, stderr)
-	case "job":
-		return runGroup("job", jobCommands, client, rest, stdout, stderr)
-	case "repo":
-		return runGroup("repo", repoCommands, client, rest, stdout, stderr)
-	case "org":
-		return runGroup("org", orgCommands, client, rest, stdout, stderr)
-	case "project":
-		return runGroup("project", projectCommands, client, rest, stdout, stderr)
-	case "api-key":
-		return runGroup("api-key", apiKeyCommands, client, rest, stdout, stderr)
-	case "cluster":
-		return runGroup("cluster", clusterCommands, client, rest, stdout, stderr)
-	case "watch":
-		return cmdWatch(apiURL, token, rest, stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage(token))
-		return 2
+func group(name string, subs []subcommand) func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	return func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		return runGroup(name, subs, c, args, stdout, stderr)
 	}
 }
 
-// The commands of hl, as its usage lists them. Each caller is listed the ones its token can
-// run: those of an org's people are refused an agent and a coordinator, and those that act as
-// an agent are refused a coordinator, which is none.
+// The commands of hl. One with subs is a group, listed as the commands of it its reader runs,
+// then its about.
 var commands = []struct {
-	name, about string
-	people      bool
-	asAgent     bool
+	subcommand
+	subs []subcommand
 }{
-	{name: "platform-experiments", about: "[list] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session"},
-	{name: "quota", about: "your share of the budget and what a job submitted now may still hold of it; --all for every agent"},
-	{name: "results", about: "standings on the declared metrics"},
-	{name: "capacity", about: "live accelerators per cluster, available and total"},
-	{name: "data-key", about: `your S3 key to the experiment's data: eval "$(hl data-key)"`, asAgent: true},
-	{name: "git-credential", about: "git's credential helper for your experiment's repository; git runs it"},
-	{name: "hypothesis", about: "submit | checkout | link | comment | status | list | get | query"},
-	{name: "job", about: "submit | list | status | metrics | summary | logs | data | cost | cancel | stats"},
-	{name: "repo", about: "init | check: the files every experiment's repository holds"},
-	{name: "org", about: "list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept", people: true},
-	{name: "project", about: "list | create NAME | rename NAME", people: true},
-	{name: "api-key", about: "create NAME | list | revoke ID", people: true},
-	{name: "cluster", about: "add NAME | list | token | order | settings | disable | enable | forget-identity | remove", people: true},
-	{name: "watch", about: "--experiment JOB --until 'status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED' returns when the job ends, or after --timeout seconds (540): the wait that needs no sleep loop. With no flag, your own updates"},
-	{name: "exec", about: "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", people: true},
+	{subcommand{"platform-experiments", "", cmdPlatformExperiments, everyone}, platformExperimentCommands},
+	{subcommand{"quota", "your share of the budget and what a job submitted now may still hold of it; --all for every agent", cmdQuota, everyone}, nil},
+	{subcommand{"results", "standings on the declared metrics", cmdResults, everyone}, nil},
+	{subcommand{"capacity", "live accelerators per cluster, available and total", cmdCapacity, everyone}, nil},
+	{subcommand{"data-key", `your S3 key to the experiment's data: eval "$(hl data-key)"`, cmdDataKey, asAgent}, nil},
+	{subcommand{"git-credential", "git's credential helper for your experiment's repository; git runs it", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		return cmdGitCredential(c, args, os.Stdin, stdout, stderr)
+	}, everyone}, nil},
+	{subcommand{"hypothesis", "", cmdHypothesis, everyone}, hypothesisCommands},
+	{subcommand{"job", "", group("job", jobCommands), everyone}, jobCommands},
+	{subcommand{"repo", "the files every experiment's repository holds", group("repo", repoCommands), everyone}, repoCommands},
+	{subcommand{"org", "", group("org", orgCommands), ofPeople}, orgCommands},
+	{subcommand{"project", "", group("project", projectCommands), ofPeople}, projectCommands},
+	{subcommand{"api-key", "", group("api-key", apiKeyCommands), ofPeople}, apiKeyCommands},
+	{subcommand{"cluster", "", group("cluster", clusterCommands), ofPeople}, clusterCommands},
+	{subcommand{"watch", "your own updates, one JSON object per line", cmdWatch, everyone}, nil},
+	// A job's token is none of an agent's or a coordinator's, so a runtime's is admitted.
+	{subcommand{"exec", "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", func(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		return cmdExec(args, stdout, stderr)
+	}, ofPeople}, nil},
 }
 
 const usageRules = `
@@ -162,10 +152,20 @@ func usage(token string) string {
 	var b strings.Builder
 	b.WriteString("usage: hl <command> ...\n\n")
 	for _, command := range commands {
-		if (command.people && kind != callerOther) || (command.asAgent && kind == callerCoordinator) {
+		if !command.who.admits(kind) {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-22s%s\n", command.name, command.about)
+		about := command.about
+		if command.subs != nil {
+			var names []string
+			for _, sub := range command.subs {
+				if sub.who.admits(kind) {
+					names = append(names, sub.name)
+				}
+			}
+			about = strings.TrimSuffix(strings.Join(names, " | ")+": "+about, ": ")
+		}
+		fmt.Fprintf(&b, "  %-22s%s\n", command.name, about)
 	}
 	b.WriteString(usageRules)
 	if kind == callerOther {
@@ -174,18 +174,15 @@ func usage(token string) string {
 	return b.String()
 }
 
-// subcommand is one command of a group. The group's listing takes its synopsis from the command's
-// own --help, so the two cannot drift.
-type subcommand struct {
-	name, about string
-	run         func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
-}
-
-// groupUsage lists each subcommand as the first usage form of its --help and what it is for.
-func groupUsage(group string, subs []subcommand) string {
+// groupUsage lists each subcommand a caller of kind runs as the first usage form of its --help
+// and what it is for.
+func groupUsage(group string, subs []subcommand, kind callerKind) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "usage: hl %s <command> ...\n", group)
 	for _, sub := range subs {
+		if !sub.who.admits(kind) {
+			continue
+		}
 		var help bytes.Buffer
 		// A subcommand may read its defaults from the client's token before it parses its flags.
 		sub.run(&apiclient.Client{}, []string{"-h"}, &help, &help)
@@ -198,20 +195,25 @@ func groupUsage(group string, subs []subcommand) string {
 }
 
 func runGroup(group string, subs []subcommand, c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	kind := kindOf(c.Token)
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, groupUsage(group, subs))
+		fmt.Fprintln(stderr, groupUsage(group, subs, kind))
 		return 2
 	}
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(stdout, groupUsage(group, subs))
+		fmt.Fprintln(stdout, groupUsage(group, subs, kind))
 		return 0
 	}
 	for _, sub := range subs {
-		if sub.name == args[0] {
-			return sub.run(c, args[1:], stdout, stderr)
+		if sub.name != args[0] {
+			continue
 		}
+		if !sub.who.admits(kind) {
+			return fail(stderr, fmt.Errorf("%s %s: %w", group, sub.name, sub.who.refusal(kind)))
+		}
+		return sub.run(c, args[1:], stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "hl: %s: unknown subcommand %q\n\n%s\n", group, args[0], groupUsage(group, subs))
+	fmt.Fprintf(stderr, "hl: %s: unknown subcommand %q\n\n%s\n", group, args[0], groupUsage(group, subs, kind))
 	return 2
 }
 
@@ -595,10 +597,7 @@ where your jobs write. The same key every time; it does not expire. Any S3 clien
 		return parseExit(err)
 	}
 	*pe = experimentOf(c, *pe)
-	var err error
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
+	*agent = agentOf(c, *agent)
 	if *pe == "" || *agent == "" || fs.NArg() > 0 {
 		return parseExit(misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
 	}
@@ -629,42 +628,40 @@ where your jobs write. The same key every time; it does not expire. Any S3 clien
 
 // --- platform-experiments -------------------------------------------------------------------------
 
-func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 {
-		switch args[0] {
-		case "create":
-			return cmdPlatformExperimentsCreate(c, args[1:], stdout, stderr)
-		case "close":
-			return cmdPlatformExperimentsClose(c, args[1:], stdout, stderr)
-		case "summary":
-			return cmdPlatformExperimentsSummary(c, args[1:], stdout, stderr)
-		case "update":
-			return cmdPlatformExperimentsUpdate(c, args[1:], stdout, stderr)
-		case "propose":
-			return cmdPlatformExperimentsPropose(c, args[1:], stdout, stderr)
-		case "decline":
-			return cmdPlatformExperimentsDecline(c, args[1:], stdout, stderr)
-		case "get":
-			return cmdPlatformExperimentsGet(c, args[1:], stdout, stderr)
-		case "agents":
-			return runGroup("platform-experiments agents", agentsCommands, c, args[1:], stdout, stderr)
-		}
-	}
-	fs := newFlags("platform-experiments", `usage: hl platform-experiments [list] [--limit N] [--project PROJECT] [--shared[=false]] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
+var platformExperimentCommands = []subcommand{
+	{"list", "the platform experiments this token reaches, one line each", cmdPlatformExperimentsList, everyone},
+	{"get", "the platform experiment: its status, what it waits for, its brief and its stages", cmdPlatformExperimentsGet, everyone},
+	{"create", "create a platform experiment from a YAML file", cmdPlatformExperimentsCreate, ofPeople},
+	{"update", "change the brief or other fields, or declare the baseline", cmdPlatformExperimentsUpdate, ofTheRun},
+	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose, asAgent},
+	{"decline", "a draft's planner: say why no experiment is proposed", cmdPlatformExperimentsDecline, asAgent},
+	{"close", "end the platform experiment for good", cmdPlatformExperimentsClose, ofTheRun},
+	{"summary", "write the summary of the platform experiment", cmdPlatformExperimentsSummary, ofTheRun},
+	{"agents", "the agents of a platform experiment", group("platform-experiments agents", agentsCommands), everyone},
+}
 
-list prints one platform experiment per line as compact JSON, without description and summary
-(hl platform-experiments get prints both). A closed one carries close_reason.`, stderr)
+// cmdPlatformExperiments is the group, with list as what it does when no command is named.
+func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (strings.HasPrefix(args[0], "-") && args[0] != "-h" && args[0] != "--help") {
+		return cmdPlatformExperimentsList(c, args, stdout, stderr)
+	}
+	return runGroup("platform-experiments", platformExperimentCommands, c, args, stdout, stderr)
+}
+
+func cmdPlatformExperimentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("platform-experiments list", `usage: hl platform-experiments list [--limit N] [--project PROJECT] [--shared[=false]]
+
+One platform experiment per line as compact JSON, without description and summary
+(hl platform-experiments get prints both). A closed one carries close_reason.
+hl platform-experiments with no command is this list.`, stderr)
 	limit := fs.Int("limit", 20, "max results")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
-	if len(args) > 0 && args[0] == "list" {
-		args = args[1:]
-	}
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 	if fs.NArg() > 0 {
-		return parseExit(misuse(fs, "unknown subcommand %q", fs.Arg(0)))
+		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{"limit": {strconv.Itoa(*limit)}}
 	if p := orEnv(*project, projectEnv); p != "" {
@@ -1202,7 +1199,8 @@ func toMapSlice(list []any) ([]map[string]any, error) {
 
 // --- watch -----------------------------------------------------------------------------------------
 
-func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int {
+func cmdWatch(client *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	apiURL, token := client.BaseURL, client.Token
 	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 

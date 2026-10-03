@@ -74,21 +74,54 @@ func agentOf(c *apiclient.Client, flagValue string) string {
 	return os.Getenv(agentEnv)
 }
 
-// errCoordinatorActsAsNoAgent refuses a coordinator every command that acts as an agent, whether
-// or not it names one: the platform refuses the same, and $AGENT_ID is not read for it.
+// callers says whose token runs a command. Every command's is stated in the table that lists it
+// (subcommand.who): the listing a caller reads holds the commands that admit it, and the same
+// value refuses the others before the command runs, as the platform would.
+type callers int
+
+const (
+	everyone callers = iota
+	// asAgent acts as an agent: an agent's token does, and a person or an API key naming one.
+	asAgent
+	// ofTheRun runs a platform experiment: its coordinator, or a person or an API key of its org.
+	ofTheRun
+	// ofPeople is an org's own: no token bound to one platform experiment reaches an org.
+	ofPeople
+)
+
+func (who callers) admits(kind callerKind) bool {
+	switch who {
+	case asAgent:
+		return kind != callerCoordinator
+	case ofTheRun:
+		return kind != callerAgent
+	case ofPeople:
+		return kind == callerOther
+	}
+	return true
+}
+
+// refusal is why a caller of kind, which who does not admit, may not run a command of who.
+func (who callers) refusal(kind callerKind) error {
+	whose := "an agent's"
+	if kind == callerCoordinator {
+		whose = "a coordinator's"
+	}
+	switch who {
+	case asAgent:
+		return errCoordinatorActsAsNoAgent
+	case ofTheRun:
+		return errors.New("this is a command of the platform experiment's coordinator and of its org's people, and HL_TOKEN is " + whose + ". hl --help lists the commands this token runs")
+	}
+	return errors.New("this is a command of an org's people, and HL_TOKEN is " + whose + ", the token of one platform experiment, which reaches no org. hl capacity shows the clusters its jobs can run on, hl platform-experiments get its experiment, and hl --help the commands this token runs")
+}
+
+// errCoordinatorActsAsNoAgent refuses a coordinator every command that acts as an agent, and
+// naming an agent in one it runs as itself: the platform refuses the same.
 var errCoordinatorActsAsNoAgent = errors.New("this acts as an agent, and HL_TOKEN is a coordinator's, which is no agent and acts for none. " +
 	"A coordinator writes the description (hl platform-experiments update) and the summary (hl platform-experiments summary), " +
 	"adds agents (hl platform-experiments agents) and closes the run (hl platform-experiments close). " +
 	"A hypothesis, a link or a comment it writes as itself, without --agent")
-
-// writingAgent is the agent a command spends as (see agentOf). An empty answer with no error
-// means none was given.
-func writingAgent(c *apiclient.Client, flagValue string) (string, error) {
-	if kindOf(c.Token) == callerCoordinator {
-		return "", errCoordinatorActsAsNoAgent
-	}
-	return agentOf(c, flagValue), nil
-}
 
 // recordOwner is the agent whose hypothesis, link, comment or verdict a command writes: the one
 // --agent names, else the agent an agent's token is, else $AGENT_ID, else none. With none the

@@ -17,20 +17,20 @@ import (
 )
 
 var jobCommands = []subcommand{
-	{"submit", "submit a job spec, prints its id", jobSubmit},
-	{"list", "jobs, newest first, one brief line each with its metrics", jobList},
-	{"status", "a job's whole record", jobStatus},
-	{"metrics", "per metric: last value, min, max and points reported", jobMetrics},
-	{"summary", "file the write-up of a finished job; hl job status shows it", jobSummary},
-	{"logs", "the last log lines its cluster reported", jobLogs},
+	{"submit", "submit a job spec, prints its id", jobSubmit, asAgent},
+	{"list", "jobs, newest first, one brief line each with its metrics", jobList, everyone},
+	{"status", "a job's whole record", jobStatus, everyone},
+	{"metrics", "per metric: last value, min, max and points reported", jobMetrics, everyone},
+	{"summary", "file the write-up of a finished job; hl job status shows it", jobSummary, everyone},
+	{"logs", "the last log lines its cluster reported", jobLogs, everyone},
 	{"data", "what the job wrote to the object store", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "data", "/data", "What the job wrote under its data prefix, one object per line", args, stdout, stderr)
-	}},
+	}, everyone},
 	{"cost", "what it cost so far, against the estimate", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 		return jobRead(c, "cost", "/cost", "Actual consumption so far (settled once final) beside the admission-time estimate", args, stdout, stderr)
-	}},
-	{"cancel", "cancel a job that has not ended, releasing what it holds of your quota", jobCancel},
-	{"stats", "job counts by status, capacity tier and eviction reason", jobStats},
+	}, everyone},
+	{"cancel", "cancel a job that has not ended, releasing what it holds of its agent's quota", jobCancel, everyone},
+	{"stats", "job counts by status, capacity tier and eviction reason", jobStats, everyone},
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -125,10 +125,7 @@ agents/coordinator/experiments.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
-	if *agent == "" {
+	if *agent = agentOf(c, *agent); *agent == "" {
 		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose job this is"))
 	}
 	body, err := readYAMLBody(path)

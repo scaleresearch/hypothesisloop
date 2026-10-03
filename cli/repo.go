@@ -19,8 +19,8 @@ import (
 )
 
 var repoCommands = []subcommand{
-	{"init", "write the experiment's files into this clone from what the platform holds", repoInit},
-	{"check", "check that this clone holds the experiment files, each valid and fitting the platform experiment", repoCheck},
+	{"init", "write the experiment's files into this clone from what the platform holds", repoInit, everyone},
+	{"check", "check that this clone holds the experiment files, each valid and fitting the platform experiment", repoCheck, everyone},
 }
 
 const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment: name, description (the brief researchers read) and

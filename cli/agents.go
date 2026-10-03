@@ -11,11 +11,11 @@ import (
 )
 
 var agentsCommands = []subcommand{
-	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd},
-	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove},
-	{"list", "the agents of a platform experiment and what each was launched with", agentsList},
-	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish},
-	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession},
+	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd, ofTheRun},
+	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove, ofTheRun},
+	{"list", "the agents of a platform experiment and what each was launched with", agentsList, ofTheRun},
+	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish, asAgent},
+	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession, everyone},
 }
 
 func agentsPath(platformExperiment string) string {
@@ -158,11 +158,7 @@ your turn. It cannot be taken back.`, stderr)
 	if strings.TrimSpace(*reason) == "" {
 		return parseExit(misuse(fs, "want --reason"))
 	}
-	var err error
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
-	if *agent == "" {
+	if *agent = agentOf(c, *agent); *agent == "" {
 		return parseExit(misuse(fs, "want --agent: HL_TOKEN names none and $"+agentEnv+" is not set"))
 	}
 	pe, err := namedExperiment(fs, c, *named)

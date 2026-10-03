@@ -77,14 +77,14 @@ Items are submitted in order; top-level fields default onto every item. Prints o
 per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
 
 var hypothesisCommands = []subcommand{
-	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},
-	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout},
-	{"link", "add a link from your own hypothesis", hypothesisLink},
-	{"comment", "add a note to a hypothesis", hypothesisComment},
-	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control", hypothesisStatus},
-	{"list", "hypotheses, most recent first", hypothesisList},
-	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full", hypothesisGet},
-	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery},
+	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit, everyone},
+	{"checkout", "put the clone on your branch for a hypothesis, made from what the hypothesis builds on", hypothesisCheckout, asAgent},
+	{"link", "add a link from your own hypothesis", hypothesisLink, everyone},
+	{"comment", "add a note to a hypothesis", hypothesisComment, everyone},
+	{"status", "set your hypothesis's verdict; confirmed and refuted need two completed jobs of its own besides the control", hypothesisStatus, everyone},
+	{"list", "hypotheses, most recent first", hypothesisList, everyone},
+	{"get", "one hypothesis with its links, findings, implementations, comments and jobs, short unless --full", hypothesisGet, everyone},
+	{"query", "read-only Cypher over the graph, including its text search", hypothesisQuery, everyone},
 }
 
 func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -887,10 +887,7 @@ with the reason when there is nothing to start from (no baseline is declared yet
 	if err != nil {
 		return parseExit(err)
 	}
-	if *agent, err = writingAgent(c, *agent); err != nil {
-		return fail(stderr, err)
-	}
-	if *agent == "" {
+	if *agent = agentOf(c, *agent); *agent == "" {
 		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose branch this is"))
 	}
 	var h struct {
