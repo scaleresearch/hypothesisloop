@@ -37,7 +37,7 @@ type PlatformExperimentsHandler struct {
 
 // NewPlatformExperimentsHandler constructs the handler.
 func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, planning Planning, logger *zap.Logger) *PlatformExperimentsHandler {
-	if planning.Limit <= 0 || planning.ProposedFor <= 0 {
+	if planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.PlannerKept <= 0 {
 		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
 	}
 	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}

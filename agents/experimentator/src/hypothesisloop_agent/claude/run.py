@@ -63,9 +63,10 @@ def _log_message(message, agent: str) -> None:
         )
 
 
-def _updates_hook(watch_env: dict[str, str], agent_id: str):
+def _updates_hook(setup: core.RunSetup, watch_env: dict[str, str]):
     """A PostToolUse hook that hands the agent the updates that arrived while it worked."""
     draining = asyncio.Lock()
+    agent_id = setup.cfg.agent_id
 
     async def hook(hook_input, tool_use_id, context) -> dict:
         # One drain per step: parallel tool calls share it, and a subagent's calls leave the
@@ -74,12 +75,12 @@ def _updates_hook(watch_env: dict[str, str], agent_id: str):
             return {}
         async with draining:
             events = await updates.drain(watch_env)
-        if not events:
+        told = await _told(setup, events)
+        if not told:
             return {}
         for line in activity.event_lines(events, agent_id):
             print(line, flush=True)
-        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                                       "additionalContext": updates.message(events, agent_id)}}
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": told}}
 
     return hook
 
@@ -342,6 +343,19 @@ def _revision_prompt(setup: core.RunSetup, draft: dict) -> str:
     return prompt + _REVISION_PROPOSAL.format(path=path)
 
 
+async def _told(setup: core.RunSetup, events: list[dict]) -> str:
+    """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
+    is an event that points at the draft: it is told as the revision itself, and one that the
+    planner has answered since, which a restored cursor replays, is told as nothing."""
+    rest = [e for e in events if e["kind"] != updates.REVISION]
+    parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
+    if len(rest) < len(events):
+        draft = await asyncio.to_thread(core.revising, setup)
+        if draft:
+            parts.insert(0, _revision_prompt(setup, draft))
+    return "\n\n".join(parts)
+
+
 def _first_prompt(setup: core.RunSetup, resume_id: str | None, initial_prompt: str | None) -> str:
     """What opens a connection: a handoff, the start, or for a resumed session the revision that
     brought a planner back, else that it goes on. A new machine is said in each."""
@@ -484,7 +498,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         # The 2 min default backgrounds long commands, and agents then poll their output files.
         # Without background tasks Bash has no run_in_background to wait in.
         env={"BASH_DEFAULT_TIMEOUT_MS": "600000", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1", **core.git_identity(cfg)},
-        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(watch_env, cfg.agent_id)]), _UNDELIVERED_MATCHER],
+        hooks={"PostToolUse": [HookMatcher(hooks=[_updates_hook(setup, watch_env)]), _UNDELIVERED_MATCHER],
                "PostToolUseFailure": [_UNDELIVERED_MATCHER]},
     )
 
@@ -589,15 +603,20 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
 
             # The agent ended its turn: wait for the next batch of updates about its own jobs and
             # hypotheses and hand it over on the same connection.
-            events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
+            while True:
+                events = await updates.next_batch(watch_env, stopped, updates.IDLE_NUDGE_S)
+                told = "" if stopped() else await _told(setup, events)
+                # A batch that tells nothing held only a revision answered since: the wait goes on.
+                if told or not events or stopped():
+                    break
             if stopped():
                 await _last_turn(client, setup, watch_env, events)
                 await _store_session(setup)
                 return None, False
-            if events:
+            if told:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
-                await client.query(updates.message(events, cfg.agent_id))
+                await client.query(told)
                 continue
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:

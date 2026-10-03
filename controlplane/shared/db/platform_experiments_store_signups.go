@@ -405,7 +405,7 @@ func (s *PlatformExperimentsStore) AgentFinishedAt(ctx context.Context, platform
 const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
             WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
             WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
-            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.proposed_at IS NOT NULL FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
+            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.planner_ends_at <= now() FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
             ELSE '' END`
 
 // The last two columns are whether the agent's run ended long enough ago for its machine to be
@@ -421,7 +421,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
            s.finished_at,
            (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
            (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
-           (SELECT planned.proposed_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '`+string(domain.SignupRolePlanner)+`'))`) + `,
+           (SELECT planned.planner_ends_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '`+string(domain.SignupRolePlanner)+`'))`) + `,
        ` + runEndSQL
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
@@ -500,13 +500,15 @@ type LauncherAgent struct {
 }
 
 // launcherEndsBySQL is the latest moment platform experiment pe can still have a machine, $2
-// seconds of wind-down included: of a draft the end of its planning, of a running one the end
+// seconds of wind-down included: of a draft the end of its planning, and once its planner
+// answered the moment the planner is kept until, of a running one the end
 // of its run, and of an open one, or a running one whose clock waits for a researcher's machine,
 // the end of the longest run it can still have, which starts at the deadline it has. Once the
 // clock runs it never moves. An open one's moves only when its owner changes starts_at or
 // duration_hours, and a machine rented before that ends at the moment it was rented with.
 const launcherEndsBySQL = `(CASE
             WHEN pe.status = 'closed' THEN pe.closed_at
+            WHEN pe.status = 'draft' AND pe.planner_ends_at IS NOT NULL THEN pe.planner_ends_at
             WHEN pe.status = 'open' OR pe.status = 'running' AND pe.started_at IS NULL
                 THEN pe.ends_at + make_interval(secs => pe.duration_hours * 3600)
             ELSE pe.ends_at END + make_interval(secs => $2))`
@@ -520,9 +522,10 @@ const launcherEndsBySQL = `(CASE
 // clock.
 //
 // A draft's planner is the other way round. It has something to do while the draft is a draft
-// and nothing is proposed, which a revision makes true again, and it is let wind down for $2
-// seconds after it proposed or the draft closed. Once the draft is accepted it has nothing left
-// to do, in an experiment that is then open or running.
+// and nothing is proposed, which a revision makes true again. After its answer it is kept until
+// the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $2
+// seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
+// do, in an experiment that is then open or running.
 const launcherAgentsFrom = `
 FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
@@ -531,7 +534,7 @@ LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_ex
 WHERE s.hosted AND s.launcher = $1
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $2)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
-       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.proposed_at IS NULL OR pe.proposed_at > now() - make_interval(secs => $2)))
+       OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $2)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $2))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $2))`
 

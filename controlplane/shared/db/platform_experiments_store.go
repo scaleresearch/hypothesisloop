@@ -115,7 +115,7 @@ func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id
 SELECT id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, summary, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id,
-       pe.duration_hours, pe.started_at
+       pe.duration_hours, pe.started_at, pe.planner_ends_at
 FROM platform_experiments pe
 WHERE id = $1`
 
@@ -126,7 +126,7 @@ WHERE id = $1`
 	var createdBy, closedBy domain.Actor
 	var proposal []byte
 	var closesAt time.Time
-	var startedAt, answeredAt *time.Time
+	var startedAt, answeredAt, plannerEndsAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents,
 		&metricsRaw, &pe.ReportIntervalSeconds,
@@ -138,13 +138,16 @@ WHERE id = $1`
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxHosted, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
 		&pe.Goal, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID,
-		&pe.DurationHours, &startedAt,
+		&pe.DurationHours, &startedAt, &plannerEndsAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("platform_experiments_store.Get: %w", err)
+	}
+	if status == string(domain.PlatformExpDraft) {
+		pe.PlannerEndsAt = plannerEndsAt
 	}
 	if pe.CoordinatorHosted {
 		pe.Coordinator = &coordinator

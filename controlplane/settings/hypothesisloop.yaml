@@ -94,8 +94,12 @@ agents:
 #
 #   limit_minutes         how long the planner has to propose, from the goal and again from each
 #              revision. A draft with no proposal by then is closed and its machine released.
-#   proposed_for_days     how long a proposal waits for a person before the draft is closed. No
-#              machine runs while it waits.
+#   proposed_for_days     how long a proposal waits for a person before the draft is closed.
+#   planner_kept_minutes  how long the planner's machine is kept after its answer, so that a
+#              revision asked for in that time is answered by the planner that is still there,
+#              with nothing to boot. It ends earlier at the planning limit the machine was
+#              rented with, and with the accept. After it no machine runs while the answer
+#              waits, and a revision starts one.
 #   baseline_limit_minutes  how long a platform experiment may stay open, counted from its
 #              starts_at, or from its creation or acceptance when that is later. The platform
 #              starts the run once a baseline is declared (PATCH baseline_job_id), and one
@@ -106,6 +110,7 @@ agents:
 planning:
   limit_minutes: 30
   proposed_for_days: 7
+  planner_kept_minutes: 10
   baseline_limit_minutes: 90
 
 # What one account may create. Staff, the platform's operators, are held to neither.

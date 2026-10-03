@@ -21,6 +21,9 @@ type Planning struct {
 	Limit time.Duration
 	// ProposedFor is how long a proposal waits for the person before the draft is closed.
 	ProposedFor time.Duration
+	// PlannerKept is how long a planner's machine is kept after its answer, for a revision asked
+	// for in that time to reach the planner that is still there.
+	PlannerKept time.Duration
 }
 
 // draftNameLength bounds the name a draft takes from its goal until the proposal names it.

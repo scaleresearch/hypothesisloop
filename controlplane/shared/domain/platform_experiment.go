@@ -207,6 +207,8 @@ type PlatformExperiment struct {
 	BaselineDueAt     time.Time                `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. planning.baseline_limit_minutes after its starts_at, or after it was created or accepted when that is later."`
 	PlanningEndsAt    time.Time                `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time                `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
+	// PlannerEndsAt is until when the machine of an answered draft's planner is kept.
+	PlannerEndsAt *time.Time               `json:"planner_ends_at,omitempty" doc:"On a draft whose planner proposed or declined: until when the planner's machine is kept, the answer plus the platform's planning.planner_kept_minutes and never past the planning limit. A revision (POST /platform-experiments/{id}/revise) asked for before it reaches the planner that is still there, as its next update, and is answered with nothing to boot. One asked for later starts the planner again with its session, as before. Absent while the planner works."`
 	Status            PlatformExperimentStatus `json:"status"`
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.

@@ -325,11 +325,12 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time) error {
+func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.Proposal, pe.DeclinedReason = proposal, ""
+			kept := now.Add(keepPlanner)
+			pe.Proposal, pe.DeclinedReason, pe.PlannerEndsAt = proposal, "", &kept
 			pe.SetAnswered(&now, true)
 			pe.SetClosesAt(waitUntil)
 			return nil
@@ -398,6 +399,11 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	// From now on it waits for a person, far longer than the planner was given.
 	if wait := pe.ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
 		t.Errorf("a proposed draft ends in %v, want %v", wait, testPlanning.ProposedFor)
+	}
+	// A revision right after the proposal waited for a machine to boot: the planner's is kept for
+	// the setting's time, and the draft says until when.
+	if pe.PlannerEndsAt == nil || out["planner_ends_at"] == nil || pe.PlannerEndsAt.Sub(before) < testPlanning.PlannerKept-time.Minute || pe.PlannerEndsAt.Sub(before) > testPlanning.PlannerKept+time.Minute {
+		t.Errorf("the planner's machine is kept until %v (%v answered), want %v from the proposal", pe.PlannerEndsAt, out["planner_ends_at"], testPlanning.PlannerKept)
 	}
 	if out["proposal_expires_at"] != pe.ProposalExpiresAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["planning_ends_at"] != nil {
 		t.Errorf("a proposed draft reads proposal_expires_at %v, ends_at %v, planning_ends_at %v: want how long the proposal waits under that name alone", out["proposal_expires_at"], out["ends_at"], out["planning_ends_at"])
@@ -686,6 +692,7 @@ func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Act
 			return db.ErrNothingProposed
 		}
 		pe.SetAnswered(nil, false)
+		pe.PlannerEndsAt = nil
 		pe.SetClosesAt(planUntil)
 		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
@@ -725,8 +732,8 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 		t.Fatalf("revise: got = %d %v, want 200", code, out)
 	}
 	pe := store.created[0]
-	if pe.ProposedAt != nil || out["proposed_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
-		t.Errorf("revised draft %+v, want no proposed_at and the proposal kept", pe)
+	if pe.ProposedAt != nil || out["proposed_at"] != nil || out["planner_ends_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
+		t.Errorf("revised draft %+v, want no proposed_at, no planner_ends_at and the proposal kept", pe)
 	}
 	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].Actor.Kind != domain.ActorUser || pe.Revisions[0].Actor.ID != "u-1" {
 		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
@@ -754,11 +761,12 @@ func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.
 	}
 }
 
-func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil time.Time) error {
+func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
 			now := time.Now().UTC()
-			pe.DeclinedReason, pe.Proposal = reason, nil
+			kept := now.Add(keepPlanner)
+			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt = reason, nil, &kept
 			pe.SetAnswered(&now, false)
 			pe.SetClosesAt(waitUntil)
 			return nil

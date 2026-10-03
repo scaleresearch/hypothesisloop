@@ -241,7 +241,14 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         patch = mock.patch.object(updates, "drain", drain)
         patch.start()
         self.addCleanup(patch.stop)
-        self.hook = run._updates_hook({}, "agent-a")
+        from types import SimpleNamespace
+
+        self.draft = {"status": "draft", "status_reason": {"reason": "proposed"}, "revisions": [{"message": "Make it fit one accelerator."}]}
+        self.cfg = SimpleNamespace(agent_id="agent-a", flavor="generalist", role="competitor")
+        self.setup = SimpleNamespace(cfg=self.cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: self.draft),
+                                     workdir=tempfile.mkdtemp())
+        self.cfg.platform_experiment_id = "pe-1"
+        self.hook = run._updates_hook(self.setup, {})
 
     async def call(self, **hook_input):
         from contextlib import redirect_stdout
@@ -268,6 +275,25 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
         self.assertEqual(await self.call(agent_id="sub-1"), {})
         self.assertEqual(self.drains, 0)
+
+    # A planner kept on its machine after its answer is told a revision by an event that only
+    # points at the draft. It is handed what the person asked, and the same event replayed once
+    # the planner has answered is handed as nothing.
+    async def test_a_revision_reaches_a_planner_as_what_was_asked_and_an_answered_one_as_nothing(self):
+        from hypothesisloop_agent import config
+
+        revision = {"kind": updates.REVISION, "subject": "pe-1", "value": ""}
+        self.cfg.flavor = config.PLANNER_FLAVOR
+        self.waiting = [revision]
+        self.assertEqual(await self.call(), {})
+
+        self.draft["status_reason"] = {"reason": "revising"}
+        self.waiting = [revision, {"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
+        told = (await self.call())["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(told.startswith("The person read your answer and asks for this revision:\n\nMake it fit one accelerator.\n\n"), told)
+        self.assertTrue(told.endswith("Platform updates:\ncomment.new hyp-1 human"), told)
+        self.assertNotIn("platform_experiment.revision", told)
+        self.assertNotIn("gone", told)
 
 
 # A coordinator sent a researcher a message with the CLI's SendMessage, was answered "No agent
@@ -391,3 +417,64 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
         self.assertIn(".claude_session_id", os.listdir(setup.statedir))
+
+    # A planner whose machine is kept after its answer waits like any agent whose turn ended. A
+    # revision is its next update and reaches the session it already has. One it answered before,
+    # which a restored cursor replays, starts no turn.
+    async def test_a_revision_is_the_next_turn_of_a_planner_kept_after_its_answer(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from claude_agent_sdk import ResultMessage
+
+        from hypothesisloop_agent import config
+        from hypothesisloop_agent.claude import run
+
+        stop_flag = [False]
+        sent = []
+        draft = {"status": "draft", "status_reason": {"reason": "proposed"}, "revisions": [{"message": "Make it fit one accelerator."}]}
+        batches = 0
+
+        class Client:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def query(self, prompt):
+                sent.append(prompt)
+
+            async def receive_response(self):
+                yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                    num_turns=1, session_id="s")
+
+        async def revised(env, stopped, idle_s):
+            # The first batch replays a revision answered already, the second is one asked now.
+            nonlocal batches
+            batches += 1
+            if batches == 2:
+                draft["status_reason"] = {"reason": "revising"}
+            if batches == 3:
+                stop_flag[0] = True
+                return []
+            return [{"kind": updates.REVISION, "subject": "pe-1", "value": ""}]
+
+        setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_platform_experiment=lambda _id: draft, get_signup=lambda *_: {}),
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor=config.PLANNER_FLAVOR, role="planner", api_url="http://x",
+                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1", max_wall_hours=0))
+        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+                mock.patch.object(updates, "next_batch", revised), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
+                redirect_stdout(StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
+        self.assertEqual(batches, 3)
+        self.assertEqual(sent[0], "Begin.")
+        self.assertEqual(sent[1], "The person read your answer and asks for this revision:\n\nMake it fit one accelerator.\n\n"
+                                  "Read the draft and the capacity again and answer with a new proposal.")

@@ -71,7 +71,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	// A proposal is stored beside the draft, marks it proposed and moves its end.
 	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
-	if err := pes.SetProposal(ctx, pe, []byte(`{"budget_accelerator_hours":6}`), wait); err != nil {
+	if err := pes.SetProposal(ctx, pe, []byte(`{"budget_accelerator_hours":6}`), wait, 0); err != nil {
 		t.Fatal(err)
 	}
 	got, err = pes.GetPlatformExperiment(ctx, pe)
@@ -83,7 +83,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	}
 	open := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, open, 10)
-	if err := pes.SetProposal(ctx, open, []byte(`{}`), wait); err != ErrNotDraft {
+	if err := pes.SetProposal(ctx, open, []byte(`{}`), wait, 0); err != ErrNotDraft {
 		t.Fatalf("proposing an open platform experiment: got = %v, want ErrNotDraft", err)
 	}
 
@@ -128,14 +128,15 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 		return false, ""
 	}
-	propose := func(ago time.Duration) {
+	// keptUntil moves the end of the time the planner is kept after its answer.
+	keptUntil := func(fromNow time.Duration) {
 		t.Helper()
-		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = now() - make_interval(secs => $2) WHERE id = $1`, pe, ago.Seconds()); err != nil {
+		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET planner_ends_at = now() + make_interval(secs => $2) WHERE id = $1 AND proposed_at IS NOT NULL`, pe, fromNow.Seconds()); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	answered := func() bool {
+	// over says the planner's run has ended, which is what ends its token.
+	over := func() bool {
 		t.Helper()
 		at, err := pes.PlannerAnsweredAt(ctx, pe, planner)
 		if err != nil {
@@ -143,28 +144,48 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		}
 		return at != nil
 	}
+	endsBy := func() time.Time {
+		t.Helper()
+		agents, err := pes.ListLauncherAgents(ctx, launcher, windDown)
+		if err != nil || len(agents) != 1 {
+			t.Fatalf("launcher agents: %+v, %v", agents, err)
+		}
+		return agents[0].EndsBy
+	}
+	const kept = 10 * time.Minute
+	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
+	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
+	until := time.Now().UTC().Add(30 * time.Minute)
 
-	if found, ended := listed(); !found || ended != "" || answered() {
-		t.Fatalf("while planning: listed %v, ended %q, answered %v, want kept and at work", found, ended, answered())
+	if found, ended := listed(); !found || ended != "" || over() {
+		t.Fatalf("while planning: listed %v, ended %q, over %v, want kept and at work", found, ended, over())
 	}
-	propose(0)
-	if !answered() {
-		t.Fatal("a planner whose proposal is stored has not answered, so its token would never end")
-	}
-	if found, ended := listed(); !found || ended != domain.RunEndPlanned {
-		t.Fatalf("just proposed: listed %v, ended %q, want winding down as planned", found, ended)
-	}
-	propose(windDown + time.Second)
-	if found, _ := listed(); found {
-		t.Fatal("a planner is kept beside a proposal that waits for a person")
-	}
-	// A revision gives the draft back, and the planner has a plan to make again, on a machine
-	// that owes nothing to the restarts of the one before.
+	// It answers, and is kept for a revision asked for soon: its run goes on, its token works,
+	// and a machine rented for it now ends when that time does.
 	if err := pes.AskInstance(ctx, pe, planner, "machine-1", "launch-1"); err != nil {
 		t.Fatal(err)
 	}
-	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
-	until := time.Now().UTC().Add(30 * time.Minute)
+	if err := pes.SetProposal(ctx, pe, []byte(`{}`), wait, kept); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := pes.GetPlatformExperiment(ctx, pe)
+	if err != nil || proposed.PlannerEndsAt == nil || time.Until(*proposed.PlannerEndsAt) < kept-time.Minute || time.Until(*proposed.PlannerEndsAt) > kept+time.Minute {
+		t.Fatalf("proposed: planner kept until %v, %v, want %v from now", proposed.PlannerEndsAt, err, kept)
+	}
+	if found, ended := listed(); !found || ended != "" || over() {
+		t.Fatalf("just proposed: listed %v, ended %q, over %v, want kept with its run going on", found, ended, over())
+	}
+	if bound := endsBy(); bound.Sub(proposed.PlannerEndsAt.Add(windDown)).Abs() > time.Second {
+		t.Fatalf("a machine rented for a kept planner ends by %v, want the end of the time it is kept and the wind-down, %v", bound, proposed.PlannerEndsAt.Add(windDown))
+	}
+	// An answer that replaces one leaves the moment alone: the machine was rented with it.
+	if err := pes.Decline(ctx, pe, "on second thought", wait, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := pes.GetPlatformExperiment(ctx, pe); again.PlannerEndsAt == nil || !again.PlannerEndsAt.Equal(*proposed.PlannerEndsAt) {
+		t.Fatalf("answered again: planner kept until %v, want %v still", again.PlannerEndsAt, proposed.PlannerEndsAt)
+	}
+	// A revision in that time reaches the planner on the machine it has, under the launch it has.
 	if err := pes.Revise(ctx, pe, "it must fit one accelerator", by, until); err != nil {
 		t.Fatal(err)
 	}
@@ -172,18 +193,66 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 		t.Fatalf("revising a draft that is being planned: got = %v, want ErrNothingProposed", err)
 	}
 	revised, err := pes.GetPlatformExperiment(ctx, pe)
-	if err != nil || revised.ProposedAt != nil || len(revised.Revisions) != 1 || revised.Revisions[0].Message != "it must fit one accelerator" ||
+	if err != nil || revised.ProposedAt != nil || revised.PlannerEndsAt != nil || len(revised.Revisions) != 1 || revised.Revisions[0].Message != "it must fit one accelerator" ||
 		revised.Revisions[0].Actor.Kind != domain.ActorUser || revised.Revisions[0].Actor.ID != "u-planning" || revised.PlanningEndsAt.Sub(until).Abs() > time.Second {
 		t.Fatalf("revised: got = %+v, %v", revised, err)
 	}
-	if found, ended := listed(); !found || ended != "" || answered() {
-		t.Fatalf("revising: listed %v, ended %q, answered %v, want kept and at work again", found, ended, answered())
+	if found, ended := listed(); !found || ended != "" || over() {
+		t.Fatalf("revising: listed %v, ended %q, over %v, want kept and at work again", found, ended, over())
 	}
-	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Launch != "" {
-		t.Fatalf("after a revision the planner's launch is %+v, %v, want none, so that its next machine is a new launch", signup.Instance, err)
+	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Name != "machine-1" || signup.Instance.Launch != "launch-1" {
+		t.Fatalf("after a revision the kept planner's machine is %+v, %v, want the one it had under the launch it had", signup.Instance, err)
 	}
+
+	// It answers the revision, and nobody asks for another: the time passes, its run is over and
+	// its machine winds down, and past that it is no longer asked for.
+	if err := pes.SetProposal(ctx, pe, []byte(`{}`), wait, kept); err != nil {
+		t.Fatal(err)
+	}
+	keptUntil(-time.Second)
+	if !over() {
+		t.Fatal("a planner past the time it is kept has a run that goes on, so its token would never end")
+	}
+	if found, ended := listed(); !found || ended != domain.RunEndPlanned {
+		t.Fatalf("past the time it is kept: listed %v, ended %q, want winding down as planned", found, ended)
+	}
+	keptUntil(-windDown - time.Second)
+	if found, _ := listed(); found {
+		t.Fatal("a planner is kept beside a proposal that waits for a person")
+	}
+	// A revision then gives the draft back, and the planner has a plan to make again, on a
+	// machine that owes nothing to the restarts of the one before.
+	if err := pes.ReleaseInstances(ctx, launcher, windDown); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.Revise(ctx, pe, "and a second seed", by, until); err != nil {
+		t.Fatal(err)
+	}
+	if found, ended := listed(); !found || ended != "" || over() {
+		t.Fatalf("revising later: listed %v, ended %q, over %v, want asked for and at work again", found, ended, over())
+	}
+	if signup, err := pes.GetAgentSignup(ctx, pe, planner); err != nil || signup.Instance == nil || signup.Instance.Name != "" || signup.Instance.Launch != "" {
+		t.Fatalf("after a revision the released planner's instance is %+v, %v, want no launch, so that its next machine is a new one", signup.Instance, err)
+	}
+
+	// The time it is kept never passes the planning limit, which its machine was rented with.
+	short, shortPlanner := createTestDraft(t, pool, launcher+"-short")
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() + interval '2 minutes' WHERE id = $1`, short); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.SetProposal(ctx, short, []byte(`{}`), wait, kept); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := pes.GetPlatformExperiment(ctx, short); got.PlannerEndsAt == nil || time.Until(*got.PlannerEndsAt) > 2*time.Minute || time.Until(*got.PlannerEndsAt) < time.Minute {
+		t.Fatalf("proposed two minutes before the planning limit: planner %s kept until %v, want the limit", shortPlanner, got.PlannerEndsAt)
+	}
+
 	// Accepted, the experiment is open and then running, and the planner has nothing to do in it.
-	propose(windDown + time.Second)
+	if err := pes.SetProposal(ctx, pe, []byte(`{}`), wait, kept); err != nil {
+		t.Fatal(err)
+	}
+	keptUntil(-windDown - time.Second)
+	answered := over
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		setPEStatus(t, pool, pe, status, 0)
 		if !answered() {
@@ -247,10 +316,10 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != ErrPlanningOver {
+		if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour), 0); err != ErrPlanningOver {
 			t.Fatalf("proposing past the limit: got = %v, want ErrPlanningOver", err)
 		}
-		if err := pes.Decline(ctx, id, "late", time.Now().Add(time.Hour)); err != ErrPlanningOver {
+		if err := pes.Decline(ctx, id, "late", time.Now().Add(time.Hour), 0); err != ErrPlanningOver {
 			t.Fatalf("declining past the limit: got = %v, want ErrPlanningOver", err)
 		}
 		if err := pes.ClosePlatformExperiment(ctx, id, nil); err != nil {
@@ -265,12 +334,12 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
 		t.Fatalf("accepting before a proposal: got = %v, want ErrNothingProposed", err)
 	}
-	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	// Declined, the draft is answered and has nothing to accept; a revision gives it back to the
 	// planner with the reason kept, and the next proposal clears it.
-	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour)); err != nil {
+	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	declined, err := pes.GetPlatformExperiment(ctx, id)
@@ -290,13 +359,13 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.Answered() || revised.DeclinedReason == "" {
 		t.Fatalf("revised after a decline: got = %+v, want it with the planner and the reason kept", revised)
 	}
-	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour)); err != nil {
+	if err := pes.SetProposal(ctx, id, []byte(`{}`), time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil || proposed.DeclinedAt != nil {
 		t.Fatalf("proposed after a decline: got = %+v, want no reason", proposed)
 	}
-	if err := pes.Decline(ctx, "pe-none", "r", time.Now()); err != ErrNotDraft {
+	if err := pes.Decline(ctx, "pe-none", "r", time.Now(), 0); err != ErrNotDraft {
 		t.Fatalf("declining what is not there: got = %v, want ErrNotDraft", err)
 	}
 	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
@@ -644,7 +713,7 @@ func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 	ctx := context.Background()
 	pes := NewPlatformExperimentsStore(pool)
 	id, _ := createTestDraft(t, pool, "launcher-"+uuid.New().String()[:8])
-	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour)); err != nil {
+	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	listed := func() *domain.PlatformExperiment {
@@ -676,5 +745,46 @@ func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 	closed, err := pes.GetPlatformExperiment(ctx, id)
 	if err != nil || closed.Status != domain.PlatformExpClosed || closed.CloseReason != domain.CloseProposalExpired || closed.DeclinedAt == nil || closed.ProposalExpiresAt.IsZero() {
 		t.Fatalf("closed: got = %s %q declined at %v, %v, want closed proposal_expired and still declined", closed.Status, closed.CloseReason, closed.DeclinedAt, err)
+	}
+}
+
+// A revision reached a planner only as the first prompt of a machine started for it. A planner
+// still on its machine after its answer hears of it as its next update: the request is an event
+// on the planner's own stream, live and replayed, that points at the draft and carries no text.
+func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	draft, planner := createTestDraft(t, pool, "launcher-"+uuid.New().String()[:8])
+	if err := pes.SetProposal(ctx, draft, []byte(`{}`), time.Now().UTC().Add(time.Hour), 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+
+	if err := pes.Revise(ctx, draft, "it must fit one accelerator", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().UTC().Add(30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	live := awaitEvent(t, events, EventPlatformExperimentRevision, draft)
+	if live.PlatformExperimentID != draft || live.Value != "" || live.Detail != "" || live.AgentID != "" {
+		t.Fatalf("live: got = %+v, want a pointer at the draft with no text", live)
+	}
+	own := EventFilter{PlatformExperimentID: draft, AgentID: planner}
+	if !own.Matches(live) {
+		t.Fatal("the planner's own subscription does not carry the revision")
+	}
+	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, own, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revisions []Event
+	for _, e := range replayed {
+		if e.Kind == EventPlatformExperimentRevision {
+			revisions = append(revisions, e)
+		}
+	}
+	if len(revisions) != 1 || revisions[0].Identity() != live.Identity() {
+		t.Fatalf("replayed: got = %+v, want the live event %+v once", revisions, live)
 	}
 }

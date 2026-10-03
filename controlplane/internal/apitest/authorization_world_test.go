@@ -222,7 +222,7 @@ func (noLauncherAgents) SetLauncherHolds(context.Context, string, bool) error {
 	panic("the launcher handler reached its store")
 }
 
-var worldPlanning = quota.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour}
+var worldPlanning = quota.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
 
 // reached is what a request answers once every check let it through and the handler asked a
 // service for something: the services here hold no store, so that first ask panics.

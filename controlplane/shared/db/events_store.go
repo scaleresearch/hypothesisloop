@@ -74,6 +74,9 @@ const (
 	// description event deliberately carries no text — see EventKinds.
 	EventPlatformExperimentStatus      = "platform_experiment.status"
 	EventPlatformExperimentDescription = "platform_experiment.description"
+	// EventPlatformExperimentRevision says a person asked a draft's planner to change its answer.
+	// A pointer like the description event: what was asked is read from the draft.
+	EventPlatformExperimentRevision = "platform_experiment.revision"
 	// EventMetricPoint is a pointer, never a value: experiment id, metric name, fraction
 	// complete. Metrics live solely in the metrics store, and this event says only that one
 	// arrived — a subscriber that wants the number reads it from there. It is the one kind
@@ -140,6 +143,8 @@ var EventKinds = []EventKindDoc{
 		Description: "The run itself moved. 'closed' is a stop condition for every agent in it."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The brief changed. A description is unbounded and is never copied into an event: re-read it with GET /platform-experiments/{id}."},
+	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",
+		Description: "A person asked the planner of a draft to change its answer (POST /platform-experiments/{id}/revise). What was asked is the last of revisions on GET /platform-experiments/{id}, whose status_reason reads revising until the planner answers again. A planner whose machine is still there after its answer is told by this event, and one whose machine was released is started again."},
 	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
 		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
@@ -517,6 +522,7 @@ FROM pg_current_snapshot() s`).Scan(&horizon, &next); err != nil {
 		replayAgentCuts,
 		replayAgentsFinished,
 		replayPlatformExperiment,
+		replayRevisions,
 	} {
 		part, err := derive(ctx, tx, filter.PlatformExperimentID, since)
 		if err != nil {
@@ -810,6 +816,24 @@ FROM platform_experiments WHERE id = $1 AND (status_changed_xid >= $2 OR descrip
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("events_store.replayPlatformExperiment: %w", err)
+	}
+	return events, nil
+}
+
+// replayRevisions derives platform_experiment.revision from the requests a draft keeps, one row
+// each.
+func replayRevisions(ctx context.Context, tx pgx.Tx, peID string, since int64) ([]Event, error) {
+	rows, err := tx.Query(ctx, `SELECT created_xid FROM planning_requests WHERE platform_experiment_id = $1 AND created_xid >= $2`, peID, since)
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayRevisions: %w", err)
+	}
+	positions, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, fmt.Errorf("events_store.replayRevisions: %w", err)
+	}
+	events := make([]Event, len(positions))
+	for i, position := range positions {
+		events[i] = Event{Kind: EventPlatformExperimentRevision, Subject: peID, PlatformExperimentID: peID, Position: position}
 	}
 	return events, nil
 }

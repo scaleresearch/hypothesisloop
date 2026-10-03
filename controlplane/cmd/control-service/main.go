@@ -211,6 +211,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
+		PlannerKept: time.Duration(pcfg.Planning.PlannerKeptMinutes) * time.Minute,
 	}, logger).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store).

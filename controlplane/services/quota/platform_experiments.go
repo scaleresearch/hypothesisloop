@@ -35,9 +35,9 @@ type PlatformExperimentsStore interface {
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	LauncherKnown(ctx context.Context, name string) (bool, error)
-	// SetProposal stores a draft's proposal and until when it waits for a person; db.ErrNotDraft
-	// for anything but a draft.
-	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error
+	// SetProposal stores a draft's proposal, until when it waits for a person and how long its
+	// planner's machine is kept for a revision; db.ErrNotDraft for anything but a draft.
+	SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
 	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
@@ -50,9 +50,9 @@ type PlatformExperimentsStore interface {
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
-	// Decline stores why a draft's planner proposes nothing and until when the draft waits for
-	// a person; db.ErrNotDraft for anything but a draft.
-	Decline(ctx context.Context, id, reason string, waitUntil time.Time) error
+	// Decline stores why a draft's planner proposes nothing, until when the draft waits for a
+	// person and how long the planner's machine is kept; db.ErrNotDraft for anything but a draft.
+	Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, prepare func(context.Context, *domain.PlatformExperiment) error) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.

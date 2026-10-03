@@ -92,11 +92,19 @@ func (s *PlatformExperimentsStore) answerDraft(ctx context.Context, id, update s
 	return ErrNotDraft
 }
 
+// plannerKeptSQL is until when the planner of a draft that is answered now keeps its machine: $4
+// seconds from now, so a revision asked for soon reaches the planner that is still there, and no
+// later than the planning limit, which is the bound its machine was rented with. It reads ends_at
+// as it was before the answer moved it, so an answer that replaces one leaves the moment alone.
+const plannerKeptSQL = `CASE WHEN proposed_at IS NULL THEN LEAST(now() + make_interval(secs => $4), ends_at) ELSE planner_ends_at END`
+
 // SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
-// draft's end to waitUntil: from then on it waits for a person, and no longer for the planner.
-func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time) error {
+// draft's end to waitUntil: from then on it waits for a person, and no longer for the planner,
+// whose machine is kept for keepPlanner more (plannerKeptSQL).
+func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, waitUntil time.Time, keepPlanner time.Duration) error {
 	err := s.answerDraft(ctx, id, `
-UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', ends_at = $3, updated_at = now()`, proposal, waitUntil)
+UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, updated_at = now()`,
+		proposal, waitUntil, keepPlanner.Seconds())
 	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 	}
@@ -105,12 +113,14 @@ UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_rea
 
 // Decline stores why a draft's planner proposes nothing. It answers the goal as a proposal
 // does: the draft waits for a person until waitUntil, when the platform closes it as it closes
-// a proposal nobody took up, and the planner's machine is released. A proposal made before no
-// longer stands, so it is cleared and there is nothing to accept. proposed_at is the column of
-// the planner's answer, whichever it was: with no proposal beside it the draft is declined.
-func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time) error {
+// a proposal nobody took up, and the planner's machine is kept for keepPlanner more, as after a
+// proposal. A proposal made before no longer stands, so it is cleared and there is nothing to
+// accept. proposed_at is the column of the planner's answer, whichever it was: with no proposal
+// beside it the draft is declined.
+func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
 	err := s.answerDraft(ctx, id, `
-UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), ends_at = $3, updated_at = now()`, reason, waitUntil)
+UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, updated_at = now()`,
+		reason, waitUntil, keepPlanner.Seconds())
 	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
 		return fmt.Errorf("platform_experiments_store.Decline: %w", err)
 	}
@@ -125,8 +135,9 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
 // researchers up, or does neither. pe carries what the proposal stated and what the person who
 // accepts stated; its start is now, on the database's clock, and it is open until its
-// BaselineDueAt. The limits a signup holds are held here too (ErrMaxAgentsReached,
-// ErrMaxHostedReached).
+// BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
+// revision ends with the accept. The limits a signup holds are held here too
+// (ErrMaxAgentsReached, ErrMaxHostedReached).
 func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if pe.Coordinator == nil || !pe.CoordinatorHosted {
 		return errors.New("platform_experiments_store.AcceptDraft: an accepted draft is run by a coordinator the platform hosts")
@@ -161,7 +172,8 @@ UPDATE platform_experiments
 SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = now(), ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
-    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now()
+    coordinator_hosted = true, coordinator_launcher = $12, coordinator_model = $13, duration_hours = $14, updated_at = now(),
+    planner_ends_at = LEAST(planner_ends_at, now())
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
 		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Launcher, pe.Coordinator.Model, pe.DurationHours); err != nil {
@@ -176,13 +188,14 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 	return nil
 }
 
-// PlannerAnsweredAt returns when the planner agentID answered its draft, with a proposal or with
-// why there is none: the moment its run ended. nil for an agent that is no planner, and for a
-// planner that is planning, which a revision makes true again.
+// PlannerAnsweredAt returns the moment the run of the planner agentID ended: it answered its
+// draft, with a proposal or with why there is none, and the time its machine is kept after an
+// answer has passed (planner_ends_at). nil for an agent that is no planner, for a planner that
+// is planning, which a revision makes true again, and for one kept after its answer.
 func (s *PlatformExperimentsStore) PlannerAnsweredAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
 	var answeredAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.proposed_at
+SELECT CASE WHEN pe.planner_ends_at <= now() THEN pe.planner_ends_at END
 FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`'`, platformExpID, agentID).Scan(&answeredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -204,9 +217,12 @@ func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experiment
 }
 
 // Revise records what a person asked a proposed draft's planner to change and gives the draft
-// back to the planner: the proposal stays to be read, proposed_at is cleared, which is what
-// the launcher keeps the planner's machine by, and the draft ends at planUntil unless the
-// planner proposes again. ErrNotDraft, and ErrNothingProposed while the planner still works.
+// back to the planner: the proposal stays to be read, proposed_at and planner_ends_at are
+// cleared, which is what the launcher keeps the planner's machine by, and the draft ends at
+// planUntil unless the planner proposes again. The request is the planner's next update
+// (platform_experiment.revision): one whose machine is still there answers it at once, and one
+// whose machine was released is started again. ErrNotDraft, and ErrNothingProposed while the
+// planner still works.
 func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
@@ -225,16 +241,16 @@ func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message strin
 	if !proposed {
 		return ErrNothingProposed
 	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, planner_ends_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: %w", err)
 	}
-	// The planner's last machine ended because its work was done. The one a revision asks for
-	// is a new launch, with its own restarts: a launch the launcher's reconcile does not know
-	// spends none of the old one's.
-	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND role = $2`, id, string(domain.SignupRolePlanner)); err != nil {
+	// A planner whose machine ended because its work was done is asked for under a new launch,
+	// with its own restarts: a launch the launcher's reconcile does not know spends none of the
+	// old one's. One whose machine is still there keeps it and its launch.
+	if _, err := tx.Exec(ctx, `UPDATE experiment_signups SET instance_launch = '' WHERE platform_experiment_id = $1 AND role = $2 AND instance_name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,
+	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id, created_xid) VALUES ($1, $2, $3, $4, pg_current_xact_id()::text::bigint)`,
 		id, message, string(by.Kind), by.ID); err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
 	}

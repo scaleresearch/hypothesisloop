@@ -174,7 +174,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
 		Summary: "Ask a draft's planner to change its proposal, or to try again after it declined", Tags: []string{"platform-experiments"},
 		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
-			"the proposal stays readable, proposed_at or declined_at is cleared, and the platform starts the planner again with what it knew, with the planning limit to propose anew. " +
+			"the proposal stays readable, proposed_at or declined_at is cleared, and the planner has the planning limit to propose anew. " +
+			"The planner's machine is kept after its answer until the draft's planner_ends_at: a revision asked for before it reaches the planner that is still there, as its next update (platform_experiment.revision), and is answered with nothing to boot. After it the platform starts the planner again with what it knew. " +
 			"A draft its planner declined is revised the same way: say what the planner lacked, and its reason stays readable until it answers again. " +
 			"409 invalid_transition for anything but a draft its planner has answered: while the planner still works there is nothing to revise yet.",
 	}, func(ctx context.Context, in *struct {
@@ -276,7 +277,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, h.refusal("encode proposal", err)
 		}
-		err = h.svc.store.SetProposal(ctx, in.ID, stored, time.Now().UTC().Add(h.planning.ProposedFor))
+		err = h.svc.store.SetProposal(ctx, in.ID, stored, time.Now().UTC().Add(h.planning.ProposedFor), h.planning.PlannerKept)
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}
@@ -432,7 +433,7 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
 			"nothing measurable, or nothing this platform can run. reason is read by the person who wrote the goal, in plain words, with what would make it plannable. " +
 			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, a proposal made before is cleared so there is nothing to accept, " +
-			"the planner's machine is released, and the person revises the draft or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason.",
+			"the planner's machine is kept until planner_ends_at for a revision asked for soon and released then, and the person revises the draft or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
@@ -459,7 +460,7 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if pe.Status != domain.PlatformExpDraft {
 			return nil, notADraft(pe)
 		}
-		err = h.svc.store.Decline(ctx, in.ID, reason, time.Now().UTC().Add(h.planning.ProposedFor))
+		err = h.svc.store.Decline(ctx, in.ID, reason, time.Now().UTC().Add(h.planning.ProposedFor), h.planning.PlannerKept)
 		if errors.Is(err, db.ErrNotDraft) {
 			return nil, notADraft(pe)
 		}

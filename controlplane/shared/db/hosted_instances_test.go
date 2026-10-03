@@ -565,7 +565,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	}
 
 	// The planner proposed and its wind-down passed, and both experiments closed and theirs did.
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = now() - make_interval(secs => $2) WHERE id = $1`, draft, (windDown + time.Second).Seconds()); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET proposed_at = now() - make_interval(secs => $2), planner_ends_at = now() - make_interval(secs => $2) WHERE id = $1`, draft, (windDown + time.Second).Seconds()); err != nil {
 		t.Fatal(err)
 	}
 	for _, pe := range []string{closing, coordinated} {
@@ -658,7 +658,7 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	}
 
 	answered, answering := createTestDraft(t, pool, launcher)
-	if err := pes.SetProposal(ctx, answered, []byte(`{}`), time.Now().UTC().Add(time.Hour)); err != nil {
+	if err := pes.SetProposal(ctx, answered, []byte(`{}`), time.Now().UTC().Add(time.Hour), 10*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if after := die(answered, answering, maxRestarts+1); !after.Stopped {

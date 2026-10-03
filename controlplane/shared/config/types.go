@@ -287,6 +287,9 @@ type PlanningConfig struct {
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
+	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a
+	// revision asked for in that time reaches the planner that is still there.
+	PlannerKeptMinutes int `yaml:"planner_kept_minutes"`
 }
 
 // AccountsConfig bounds what one account creates. Staff are held to neither bound.

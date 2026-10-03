@@ -137,7 +137,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS created_by_id   TEXT N
 -- What a draft's planner proposed (quota.Proposal as JSON) and when it answered. Both NULL until
 -- it has, and proposed_at NULL again while a revision is being planned. A decline answers too:
 -- it sets proposed_at and clears proposal, and is read as declined_at (domain.SetAnswered). The launcher keeps the planner's
--- machine only while proposed_at is NULL.
+-- machine while proposed_at is NULL, and after the answer until planner_ends_at.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposal    JSONB;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS proposed_at TIMESTAMPTZ;
 -- Why a draft's planner declined to propose: the goal could not be made into an experiment. A
@@ -168,6 +168,16 @@ CREATE TABLE IF NOT EXISTS planning_requests (
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS planning_requests_by_experiment ON planning_requests (platform_experiment_id, id);
+-- The transaction that recorded the request, which platform_experiment.revision replays from.
+-- NULL on a request from before the event, which is replayed to nobody.
+ALTER TABLE planning_requests ADD COLUMN IF NOT EXISTS created_xid BIGINT;
+-- Until when the launcher keeps the machine of a draft's planner once it answered, so that a
+-- revision asked for soon after reaches the planner that is still there: the answer plus
+-- planning.planner_kept_minutes, and never later than the planning limit the machine was rented
+-- with. NULL while the planner works, and again once a revision gave the draft back to it. An
+-- answer from before the column released its machine at once.
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS planner_ends_at TIMESTAMPTZ;
+UPDATE platform_experiments SET planner_ends_at = proposed_at WHERE proposed_at IS NOT NULL AND planner_ends_at IS NULL;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS default_quota_tier TEXT NOT NULL DEFAULT '';
 
 DO $$ BEGIN
@@ -454,6 +464,10 @@ ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAUL
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
 -- The git branch the job's commit was pushed on. A job from before branches were kept has none.
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS branch     TEXT NOT NULL DEFAULT '';
+-- The key a submit stated to be safe to repeat: one agent's submits with one key are one job.
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS submission_key TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_experiments_submission_key
+    ON experiments(platform_experiment_id, agent_id, submission_key) WHERE submission_key <> '';
 ALTER TABLE experiments ALTER COLUMN actor_kind DROP DEFAULT;
 ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT 'unverified';
 ALTER TABLE hypothesis_findings ADD COLUMN IF NOT EXISTS actor_id   TEXT NOT NULL DEFAULT '';
@@ -937,6 +951,19 @@ DROP TRIGGER IF EXISTS signup_finished_notify ON experiment_signups;
 CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_signups
     FOR EACH ROW WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL)
     EXECUTE FUNCTION hypothesisloop_agent_finished_notify();
+
+-- A revision asked of a draft's planner. A pointer: what was asked is read from the draft.
+CREATE OR REPLACE FUNCTION hypothesisloop_planning_request_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM hypothesisloop_notify_event('platform_experiment.revision', NEW.platform_experiment_id,
+        '', '', NEW.platform_experiment_id, '');
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS planning_requests_notify ON planning_requests;
+CREATE TRIGGER planning_requests_notify AFTER INSERT ON planning_requests
+    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_planning_request_notify();
 
 -- ---------------------------------------------------------------------------
 -- Tenancy

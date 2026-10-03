@@ -333,6 +333,8 @@ func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
 		"no baseline limit": {"  baseline_limit_minutes: 90\n", ""},
 		"no wait":           {"  proposed_for_days: 7\n", ""},
 		"misspelled wait":   {"  proposed_for_days: 7", "  proposed_for_day: 7"},
+		"no planner kept":   {"  planner_kept_minutes: 10\n", ""},
+		"zero planner kept": {"  planner_kept_minutes: 10", "  planner_kept_minutes: 0"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {

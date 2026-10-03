@@ -39,8 +39,12 @@ WAKES = {
     "coordinator": ("agent.finished", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut",
-              "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description"),
+              "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
+              "platform_experiment.revision"),
 }
+# A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
+# read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
+REVISION = "platform_experiment.revision"
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
 # is a baseline agent's, and one that failed for what the brief says is the coordinator's to
 # repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
