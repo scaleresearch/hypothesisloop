@@ -86,7 +86,7 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("POST", f"/hypotheses/{hyp_id}/status", {"agent_id": agent, "status": "confirmed", "despite": "an intruder settles it with a reason of its own"}),
             ("PATCH", f"/platform-experiments/{pe_id}", {"name": "taken over", "description": "taken over"}),
             ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}),
-            ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),
+            ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),
             ("POST", f"/platform-experiments/{pe_id}/agents", {"agent_id": agent}),
             ("DELETE", f"/platform-experiments/{pe_id}/agents/{agent}", None),
             ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent}),

@@ -30,8 +30,9 @@ from support.wait import eventually
 pytestmark = pytest.mark.exclusive
 
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
-# Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes, so a job
-# asking for it stays QUEUED: its token stays valid and it holds nothing.
+# Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes. A job asking
+# for it, submitted while its org has no cluster a submit could be judged against, stays QUEUED:
+# its token stays valid and it holds nothing.
 UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
 # domain.AgentWindDown, in seconds.
 AGENT_WIND_DOWN = 120
@@ -165,7 +166,8 @@ def test_a_project_key_reads_and_writes_nothing_of_its_orgs_other_project(org: O
             ("POST", f"/orgs/{org.org_id}/projects", {"name": "a third"}, 403),
             ("POST", f"/orgs/{org.org_id}/api-keys", {"name": "wider"}, 403),
         ])
-        for path in ("/platform-experiments?limit=200", "/experiments?limit=200", "/hypotheses?limit=200"):
+        # Each at its list's largest page: 200, and 50 for jobs.
+        for path in ("/platform-experiments?limit=200", "/experiments?limit=50", "/hypotheses?limit=200"):
             listed = bound.get(path)
             assert listed.status_code == 200, f"the first project's key GET {path}: {listed.status_code} {listed.text}"
             for theirs in (pe_id, other.job_id, other.hypothesis_id):
@@ -215,7 +217,7 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", f"/hypotheses/{theirs.hypothesis_id}/status", {"agent_id": mine.agent, "status": "refuted"}, 403),
         ("POST", "/platform-experiments", _platform_experiment_body("an agent's own", org.project_id), 403),
         ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}, 403),
-        ("POST", "/agents", {"id": f"agent-made-by-an-agent-{uuid.uuid4().hex[:6]}"}, 403),
+        ("POST", "/agents", {"id": f"agent-made-by-an-agent-{uuid.uuid4().hex[:6]}", "name": "Made by an agent"}, 403),
     ])
 
     assert org.key.experiment(theirs.job_id)["status"] == "QUEUED"
@@ -370,6 +372,10 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     closed_at = time.monotonic()
     closed = org.key.post(f"/platform-experiments/{pe_id}/close", {"top_results": []})
     assert closed.status_code == 200, f"close: {closed.status_code} {closed.text}"
+    assert (closed.json()["id"], closed.json()["status"], closed.json()["close_reason"]) == (pe_id, "closed", "closed_by_request"), \
+        f"a close answers the platform experiment as closed: {closed.text}"
+    again = org.key.post(f"/platform-experiments/{pe_id}/close", {"top_results": []})
+    assert again.status_code == 409 and again.json()["reason"] == "invalid_transition", f"closing a closed one: {again.status_code} {again.text}"
 
     new_job = org.key.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, member.agent)
     new_job["metadata"]["hypothesis_id"] = member.hypothesis_id
@@ -386,7 +392,7 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     _assert_each(coordinator, "the coordinator after the close", [
         ("GET", f"/platform-experiments/{pe_id}", None, 200),
         ("GET", f"/platform-experiments/{pe_id}/results", None, 200),
-        ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "what the run showed"}, 200),
+        ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "what the run showed"}, 200),
         ("POST", "/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": "MATCH (h:Hypothesis) RETURN count(h)", "params": {}}, 200),
         ("PATCH", f"/platform-experiments/{pe_id}", {"description": "reopened"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/agents", {}, 403),
@@ -404,10 +410,11 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     ])
     _assert_each(coordinator, "the coordinator after the wind-down", [
         ("GET", f"/platform-experiments/{pe_id}", None, 401),
-        ("POST", f"/platform-experiments/{pe_id}/summary", {"summary": "amended"}, 401),
+        ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "amended"}, 401),
     ])
-    amended = org.key.post(f"/platform-experiments/{pe_id}/summary", {"summary": "amended"})
+    amended = org.key.put(f"/platform-experiments/{pe_id}/summary", {"summary": "amended"})
     assert amended.status_code == 200, f"the owner amending the summary after the wind-down: {amended.status_code} {amended.text}"
+    assert (amended.json()["id"], amended.json()["summary"]) == (pe_id, "amended"), f"a summary answers the platform experiment with it: {amended.text}"
 
 
 # ---- what a /watch stream delivers, and for how long ------------------------------------------

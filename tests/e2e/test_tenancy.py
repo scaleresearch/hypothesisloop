@@ -25,6 +25,8 @@ pytestmark = pytest.mark.exclusive
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes.
 UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
+# The largest page GET /experiments serves: 422 invalid_page over it.
+MAX_JOB_PAGE = 50
 
 
 @dataclass
@@ -55,7 +57,9 @@ def _tenant(api: API, run_id: str, label: str) -> Tenant:
         pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
         caller.signup_and_start(pe_id, [agent])
     hypothesis_id = caller.register_hypothesis(pe_id, agent, f"{marker} hypothesis")["id"]
-    # An accelerator type no local cluster has, so the job stays QUEUED: non-terminal for the job
+    # An accelerator type no local cluster has, submitted while the org has no cluster a submit
+    # could be judged against (one that asks for more than every cluster of its org has is
+    # refused with exceeds_cluster_capacity). The job stays QUEUED: non-terminal for the job
     # token, and holding nothing.
     job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR})
     cluster = f"cluster-{marker}-{run_id}"
@@ -116,7 +120,7 @@ def _list_reads(t: Tenant) -> list[str]:
         f"/agents?q={t.marker}",
         f"/agents?project_id={t.project_id}",
         f"/agents/stats?platform_experiment_id={t.pe_id}",
-        "/experiments?limit=200",
+        f"/experiments?limit={MAX_JOB_PAGE}",
         f"/experiments?platform_experiment_id={t.pe_id}",
         f"/experiments?agent_id={t.agent}",
         f"/experiments?project_id={t.project_id}",
@@ -161,10 +165,14 @@ def test_the_owner_reads_everything_of_its_own(tenants):
         for path in _reads_of_one_resource(t):
             r = t.api.get(path)
             assert r.status_code == 200, f"owner GET {path}: {r.status_code} {r.text}"
-        for path in ("/platform-experiments?limit=200", "/agents?limit=200", "/experiments?limit=200",
+        for path in ("/platform-experiments?limit=200", "/agents?limit=200", f"/experiments?limit={MAX_JOB_PAGE}",
                      "/hypotheses?limit=200"):
             r = t.api.get(path)
             assert r.status_code == 200 and t.marker in r.text, f"owner GET {path} does not list its own rows: {r.text}"
+        # A page over a list's maximum is refused, so a short page is never read as the whole set.
+        for path in (f"/experiments?limit={MAX_JOB_PAGE + 1}", "/hypotheses?limit=201"):
+            r = t.api.get(path)
+            assert r.status_code == 422 and r.json()["reason"] == "invalid_page", f"owner GET {path}: {r.status_code} {r.text}"
 
 
 def test_another_org_reads_nothing_by_id(tenants):
@@ -180,7 +188,7 @@ def test_another_orgs_rows_are_in_no_list(tenants):
         r = a.api.get(path)
         assert r.status_code == 200, f"org A GET {path}: {r.status_code} {r.text}"
         assert not _leaks(r, b), f"org A GET {path} shows {_leaks(r, b)} of org B: {r.text}"
-        assert r.headers.get("X-Total-Count", "0") == "0" or "?limit=200" in path, (
+        assert r.headers.get("X-Total-Count", "0") == "0" or "?limit=" in path, (
             f"org A GET {path} counts {r.headers['X-Total-Count']} rows of org B"
         )
         if "/stats" in path:
@@ -206,10 +214,10 @@ def test_another_org_writes_nothing(tenants):
         ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
         ("PATCH", f"/platform-experiments/{b.pe_id}", {"name": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),
-        ("POST", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
+        ("PUT", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/data-key", {"agent_id": a.agent}),
         ("POST", "/platform-experiments", _platform_experiment_body("intruding", project_id=b.project_id)),
-        ("POST", "/agents", {"id": f"agent-intruder-{uuid.uuid4().hex[:8]}", "org_id": b.org_id}),
+        ("POST", "/agents", {"id": f"agent-intruder-{uuid.uuid4().hex[:8]}", "name": "Intruder", "org_id": b.org_id}),
         ("POST", "/experiments", body_naming_b),
         ("POST", "/experiments", body_as_b),
         ("POST", f"/experiments/{b.job_id}/cancel", None),
