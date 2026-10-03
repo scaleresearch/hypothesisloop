@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
-"""Anthropic entry point — the shared agent (see core.py) driven by the Claude Agent SDK.
+"""The Claude entry point: the shared agent (core.py) on one ClaudeSDKClient session.
 
-Runs on claude_agent_sdk rather than a hand-rolled ReAct loop — it's Claude Code packaged as a
-library, run on our own infra (same container, same platform APIs) instead of Anthropic-hosted.
-This gives us, for free, what a hand-rolled loop had to reinvent badly: the agent loop itself, a
-real bash/file/web tool surface (no bespoke run_bash/call_api — the model runs `hl` via the
-built-in Bash tool).
-Auth: Claude subscription (Claude Code login) or
-ANTHROPIC_API_KEY, exactly as Claude Code itself resolves it.
-
-Uses ClaudeSDKClient (bidirectional, resumable) rather than one-shot query(): a platform
-experiment runs for hours to days, and a one-shot query() ends the whole process the moment the
-model reaches a natural end_turn — which happens constantly, e.g. any time the model "waits" for
-a background job instead of blocking on it. This session survives that: an end_turn waits for the
-next batch of platform updates (see updates.py) and sends it on the same connection (same context,
-same prompt cache) instead of the process exiting. The session_id is persisted to disk so that even a genuine process crash/redeploy resumes
-the same conversation (via `resume=`) rather than starting over cold.
+A turn that ends waits for the next platform updates (updates.py) and sends them on the same
+connection, and a hook hands the agent the ones that arrive while it works. The session id is
+kept on disk and the session is stored with the platform, so a restarted process or a new
+machine resumes the conversation.
 """
 from __future__ import annotations
 
