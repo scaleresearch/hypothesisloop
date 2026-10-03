@@ -84,7 +84,33 @@ func (s *Service) supported(ctx context.Context, h *domain.Hypothesis, v Verdict
 // repeats the claim can read what it rests on.
 func basis(v Verdict) string {
 	if reason := strings.TrimSpace(v.Despite); reason != "" {
-		return fmt.Sprintf("Verdict %s given without a repeated run and a control: %s", v.Status, reason)
+		return fmt.Sprintf("%sgiven without a repeated run and a control: %s", basisPrefix(v.Status), reason)
 	}
-	return fmt.Sprintf("Verdict %s against control %s.", v.Status, v.Against)
+	return fmt.Sprintf("%sagainst control %s.", basisPrefix(v.Status), v.Against)
+}
+
+func basisPrefix(status domain.HypothesisStatus) string {
+	return fmt.Sprintf("Verdict %s ", status)
+}
+
+// basisPage is how many comments basisNoted reads at a time.
+const basisPage = 200
+
+// basisNoted reports whether the basis of the verdict h holds is among its comments: a basis of
+// that status written since the status was set.
+func (s *Service) basisNoted(ctx context.Context, h *domain.Hypothesis) (bool, error) {
+	for offset := 0; ; offset += basisPage {
+		comments, err := s.store.ListCommentsByHypothesis(ctx, h.ID, basisPage, offset)
+		if err != nil {
+			return false, err
+		}
+		for _, c := range comments {
+			if strings.HasPrefix(c.Text, basisPrefix(h.Status)) && (h.StatusChangedAt == nil || !c.CreatedAt.Before(*h.StatusChangedAt)) {
+				return true, nil
+			}
+		}
+		if len(comments) < basisPage {
+			return false, nil
+		}
+	}
 }

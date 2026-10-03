@@ -492,7 +492,17 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	// Whose verdict it is comes first and is the graph's to refuse, in the write below: the
 	// evidence is asked only of an agent that may give the verdict at all.
 	mayJudge := current != nil && (current.AgentID == "" || current.AgentID == callerAgentID)
-	if mayJudge && current.Status != status {
+	// A verdict that stands with its basis noted is said again and changes nothing. One that
+	// stands without it lost the note to a failed write, and this call writes it.
+	note := mayJudge && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted)
+	if note && current.Status == status {
+		noted, err := s.basisNoted(ctx, current)
+		if err != nil {
+			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+		}
+		note = !noted
+	}
+	if mayJudge && (current.Status != status || note) {
 		if err := s.supported(ctx, current, verdict); err != nil {
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 		}
@@ -513,7 +523,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	}
 	s.logger.Info("hypothesis status updated",
 		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
-	if announced && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted) {
+	if note {
 		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, actor, basis(verdict)); err != nil {
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
 		}

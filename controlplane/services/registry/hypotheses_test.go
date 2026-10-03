@@ -35,6 +35,9 @@ type poolStore struct {
 	// for an actor, by its id.
 	commentActors []domain.Actor
 	actorNames    map[string]string
+	commentRows   []*domain.HypothesisComment
+	// failNextComment fails the next comment insert, once.
+	failNextComment bool
 }
 
 func (s *poolStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
@@ -95,12 +98,29 @@ func TestABaselineAgentRegistersNoHypothesis(t *testing.T) {
 // CreateHypothesisComment mirrors the store insert, which consults nothing about the hypothesis
 // beyond its id — a note is attached to a row, not authorised against its owner.
 func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
+	if s.failNextComment {
+		s.failNextComment = false
+		return nil, errors.New("insert failed")
+	}
 	s.comments = append(s.comments, text)
 	s.commentActors = append(s.commentActors, actor)
-	return &domain.HypothesisComment{
+	c := &domain.HypothesisComment{
 		ID: "c-1", HypothesisID: hypothesisID, PlatformExperimentID: platformExperimentID,
-		AgentID: agentID, Actor: actor, Text: text,
-	}, nil
+		AgentID: agentID, Actor: actor, Text: text, CreatedAt: time.Now().UTC(),
+	}
+	s.commentRows = append(s.commentRows, c)
+	return c, nil
+}
+
+func (s *poolStore) ListCommentsByHypothesis(_ context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
+	var of []*domain.HypothesisComment
+	for _, c := range s.commentRows {
+		if c.HypothesisID == hypothesisID {
+			of = append(of, c)
+		}
+	}
+	of = of[min(offset, len(of)):]
+	return of[:min(limit, len(of))], nil
 }
 
 // NameActors names an actor as the database does: by the name kept for it, else by its id, and a

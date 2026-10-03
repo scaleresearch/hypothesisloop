@@ -109,6 +109,42 @@ func TestAVerdictWithoutTheEvidenceStandsOnAStatedReasonWhichIsKept(t *testing.T
 	}
 }
 
+// The verdict is written to the graph and its basis to Postgres after it. When the second write
+// failed, the repeat found the status already set and skipped the note, so the verdict stood
+// with nothing saying what it rests on.
+func TestAVerdictWhoseBasisWasNotWrittenGetsItOnTheRepeat(t *testing.T) {
+	ctx := context.Background()
+	store := newPoolStore()
+	svc := poolService(store)
+	h, _, _, err := svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "lr 10 trains", buildOnRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict := Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid}
+	store.failNextComment = true
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), verdict); err == nil {
+		t.Fatal("SetHypothesisStatus with a failing comment insert: got = nil, want an error")
+	}
+	if got, _ := svc.GetHypothesis(ctx, h.ID); got.Status != domain.HypothesisRefuted || len(store.comments) != 0 {
+		t.Fatalf("after the failed note: got = %s with notes %v, want refuted with none", got.Status, store.comments)
+	}
+	var unsupported *UnsupportedVerdictError
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted}); !errors.As(err, &unsupported) {
+		t.Fatalf("the repeat with no basis to note: got = %v, want it refused", err)
+	}
+	for range 2 {
+		if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), verdict); err != nil {
+			t.Fatalf("the repeat: got = %v, want nil", err)
+		}
+	}
+	if len(store.comments) != 1 || !strings.Contains(store.comments[0], enoughSaid) {
+		t.Fatalf("the basis after two repeats: got = %v, want it noted once", store.comments)
+	}
+	if _, err := svc.SetHypothesisStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted}); err != nil {
+		t.Errorf("saying again a verdict whose basis is noted: got = %v, want nil", err)
+	}
+}
+
 // What needs no evidence: saying a hypothesis is open or inconclusive, and saying again what it
 // already is.
 func TestOpenAndInconclusiveNeedNoEvidence(t *testing.T) {
