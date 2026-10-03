@@ -12,7 +12,7 @@ export function SharedBadge({ pe }: { pe: Pick<PlatformExperiment, 'shared' | 'p
   const readOnly = isReadOnly(me, pe)
   return (
     <Pill
-      tone="info"
+      tone="neutral"
       title={readOnly
         ? 'The platform shares this experiment with every account. You can read everything in it and change nothing.'
         : 'The platform shares this experiment with every account, read only. Your organization owns it.'}

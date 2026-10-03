@@ -132,8 +132,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       />
 
       {lastAttempt && j.eviction_reason && (
-        <Callout tone="accent" className="text-accent">
-          <strong>{lastAttempt}</strong>
+        <Callout tone="warning">
+          <strong className="text-warning">{lastAttempt}</strong>
           <JobReason reason={j.eviction_reason} />
         </Callout>
       )}
@@ -163,8 +163,8 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
 
       {/* A queued job never errors on its own; this is the scheduler's current reason. */}
       {j.status === 'QUEUED' && j.not_admitted_reason && (
-        <Callout tone="accent">
-          <strong className="text-accent">Not admitted:</strong>{' '}
+        <Callout tone="warning">
+          <strong className="text-warning">Not admitted:</strong>{' '}
           <span className="font-mono text-xs text-muted">{notAdmittedLabel(j.not_admitted_reason, j.not_admitted_message)}</span>
         </Callout>
       )}

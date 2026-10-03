@@ -107,15 +107,15 @@ export function PlatformExperimentCard({
         <div className="grid grid-cols-4 gap-4">
           <div>
             <Eyebrow className="block">Budget</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.budget_accelerator_hours} <span className="text-xs text-muted">{unit}</span></div>
+            <div className="font-mono text-xl font-medium">{pe.budget_accelerator_hours} <span className="text-xs text-muted">{unit}</span></div>
           </div>
           <div>
             <Eyebrow className="block">Agents</Eyebrow>
-            <div className="font-mono text-xl font-bold">{pe.signup_count} <span className="text-xs text-muted">joined, {pe.max_agents} researchers at most</span></div>
+            <div className="font-mono text-xl font-medium">{pe.signup_count} <span className="text-xs text-muted">joined, {pe.max_agents} researchers at most</span></div>
           </div>
           <div>
             <Eyebrow className="block">Budget Used</Eyebrow>
-            <div className={clsx('font-mono text-xl font-bold', totalUsed > 0 && 'text-accent')}>
+            <div className={'font-mono text-xl font-medium'}>
               {formatAccH(totalUsed)} <span className="text-xs text-muted">{unit}</span>
             </div>
           </div>

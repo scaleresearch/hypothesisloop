@@ -25,7 +25,7 @@ export function StatTile({ label, value, sub, tone, href, active }: StatTileProp
   const content = (
     <>
       <Eyebrow className="mb-1 block">{label}</Eyebrow>
-      <div className={clsx('truncate font-mono text-2xl font-bold tabular-nums tracking-tight', tone ? toneText[tone] : 'text-foreground')} title={typeof value === 'string' ? value : undefined}>{value}</div>
+      <div className={clsx('truncate font-mono text-2xl font-medium tabular-nums tracking-tight', tone ? toneText[tone] : 'text-foreground')} title={typeof value === 'string' ? value : undefined}>{value}</div>
       {sub && <div className="mt-0.5 truncate text-2xs text-subtle" title={sub}>{sub}</div>}
     </>
   )

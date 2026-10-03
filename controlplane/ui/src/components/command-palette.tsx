@@ -202,7 +202,7 @@ export function CommandPalette() {
         <div className="flex items-center gap-4 border-t bg-surface-inset px-4 py-2 text-2xs text-subtle">
           <span className="inline-flex items-center gap-1"><ArrowUp size={11} /><ArrowDown size={11} /> navigate</span>
           <span className="inline-flex items-center gap-1"><CornerDownLeft size={11} /> select</span>
-          <span className="ml-auto inline-flex items-center gap-1 text-accent"><Zap size={11} /> agent- and human-readable IDs both work</span>
+          <span className="ml-auto inline-flex items-center gap-1 text-subtle"><Zap size={11} /> agent- and human-readable IDs both work</span>
         </div>
       </div>
     </div>

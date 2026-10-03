@@ -217,7 +217,7 @@ export function OrgClusters() {
                 <td className="font-mono text-xs font-semibold">{c.name}</td>
                 <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                 <td className="text-xs">
-                  {c.owned ? org.name : <Badge tone="accent">Platform</Badge>}
+                  {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
                   {c.shared && <div className="mt-0.5 text-2xs text-muted">shared with every org</div>}
                 </td>
                 <td className="text-xs">

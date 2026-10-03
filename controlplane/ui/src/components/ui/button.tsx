@@ -14,7 +14,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean
 }
 
-const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-semibold transition-colors disabled:cursor-default disabled:opacity-50'
+const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors disabled:cursor-default disabled:opacity-50'
 
 const boxed = 'rounded border shadow-sm active:translate-y-px disabled:shadow-none'
 
@@ -73,10 +73,10 @@ export function Chip({ active, className, ...props }: ChipProps) {
     <button
       aria-pressed={active ?? false}
       className={clsx(
-        'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+        'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
         active
           ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border-control bg-surface text-muted hover:border-accent hover:bg-foreground/5 hover:text-foreground',
+          : 'border-border-control bg-surface text-muted hover:bg-foreground/5 hover:text-foreground',
         className,
       )}
       {...props}

@@ -82,10 +82,9 @@ function SchedulerQuality() {
           <StatTile
             label="Accelerators in use"
             value={chips.percent}
-            tone="accent"
             sub={chips.detail ?? 'no live capacity reported'}
           />
-          {cores.detail && <StatTile label="CPU cores in use" value={cores.percent} tone="accent" sub={cores.detail} />}
+          {cores.detail && <StatTile label="CPU cores in use" value={cores.percent} sub={cores.detail} />}
         </div>
         <Table className="max-w-[640px]">
           <thead>
