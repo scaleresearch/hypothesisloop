@@ -25,7 +25,11 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const github = useGitHub()
   const [repository, setRepository] = useState('')
 
+  // One rule for the button and for Enter: a sentence, GitHub connected where it is needed, and no plan already on its way.
+  const ready = goal.trim() !== '' && !sending && github !== 'unconnected'
+
   async function plan() {
+    if (!ready) return
     setSending(true)
     setError(null)
     setNotCreated(null)
@@ -42,13 +46,18 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
     <div className="grid gap-2">
       <FormField
         label="What do you want to find out?"
-        hint="One sentence is enough. The platform works out how to measure it and proposes the experiment in a few minutes. Nothing runs and nothing is spent until you accept."
+        hint="One sentence is enough. Enter plans it, Shift+Enter starts a new line. The platform works out how to measure it and proposes the experiment in a few minutes. Nothing runs and nothing is spent until you accept."
       >
         <Textarea
           rows={3}
           maxLength={MAX_GOAL_LENGTH}
           value={goal}
           onChange={e => setGoal(e.target.value)}
+          onKeyDown={e => {
+            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+            e.preventDefault()
+            void plan()
+          }}
           placeholder="e.g. Does a cosine learning-rate schedule beat a constant one for a small transformer on character-level text?"
         />
       </FormField>
@@ -59,7 +68,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
       )}
       {github === 'unconnected' ? <ConnectGitHubStep /> : (
         <div className="flex items-center gap-3">
-          <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan}>Plan this experiment</Button>
+          <Button variant="primary" loading={sending} disabled={goal.trim() === ''} onClick={plan} aria-keyshortcuts="Enter">Plan this experiment</Button>
           {error && <InlineError>{error}</InlineError>}
         </div>
       )}

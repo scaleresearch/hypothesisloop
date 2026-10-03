@@ -83,6 +83,21 @@ describe('the experiments page', () => {
     }
   })
 
+  it('plans on Enter as the button does, keeps Shift+Enter for a new line, and plans nothing from an empty box', async () => {
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+    show()
+    const goal = screen.getByLabelText('What do you want to find out?')
+    await userEvent.type(goal, '  {Enter}')
+    expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.clear(goal)
+    await userEvent.type(goal, 'Is a cosine schedule better?{Shift>}{Enter}{/Shift}On small models.')
+    expect(apiSend).not.toHaveBeenCalled()
+    expect(goal).toHaveProperty('value', 'Is a cosine schedule better?\nOn small models.')
+    await userEvent.type(goal, '{Enter}')
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?\nOn small models.' })
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/platform-experiments/pe-draft?project=prj_1'))
+  })
+
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('no launcher is registered, so nothing would run the planner'))
     show()
