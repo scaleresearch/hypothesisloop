@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentAgents, fetchPlatformExperimentsPage } from '@/lib/api'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesesPage from '@/app/(app)/hypotheses/page'
+import { PlatformExperimentStatus } from '@/types'
 import type { HypothesisGraph, Me, PlatformExperiment } from '@/types'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
@@ -70,6 +71,32 @@ describe('the hypothesis graph', () => {
     show('pe=pe-x&focus=hyp-1', { project_id: 'prj_1', shared: true })
     expect(await screen.findByRole('button', { name: '+ Add idea under the objective' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '+ Add idea under this' })).toBeTruthy()
+  })
+
+  it('opens the idea editor in place, under the objective\'s row of the outline', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    show('pe=pe-x&view=outline', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.RUNNING })
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add idea under the objective' }))
+    const editor = screen.getByRole('group', { name: 'New idea' })
+    expect(editor.closest('li')!.textContent).toContain('Vision benchmark')
+    expect(screen.getByText('the objective of Vision benchmark')).toBeTruthy()
+  })
+
+  it.each([
+    ['a reader of a shared experiment of another org', { project_id: 'prj_platform', shared: true, status: PlatformExperimentStatus.RUNNING }],
+    ['a closed experiment of the caller\'s own', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.CLOSED }],
+  ])('shows %s no control that adds or links', async (_, pe) => {
+    Element.prototype.scrollIntoView = vi.fn()
+    const own = show('pe=pe-x&view=outline&focus=hyp-1', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.RUNNING })
+    await screen.findByRole('button', { name: 'Link to…' })
+    expect(screen.getAllByRole('button', { name: /Add idea/ }).length).toBeGreaterThan(0)
+    own.unmount()
+
+    show('pe=pe-x&view=outline&focus=hyp-1', pe)
+    await screen.findByRole('button', { name: /warmup helps/ })
+    await screen.findByRole('link', { name: 'Open detail →' })
+    expect(screen.queryByRole('button', { name: /Add idea/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Link to…' })).toBeNull()
   })
 
   it('names who registered the selected hypothesis beside the agent it was registered for, by its name', async () => {

@@ -8,7 +8,7 @@ import {
 import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import { AddCommentForm, AddIdeaForm, AddLinkForm } from '@/components/human-idea'
+import { AddCommentForm, AddLinkForm } from '@/components/human-idea'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { PlatformExperimentStatus } from '@/types'
@@ -103,17 +103,16 @@ describe('a shared platform experiment of another org shows no control that writ
     expect(screen.getByRole('link', { name: 'Experiment →' }).getAttribute('href')).toBe('/platform-experiments/pe-x?project=prj_1')
   })
 
-  it('to a hypothesis: no idea, link or comment form', () => {
+  it('to a hypothesis: no link or comment form', () => {
     const hypothesis = { ...node, links: { out: [], in: [] } } as unknown as HypothesisWithJobs
     const forms = (
       <>
-        <AddIdeaForm platformExperimentID="pe-x" parent={{ id: 'pe-x', label: 'the objective' }} onAdded={() => {}} />
         <AddLinkForm hypothesis={hypothesis} onAdded={() => {}} />
         <AddCommentForm hypothesisID="hyp-1" onAdded={() => {}} />
       </>
     )
     const own = show(forms, false)
-    expect(names('button')).toEqual(expect.arrayContaining(['Add idea', 'Add comment']))
+    expect(names('button')).toEqual(expect.arrayContaining(['Add comment']))
     expect(screen.getByText('Add link')).toBeTruthy()
     own.unmount()
 
