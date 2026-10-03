@@ -17,12 +17,19 @@ func (s *Service) RePrioritize(ctx context.Context) error {
 		return fmt.Errorf("scheduler: list queued for reprioritize: %w", err)
 	}
 
-	activeExps, err := s.store.GetRunningAndQueued(ctx)
-	if err != nil {
-		return fmt.Errorf("scheduler: get active experiments: %w", err)
-	}
-
+	// Read once per platform experiment with a queued job, for every job of it in this pass.
+	active := map[string][]*domain.Experiment{}
 	for _, exp := range queued {
+		activeExps, read := active[exp.PlatformExperimentID]
+		if !read {
+			activeExps, err = s.store.GetRunningAndQueued(ctx, exp.PlatformExperimentID)
+			if err != nil {
+				s.logger.Warn("reprioritize: read the platform experiment's active jobs failed; leaving stale priority",
+					zap.String("exp", exp.ID), zap.Error(err))
+				continue
+			}
+			active[exp.PlatformExperimentID] = activeExps
+		}
 		// A per-job failure here (novelty lookup, quota lookup, or the DB write) must not abort
 		// reprioritization of the rest of the queue: an unrelated job's transient error would
 		// otherwise leave every job after it with a stale score for the rest of this tick. Log

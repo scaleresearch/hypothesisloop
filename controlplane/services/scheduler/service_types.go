@@ -26,10 +26,10 @@ type Store interface {
 	// callers that need whole-set totals rather than a page of rows.
 	ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error)
 	UpdateExperimentPriority(ctx context.Context, id string, score float64) error
-	GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error)
+	// GetRunningAndQueued is the jobs of one platform experiment that have not ended.
+	GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
 	// Platform experiment lookups for admission validation.
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
-	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// GetAgentSignup is the agent's place in the platform experiment, nil when it has none: its
 	// role says whether its job is the baseline's.
 	GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error)

@@ -100,7 +100,7 @@ type poolOnlyStore struct {
 	Store
 }
 
-func (poolOnlyStore) GetRunningAndQueued(_ context.Context) ([]*domain.Experiment, error) {
+func (poolOnlyStore) GetRunningAndQueued(context.Context, string) ([]*domain.Experiment, error) {
 	return nil, errReachedScoring
 }
 
@@ -110,7 +110,6 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 func (poolOnlyStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
 	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor, Flavor: domain.DefaultAgentFlavor}, nil
 }
-func (poolOnlyStore) IsSignedUp(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
@@ -502,11 +501,12 @@ func TestSubmitAnswersAHypothesisElsewhereAsItDoesAnAbsentOne(t *testing.T) {
 
 type twoExperimentsStore struct{ poolOnlyStore }
 
-func (twoExperimentsStore) GetRunningAndQueued(context.Context) ([]*domain.Experiment, error) {
-	return []*domain.Experiment{
+func (twoExperimentsStore) GetRunningAndQueued(_ context.Context, platformExpID string) ([]*domain.Experiment, error) {
+	all := []*domain.Experiment{
 		{ID: "mine-1", PlatformExperimentID: "pe-1"}, {ID: "theirs-1", PlatformExperimentID: "pe-other"},
 		{ID: "mine-2", PlatformExperimentID: "pe-1"}, {ID: "human-idea-job", PlatformExperimentID: "pe-1"},
-	}, nil
+	}
+	return slices.DeleteFunc(all, func(e *domain.Experiment) bool { return e.PlatformExperimentID != platformExpID }), nil
 }
 
 type recordingNovelty struct{ compared []string }

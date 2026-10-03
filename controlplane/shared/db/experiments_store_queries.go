@@ -11,13 +11,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// GetRunningAndQueued returns all experiments with status RUNNING, QUEUED, or SUBMITTED.
-func (s *ExperimentsStore) GetRunningAndQueued(ctx context.Context) ([]*domain.Experiment, error) {
+// GetRunningAndQueued returns the experiments of one platform experiment with status RUNNING,
+// QUEUED, or SUBMITTED.
+func (s *ExperimentsStore) GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('RUNNING', 'QUEUED', 'SUBMITTED')
+WHERE platform_experiment_id = $1 AND status IN ('RUNNING', 'QUEUED', 'SUBMITTED')
 ORDER BY created_at ASC`
 
-	rows, err := s.pool.pool.Query(ctx, q)
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.GetRunningAndQueued: %w", err)
 	}

@@ -18,7 +18,9 @@ func (s measuredStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", JobEstimatedDurationHours: s.measured}, nil
 }
 
-func (measuredStore) IsSignedUp(context.Context, string, string) (bool, error) { return false, nil }
+func (measuredStore) GetAgentSignup(context.Context, string, string) (*domain.AgentSignup, error) {
+	return nil, nil
+}
 
 // Held to the estimate its spec guessed before anything ran, a baseline ran twice, the second
 // time only to carry a corrected one. The estimate of a job that states none is the one the

@@ -224,11 +224,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 
-	signedUp, err := s.store.IsSignedUp(ctx, exp.PlatformExperimentID, exp.AgentID)
-	if err != nil {
-		return fmt.Errorf("scheduler: check signup: %w", err)
-	}
-	if !signedUp {
+	if signup == nil {
 		return &AdmissionError{
 			Reason:  "not_signed_up",
 			Message: "agent has not signed up for this platform experiment",
@@ -307,11 +303,10 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// check GET /experiments?status=QUEUED to spot duplicates before submitting.
 	// Within this platform experiment only: a hypothesis belongs to one, so a job elsewhere
 	// tests nothing this one could duplicate, and may be another org's.
-	activeExps, err := s.store.GetRunningAndQueued(ctx)
+	activeExps, err := s.store.GetRunningAndQueued(ctx, exp.PlatformExperimentID)
 	if err != nil {
 		return fmt.Errorf("scheduler: get running and queued: %w", err)
 	}
-	activeExps = inPlatformExperiment(activeExps, exp.PlatformExperimentID)
 	// Never against itself. Re-submitting an already-QUEUED job (step 7's `existing` branch)
 	// otherwise finds its own row in the active set, scores itself a duplicate of itself, and
 	// persists the depressed priority that follows — reprioritize excludes it for the same
@@ -334,7 +329,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// for it. The id check used to run before the transaction, which made it non-atomic with the
 	// insert and left the primary key as a second, competing decider that surfaced as a 500.
 	exp.Status = domain.StatusQueued
-	exp.PriorityScore = priorityScore
 	// ClusterName is intentionally left unset here: the admission loop assigns it, capacity-aware,
 	// at the moment this job is actually admitted onto a specific cluster (see loop_tick.go).
 	// The submission rate limit is enforced inside this transaction rather than before it: the
@@ -446,14 +440,4 @@ func (s *Service) enforceDataCeiling(ctx context.Context, exp *domain.Experiment
 // of another platform experiment, so a submission cannot probe for the latter.
 func hypothesisNotInExperiment(exp *domain.Experiment) string {
 	return fmt.Sprintf("hypothesis %s not found in platform experiment %s — register it first via POST /hypotheses", exp.HypothesisID, exp.PlatformExperimentID)
-}
-
-func inPlatformExperiment(exps []*domain.Experiment, platformExperimentID string) []*domain.Experiment {
-	kept := make([]*domain.Experiment, 0, len(exps))
-	for _, e := range exps {
-		if e.PlatformExperimentID == platformExperimentID {
-			kept = append(kept, e)
-		}
-	}
-	return kept
 }

@@ -41,7 +41,7 @@ func TestAQuotaRefusalSaysWhetherALaterStageRaisesTheShare(t *testing.T) {
 
 type admittingStore struct{ poolOnlyStore }
 
-func (admittingStore) GetRunningAndQueued(context.Context) ([]*domain.Experiment, error) {
+func (admittingStore) GetRunningAndQueued(context.Context, string) ([]*domain.Experiment, error) {
 	return nil, nil
 }
 
