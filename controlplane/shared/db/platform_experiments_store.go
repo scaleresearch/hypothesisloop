@@ -298,9 +298,10 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 	return clauses, args
 }
 
-// defaultPlatformExperimentListLimit and maxPlatformExperimentListLimit bound every
-// ListPlatformExperiments read the same way ListAgents/ListHypotheses bound their own — see
-// agents_store.go/hypotheses_store.go. Limit<=0 must not mean "unbounded".
+// defaultPlatformExperimentListLimit is the page of a ListPlatformExperiments read that states
+// none, so Limit<=0 never means "unbounded", and MaxPlatformExperimentListLimit the largest page
+// GET /platform-experiments takes: the handler refuses a larger one, so the store never shortens
+// a page on its own.
 // The default is deliberately far below the maximum. Every caller of this API is an autonomous
 // agent whose whole response lands in a bounded context window, so a list that answers "here is
 // everything" hands it a truncated or poisoned context and no way to recover. A caller that
@@ -308,28 +309,22 @@ func platformExperimentFilterClauses(filter PlatformExperimentsFilter) ([]string
 // can read, plus the exact total in X-Total-Count telling it what it has not seen.
 const (
 	defaultPlatformExperimentListLimit = 20
-	maxPlatformExperimentListLimit     = 200
+	MaxPlatformExperimentListLimit     = 200
 )
 
-// ListPlatformExperiments returns platform experiments matching the given filter. filter.Limit
-// is defaulted and clamped to [1, maxPlatformExperimentListLimit]; limit<=0 uses the default.
+// ListPlatformExperiments returns platform experiments matching the given filter. A filter.Limit
+// of 0 or less is the default page.
 func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = defaultPlatformExperimentListLimit
-	} else if filter.Limit > maxPlatformExperimentListLimit {
-		filter.Limit = maxPlatformExperimentListLimit
 	}
 
 	clauses, args := platformExperimentFilterClauses(filter)
 	n := len(args) + 1
 
-	q := platformExperimentSelect(clauses, filter.Sort)
-
-	if filter.Limit > 0 {
-		q += fmt.Sprintf(" LIMIT $%d", n)
-		args = append(args, filter.Limit)
-		n++
-	}
+	q := platformExperimentSelect(clauses, filter.Sort) + fmt.Sprintf(" LIMIT $%d", n)
+	args = append(args, filter.Limit)
+	n++
 	if filter.Offset > 0 {
 		q += fmt.Sprintf(" OFFSET $%d", n)
 		args = append(args, filter.Offset)

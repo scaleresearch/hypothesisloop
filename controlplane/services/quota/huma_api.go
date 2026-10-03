@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,20 +61,20 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
 		Description: "Filter with ?platform_experiment_id (the agents signed up to it) and ?q (search id/name). " +
-			"Optional ?limit (default 20, max 200) and ?offset, newest first. Total match count is " +
+			"Optional ?limit (default 20, max 200, 422 invalid_page over it) and ?offset, newest first. Total match count is " +
 			"returned in the X-Total-Count response header.",
 	}, func(ctx context.Context, in *struct {
 		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only the agents signed up to this platform experiment."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against id and name."`
 		ProjectID            string `query:"project_id" doc:"Only the agents signed up to a platform experiment of this project."`
-		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 200: a larger one is refused with 422 invalid_page. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.Agent
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		if in.Limit < 0 || in.Limit > db.MaxAgentListLimit || in.Offset < 0 {
+			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxAgentListLimit)+" and offset must not be negative")
 		}
 		scope, err := access.ListScope(ctx, in.ProjectID)
 		if err != nil {
@@ -249,7 +250,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"staff shared with every account: those are in every project's listing, marked shared, read like the " +
 			"caller's own and written by their own org alone. ?shared=true keeps only the shared ones, ?shared=false " +
 			"leaves them out. A token bound to one platform experiment lists that one. A closed one carries closed_at and close_reason. " +
-			"Filter with ?status, ?q (search name/description), ?limit, ?offset. " +
+			"Filter with ?status, ?q (search name/description), ?limit (default 20, max 200, 422 invalid_page over it), ?offset. " +
 			"?sort selects order: created_at, starts_at, name, or status, optionally prefixed with " +
 			"- for descending (default -created_at). Total match count is returned in the " +
 			"X-Total-Count response header.",
@@ -257,7 +258,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Status    string `query:"status" doc:"draft, open, running or closed."`
 		Search    string `query:"q" doc:"Case-insensitive substring match against name and description."`
 		ProjectID string `query:"project_id" doc:"Only the platform experiments of this project, and the shared ones."`
-		Limit     int    `query:"limit" doc:"Page size, default 20, maximum 200. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+		Limit     int    `query:"limit" doc:"Page size, default 20, maximum 200: a larger one is refused with 422 invalid_page. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset    int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort      string `query:"sort" doc:"created_at, name or status, optionally prefixed with a minus for descending."`
 		Shared    string `query:"shared" enum:"true,false" doc:"true: only the platform experiments staff shared with every account. false: none of them. Left out, the listing holds both."`
@@ -271,8 +272,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if !domain.ValidSortField(in.Sort, db.PlatformExperimentSortFields) {
 			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
 		}
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		if in.Limit < 0 || in.Limit > db.MaxPlatformExperimentListLimit || in.Offset < 0 {
+			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxPlatformExperimentListLimit)+" and offset must not be negative")
 		}
 		scope, withShared, err := access.PlatformExperimentListScope(ctx, in.ProjectID)
 		if err != nil {

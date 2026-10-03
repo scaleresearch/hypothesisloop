@@ -64,8 +64,9 @@ WHERE id = $1`
 	return agent, nil
 }
 
-// defaultAgentListLimit and maxAgentListLimit bound every ListAgents read the same way
-// ListHypotheses bounds its own — see hypotheses_store.go.
+// defaultAgentListLimit is the page of a ListAgents read that states none, and MaxAgentListLimit
+// the largest page GET /agents takes: the handler refuses a larger one, so the store never
+// shortens a page on its own.
 // The default is deliberately far below the maximum. Every caller of this API is an autonomous
 // agent whose whole response lands in a bounded context window, so a list that answers "here is
 // everything" hands it a truncated or poisoned context and no way to recover. A caller that
@@ -73,7 +74,7 @@ WHERE id = $1`
 // can read, plus the exact total in X-Total-Count telling it what it has not seen.
 const (
 	defaultAgentListLimit = 20
-	maxAgentListLimit     = 200
+	MaxAgentListLimit     = 200
 )
 
 // AgentsFilter narrows ListAgents and CountAgents. Limit and Offset apply to ListAgents only.
@@ -113,13 +114,11 @@ func agentFilterClauses(filter AgentsFilter) (string, []any) {
 }
 
 // ListAgents returns the agents matching filter newest first, including top3_count from
-// experiment_top3. Limit is defaulted and clamped to [1, maxAgentListLimit]; limit<=0 uses the default.
+// experiment_top3. A Limit of 0 or less is the default page.
 func (s *AgentsStore) ListAgents(ctx context.Context, filter AgentsFilter) ([]*domain.Agent, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = defaultAgentListLimit
-	} else if limit > maxAgentListLimit {
-		limit = maxAgentListLimit
 	}
 
 	where, args := agentFilterClauses(filter)

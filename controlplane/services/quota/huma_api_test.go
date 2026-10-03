@@ -75,6 +75,61 @@ func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
 	}
 }
 
+// pagedAgents and pagedExperiments record the limit each list was read with.
+type pagedAgents struct {
+	Store
+	limits *[]int
+}
+
+func (s pagedAgents) ListAgents(_ context.Context, filter db.AgentsFilter) ([]*domain.Agent, error) {
+	*s.limits = append(*s.limits, filter.Limit)
+	return nil, nil
+}
+
+func (pagedAgents) AgentStats(context.Context, db.AgentsFilter) (*domain.AgentStats, error) {
+	return &domain.AgentStats{}, nil
+}
+
+type pagedExperiments struct {
+	PlatformExperimentsStore
+	limits *[]int
+}
+
+func (s pagedExperiments) ListPlatformExperiments(_ context.Context, filter db.PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
+	*s.limits = append(*s.limits, filter.Limit)
+	return nil, nil
+}
+
+func (pagedExperiments) CountPlatformExperiments(context.Context, db.PlatformExperimentsFilter) (int, error) {
+	return 0, nil
+}
+
+// Both lists shortened a limit over the maximum to it, so a short page read as the whole set.
+func TestTheAgentAndPlatformExperimentListsRefuseAPageOverTheMaximum(t *testing.T) {
+	var read []int
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.Staff, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	RegisterHuma(doc, NewHandler(NewService(pagedAgents{limits: &read}, zap.NewNop()), zap.NewNop()),
+		NewPlatformExperimentsHandler(newSignupTestService(t, pagedExperiments{limits: &read}), &fakeRepositories{}, testPlanning, zap.NewNop()))
+
+	for _, list := range []string{"/agents", "/platform-experiments"} {
+		for _, query := range []string{"limit=201", "limit=100000", "limit=-1", "offset=-1"} {
+			if code, out := call(t, r, "GET", list+"?"+query, ""); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_page" {
+				t.Errorf("GET %s?%s: got = %d %v, want 422 invalid_page", list, query, code, out)
+			}
+		}
+		if len(read) != 0 {
+			t.Fatalf("GET %s: a refused page was read from the store with limits %v", list, read)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, list+"?limit=200", nil)))
+		if rec.Code != http.StatusOK || len(read) != 1 || read[0] != 200 {
+			t.Errorf("GET %s?limit=200: got = %d, read with %v, want 200 and the store asked for 200: %s", list, rec.Code, read, rec.Body)
+		}
+		read = nil
+	}
+}
+
 // summarizedStore is statusStore with the write of a summary, which fails while broken is set.
 type summarizedStore struct {
 	statusStore

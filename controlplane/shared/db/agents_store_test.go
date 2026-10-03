@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -50,6 +51,36 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 		if err != nil || stats.Total != len(tc.want) {
 			t.Fatalf("%s: stats = (%+v, %v), want total %d", tc.name, stats, err, len(tc.want))
 		}
+	}
+}
+
+// Both lists cut a limit over 200 down to 200 without saying so. The handlers refuse one now, and
+// the store reads the page it is asked for.
+func TestTheAgentAndPlatformExperimentListsReadThePageAsked(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	const rows = MaxAgentListLimit + 1
+	for i := range rows {
+		createTestAgent(t, pool, fmt.Sprintf("paged-%s-%d", suffix, i))
+		createTestPE(t, pool, fmt.Sprintf("pe-paged-%s-%d", suffix, i), 10)
+	}
+
+	agents, err := NewAgentsStore(pool).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix, Limit: rows})
+	if err != nil || len(agents) != rows {
+		t.Errorf("agents with limit %d: got = %d (%v), want = %d", rows, len(agents), err, rows)
+	}
+	pes, err := NewPlatformExperimentsStore(pool).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix, Limit: rows})
+	if err != nil || len(pes) != rows {
+		t.Errorf("platform experiments with limit %d: got = %d (%v), want = %d", rows, len(pes), err, rows)
+	}
+	agents, err = NewAgentsStore(pool).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix})
+	if err != nil || len(agents) != defaultAgentListLimit {
+		t.Errorf("agents with no limit: got = %d (%v), want = %d", len(agents), err, defaultAgentListLimit)
+	}
+	pes, err = NewPlatformExperimentsStore(pool).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix})
+	if err != nil || len(pes) != defaultPlatformExperimentListLimit {
+		t.Errorf("platform experiments with no limit: got = %d (%v), want = %d", len(pes), err, defaultPlatformExperimentListLimit)
 	}
 }
 
