@@ -45,8 +45,8 @@ branches. This never touches an agent already running; it only changes what flav
 fixed once its experiment starts. So read the graph before every new wave, not just at kickoff, e.g. statuses per
 direction:
 
-    hl hypothesis query --platform-experiment $PLATFORM_EXPERIMENT_ID "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective {id:'$PLATFORM_EXPERIMENT_ID'})
-      OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d) RETURN d.id, d.text, h.status, count(h)"
+    hl hypothesis query --platform-experiment $PLATFORM_EXPERIMENT_ID "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective)
+      OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"
 
 and log the mix and its reasoning in `$FINDINGS_FILE` each time it changes, the same way the
 initial mix is logged.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -115,19 +116,26 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 	"datetime('2026-10-02T01:30:00Z'), since a string never matches one. " +
 	"Relationships, each {agent_id, actor_kind, actor_id, created_at}: (:Hypothesis)-[:BUILDS_ON]->(:Hypothesis or :Objective) " +
 	"(refines, extends, combines; acyclic, every hypothesis has one or more), (:Hypothesis)-[:CONTRADICTS]->(:Hypothesis), " +
-	"(:Hypothesis)-[:RELATED]->(:Hypothesis). $pe is bound to platform_experiment_id: filter every MATCH and text search " +
-	"with it; a result holding a node or relationship of another platform experiment is refused with 400. " +
+	"(:Hypothesis)-[:RELATED]->(:Hypothesis). A query reads this platform experiment and nothing else, whatever it returns: " +
+	"the platform rewrites it before it runs. Every node pattern names its label, (h:Hypothesis) or (o:Objective), and is " +
+	"tied to $pe (platform_experiment_id on a hypothesis, id on the objective), which you may leave out or write as " +
+	"{platform_experiment_id: $pe} and {id: $pe}; a variable-length relationship ([:BUILDS_ON*1..3]) stays inside the " +
+	"platform experiment and takes no filter of its own; a text search keeps this platform experiment's hits. Refused with 400: " +
+	"a node without a label, as (n), () or a variable in parentheses on its own, which is then written (n:Hypothesis) " +
+	"again, another or a second label, the scope property set to anything but $pe, a parameter as a property map, a " +
+	"function outside the built-in ones (" + strings.Join(graphdb.QueryFunctions, ", ") + "), a statement that does not start with " +
+	"MATCH, OPTIONAL MATCH, WITH, UNWIND, RETURN or CALL, and a CALL without YIELD node. " +
 	"$evidence is bound to a map by hypothesis id of what is outside the graph: {jobs (rejected aside), submitted, queued, " +
 	"running, completed, failed, evicted, rejected, findings, comments} as counts and last_finding_at (datetime). A hypothesis with none " +
 	"of these has no entry and reads as null: `WHERE coalesce($evidence[h.id].jobs, 0) = 0` finds the untested ones. " +
 	"Full-text index " + graphdb.TextIndex + " over Hypothesis.text, ranked by how many of your words match: " +
 	"`CALL text_search.search_all('" + graphdb.TextIndex + "', 'warmup cosine schedule') YIELD node, score " +
-	"WHERE node.platform_experiment_id = $pe RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +
+	"RETURN node.id, node.text, node.status, score ORDER BY score DESC LIMIT 10` " +
 	"(plain words; quotes, colons and parentheses are search syntax). " +
 	"Children of a hypothesis: `MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id}) RETURN c.id, c.text, c.status`. " +
 	"Nodes come back as their properties plus _labels, relationships as properties plus _type, _from and _to, paths as lists. " +
 	"Nothing a query writes persists (writes go through POST /hypotheses and POST /hypotheses/{id}/links). " +
-	"LOAD CSV, periodic commits and procedures other than text_search.* are refused. Limits: " +
+	"LOAD CSV, periodic commits and procedures other than " + strings.Join(graphdb.QueryProcedures, ", ") + " are refused. Limits: " +
 	fmt.Sprintf("%s and %d MB of memory per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryMemoryLimitMB, graphdb.QueryRowCap) +
 	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
 	"GET /hypotheses/{id} returns them."
@@ -449,7 +457,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Body struct {
 			PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
 			Cypher               string         `json:"cypher"`
-			Params               map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name; pe is reserved."`
+			Params               map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name; pe and evidence are bound by the platform and refused here."`
 		}
 	}) (*struct{ Body *graphdb.QueryResult }, error) {
 		if in.Body.PlatformExperimentID == "" || in.Body.Cypher == "" {

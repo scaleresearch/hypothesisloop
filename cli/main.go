@@ -28,7 +28,7 @@
 //	hl platform-experiments agents add --platform-experiment pe-123 --hosted --flavor generalist
 //	hl platform-experiments agents add --platform-experiment pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
-//	hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.text' --platform-experiment pe-123
+//	hl hypothesis query 'MATCH (h:Hypothesis) RETURN h.id, h.text' --platform-experiment pe-123
 //	hl job submit --agent jane job.yaml
 //	hl job submit --agent jane job.yaml --hypothesis hyp-1 --env LR=0.1
 //	hl job status job-1

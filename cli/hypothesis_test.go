@@ -490,14 +490,16 @@ func TestARefusedHypothesisQueryPrintsAQueryThatWorks(t *testing.T) {
 	}))
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"hypothesis", "query", "MATCH (n) WHERE n.platform_experiment_id = $pe RETURN n", "--param", "pe=pe-1", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "already bound") || !strings.Contains(stderr.String(), "pass no --param for it") || !strings.Contains(stderr.String(), queryExample) {
+	if code != 1 || !strings.Contains(stderr.String(), "already bound") || !strings.Contains(stderr.String(), "pass no --param for it") || !strings.Contains(stderr.String(), "every node names its label") || !strings.Contains(stderr.String(), queryExample) {
 		t.Errorf("a refused query: exit code = %d, stderr = %s, want the platform's reason and the working example", code, stderr.String())
 	}
 
 	stderr.Reset()
 	run([]string{"hypothesis", "query", "--help"}, &stdout, &stderr)
-	if !strings.Contains(stderr.String(), "$pe is bound for you") || !strings.Contains(stderr.String(), queryExample) {
-		t.Errorf("hl hypothesis query --help lacks the working example:\n%s", stderr.String())
+	for _, want := range []string{"$pe is bound for you", queryExample, "(h:Hypothesis) or (o:Objective)", "[:BUILDS_ON*1..3]", "YIELD node"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("hl hypothesis query --help lacks %q:\n%s", want, stderr.String())
+		}
 	}
 }
 

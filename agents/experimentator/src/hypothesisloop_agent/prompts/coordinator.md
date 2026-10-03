@@ -64,8 +64,8 @@ Never poll or sleep-wait. On each wake, look at what the update points to, then 
     `--full`. A job's summary is in `hl job status ID`. Across the graph, `hl hypothesis query` with read-only
     Cypher. Statuses per direction:
 
-        hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective {{id:'{platform_experiment_id}'}})
-          OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d) RETURN d.id, d.text, h.status, count(h)"
+        hl hypothesis query "MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective)
+          OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, d.text, h.status, count(h)"
 
   - The graph's shape: the objective's children are distinct approaches, each one claim, a
     refinement or a combination sits under what it refines, and the best result is a node.

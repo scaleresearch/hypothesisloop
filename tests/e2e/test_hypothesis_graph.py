@@ -31,7 +31,7 @@ TEXT_SEARCH = (
     "RETURN node.id AS id, node.status AS status, score ORDER BY score DESC"
 )
 CHILDREN = (
-    "MATCH (c:Hypothesis)-[:BUILDS_ON]->(p {id: $id}) "
+    "MATCH (c:Hypothesis)-[:BUILDS_ON]->(p:Hypothesis {id: $id}) "
     "RETURN c.id AS id ORDER BY id"
 )
 
@@ -295,7 +295,7 @@ def test_query_value_mapping(api, graph_pe, run_id):
 
     rows = api.query_rows(
         pe_id,
-        "MATCH (c:Hypothesis {id: $id})-[r:BUILDS_ON]->(p) RETURN c, r, p.id AS parent",
+        "MATCH (c:Hypothesis {id: $id})-[r:BUILDS_ON]->(p:Hypothesis) RETURN c, r, p.id AS parent",
         id=child["id"],
     )
     assert len(rows) == 1
@@ -333,11 +333,16 @@ def test_query_reads_one_platform_experiment(api, graph_pe, experiment, run_id):
     mine = api.register_hypothesis(pe_id, agent_a, f"scoped claim {run_id}")
     theirs = api.register_hypothesis(other_pe, agent_a, f"foreign claim {run_id}")
 
-    refused = api.query(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN h", id=theirs["id"])
-    assert refused.status_code == 400, f"another experiment's node answered {refused.status_code}"
-    assert "$pe" in refused.json().get("error", ""), refused.text
-    scoped = "MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.id IN $ids RETURN h.id AS id"
-    assert api.query_rows(pe_id, scoped, ids=[mine["id"], theirs["id"]]) == [{"id": mine["id"]}]
+    ids = [mine["id"], theirs["id"]]
+    assert api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN h.id, h.text", id=theirs["id"]) == []
+    assert api.query_rows(pe_id, "MATCH (h:Hypothesis) WHERE h.id IN $ids RETURN h.id AS id", ids=ids) == [{"id": mine["id"]}]
+    assert api.query_rows(pe_id, "MATCH (h:Hypothesis) WHERE h.id IN $ids RETURN count(h) AS n", ids=ids) == [{"n": 1}]
+    for cypher in (
+        "MATCH (h) WHERE h.id IN $ids RETURN h.id, h.text",
+        "MATCH (h:Hypothesis {platform_experiment_id: $other}) RETURN h.text",
+    ):
+        refused = api.query(pe_id, cypher, ids=ids, other=other_pe)
+        assert refused.status_code == 400, f"{cypher!r} answered {refused.status_code}: {refused.text}"
 
 
 def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
@@ -359,7 +364,7 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
 
     assert api.hypothesis(hyp["id"])["text"] == text
     assert _out(api.hypothesis(hyp["id"])) == {("builds_on", pe_id)}
-    assert api.query_rows(pe_id, "MATCH (h {id: $planted}) RETURN count(h) AS n", planted=planted) == [{"n": 0}]
+    assert api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $planted}) RETURN count(h) AS n", planted=planted) == [{"n": 0}]
     assert planted not in {h["id"] for h in api.hypotheses(pe_id)}
 
     bad = api.query(pe_id, "MATC (h:Hypothesis) RETURN h")

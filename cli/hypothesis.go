@@ -677,19 +677,33 @@ wrote each, and a job as hl job list prints it. hl job status ID prints a job's 
 	return 0
 }
 
-const queryExample = `hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id, h.status, h.text'`
+const queryExample = `hl hypothesis query 'MATCH (h:Hypothesis) RETURN h.id, h.status, h.text'`
 
 func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis query", `usage: hl hypothesis query 'CYPHER' [--param k=v ...]
    or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
 
 Read-only Cypher over one platform experiment's hypothesis graph (default
-$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded: use submit/link. Filter
-every MATCH and text search with platform_experiment_id = $pe: a result holding another
-experiment's nodes is refused. Prints a JSON object per row keyed by column, 200 rows max.
+$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded: use submit/link. Prints a
+JSON object per row keyed by column, 200 rows max.
+
+A query reads that platform experiment and nothing else: the platform ties every node,
+every variable-length relationship and every text search to it before the query runs.
+For that it takes this much of Cypher:
+  every node names its label, each time it is written: (h:Hypothesis) or (o:Objective).
+      (n), () and (h) for a node matched earlier are refused, as is a variable alone in
+      parentheses; another label, two labels and a parameter as the property map too
+  the scope is set for you: {platform_experiment_id: $pe} and {id: $pe} may be written
+      or left out, and any other value for them is refused
+  a variable-length relationship takes type, bounds and properties: [:BUILDS_ON*1..3]
+  CALL only text_search.search, search_all, regex_search and fuzzy_phrase_search, each
+      with YIELD node (and score)
+  built-in functions only (count, collect, coalesce, size, nodes, datetime, ...); the
+      refusal lists them
+  the query starts with MATCH, OPTIONAL MATCH, WITH, UNWIND, RETURN or CALL
 
 Schema:
-  (:Objective {id})   the root, id = $pe
+  (:Objective {id})   the root, id = $pe: there is one, so (:Objective) is it
   (:Hypothesis {id, platform_experiment_id, agent_id, actor_kind, actor_id, text, status,
                 created_at, status_changed_at, status_actor_kind, status_actor_id})
       the times are datetimes: compare with datetime('RFC3339')
@@ -705,17 +719,17 @@ last_finding_at, or null. Text: hl hypothesis get ID.
 
 Examples:
 
-  every hypothesis of the platform experiment. $pe is bound for you: use it in the query and
-  pass no --param for it:
+  every hypothesis of the platform experiment. $pe is bound for you: pass no --param for
+  it:
   `+queryExample+`
 
   text search on plain words, best matches first:
   hl hypothesis query 'CALL text_search.search_all("hypothesis_text", "learning rate warmup")
-    YIELD node, score WHERE node.platform_experiment_id = $pe
+    YIELD node, score
     RETURN node.id, node.status, node.text ORDER BY score DESC LIMIT 10'
 
   the approaches, the children of the root:
-  hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe})
+  hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective)
     RETURN h.id, h.status, h.text'
 
   one branch, everything that builds on a hypothesis at any depth:
@@ -723,7 +737,7 @@ Examples:
     RETURN DISTINCT d.id, d.status, d.text' --param id=HYP_ID
 
   by job count, untested first:
-  hl hypothesis query 'MATCH (h:Hypothesis {platform_experiment_id: $pe})
+  hl hypothesis query 'MATCH (h:Hypothesis)
     RETURN h.id, h.text, coalesce($evidence[h.id].jobs, 0) AS n ORDER BY n'`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	var params stringList
@@ -771,7 +785,7 @@ Examples:
 		code := fail(stderr, err)
 		var refused *apiclient.HTTPError
 		if errors.As(err, &refused) && refused.Status == http.StatusBadRequest {
-			fmt.Fprintf(stderr, "hl: hypothesis query: $pe is bound for you to platform experiment %s: use it in the query and pass no --param for it. A query that works:\n  %s\n", *pe, queryExample)
+			fmt.Fprintf(stderr, "hl: hypothesis query: every node names its label and is tied to platform experiment %s for you ($pe, pass no --param for it); 'hl hypothesis query --help' has what a query may contain. A query that works:\n  %s\n", *pe, queryExample)
 		}
 		return code
 	}

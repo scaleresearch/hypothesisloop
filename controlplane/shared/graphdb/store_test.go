@@ -667,14 +667,23 @@ func TestAQueryCannotLeaveATraceInTheGraph(t *testing.T) {
 	ctx := context.Background()
 
 	for _, q := range []string{
-		`CREATE (:QueryTrace {pe: '` + pe + `'})`,
-		`MERGE (:QueryTrace {pe: '` + pe + `'}) RETURN 1`,
+		`WITH 1 AS one CREATE (:Hypothesis:QueryTrace {id: 'query-trace'})`,
 		`MATCH (h:Hypothesis {id: '` + h.ID + `'}) SET h.status = 'confirmed', h:QueryTrace RETURN h`,
 		`MATCH (h:Hypothesis {id: '` + h.ID + `'}) DETACH DELETE h`,
-		`MATCH (o:Objective {id: '` + pe + `'}) CREATE (o)-[:QUERY_TRACE]->(o)`,
+		`MATCH (o:Objective) CREATE (o:Objective)-[:QUERY_TRACE]->(o:Objective)`,
+		`MATCH (o:Objective) MERGE (o:Objective)-[:QUERY_TRACE]->(o:Objective) RETURN 1`,
 	} {
 		if _, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "read-only") {
 			t.Errorf("Query %q: got = %v, want %v saying the endpoint is read-only", q, err, ErrInvalidQuery)
+		}
+	}
+	for _, q := range []string{
+		`CREATE (:QueryTrace {pe: '` + pe + `'})`,
+		`MERGE (:QueryTrace {pe: '` + pe + `'}) RETURN 1`,
+		`MATCH (o:Objective) CREATE (:QueryTrace)-[:QUERY_TRACE]->(o:Objective)`,
+	} {
+		if _, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) {
+			t.Errorf("Query %q: got = %v, want %v", q, err, ErrInvalidQuery)
 		}
 	}
 	if n := count(t, s, `MATCH (n:QueryTrace) RETURN count(n)`); n != 0 {
@@ -734,7 +743,7 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 	register(t, s, pe, "agent-1", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}})
 	ctx := context.Background()
 
-	result, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->(a) RETURN b, r, a.id AS parent`, nil)
+	result, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->(a:Hypothesis) RETURN b, r, a.id AS parent`, nil)
 	if err != nil {
 		t.Fatalf("Query: got = %v, want nil", err)
 	}
@@ -756,7 +765,7 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 	}
 	// Relationships in the capped rows force the endpoint lookup, a second query in the same
 	// transaction, while the first result still has rows unread.
-	cappedRels, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b', platform_experiment_id: $pe})-[r:BUILDS_ON]->() UNWIND range(1, $n) AS i RETURN r`, map[string]any{"n": float64(QueryRowCap + 5)})
+	cappedRels, err := s.Query(ctx, pe, `MATCH (b:Hypothesis {text: 'b'})-[r:BUILDS_ON]->(:Hypothesis) UNWIND range(1, $n) AS i RETURN r`, map[string]any{"n": float64(QueryRowCap + 5)})
 	if err != nil || len(cappedRels.Rows) != QueryRowCap || !cappedRels.Truncated {
 		t.Fatalf("capped relationship query: got = (%+v, %v), want (%d rows, truncated, nil)", cappedRels, err, QueryRowCap)
 	}
@@ -766,7 +775,7 @@ func TestAQueryMapsGraphValuesAndCapsRows(t *testing.T) {
 	if literal, err := s.Query(ctx, "pe-1", `RETURN 'LOAD CSV and CALL mg.load_all()' AS s // CALL mg.load_all()`, nil); err != nil || literal.Rows[0][0] != "LOAD CSV and CALL mg.load_all()" {
 		t.Errorf("keywords inside a string and a comment: got = (%v, %v), want the string back", literal, err)
 	}
-	if _, err := s.Query(ctx, "pe-1", `MATCH (n RETURN n`, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "mismatched input") {
+	if _, err := s.Query(ctx, "pe-1", `MATCH (n:Hypothesis) RETURN n n`, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "mismatched input") {
 		t.Errorf("syntax error: got = %v, want %v with Memgraph's message", err, ErrInvalidQuery)
 	}
 }
@@ -999,41 +1008,76 @@ func TestImportLegacyPlacesOldHypothesesOnTheObjectiveAndIsRepeatable(t *testing
 	}
 }
 
-// Each experiment's graph is closed (links stay inside it), so a result can only reach another
-// experiment through an unfiltered scan or text search; such a result is refused.
+// A query reads its own platform experiment whatever it returns, and stays inside it even where
+// the graph itself does not: the two links to and from the other experiment here are ones no
+// write through the store would make.
 func TestAQueryReadsOnePlatformExperiment(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
 	other := testExperiment(t, s)
 	mine := register(t, s, pe, "agent-1", "cosine decay helps", onRoot(pe))
-	register(t, s, other, "agent-1", "cosine decay hurts", onRoot(other))
+	child := register(t, s, pe, "agent-1", "cosine decay helps with warmup", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: mine.ID}})
+	theirs := register(t, s, other, "agent-1", "cosine decay hurts", onRoot(other))
 	ctx := context.Background()
+	if _, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		return collect(ctx, tx, `MATCH (a:Hypothesis {id: $mine}), (b:Hypothesis {id: $theirs}), (c:Hypothesis {id: $child})
+CREATE (a)-[:RELATED]->(b)-[:RELATED]->(c), (b)-[:BUILDS_ON]->(a)`, map[string]any{"mine": mine.ID, "theirs": theirs.ID, "child": child.ID})
+	}); err != nil {
+		t.Fatalf("linking across experiments: %v", err)
+	}
+
+	search := `CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD node, score `
+	for q, rows := range map[string]int{
+		`MATCH (h:Hypothesis) RETURN h.id, h.text LIMIT 25`:                                                                                              2,
+		`MATCH (h:Hypothesis) RETURN h`:                                                                                                                  2,
+		`MATCH (h:Hypothesis) RETURN collect(h.text) AS texts, count(h) AS n, max(h.text) AS last`:                                                       1,
+		`MATCH (o:Objective) RETURN o.id, o`:                                                                                                             1,
+		`MATCH (h:Hypothesis)-[r:RELATED]-(o:Hypothesis) RETURN r, o.text`:                                                                               0,
+		`MATCH (h:Hypothesis)<-[r:BUILDS_ON]-(o:Hypothesis) RETURN r, o.text`:                                                                            1,
+		`MATCH p = (a:Hypothesis)-[:RELATED*]-(b:Hypothesis) RETURN p, [n IN nodes(p) | n.text]`:                                                         0,
+		`MATCH p = (a:Hypothesis)-[*1..4]-(b:Hypothesis) RETURN [n IN nodes(p) | n.text], relationships(p)`:                                              2,
+		`MATCH (d:Hypothesis)-[:BUILDS_ON*]->(:Hypothesis {id: $id}) RETURN DISTINCT d.id`:                                                               1,
+		`MATCH (d:Hypothesis)-[:BUILDS_ON*]->(:Objective) RETURN DISTINCT d.id`:                                                                          2,
+		`MATCH (h:Hypothesis) OPTIONAL MATCH (h:Hypothesis)-[:RELATED]-(o:Hypothesis) RETURN h.id, o.text`:                                               2,
+		`MATCH (h:Hypothesis) RETURN h.id, [(h:Hypothesis)-[:RELATED]-(o:Hypothesis) | o.text] AS related`:                                               2,
+		`MATCH (h:Hypothesis) WHERE exists((h:Hypothesis)-[:RELATED]-(:Hypothesis)) RETURN h.id`:                                                         0,
+		`MATCH (h:Hypothesis) WHERE exists((h:Hypothesis)-[:BUILDS_ON]->(:Objective)) RETURN h.id`:                                                       1,
+		`MATCH (h:Hypothesis) WHERE EXISTS { MATCH (h:Hypothesis)-[:RELATED]-(o:Hypothesis) } RETURN h.id`:                                               0,
+		`MATCH (h:Hypothesis) CALL { MATCH (o:Hypothesis) RETURN count(o) AS c } RETURN DISTINCT c`:                                                      1,
+		`MATCH (h:Hypothesis) RETURN h.text AS t UNION MATCH (o:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN o.text AS t`:                               2,
+		`MATCH (d:Hypothesis)-[:BUILDS_ON]->(:Objective) OPTIONAL MATCH (h:Hypothesis)-[:BUILDS_ON*0..]->(d:Hypothesis) RETURN d.id, h.status, count(h)`: 1,
+		search + `RETURN node.text, score`:                                                                                                               2,
+		search + `RETURN count(node) AS n, collect(node.text) AS texts`:                                                                                  1,
+		search + `WHERE node.text CONTAINS 'warmup' RETURN node`:                                                                                         1,
+		search + `MATCH (node:Hypothesis)-[:RELATED]-(o:Hypothesis) RETURN o.text`:                                                                       0,
+	} {
+		result, err := s.Query(ctx, pe, q, map[string]any{"id": mine.ID})
+		if err != nil || len(result.Rows) != rows {
+			t.Errorf("Query %q: got = (%+v, %v), want %d rows", q, result, err, rows)
+			continue
+		}
+		if seen := fmt.Sprint(result.Rows); strings.Contains(seen, theirs.ID) || strings.Contains(seen, theirs.Text) || strings.Contains(seen, other) {
+			t.Errorf("Query %q: got = %s, want nothing of platform experiment %s", q, seen, other)
+		}
+	}
+	if result, err := s.Query(ctx, pe, `MATCH (h:Hypothesis) RETURN count(h)`, nil); err != nil || result.Rows[0][0] != int64(2) {
+		t.Errorf("count: got = (%+v, %v), want 2", result, err)
+	}
 
 	for _, q := range []string{
-		`MATCH (h:Hypothesis) RETURN h`,
-		`MATCH (o:Objective) RETURN o.id, o`,
+		`MATCH (h) RETURN h.id, h.text LIMIT 25`,
+		`MATCH (n) RETURN count(n)`,
 		`MATCH ()-[r:BUILDS_ON]->() RETURN r`,
-		`MATCH p = (:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN p`,
-		`MATCH (h:Hypothesis) RETURN collect(h) AS all`,
-		`CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD node RETURN node`,
+		`MATCH (h:Hypothesis)-[:RELATED]-(o) RETURN o.text`,
+		`MATCH (h:Hypothesis {platform_experiment_id: $other}) RETURN h.text`,
+		`MATCH (o:Objective {id: $other}) RETURN o`,
+		`MATCH (a:Hypothesis)-[:RELATED* (e, n | true)]-(b:Hypothesis) RETURN b.id`,
+		`CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD score RETURN score`,
+		`CALL text_search.aggregate('` + TextIndex + `', 'cosine', '{"count": {"value_count": {"field": "data.text"}}}') YIELD aggregation RETURN aggregation`,
 	} {
-		if _, err := s.Query(ctx, pe, q, nil); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "platform_experiment_id = $pe") {
-			t.Errorf("Query %q: got = %v, want %v asking to filter on $pe", q, err, ErrInvalidQuery)
+		if result, err := s.Query(ctx, pe, q, map[string]any{"other": other}); !errors.Is(err, ErrInvalidQuery) {
+			t.Errorf("Query %q: got = (%+v, %v), want %v", q, result, err, ErrInvalidQuery)
 		}
-	}
-
-	for _, q := range []string{
-		`MATCH p = (h:Hypothesis {platform_experiment_id: $pe})-[:BUILDS_ON]->(o:Objective) RETURN h, p, o`,
-		`MATCH (h:Hypothesis)-[r:BUILDS_ON]->(:Objective {id: $pe}) RETURN r, h.id`,
-		`CALL text_search.search_all('` + TextIndex + `', 'cosine') YIELD node WHERE node.platform_experiment_id = $pe RETURN node`,
-	} {
-		result, err := s.Query(ctx, pe, q, nil)
-		if err != nil || len(result.Rows) != 1 {
-			t.Errorf("Query %q: got = (%v, %v), want one row", q, result, err)
-		}
-	}
-	if result, err := s.Query(ctx, pe, `MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id`, nil); err != nil || result.Rows[0][0] != mine.ID {
-		t.Errorf("Query with $pe: got = (%v, %v), want %s", result, err, mine.ID)
 	}
 	if _, err := s.Query(ctx, pe, `RETURN $pe`, map[string]any{"pe": other}); !errors.Is(err, ErrInvalidQuery) {
 		t.Errorf("Query rebinding $pe: got = %v, want %v", err, ErrInvalidQuery)
