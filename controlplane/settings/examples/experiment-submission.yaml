@@ -168,7 +168,8 @@ metadata:
   # states it for one trial that will run longer.
   #
   # A job submitted while its agent owes the summary of a COMPLETED job is accepted and stays
-  # QUEUED with not_admitted_reason summary_gate until hl job summary files it.
+  # QUEUED with not_admitted_reason summary_gate until hl job summary files it. A job that was
+  # already queued when that job ended is not held by it.
 
   # config_hash, data_ref: optional pointers the training code knows how to resolve (a hash of
   # the resolved config, where the input dataset lives). Stored and returned as stated, never

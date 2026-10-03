@@ -480,7 +480,7 @@ The codes (`controlplane/shared/domain/constants.go`):
 | `waiting-for-scale-up` | a cluster is already adding a node for a job like it |
 | `no_scalable_capacity` | every cluster that scales up was tried and failed it recently |
 | `concurrency_cap` | its platform experiment holds `max_concurrent_accelerators` in flight |
-| `summary_gate` | its agent owes the summary of a COMPLETED job |
+| `summary_gate` | its agent owes the summary of a COMPLETED job that ended before this one was submitted |
 | `insufficient_quota` | its agent's quota no longer covers what it holds |
 | `stage_cut` | its agent was cut at a stage boundary |
 | `job_too_long` | its estimate is over the current stage's `max_job_hours` |

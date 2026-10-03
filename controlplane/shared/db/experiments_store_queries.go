@@ -226,9 +226,10 @@ ORDER BY queued_at ASC`
 }
 
 // UnsummarizedCompletedPredicate is the admission summary gate written as SQL over the
-// experiments table: a finished job whose write-up was never filed. Admission asks whether any
-// row matches it; GET /experiments?needs_summary=true lists the rows that do. One definition, so
-// the set an agent is told to clear can never disagree with the rule that blocked it.
+// experiments table: a finished job whose write-up was never filed. Admission holds a job for
+// the matching rows that ended before it was submitted (UnsummarizedCompleted), and
+// GET /experiments?needs_summary=true lists every row that matches. One definition, so the set
+// an agent is told to clear always contains the jobs that hold one of its own.
 const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
 	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
 

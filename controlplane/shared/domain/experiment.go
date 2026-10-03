@@ -109,7 +109,7 @@ type Experiment struct {
 	// Summary is the write-up the job's agent filed for it. Set on a read of one job only.
 	Summary string `json:"summary,omitempty"`
 	// SummaryDue says the job completed and no summary was filed for it: the jobs
-	// ?needs_summary=true lists, which hold their agent's queued jobs back.
+	// ?needs_summary=true lists, which hold back the jobs their agent submits after they ended.
 	SummaryDue bool `json:"summary_due"`
 	// Data is the job's durable-data addressing and key, assembled on the way out to a runtime.
 	// Nil on every other read of an experiment.
@@ -369,8 +369,9 @@ type ExperimentFilter struct {
 	// Search matches against hypothesis/theory text, case-insensitively, substring
 	// match (mirrors PlatformExperimentsFilter.Search).
 	Search string
-	// NeedsSummary selects only COMPLETED experiments with no finding filed against them -- the
-	// exact set the admission summary gate blocks on. See db.UnsummarizedCompletedPredicate.
+	// NeedsSummary selects only COMPLETED experiments with no finding filed against them: the
+	// set the admission summary gate draws from, which holds a job for those that ended before
+	// it was submitted. See db.UnsummarizedCompletedPredicate.
 	NeedsSummary bool
 	Limit        int
 	// Offset skips this many matching rows before applying Limit — used for page-by-page
