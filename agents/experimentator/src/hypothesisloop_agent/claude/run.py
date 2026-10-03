@@ -498,7 +498,9 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     def stopped() -> bool:
         return core.stop_requested(setup, started_at, stop_flag)
 
+    connecting = time.monotonic()
     async with ClaudeSDKClient(options=options) as client:
+        log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
         await client.query(_first_prompt(setup, resume_id, initial_prompt))
         while True:
             got_result = False
@@ -662,6 +664,10 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
                 raise
             log.warning("session lost its connection to the CLI (%s): reconnecting after backoff", e)
             resets_at, rotated = None, False
+        # The CLI has exited here and written all of its transcript. The store at the end of a
+        # turn can come before the CLI wrote the turn's last reply, and after a planner's
+        # answer or an agent's finish no turn follows to store it.
+        await _store_session(setup)
         if rotated or core.stop_reason(setup, started_at, stop_flag):
             continue
 
@@ -678,13 +684,16 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
 
 def main() -> None:
     global _sessions
+    started = time.monotonic()
     setup = core.prepare()
     _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, session.model_home())
     _restore_session(setup)
     model = setup.cfg.model
+    # With the line the CLI connects with, this says where a slow start went: what precedes
+    # both is the machine, its image and the interpreter.
     log.info(
-        "llm_agent %s starting (claude): pe=%s model=%s",
-        setup.cfg.agent_id, setup.cfg.platform_experiment_id, model,
+        "llm_agent %s starting (claude): pe=%s model=%s, prepared in %.1fs",
+        setup.cfg.agent_id, setup.cfg.platform_experiment_id, model, time.monotonic() - started,
     )
     asyncio.run(_run(setup, model))
     log.info("llm_agent %s stopped", setup.cfg.agent_id)

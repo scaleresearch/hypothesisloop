@@ -226,6 +226,27 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed, [None, "s-2", "s-2", "s-2"])
         self.assertEqual(sleeps, [30, 60, 30])
 
+    # A planner's stored session lacked its closing reply: the store at the end of the turn ran
+    # before the CLI had written it, and its run ended with that turn.
+    async def test_the_session_is_stored_once_more_after_the_cli_has_exited(self):
+        order = []
+
+        async def session(*_):
+            order.append("the CLI exited")
+            return None, False
+
+        async def store(setup):
+            order.append("stored")
+
+        answers = [{}, {"ended": "planned"}, {"ended": "planned"}]
+        setup = _setup()
+        setup.client.get_signup = lambda *_: answers.pop(0) if len(answers) > 1 else answers[0]
+        with mock.patch.object(run, "_run_one_session", session), \
+                mock.patch.object(run, "_store_session", store), \
+                self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run_until_stopped(setup, "m", time.time(), [False], 30), timeout=5)
+        self.assertEqual(order, ["the CLI exited", "stored"])
+
     # A bug in the harness once read as a flaky connection and was retried for the whole run.
     async def test_an_error_that_is_no_lost_connection_ends_the_process(self):
         async def session(*_):
