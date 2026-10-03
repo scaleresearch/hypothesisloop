@@ -253,8 +253,11 @@ func TestJobSubmitWithNoOriginSaysToWorkInTheClone(t *testing.T) {
 	clone, _ := pushedClone(t)
 	mustGit(t, clone, "remote", "remove", "origin")
 	code, stderr, sent := submit(t, "job.yaml")
-	if code != 1 || sent != nil || !strings.Contains(stderr, "work in your clone of it") {
-		t.Fatalf("exit code = %d, sent = %v, stderr = %s, want it refused naming the clone", code, sent, stderr)
+	if code != 1 || sent != nil || !strings.Contains(stderr, "work in your clone of it (hl platform-experiments get names repository_url)") {
+		t.Fatalf("exit code = %d, sent = %v, stderr = %s, want it refused naming the clone and the command that names its address", code, sent, stderr)
+	}
+	if _, err := checkoutBranch(t.TempDir(), "hl/pe-1/a/b", "", ""); err == nil || !strings.Contains(err.Error(), "(hl platform-experiments get names repository_url)") {
+		t.Fatalf("a checkout outside a repository: %v, want the same command named", err)
 	}
 }
 

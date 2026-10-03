@@ -945,7 +945,7 @@ with the reason when there is nothing to start from (no baseline is declared yet
 // returned.
 func checkoutBranch(dir, branch, base, from string) (created string, err error) {
 	if _, err := git(dir, "rev-parse", "--is-inside-work-tree"); err != nil {
-		return "", errors.New("this is not a git repository: run it in your clone of the platform experiment's repository (hl platform-experiments show names repository_url)")
+		return "", errors.New("this is not a git repository: run it in your clone of the platform experiment's repository (hl platform-experiments get names repository_url)")
 	}
 	if _, err := git(dir, "fetch", "--quiet", "origin"); err != nil {
 		return "", err

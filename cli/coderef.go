@@ -33,7 +33,7 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 		return err
 	}
 	if !slices.Contains(strings.Fields(remotes), "origin") {
-		return errors.New("metadata.code_ref is empty and this repository has no origin: a job runs a commit of the platform experiment's repository, so work in your clone of it (hl platform-experiments show names repository_url), or set code_ref")
+		return errors.New("metadata.code_ref is empty and this repository has no origin: a job runs a commit of the platform experiment's repository, so work in your clone of it (hl platform-experiments get names repository_url), or set code_ref")
 	}
 	url, err := git(dir, "remote", "get-url", "origin")
 	if err != nil {
