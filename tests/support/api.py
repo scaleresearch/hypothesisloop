@@ -15,6 +15,7 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -707,6 +708,11 @@ class API:
     def metric_max(self, job_id: str, metric_name: str) -> float | None:
         values = self.metric_values(job_id, metric_name)
         return max(values) if values else None
+
+    def metric_last(self, job_id: str, metric_name: str) -> float | None:
+        """The last value the job reported on the metric: what the job is ranked and shown by."""
+        points = [p for p in self.metrics(job_id) if p["metric_name"] == metric_name]
+        return max(points, key=lambda p: datetime.fromisoformat(p["recorded_at"].replace("Z", "+00:00")))["metric_value"] if points else None
 
     def post_metric(
         self, job_id: str, fraction_complete: float, metric_value: float, metric_name: str = "val_accuracy"

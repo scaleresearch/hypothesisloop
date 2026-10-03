@@ -151,12 +151,13 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     api.cancel_job(held_job)
     api.file_finding(baseline_job)
 
-    baseline_best = api.metric_max(baseline_job, "val_accuracy")
+    # A job is ranked by the last value it reported.
+    baseline_best = api.metric_last(baseline_job, "val_accuracy")
     assert baseline_best is not None, "the baseline's val_accuracy must be recorded and readable"
 
     best_comp, best_comp_value = None, None
     for a, job in zip(competitors, comp_jobs):
-        v = api.metric_max(job, "val_accuracy")
+        v = api.metric_last(job, "val_accuracy")
         if v is None:
             continue
         if best_comp_value is None or v > best_comp_value:

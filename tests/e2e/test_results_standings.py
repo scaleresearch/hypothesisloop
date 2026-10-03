@@ -1,7 +1,8 @@
 """GET /platform-experiments/{id}/results -- what a finished run amounts to. Ported 1:1 from
 tests/scenarios/results-standings.sh. The ranking arithmetic itself is pinned by Go unit tests;
 this covers what only a live run exercises:
-  1. standings come back ranked, one entry per agent that reported, on the declared metric.
+  1. standings come back ranked, one entry per agent that reported, on the declared metric, each
+     by the last value its job reported.
   2. every standing carries the experiment that produced it and that job's code_ref.
   3. a constraint metric gates eligibility: an agent that never reports a declared constraint is
      excluded from standings entirely rather than ranked on the metric it did report.
@@ -112,6 +113,8 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
         metric = job["metric"]
         assert metric == {"name": "val_accuracy", "value": s["best"], "basis": "raw"}, metric
         assert metric in job["metrics"], job["metrics"]
+        # A job is read by the last value it reported, whatever the best point of its curve was.
+        assert s["best"] == api.metric_last(job["id"], "val_accuracy"), (s, api.metric_values(job["id"], "val_accuracy"))
 
     (bests,) = results["bests"]
     assert bests["metric"] == "val_accuracy"
