@@ -323,6 +323,9 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		all := []map[string]any{}
 		for _, id := range f.reaches[user] {
+			if f.installations[id] == nil {
+				continue
+			}
 			all = append(all, map[string]any{"id": id, "app_id": testAppID, "account": f.accountOf(id)})
 		}
 		if f.foreign {
@@ -344,7 +347,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		all := []map[string]any{}
 		for _, id := range f.reaches[user] {
-			if role := f.roles[user][id]; role != "" {
+			if role := f.roles[user][id]; role != "" && f.installations[id] != nil {
 				all = append(all, map[string]any{"state": "active", "role": role, "organization": f.accountOf(id)})
 			}
 		}
