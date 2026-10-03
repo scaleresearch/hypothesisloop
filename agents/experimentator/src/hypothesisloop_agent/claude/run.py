@@ -354,9 +354,9 @@ def _new_machine_note(cfg) -> str:
     return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_RESEARCHER)
 
 
-# A planner's machine is released with its answer and a revision starts another. Told only that
-# its machine was replaced and to continue, a planner had to find the revision by itself, and
-# with the file of its proposal gone it wrote the whole proposal again.
+# A planner's machine is released some minutes after its answer and a revision asked later
+# starts another. Told only that its machine was replaced and to continue, a planner had to find
+# the revision by itself, and with the file of its proposal gone it wrote the whole proposal again.
 _REVISION_PROMPT = (
     "The person read your answer and asks for this revision:\n\n{revision}\n\n"
     "Read the draft and the capacity again and answer with a new proposal.")
