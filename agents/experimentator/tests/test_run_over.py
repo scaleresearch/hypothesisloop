@@ -18,7 +18,7 @@ def setup(answer):
             raise result
         return result
 
-    cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="competitor", platform_experiment_id="pe-1", max_wall_hours=0)
+    cfg = SimpleNamespace(agent_id="ag-1", flavor="generalist", role="competitor", platform_experiment_id="pe-1")
     return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_signup=get_signup))
 
 
@@ -33,7 +33,7 @@ class RunOverTest(unittest.TestCase):
         reason = core.run_over(setup(lambda: REFUSED))
         self.assertEqual(reason, 'the platform refuses this token, so its run is over ({"error":"unauthenticated: agent ag-1 finished in platform experiment pe-1"})')
         self.assertTrue(core.lost_platform(reason))
-        self.assertEqual(core.stop_reason(setup(lambda: REFUSED), time.time(), [False]), reason)
+        self.assertEqual(core.stop_reason(setup(lambda: REFUSED), [False]), reason)
 
     def test_an_outage_is_waited_out_up_to_the_limit_and_an_answer_ends_it(self):
         answers = [DOWN, DOWN, {}, DOWN]

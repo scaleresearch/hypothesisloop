@@ -406,13 +406,12 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
-                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1",
-                                                    max_wall_hours=0))
+                                cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
         self.assertEqual(sent, ["Begin.", "Platform updates:\nexperiment.status exp-1 COMPLETED", run._shutdown_prompt(setup)])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
@@ -468,12 +467,12 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_platform_experiment=lambda _id: draft, get_signup=lambda *_: {}),
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor=config.PLANNER_FLAVOR, role="planner", api_url="http://x",
-                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1", max_wall_hours=0))
+                                                    token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", revised), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "m", None, time.time(), stop_flag), timeout=5)
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, stop_flag), timeout=5)
         self.assertEqual(batches, 3)
         self.assertEqual(sent[0], "Begin.")
         self.assertEqual(sent[1], "The person read your answer and asks for this revision:\n\nMake it fit one accelerator.\n\n"

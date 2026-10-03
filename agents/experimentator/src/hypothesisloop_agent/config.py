@@ -13,11 +13,6 @@ def required(name: str, what: str = "") -> str:
     return value
 
 
-def _env_float(name: str, default: float) -> float:
-    v = os.environ.get(name)
-    return float(v) if v else default
-
-
 # What a platform experiment's coordinator runs as. It is no flavor of an agent: a coordinator is
 # not in the experiment, and HL_TOKEN is the platform experiment's coordinator token.
 COORDINATOR_FLAVOR = "coordinator"
@@ -57,10 +52,6 @@ class Config:
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
     api_url: str = field(default_factory=lambda: required("API_URL"))
     token: str = field(default_factory=lambda: required("HL_TOKEN"))
-
-    # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
-    # experiment closes and submissions start getting rejected (see core.py's stop_reason).
-    max_wall_hours: float = field(default_factory=lambda: _env_float("MAX_WALL_HOURS", 0))
 
     # From the token. A coordinator has no agent id: agent_id is then its flavor, which names it
     # in the activity log and its working directory and is never sent to the platform.

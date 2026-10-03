@@ -1,6 +1,5 @@
 import os
 import tempfile
-import time
 import unittest
 from unittest import mock
 from types import SimpleNamespace
@@ -9,11 +8,11 @@ from hypothesisloop_agent import core
 
 
 def planner():
-    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={}, max_wall_hours=0)
+    return SimpleNamespace(agent_id="ag-planner", flavor="planner", role="planner", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def baseline_agent():
-    return SimpleNamespace(agent_id="ag-baseline", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={}, max_wall_hours=0)
+    return SimpleNamespace(agent_id="ag-baseline", flavor="generalist", role="baseline", platform_experiment_id="pe-1", hyperparameters={})
 
 
 def render(cfg) -> tuple[str, str]:
@@ -254,7 +253,7 @@ class BaselinePromptTest(unittest.TestCase):
 class RunEndedTest(unittest.TestCase):
     def reason(self, cfg, signup, platform_experiment=None):
         client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment, get_signup=lambda *_: signup)
-        return core.stop_reason(SimpleNamespace(cfg=cfg, client=client), time.time(), [False])
+        return core.stop_reason(SimpleNamespace(cfg=cfg, client=client), [False])
 
     # The planner's machine is rented while it plans and no longer: it stops by itself once the
     # platform says its answer is stored, and a revision, which takes that back, lets it go on.
@@ -343,12 +342,12 @@ sizing_reason: " kept as sent"
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):
-        researcher = SimpleNamespace(agent_id="ag-1", flavor="generalist", platform_experiment_id="pe-1", max_wall_hours=0)
+        researcher = SimpleNamespace(agent_id="ag-1", flavor="generalist", platform_experiment_id="pe-1")
         self.assertIsNone(self.reason(researcher, {}))
         self.assertEqual(self.reason(researcher, {"ended": "finished"}), "the platform ended the run: finished")
 
     def test_a_coordinator_stops_once_its_platform_experiment_closed(self):
-        coordinator = SimpleNamespace(agent_id="", flavor="coordinator", platform_experiment_id="pe-1", max_wall_hours=0)
+        coordinator = SimpleNamespace(agent_id="", flavor="coordinator", platform_experiment_id="pe-1")
         self.assertIsNone(self.reason(coordinator, None, {"status": "running"}))
         self.assertEqual(self.reason(coordinator, None, {"status": "closed"}), "the platform ended the run: closed")
 

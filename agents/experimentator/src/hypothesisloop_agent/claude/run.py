@@ -467,7 +467,7 @@ def credential_refused(result: str | None) -> bool:
 
 
 async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | None,
-                            started_at: float, stop_flag: list,
+                            stop_flag: list,
                             initial_prompt: str | None = None,
                             on_good_turn=lambda: None,
                             ) -> tuple[float | None, bool]:
@@ -484,7 +484,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
         permission_mode="bypassPermissions",
         # No max_turns cap: this session is meant to run for the platform experiment's whole
         # lifetime (hours to days), not a bounded number of turns. The only real stop conditions
-        # are MAX_WALL_HOURS, a signal, or the platform experiment closing — see stop_reason().
+        # are a signal and the end of its run on the platform, see core.stop_reason.
         max_turns=None,
         cwd=setup.workdir,
         resume=resume_id,
@@ -508,7 +508,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     rate_limited_resets_at: float | None = None
 
     def stopped() -> bool:
-        return core.stop_requested(setup, started_at, stop_flag)
+        return stop_flag[0]
 
     connecting = time.monotonic()
     async with ClaudeSDKClient(options=options) as client:
@@ -574,7 +574,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
                 return None, False
 
-            reason = core.stop_reason(setup, started_at, stop_flag)
+            reason = core.stop_reason(setup, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
                 return None, False
@@ -621,7 +621,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                     print(line, flush=True)
                 await client.query(told)
                 continue
-            reason = core.stop_reason(setup, started_at, stop_flag)
+            reason = core.stop_reason(setup, stop_flag)
             if reason:
                 log.info("stopping: %s", reason)
                 return None, False
@@ -643,19 +643,18 @@ def _restart_state(setup: core.RunSetup) -> tuple[str | None, str | None]:
 
 
 async def _run(setup: core.RunSetup, model: str) -> None:
-    started_at = time.time()
     stop_flag = core.install_signal_handler()
-    backoff_s = _RECONNECT_BACKOFF_INITIAL_S
     beat = asyncio.ensure_future(_progress.run())
     storing = asyncio.ensure_future(_keep_session_stored(setup))
     try:
-        await core.run_until_lost(setup, _run_until_stopped(setup, model, started_at, stop_flag, backoff_s))
+        await core.run_until_lost(setup, _run_until_stopped(setup, model, stop_flag))
     finally:
         beat.cancel()
         storing.cancel()
 
 
-async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float, stop_flag: list, backoff_s: float) -> None:
+async def _run_until_stopped(setup: core.RunSetup, model: str, stop_flag: list) -> None:
+    backoff_s = _RECONNECT_BACKOFF_INITIAL_S
 
     def reset_backoff() -> None:
         nonlocal backoff_s
@@ -666,7 +665,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
     # must pause and resume, never permanently end the run, since running out of quota is an
     # everyday occurrence on a multi-day competition, not an exceptional one.
     while True:
-        reason = core.stop_reason(setup, started_at, stop_flag)
+        reason = core.stop_reason(setup, stop_flag)
         if reason:
             log.info("stopping: %s", reason)
             return
@@ -674,7 +673,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
         resume_id, initial_prompt = _restart_state(setup)
         try:
             resets_at, rotated = await _run_one_session(
-                setup, model, resume_id, started_at, stop_flag, initial_prompt, reset_backoff,
+                setup, model, resume_id, stop_flag, initial_prompt, reset_backoff,
             )
         except Exception as e:
             if not _transport_error(e):
@@ -685,7 +684,7 @@ async def _run_until_stopped(setup: core.RunSetup, model: str, started_at: float
         # turn can come before the CLI wrote the turn's last reply, and after a planner's
         # answer or an agent's finish no turn follows to store it.
         await _store_session(setup)
-        if rotated or core.stop_reason(setup, started_at, stop_flag):
+        if rotated or core.stop_reason(setup, stop_flag):
             continue
 
         if resets_at:

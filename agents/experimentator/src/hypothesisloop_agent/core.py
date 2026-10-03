@@ -166,12 +166,6 @@ def revising(setup: RunSetup) -> dict | None:
     return draft
 
 
-def stop_requested(setup: RunSetup, started_at: float, stop_flag: list) -> bool:
-    """The stop conditions that need no platform call: a signal or MAX_WALL_HOURS."""
-    hours = setup.cfg.max_wall_hours
-    return stop_flag[0] or bool(hours and (time.time() - started_at) / 3600.0 >= hours)
-
-
 def _closer(actor: dict | None) -> str:
     kind, name = (actor or {}).get("kind"), (actor or {}).get("name") or "unnamed"
     if kind == "coordinator":
@@ -307,11 +301,8 @@ async def run_until_lost(setup: RunSetup, work) -> None:
         lost.cancel()
 
 
-def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | None:
-    """Between-event stop check shared by both backends. Returns a reason string, or None."""
+def stop_reason(setup: RunSetup, stop_flag: list) -> str | None:
+    """Why the run loop stops at a turn boundary, None while it goes on: a signal, or run_over."""
     if stop_flag[0]:
         return "received signal"
-    cfg = setup.cfg
-    if cfg.max_wall_hours and (time.time() - started_at) / 3600.0 >= cfg.max_wall_hours:
-        return f"reached MAX_WALL_HOURS={cfg.max_wall_hours}"
     return run_over(setup)

@@ -121,7 +121,7 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=SimpleNamespace(get_signup=lambda *_: {}),
                                 cfg=SimpleNamespace(agent_id="agent-a", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
-                                                    platform_experiment_id="pe-1", max_wall_hours=0))
+                                                    platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", SilentClient), \
                 mock.patch.object(run, "_progress", beating), \
                 mock.patch.object(progress, "INTERVAL_S", 0.02), \

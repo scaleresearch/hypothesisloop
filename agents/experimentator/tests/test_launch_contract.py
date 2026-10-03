@@ -36,10 +36,9 @@ class StopSignalTest(unittest.TestCase):
         before = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
         try:
             stop_flag = core.install_signal_handler()
-            setup = SimpleNamespace(cfg=SimpleNamespace(max_wall_hours=0))
-            self.assertFalse(core.stop_requested(setup, 0.0, stop_flag))
+            self.assertEqual(stop_flag, [False])
             os.kill(os.getpid(), signal.SIGTERM)
-            self.assertTrue(core.stop_requested(setup, 0.0, stop_flag))
+            self.assertEqual(stop_flag, [True])
         finally:
             for signum, handler in before.items():
                 signal.signal(signum, handler)
@@ -78,12 +77,11 @@ class ErrorTurnClient:
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1",
-                                                    max_wall_hours=0))
+                                cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
                 contextlib.redirect_stdout(io.StringIO()):
-            return await asyncio.wait_for(run._run_one_session(setup, "m", None, 0.0, [False]), timeout=5)
+            return await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
 
     async def test_a_refused_credential_ends_the_agent_with_the_providers_words(self):
         for refusal in ("Not logged in · Please run /login", "Invalid API key · Fix external API key",
@@ -110,9 +108,9 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(run, "ClaudeSDKClient", Client):
             setup = SimpleNamespace(system_prompt="BRIEFING", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                     cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
-                                                        platform_experiment_id="pe-1", max_wall_hours=0))
+                                                        platform_experiment_id="pe-1"))
             with mock.patch.object(Client, "result", "Connection error."), contextlib.redirect_stdout(io.StringIO()):
-                await asyncio.wait_for(run._run_one_session(setup, "m", None, 0.0, [False]), timeout=5)
+                await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
         self.assertEqual(seen, ["BRIEFING\n\nWrite and Edit refuse an existing file you have not opened with Read: `cat` does not count."])
 
     def test_only_the_providers_refusal_of_the_credential_counts(self):
