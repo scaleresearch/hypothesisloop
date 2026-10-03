@@ -72,6 +72,15 @@ describe('the health of a hosted machine', () => {
     expect(screen.getByText(new RegExp(`ended 1m ago, ${words}\\.$`))).toBeTruthy()
   })
 
+  it.each([
+    ['expired', 'its provider ended it at the provider’s own lifetime'],
+    ['progress_unreadable', 'its output could not be read for as long as progress is waited for'],
+  ] as const)('says a machine that ended as %s counts as no restart', (end_reason, words) => {
+    render(<InstanceHealth instance={instance({ end_reason, exited_at: ago(60) })} />)
+    expect(screen.getByText(`Replaced: the machine before this one ended 1m ago, ${words}, which counts as no restart.`)).toBeTruthy()
+    expect(screen.queryByText(/restarted/)).toBeNull()
+  })
+
   it('says a machine with no restart left is stopped for good, and shows no progress age', () => {
     render(<InstanceHealth instance={instance({
       state: 'stopped', stopped: true, restarts: 3, progress_at: ago(4000), end_reason: 'exited', exited_at: ago(3600), exit_log: 'exit 1',

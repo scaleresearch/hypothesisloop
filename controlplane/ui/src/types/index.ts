@@ -663,7 +663,9 @@ export interface AgentInstance {
   // Why the last machine that ended was given up on, when, and the end of what it wrote. A
   // machine that was replaced leaves these set while state is running again. 'released' is the
   // platform taking the machine down because its run was over, and exit_log says which end.
-  end_reason?: 'exited' | 'gone' | 'never_seen' | 'still_starting' | 'silent' | 'released'
+  // 'expired' (the provider ended it at its own lifetime) and 'progress_unreadable' (its output
+  // could not be read for the progress limit) spend no restart either.
+  end_reason?: 'exited' | 'gone' | 'never_seen' | 'still_starting' | 'silent' | 'progress_unreadable' | 'expired' | 'released'
   exited_at?: string
   exit_log?: string
 }

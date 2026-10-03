@@ -22,6 +22,8 @@ const END_REASON: Record<NonNullable<AgentInstance['end_reason']>, string> = {
   never_seen: 'no machine came to be',
   still_starting: 'it did not come up in time',
   silent: 'it ran and made no progress',
+  expired: 'its provider ended it at the provider’s own lifetime, which counts as no restart',
+  progress_unreadable: 'its output could not be read for as long as progress is waited for, which counts as no restart',
   released: 'the platform took it down',
 }
 
