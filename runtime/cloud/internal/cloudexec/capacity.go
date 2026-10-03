@@ -48,9 +48,10 @@ type counted struct {
 	at           time.Time
 }
 
-// offerCounts keeps the market's last answer per shape for the executors of every pass, so the
-// vendor is searched once per shape and OfferWait and not once per pass. It saves requests and
-// nothing else: a process that starts without it asks again.
+// offerCounts keeps the market's last answer per shape for the executors of every pass, because
+// the vendor's search is rate limited and a refused search fails the whole pass. A count that
+// went stale reports a slot free the market no longer has a machine for: the job placed on it
+// waits and goes back to the queue as no_offer. A process that starts without it asks again.
 type offerCounts struct {
 	mu      sync.Mutex
 	byShape map[string]counted
