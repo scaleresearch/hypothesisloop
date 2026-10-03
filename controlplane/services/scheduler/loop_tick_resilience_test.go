@@ -46,8 +46,8 @@ func (s *resilienceStore) IsAgentCut(context.Context, string, string) (bool, err
 	return false, nil
 }
 
-func (s *resilienceStore) HasUnsummarizedCompleted(context.Context, string, string) (bool, error) {
-	return false, nil
+func (s *resilienceStore) UnsummarizedCompleted(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 
 func (s *resilienceStore) UpdateNotAdmittedReason(_ context.Context, id, reason string) error {

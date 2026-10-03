@@ -85,7 +85,7 @@ func TestAPreemptedJobStopsBeingRecentlyUndesiredWhileItWaitsInTheQueue(t *testi
 	if err := exps.UpdateExperimentPriority(ctx, preempted, 0.75); err != nil {
 		t.Fatalf("UpdateExperimentPriority: %v", err)
 	}
-	if err := exps.UpdateNotAdmittedReason(ctx, preempted, domain.NotAdmittedCapacityUnavailable); err != nil {
+	if err := exps.UpdateNotAdmittedReason(ctx, preempted, domain.NotAdmittedCapacityUnavailable+": no room"); err != nil {
 		t.Fatalf("UpdateNotAdmittedReason: %v", err)
 	}
 	if listed()[preempted] {

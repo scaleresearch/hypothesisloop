@@ -58,7 +58,7 @@ func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Exp
 		exp.CapacityTier = domain.CapacityGuaranteed
 	}
 	if exp.Status == domain.StatusQueued && exp.NotAdmittedReason == "" {
-		exp.NotAdmittedReason = domain.NotAdmittedAwaitingAdmission
+		exp.NotAdmittedReason = domain.QueueReasonAwaitingAdmission
 	}
 	if exp.Actor.Kind == "" {
 		return fmt.Errorf("experiments_store.CreateExperiment: job %s names no actor: whose credential submits it is kept with it", exp.ID)

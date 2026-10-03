@@ -83,7 +83,7 @@ type Experiment struct {
 	// why a QUEUED job was skipped: a stable code and a sentence (SplitQueueReason). Overwritten
 	// each decision and cleared on admission; not tick history.
 	NotAdmittedReason  string `json:"not_admitted_reason,omitempty" doc:"On a QUEUED job: the code of why it waits, such as awaiting_admission, summary_gate, capacity_unavailable, outranked or exceeds_cluster_capacity. Branch on this."`
-	NotAdmittedMessage string `json:"not_admitted_message,omitempty" doc:"With not_admitted_reason, where there is more to say: what the job waits for, in a sentence. For capacity_unavailable the cluster, what it is short of (cores, GiB of memory and storage, devices) and how many jobs hold that, of this platform experiment and of others. The wording may change."`
+	NotAdmittedMessage string `json:"not_admitted_message,omitempty" doc:"With not_admitted_reason, always: what the job waits for, in a sentence. For summary_gate the COMPLETED jobs whose summary is owed and the command that files one. For capacity_unavailable the cluster, what it is short of (cores, GiB of memory and storage, devices) and how many jobs hold that, of this platform experiment and of others. The wording may change."`
 	// PhaseDetail is the runtime's latest explanation for why this job's container hasn't
 	// started or has been restarting, merged in live from the metrics store on every read —
 	// never persisted to PostgreSQL (metrics only in the metrics store, important.md #3). Nil

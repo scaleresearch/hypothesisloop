@@ -52,7 +52,7 @@ UPDATE experiments e SET
 	cluster_name = '',
 	resolved_job_spec = NULL,
 	queued_at = COALESCE(queued_at, NOW()),
-	not_admitted_reason = 'awaiting_admission',
+	not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 	quota_settled_at = NULL,
 	updated_at = NOW()
 WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')

@@ -38,9 +38,9 @@ type Store interface {
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// IsAgentFinished reports whether the agent said it has nothing left to do, which is final.
 	IsAgentFinished(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment
-	// without a summary in the given platform experiment.
-	HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error)
+	// UnsummarizedCompleted returns the ids of the agent's COMPLETED jobs without a summary in
+	// the given platform experiment.
+	UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) ([]string, error)
 	// CreateHypothesisFinding records the agent's post-run write-up, attached to the
 	// hypothesis the completed job tested (see domain.HypothesisFinding).
 	CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error)

@@ -263,7 +263,7 @@ func TestTickTellsAJobWhoseOrgHasNoClusterSo(t *testing.T) {
 				if cluster, admitted := store.submitted["c1"]; admitted {
 					t.Fatalf("a job of an org with no cluster was placed on %s", cluster)
 				}
-				if got := store.notAdmitted["c1"]; got != domain.NotAdmittedNoClusterForOrg {
+				if got := reasonCode(store.notAdmitted["c1"]); got != domain.NotAdmittedNoClusterForOrg {
 					t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedNoClusterForOrg)
 				}
 			})
@@ -372,7 +372,7 @@ func TestTickFailsOverOnlyToAClusterThatHostsTheJob(t *testing.T) {
 		if cluster, admitted := store.submitted["a1"]; admitted {
 			t.Fatalf("failed over to %s, a cluster of another org", cluster)
 		}
-		if got := store.notAdmitted["a1"]; got != domain.NotAdmittedNoScalableCapacity {
+		if got := reasonCode(store.notAdmitted["a1"]); got != domain.NotAdmittedNoScalableCapacity {
 			t.Fatalf("not_admitted_reason = %q, want %q: the one cluster that hosts the job was just tried", got, domain.NotAdmittedNoScalableCapacity)
 		}
 	})
@@ -430,7 +430,7 @@ func TestTickPreemptsAcrossOrgsOnASharedClusterOnly(t *testing.T) {
 			if _, admitted := store.submitted["a1"]; admitted {
 				t.Fatal("the guaranteed job was admitted before its capacity was free")
 			}
-			if !tc.preempted && store.notAdmitted["a1"] != domain.NotAdmittedNoClusterForOrg {
+			if !tc.preempted && reasonCode(store.notAdmitted["a1"]) != domain.NotAdmittedNoClusterForOrg {
 				t.Fatalf("not_admitted_reason = %q, want %q", store.notAdmitted["a1"], domain.NotAdmittedNoClusterForOrg)
 			}
 		})
@@ -452,7 +452,7 @@ func TestTickRefusesAPinOnAClusterThatDoesNotHostTheJob(t *testing.T) {
 			if cluster, admitted := store.submitted["a1"]; admitted {
 				t.Fatalf("a job pinned to %s was placed on %s", pinned, cluster)
 			}
-			if got := store.notAdmitted["a1"]; got != domain.NotAdmittedNoClusterForOrg {
+			if got := reasonCode(store.notAdmitted["a1"]); got != domain.NotAdmittedNoClusterForOrg {
 				t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedNoClusterForOrg)
 			}
 		})
@@ -465,7 +465,7 @@ func TestAMultiNodeJobIsOfferedOnlyHostingClustersThatSpanNodes(t *testing.T) {
 	exp.OrgID = "org-a"
 
 	candidates, ineligible := eligibleClusters(avail, map[string]bool{"of-b": true}, threeOrgClusters(), exp)
-	if len(candidates) != 0 || ineligible != domain.NotAdmittedNoMultiNodeCluster {
+	if len(candidates) != 0 || reasonCode(ineligible) != domain.NotAdmittedNoMultiNodeCluster {
 		t.Fatalf("got %v, %q, want no cluster and %q: the only one that spans nodes is another org's", candidates, ineligible, domain.NotAdmittedNoMultiNodeCluster)
 	}
 	candidates, ineligible = eligibleClusters(avail, map[string]bool{"of-b": true, "shared": true}, threeOrgClusters(), exp)
@@ -534,7 +534,7 @@ func TestTickEvictsADisbalancedJobForAnotherOrgOnASharedClusterOnly(t *testing.T
 			if _, admitted := store.submitted["blocked"]; admitted {
 				t.Fatalf("the blocked job was placed on %s, where nothing was free for it", store.submitted["blocked"])
 			}
-			if !tc.shared && store.notAdmitted["blocked"] != domain.NotAdmittedNoClusterForOrg {
+			if !tc.shared && reasonCode(store.notAdmitted["blocked"]) != domain.NotAdmittedNoClusterForOrg {
 				t.Fatalf("not_admitted_reason = %q, want %q", store.notAdmitted["blocked"], domain.NotAdmittedNoClusterForOrg)
 			}
 		})
@@ -644,7 +644,7 @@ func TestTickTellsAJobWhoseOrgTurnedEveryClusterOffSo(t *testing.T) {
 					if cluster, admitted := store.submitted[id]; admitted {
 						t.Fatalf("%s was placed on %s, which its org turned off", id, cluster)
 					}
-					if got := store.notAdmitted[id]; got != domain.NotAdmittedClustersDisabled {
+					if got := reasonCode(store.notAdmitted[id]); got != domain.NotAdmittedClustersDisabled {
 						t.Fatalf("%s not_admitted_reason = %q, want %q", id, got, domain.NotAdmittedClustersDisabled)
 					}
 				}
@@ -679,7 +679,7 @@ func TestTickPreemptsNothingOnAClusterTheJobsOrgTurnedOff(t *testing.T) {
 		t.Fatalf("preempted %v for a job that cannot land on the cluster", store.requeued)
 	}
 	for _, id := range []string{"a1", "a2"} {
-		if got := store.notAdmitted[id]; got != domain.NotAdmittedClustersDisabled {
+		if got := reasonCode(store.notAdmitted[id]); got != domain.NotAdmittedClustersDisabled {
 			t.Fatalf("%s not_admitted_reason = %q, want %q", id, got, domain.NotAdmittedClustersDisabled)
 		}
 	}

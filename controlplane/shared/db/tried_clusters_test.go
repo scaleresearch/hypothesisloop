@@ -225,7 +225,7 @@ func TestTheTypeAJobRanOnOutlivesEveryRequeue(t *testing.T) {
 	if !w.claim(t, id, w.ofA) {
 		t.Fatal("the preempted job was not placed again")
 	}
-	if err := w.exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation); err != nil {
+	if err := w.exps.MarkQueued(ctx, id, domain.NotAdmittedWorkloadCreation+": not handed over"); err != nil {
 		t.Fatal(err)
 	}
 	held("placed again and rolled back")

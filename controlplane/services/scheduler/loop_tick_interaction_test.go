@@ -177,8 +177,8 @@ func (s *noRunningListStore) GetPlatformExperiment(_ context.Context, id string)
 func (s *noRunningListStore) IsAgentCut(context.Context, string, string) (bool, error) {
 	return false, nil
 }
-func (s *noRunningListStore) HasUnsummarizedCompleted(context.Context, string, string) (bool, error) {
-	return false, nil
+func (s *noRunningListStore) UnsummarizedCompleted(context.Context, string, string) ([]string, error) {
+	return nil, nil
 }
 func (s *noRunningListStore) UpdateNotAdmittedReason(_ context.Context, id, reason string) error {
 	if s.notAdmitted == nil {
@@ -309,7 +309,7 @@ func TestTickSkipsPreemptionWhenClusterIsAlreadyWaitingForScaleUp(t *testing.T) 
 	if store.requeuePreemptedCall {
 		t.Fatal("preemption must not run against a cluster whose desired-free is already negative for this dimension — a scale-up is outstanding, not a shortage preemption could fix")
 	}
-	if got := store.notAdmitted[exp.ID]; got != domain.NotAdmittedWaitingForScaleUp {
+	if got := reasonCode(store.notAdmitted[exp.ID]); got != domain.NotAdmittedWaitingForScaleUp {
 		t.Fatalf("not_admitted_reason = %q, want %q", got, domain.NotAdmittedWaitingForScaleUp)
 	}
 }
@@ -408,8 +408,11 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 
 type summaryOwedStore struct{ noRunningListStore }
 
-func (s *summaryOwedStore) HasUnsummarizedCompleted(_ context.Context, agentID, _ string) (bool, error) {
-	return agentID == "agent-owing", nil
+func (s *summaryOwedStore) UnsummarizedCompleted(_ context.Context, agentID, _ string) ([]string, error) {
+	if agentID == "agent-owing" {
+		return []string{"job-done"}, nil
+	}
+	return nil, nil
 }
 
 func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
@@ -433,8 +436,8 @@ func TestTickHoldsEveryQueuedJobOfAnAgentThatOwesASummary(t *testing.T) {
 		t.Fatalf("tick() = %v, want nil", err)
 	}
 	for _, id := range []string{"exp-1", "exp-2"} {
-		if got := store.notAdmitted[id]; got != domain.NotAdmittedSummaryGate {
-			t.Errorf("not_admitted_reason of %s = %q, want %q", id, got, domain.NotAdmittedSummaryGate)
+		if got := store.notAdmitted[id]; got != summaryGateReason([]string{"job-done"}) || !strings.Contains(got, "hl job summary job-done --text T") {
+			t.Errorf("not_admitted_reason of %s = %q, want the summary gate naming job-done and the command that files its summary", id, got)
 		}
 	}
 	if got := store.notAdmitted["exp-3"]; got == domain.NotAdmittedSummaryGate {

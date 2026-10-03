@@ -115,8 +115,8 @@ func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { 
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
-func (poolOnlyStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
-	return false, nil
+func (poolOnlyStore) UnsummarizedCompleted(_ context.Context, _, _ string) ([]string, error) {
+	return nil, nil
 }
 func (poolOnlyStore) ProjectOrg(context.Context, string) (string, error) { return "org-a", nil }
 func (poolOnlyStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
@@ -244,8 +244,8 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 
 type unsummarizedStore struct{ poolOnlyStore }
 
-func (unsummarizedStore) HasUnsummarizedCompleted(_ context.Context, _, _ string) (bool, error) {
-	return true, nil
+func (unsummarizedStore) UnsummarizedCompleted(_ context.Context, _, _ string) ([]string, error) {
+	return []string{"job-done"}, nil
 }
 
 // A job that completed during the agent's turn is unknown to it, so the submit is not refused: it
@@ -257,8 +257,8 @@ func TestSubmitWhileASummaryIsOwedIsAcceptedAndSaysWhatHoldsIt(t *testing.T) {
 	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("Submit with unsummarized jobs: got = %v, want it to pass the summary gate", err)
 	}
-	if exp.NotAdmittedReason != domain.NotAdmittedSummaryGate {
-		t.Errorf("not_admitted_reason: got = %q, want %q", exp.NotAdmittedReason, domain.NotAdmittedSummaryGate)
+	if exp.NotAdmittedReason != summaryGateReason([]string{"job-done"}) {
+		t.Errorf("not_admitted_reason: got = %q, want the summary gate naming job-done", exp.NotAdmittedReason)
 	}
 }
 

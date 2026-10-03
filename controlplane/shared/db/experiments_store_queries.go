@@ -206,10 +206,6 @@ ORDER BY queued_at ASC`
 	return collectExperiments(rows)
 }
 
-// HasUnsummarizedCompleted returns true when the agent has any COMPLETED experiment in the given
-// platform experiment without a finding filed against its hypothesis (see hypothesis_findings,
-// one row per job). Agents must document successful runs before submitting new jobs. FAILED and
-// EVICTED runs are excluded since documenting infra failures adds little signal.
 // UnsummarizedCompletedPredicate is the admission summary gate written as SQL over the
 // experiments table: a finished job whose write-up was never filed. Admission asks whether any
 // row matches it; GET /experiments?needs_summary=true lists the rows that do. One definition, so
@@ -217,16 +213,20 @@ ORDER BY queued_at ASC`
 const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
 	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
 
-func (s *ExperimentsStore) HasUnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) (bool, error) {
-	const q = `SELECT EXISTS(
-		SELECT 1 FROM experiments
+// UnsummarizedCompleted returns the ids of the agent's COMPLETED jobs in the platform experiment
+// that have no summary, oldest first: the jobs that hold its queued ones back. FAILED and EVICTED
+// jobs owe none.
+func (s *ExperimentsStore) UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) ([]string, error) {
+	const q = `SELECT id FROM experiments
 		WHERE agent_id = $1
 		  AND platform_experiment_id = $2
 		  AND ` + UnsummarizedCompletedPredicate + `
-	)`
-	var exists bool
-	err := s.pool.pool.QueryRow(ctx, q, agentID, platformExpID).Scan(&exists)
-	return exists, err
+		ORDER BY created_at, id`
+	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.UnsummarizedCompleted: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // DescribeJobs sets on each job what an answer says of it beyond its own row: its agent's name,

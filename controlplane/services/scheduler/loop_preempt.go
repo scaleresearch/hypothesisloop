@@ -52,13 +52,13 @@ func notAdmittedReasonForSubmitError(err error) string {
 	var quotaErr insufficientQuota
 	switch {
 	case errors.As(err, &capErr):
-		return domain.NotAdmittedConcurrencyCap
+		return concurrencyCapReason()
 	case errors.As(err, &quotaErr):
 		return domain.NotAdmittedInsufficientQuota + ": " + quotaErr.Error()
 	case errors.Is(err, errAdmissionCapacityChanged):
-		return domain.NotAdmittedCapacityUnavailable
+		return capacityTakenReason()
 	default:
-		return domain.NotAdmittedWorkloadCreation
+		return workloadCreationReason()
 	}
 }
 
@@ -475,7 +475,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	}
 	exp.ClusterName = clusterName
 	if err := l.workload.CreateWorkload(ctx, exp); err != nil {
-		if rbErr := l.store.MarkQueued(ctx, exp.ID, domain.NotAdmittedWorkloadCreation); rbErr != nil {
+		if rbErr := l.store.MarkQueued(ctx, exp.ID, workloadCreationReason()); rbErr != nil {
 			l.logger.Error("rollback to QUEUED failed after workload creation error",
 				zap.String("exp", exp.ID), zap.Error(rbErr))
 		}

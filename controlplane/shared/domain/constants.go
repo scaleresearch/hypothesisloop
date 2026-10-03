@@ -100,6 +100,11 @@ const (
 	NotAdmittedExceedsClusterCapacity = "exceeds_cluster_capacity"
 )
 
+// QueueReasonAwaitingAdmission is the stored reason of a job the admission loop has not looked at
+// yet. Every stored reason is "code: sentence" (SplitQueueReason), and this is the one the store
+// writes itself.
+const QueueReasonAwaitingAdmission = NotAdmittedAwaitingAdmission + ": the scheduler has not looked at the job since it was queued, which it does within seconds"
+
 // IsTerminal reports whether the status is a final lifecycle state that no further execution
 // or progress reporting can follow.
 func (s ExperimentStatus) IsTerminal() bool {

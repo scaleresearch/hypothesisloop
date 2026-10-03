@@ -213,10 +213,10 @@ CREATE TABLE IF NOT EXISTS experiments (
     config_hash              TEXT              NOT NULL,
     data_ref                 TEXT              NOT NULL,
     job_spec                 JSONB             NOT NULL DEFAULT '{}'::jsonb,
-    -- resolved_job_spec is the durably-persisted literal resolution of any "max" resource
-    -- sentinel in job_spec's cpu/memory/storage, written once at admission (ClaimSubmitted) onto
-    -- the specific cluster the job landed on, reset to NULL on requeue (MarkQueued). NULL until
-    -- admitted, or for a job with nothing to resolve. job_spec itself is NEVER rewritten, so a
+    -- resolved_job_spec is job_spec as the runtime runs it (a slot's size, the image, the grace
+    -- periods), written once at admission (ClaimSubmitted) onto the specific cluster the job
+    -- landed on, reset to NULL on requeue (MarkQueued). NULL until admitted. job_spec itself is
+    -- NEVER rewritten, so a
     -- GET always shows exactly what was submitted — see domain.Experiment.ResolvedJob/EffectiveJob.
     resolved_job_spec        JSONB,
     -- A hypothesis in the graph store (shared/graphdb), validated there at submit.
@@ -750,7 +750,7 @@ BEGIN
     -- so it needs an event of its own or a waiting agent learns nothing until admission. A job
     -- nobody has judged yet has no reason to tell, and the submit reply already says summary_gate
     -- (replayExperiments leaves out the same two).
-    IF NEW.not_admitted_reason NOT IN ('awaiting_admission', 'summary_gate')
+    IF split_part(NEW.not_admitted_reason, ': ', 1) NOT IN ('awaiting_admission', 'summary_gate')
        AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
         PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id,
             split_part(NEW.not_admitted_reason, ': ', 1),

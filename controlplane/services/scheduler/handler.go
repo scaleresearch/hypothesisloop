@@ -77,7 +77,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
-			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate).",
+			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate, with the jobs owed and the command that files one in not_admitted_message, and a job.held event at once). Every not_admitted_reason comes with its sentence in not_admitted_message.",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 		req := in.Body
 		if req.ID == "" {

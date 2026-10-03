@@ -193,8 +193,8 @@ func (l *Loop) tick(ctx context.Context) error {
 	// important.md #19 exists to forbid. Per-experiment failures are logged, collected, and the
 	// experiment is dropped from this tick's consideration; the pass finishes, and the joined
 	// error surfaces at the end so the failure is still loud.
-	summaryBlocked := map[string]bool{} // key: agentID+"/"+platformExpID
-	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
+	summaryOwed := map[string][]string{} // key: agentID+"/"+platformExpID
+	maxJobHours := map[string]float64{}  // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
 	for _, exp := range queued {
 		if exp.PlatformExperimentID == "" {
@@ -216,7 +216,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			maxJobHours[exp.PlatformExperimentID] = limit
 		}
 		if limit > 0 && exp.EstimatedDurationHours > limit {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedJobTooLong); err != nil {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, jobTooLongReason(exp.EstimatedDurationHours, limit)); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark job too long: %w", err))
 			}
 			continue
@@ -227,26 +227,26 @@ func (l *Loop) tick(ctx context.Context) error {
 			continue
 		}
 		if cut {
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedStageCut); err != nil {
+			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, stageCutReason()); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark stage cut: %w", err))
 			}
 			continue
 		}
 		key := exp.AgentID + "/" + exp.PlatformExperimentID
-		blocked, seen := summaryBlocked[key]
+		owed, seen := summaryOwed[key]
 		if !seen {
-			blocked, err = l.store.HasUnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
+			owed, err = l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
 			if err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
 				continue
 			}
-			summaryBlocked[key] = blocked
+			summaryOwed[key] = owed
 		}
-		if !blocked {
+		if len(owed) == 0 {
 			filtered = append(filtered, exp)
 			continue
 		}
-		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, domain.NotAdmittedSummaryGate); err != nil {
+		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, summaryGateReason(owed)); err != nil {
 			l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark summary gate: %w", err))
 		}
 	}
@@ -537,9 +537,9 @@ func (l *Loop) tick(ctx context.Context) error {
 			case leaving != "":
 				reason = waitingForSlotReason(cluster, leaving)
 			case waitingForScaleUp:
-				reason = domain.NotAdmittedWaitingForScaleUp
+				reason = waitingForScaleUpReason(cluster)
 			case allSpeculativeCandidatesTried(exp, autoscalerEnabled, connectedClusters, clusterIDs, registeredClusters, l.triedClusterTTL):
-				reason = domain.NotAdmittedNoScalableCapacity
+				reason = noScalableCapacityReason()
 			case misfit != "":
 				reason = misfit
 			case exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
@@ -918,10 +918,10 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	// around admission.
 	pinnedElsewhere := exp.ClusterName != "" && !hostsJob(registered, exp.ClusterName, exp)
 	if pinnedElsewhere || !orgHasCluster(registered, exp.OrgID, domain.Cluster.OpenTo) {
-		return map[string]domain.Footprint{}, domain.NotAdmittedNoClusterForOrg
+		return map[string]domain.Footprint{}, noClusterForOrgReason()
 	}
 	if !orgHasCluster(registered, exp.OrgID, domain.Cluster.Hosts) {
-		return map[string]domain.Footprint{}, domain.NotAdmittedClustersDisabled
+		return map[string]domain.Footprint{}, clustersDisabledReason()
 	}
 	if runs, others := byImageChoice(registered, exp); len(runs) == 0 {
 		return map[string]domain.Footprint{}, noClusterForImageReason(runs, others, nil, nil, exp)
@@ -936,7 +936,7 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 		}
 	}
 	if len(out) == 0 {
-		return out, domain.NotAdmittedNoMultiNodeCluster
+		return out, noMultiNodeClusterReason(exp.Job.Nodes())
 	}
 	return out, ""
 }

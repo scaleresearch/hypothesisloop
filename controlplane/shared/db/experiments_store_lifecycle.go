@@ -66,8 +66,8 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 // stale and must not be read as though it were the resolution for wherever it lands next. A
 // QUEUED row therefore never carries one, and EffectiveJob on it is the submitted job.
 func (s *ExperimentsStore) MarkQueued(ctx context.Context, id, reason string) error {
-	if reason == "" {
-		return fmt.Errorf("experiments_store.MarkQueued: reason is required")
+	if err := sentenced(reason); err != nil {
+		return fmt.Errorf("experiments_store.MarkQueued: %w", err)
 	}
 	const q = `UPDATE experiments SET status = 'QUEUED', queued_at = COALESCE(queued_at, NOW()),
 	cluster_name = '', submitted_at = NULL, not_admitted_reason = $2, resolved_job_spec = NULL, updated_at = NOW()
@@ -180,14 +180,28 @@ WHERE id = $1 AND underperforming_metric IS NULL`
 	return nil
 }
 
-// MarkHeldJobs records, on every QUEUED job that has waited since it was queued for longer than
-// its estimated duration and longer than minimum, the queue reason it is held for. Only the
-// first write for a job stands, and that write is what emits job.held (see schema.sql), so the
-// job's owner is told once. A job the scheduler has not judged yet has no reason to tell.
+// sentenced refuses a queue reason that is a bare code: the sentence is what the job's owner
+// reads in not_admitted_message and in job.held.
+func sentenced(reason string) error {
+	if code, sentence := domain.SplitQueueReason(reason); code == "" || sentence == "" {
+		return fmt.Errorf("queue reason %q is not \"code: sentence\"", reason)
+	}
+	return nil
+}
+
+// MarkHeldJobs records on a QUEUED job the queue reason it is held for, and that write is what
+// emits job.held (see schema.sql). A job held by the summary gate is marked at once: its owner
+// lifts that gate itself, so every minute untold is a minute lost. Any other reason is marked
+// when the job has waited since it was queued for longer than its estimated duration and longer
+// than minimum, once, also after a notice of the summary gate. A job the scheduler has not judged
+// yet has no reason to tell.
 func (s *ExperimentsStore) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
 	const q = `UPDATE experiments SET held_reason = not_admitted_reason
-WHERE status = 'QUEUED' AND held_reason IS NULL AND not_admitted_reason <> 'awaiting_admission'
-  AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')`
+WHERE status = 'QUEUED' AND split_part(not_admitted_reason, ': ', 1) <> 'awaiting_admission'
+  AND ((held_reason IS NULL AND split_part(not_admitted_reason, ': ', 1) = 'summary_gate')
+    OR ((held_reason IS NULL OR split_part(held_reason, ': ', 1) = 'summary_gate')
+        AND split_part(not_admitted_reason, ': ', 1) <> 'summary_gate'
+        AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')))`
 	if _, err := s.pool.pool.Exec(ctx, q, minimum.Seconds()); err != nil {
 		return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
 	}
@@ -198,8 +212,8 @@ WHERE status = 'QUEUED' AND held_reason IS NULL AND not_admitted_reason <> 'awai
 // ClaimSubmitted clears it in the same statement that changes the lifecycle, so a stale
 // scheduler decision can never attach a queue reason to an admitted job.
 func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reason string) error {
-	if reason == "" {
-		return fmt.Errorf("experiments_store.UpdateNotAdmittedReason: reason is required")
+	if err := sentenced(reason); err != nil {
+		return fmt.Errorf("experiments_store.UpdateNotAdmittedReason: %w", err)
 	}
 	const q = `UPDATE experiments SET not_admitted_reason = $2
 	WHERE id = $1 AND status = 'QUEUED' AND not_admitted_reason IS DISTINCT FROM $2`
@@ -228,7 +242,7 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 		-- clear cluster_name: job holds no capacity, so next admission tick can place it anywhere.
 		cluster_name = '',
 		resolved_job_spec = NULL,
-		not_admitted_reason = 'awaiting_admission',
+		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'RUNNING'`
 	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH,
@@ -265,7 +279,7 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 		-- can place this anywhere, exactly as a preemption requeue does.
 		cluster_name = '',
 		resolved_job_spec = NULL,
-		not_admitted_reason = 'awaiting_admission',
+		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		updated_at = NOW()
 	WHERE id = $1 AND status IN ('SUBMITTED', 'RUNNING') AND attempt_count - infra_requeue_count < $2`
 	tag, err := s.pool.pool.Exec(ctx, q, id, maxAttemptsBefore)
@@ -318,7 +332,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 		cluster_name = '',
 		resolved_job_spec = NULL,
 		queued_at = COALESCE(queued_at, NOW()),
-		not_admitted_reason = 'awaiting_admission',
+		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		quota_settled_at = NULL,
 		tried_clusters = tried_clusters || COALESCE((
 			SELECT jsonb_build_array(jsonb_build_object(
