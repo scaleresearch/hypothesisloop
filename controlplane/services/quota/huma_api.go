@@ -218,10 +218,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err != nil {
 			return nil, peh.refusal("create platform experiment", err)
 		}
-		if caller, ok := auth.FromContext(ctx); ok {
-			by := caller.Actor()
-			hosting.createdBy = &by
+		caller, err := peh.caller(ctx)
+		if err != nil {
+			return nil, err
 		}
+		by := caller.Actor()
+		hosting.createdBy = &by
 		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
 		pe, err := peh.svc.Create(ctx, hosting)
 		// What is wrong with a body laid over the experiment file may be the file's doing.
@@ -390,7 +392,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		// A coordinator's token is handed to a machine the platform rents, so it changes the
 		// brief and declares the baseline, and nothing a run's cost or length follows from.
-		caller, _ := auth.FromContext(ctx)
+		caller, err := peh.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
 		if caller.Kind == auth.KindCoordinator {
 			if others := in.Body.carried("description", "baseline_job_id"); len(others) > 0 {
 				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and baseline_job_id and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
@@ -435,19 +440,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Summary: "Close a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
 			"no further submission is accepted. Optional top_results records the final standings; " +
-			"omitted, standings are derived from observed metrics. The experiment then reads close_reason closed_by_request with closed_by, " +
-			"where a run the platform closed at its ends_at reads end_time_reached and an open one it closed at its baseline_due_at baseline_limit_reached. Safe to call twice -- a second " +
-			"call reports invalid_transition rather than changing anything.",
+			"omitted, standings are derived from observed metrics. The answer is the platform experiment as closed: close_reason closed_by_request with closed_by, " +
+			"where a run the platform closed at its ends_at reads end_time_reached and an open one it closed at its baseline_due_at baseline_limit_reached. " +
+			"409 invalid_transition for one already closed, which changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body *struct {
 			TopResults []AgentResult `json:"top_results,omitempty" doc:"Best-first final standings (up to 3). Omit to derive standings from the metrics store."`
 		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
@@ -455,18 +456,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if in.Body != nil {
 			topResults = in.Body.TopResults
 		}
-		caller, _ := auth.FromContext(ctx)
-		by := caller.Actor()
-		if err := peh.svc.Close(ctx, in.ID, &by, topResults); err != nil {
-			return nil, huma.Error400BadRequest(err.Error())
+		caller, err := peh.caller(ctx)
+		if err != nil {
+			return nil, err
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "closed"
-		return out, nil
+		by := caller.Actor()
+		pe, err := peh.svc.Close(ctx, in.ID, &by, topResults)
+		if err != nil {
+			return nil, peh.refusal("close platform experiment", err)
+		}
+		return peh.Answer(ctx, pe)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -492,9 +491,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
-		OperationID: "set-platform-experiment-summary", Method: "POST", Path: "/platform-experiments/{id}/summary",
+		OperationID: "set-platform-experiment-summary", Method: "PUT", Path: "/platform-experiments/{id}/summary",
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
-		Description: "Writable after the experiment closes: it is the one field whose whole point " +
+		Description: "Replaces the summary and answers the platform experiment with it. Writable after the experiment closes: it is the one field whose whole point " +
 			"is to be written once the run is over and the results are in. A person or an API key writes it at any time. " +
 			"A coordinator's token writes it until two minutes after the close, when the token ends (401).",
 	}), func(ctx context.Context, in *struct {
@@ -502,24 +501,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		Body struct {
 			Summary string `json:"summary"`
 		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{ Body *domain.PlatformExperiment }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if err := peh.svc.SetSummary(ctx, in.ID, in.Body.Summary); err != nil {
-			return nil, huma.Error400BadRequest(err.Error())
+		pe, err := peh.svc.SetSummary(ctx, in.ID, in.Body.Summary)
+		if err != nil {
+			return nil, peh.refusal("set platform experiment summary", err)
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "summary_recorded"
-		return out, nil
+		return peh.Answer(ctx, pe)
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -576,7 +566,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			if pe == nil || pe.Status != domain.PlatformExpOpen {
 				return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID)
 			}
-			reader, _ := auth.FromContext(ctx)
+			reader, err := peh.caller(ctx)
+			if err != nil {
+				return nil, err
+			}
 			if err := peh.svc.Describe(ctx, pe, reader); err != nil {
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}

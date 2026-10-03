@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -40,6 +41,16 @@ func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githos
 		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
 	}
 	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
+}
+
+// caller is whose credential the request came with. Every route is authenticated before its
+// handler runs, so a request that reaches one with none is the platform's own failure.
+func (h *PlatformExperimentsHandler) caller(ctx context.Context) (auth.Principal, error) {
+	caller, ok := auth.FromContext(ctx)
+	if !ok {
+		return auth.Principal{}, auth.Internal(h.logger, "read the caller", errors.New("the request reached its handler with no principal"))
+	}
+	return caller, nil
 }
 
 // WithJobImages attaches the images the deployment offers a job to run in.

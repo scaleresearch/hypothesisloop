@@ -243,13 +243,13 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, platformExpID st
 	err = s.store.SpawnAgent(ctx, platformExpID, agent, signup)
 	switch {
 	case errors.Is(err, db.ErrSignupClosed):
-		return nil, refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
+		return nil, refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
 	case errors.Is(err, db.ErrAgentNameTaken):
 		return nil, agentNameTaken(agent.Name)
 	case errors.Is(err, db.ErrMaxAgentsReached):
 		return nil, maxAgentsReached(pe.MaxAgents)
 	case errors.Is(err, db.ErrMaxHostedReached):
-		return nil, refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+		return nil, refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	case err != nil:
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
@@ -302,31 +302,38 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 	return nil
 }
 
-// FinishAgent records that an agent has nothing left to do, which releases its machine. Calling
-// it again changes nothing.
-func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
+// FinishAgent records that an agent has nothing left to do, which releases its machine, and
+// answers its signup as finished. Calling it again changes nothing.
+func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) (*domain.AgentSignup, error) {
 	err := s.store.FinishAgent(ctx, platformExpID, agentID, reason)
 	switch {
 	case errors.Is(err, db.ErrNotSignedUp):
-		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
+		return nil, refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
 		pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 		if err != nil {
-			return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+			return nil, fmt.Errorf("platform_experiments.FinishAgent: %w", err)
 		}
 		// The same answer as to anything else sent past the close (RequireActive): the token's
 		// wind-down is for filing summaries, and the close already ended the agent's run.
 		if pe == nil || pe.Status == domain.PlatformExpClosed {
-			return api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
+			return nil, api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
 		}
-		return refuseSignup(409, "not_running", "platform experiment %s is %s: only an agent of role baseline finishes before it runs", platformExpID, pe.Status)
+		return nil, refuseSignup(409, "not_running", "platform experiment %s is %s: only an agent of role baseline finishes before it runs", platformExpID, pe.Status)
 	case errors.Is(err, db.ErrWorkUnfinished):
-		return refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, or a completed job without its summary: cancel or wait for the one, write the other, then finish", agentID)
+		return nil, refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, or a completed job without its summary: cancel or wait for the one, write the other, then finish", agentID)
 	case err != nil:
-		return fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+		return nil, fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+	}
+	finished, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.FinishAgent: %w", err)
+	}
+	if finished == nil {
+		return nil, fmt.Errorf("platform_experiments.FinishAgent: agent %s is not signed up after finishing", agentID)
 	}
 	s.logger.Info("agent finished", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
-	return nil
+	return finished, nil
 }
 
 // WithAgentLaunch attaches what joining needs beyond the store.
@@ -380,13 +387,13 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"The answer is agents, a list holding that one agent. " +
 			"hosted=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
 			"Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads waiting: no machine exists before the start. " +
-			"400 max_hosted_reached beyond max_hosted machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, the next is added in its place. " +
+			"409 max_hosted_reached beyond max_hosted machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, the next is added in its place. " +
 			"flavor and model are resolved here and stored: the answer shows what the agent runs. " +
 			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its flavor: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
-			"400 max_agents_reached for a researcher past max_agents, which counts every researcher that joined, one that finished or was cut included, and no agent of another role and no coordinator. " +
+			"409 max_agents_reached for a researcher past max_agents, which counts every researcher that joined, one that finished or was cut included, and no agent of another role and no coordinator. 409 signup_closed once the experiment is no longer open. " +
 			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (the first stage's share of the budget over max_agents, what one researcher holds then, which follows a later change of either while the experiment is open), " +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, func(ctx context.Context, in *struct {
@@ -401,7 +408,10 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 				return nil, err
 			}
 		}
-		caller, _ := auth.FromContext(ctx)
+		caller, err := h.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
 		signups, err := h.svc.AddAgent(ctx, in.ID, in.Body, caller.Actor(), h.launch)
 		if err != nil {
 			return nil, h.refusal("add agent", err)
@@ -463,7 +473,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
 		OperationID: "remove-platform-experiment-agent", Method: "DELETE", Path: "/platform-experiments/{id}/agents/{agent_id}",
 		Summary: "Remove an agent from a platform experiment that has not started", Tags: []string{"platform-experiments"},
-		DefaultStatus: 200,
+		DefaultStatus: http.StatusNoContent,
 		Description: "Takes the agent out while the experiment is open: its token stops working and, if the platform runs it, its machine is taken down. " +
 			"Only its place goes: the agent stays in the org and joins again with agent_id. " +
 			"409 once the experiment has started, when the roster is what quota was divided over: from then on an agent leaves by being cut or by the experiment closing. " +
@@ -471,25 +481,18 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{}, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		caller, _ := auth.FromContext(ctx)
+		caller, err := h.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
 		if err := h.svc.RemoveAgent(ctx, in.ID, in.AgentID, caller.Actor()); err != nil {
 			return nil, h.refusal("remove agent", err)
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "removed"
-		return out, nil
+		return &struct{}{}, nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -497,7 +500,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
-			"its signup reads finished_at and finished_reason, and agent.finished is sent. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
+			"its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
 			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
@@ -505,26 +508,29 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Body    struct {
 			Reason string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
 		}
-	}) (*struct {
-		Body struct {
-			Status string `json:"status"`
-		}
-	}, error) {
+	}) (*struct{ Body joinedAgentsBody }, error) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		if caller, _ := auth.FromContext(ctx); caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
+		caller, err := h.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
 			return nil, huma.Error403Forbidden("an agent finishes itself, with its own token")
 		}
-		if err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason); err != nil {
+		finished, err := h.svc.FinishAgent(ctx, in.ID, in.AgentID, in.Body.Reason)
+		if err != nil {
 			return nil, h.refusal("finish agent", err)
 		}
-		out := &struct {
-			Body struct {
-				Status string `json:"status"`
-			}
-		}{}
-		out.Body.Status = "finished"
+		signups := []domain.AgentSignup{*finished}
+		if err := h.nameAddedBy(ctx, signups); err != nil {
+			return nil, h.refusal("finish agent", err)
+		}
+		out := &struct{ Body joinedAgentsBody }{}
+		if out.Body.Agents, err = h.svc.roster(ctx, in.ID, signups); err != nil {
+			return nil, h.refusal("finish agent", err)
+		}
 		return out, nil
 	})
 }

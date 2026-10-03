@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -70,6 +72,69 @@ func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
 	}
 	if code, out := call(t, r, "POST", "/agents", `{"id":"nameless"}`); code != http.StatusUnprocessableEntity {
 		t.Errorf("no name: got = %d %v, want 422", code, out)
+	}
+}
+
+// summarizedStore is statusStore with the write of a summary, which fails while broken is set.
+type summarizedStore struct {
+	statusStore
+	broken error
+}
+
+func (s *summarizedStore) SetPlatformExperimentSummary(_ context.Context, id, summary string) error {
+	if s.broken != nil {
+		return s.broken
+	}
+	for _, pe := range s.created {
+		if pe.ID == id {
+			pe.Summary = summary
+			return nil
+		}
+	}
+	return db.ErrPlatformExperimentNotFound
+}
+
+func (s *summarizedStore) NameActors(context.Context, []*domain.Actor) error { return nil }
+
+// Closing and the summary answered every failure 400 with the error's own text, a database
+// error among them, and a second close read as bad input. Each answers the platform experiment
+// it changed, a refusal by its status and reason, and a failure of the platform says nothing.
+func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.T) {
+	store := &summarizedStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{
+		{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", Stages: []domain.Stage{{LengthPct: 100}}},
+	}}}}
+	svc := newSignupTestService(t, store)
+	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}}}
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingPerson), auth.NewAccess(placement), zap.NewNop())
+	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+
+	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"what was found"}`); code != http.StatusOK || out["id"] != "pe-1" || out["summary"] != "what was found" {
+		t.Errorf("a summary: got = %d %v, want 200 and the platform experiment with it", code, out)
+	}
+	if code, _ := call(t, r, "POST", "/platform-experiments/pe-1/summary", `{"summary":"again"}`); code != http.StatusMethodNotAllowed {
+		t.Errorf("a summary sent with POST: got = %d, want 405", code)
+	}
+	store.broken = errors.New("pq: connection refused at 10.0.0.7")
+	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"lost"}`); code != http.StatusInternalServerError || strings.Contains(fmt.Sprint(out), "10.0.0.7") {
+		t.Errorf("a summary the store fails: got = %d %v, want 500 with no internal text", code, out)
+	}
+	store.broken = nil
+
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/close", ""); code != http.StatusOK || out["id"] != "pe-1" || out["status"] != "closed" {
+		t.Errorf("a close: got = %d %v, want 200 and the platform experiment as closed", code, out)
+	}
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/close", ""); code != http.StatusConflict || out["reason"] != "invalid_transition" {
+		t.Errorf("a second close: got = %d %v, want 409 invalid_transition", code, out)
+	}
+	for name, err := range map[string]error{
+		"closing one that does not exist":    func() error { _, err := svc.Close(context.Background(), "pe-none", nil, nil); return err }(),
+		"a summary of one that does not exist": func() error { _, err := svc.SetSummary(context.Background(), "pe-none", "s"); return err }(),
+	} {
+		var refused *api.Refusal
+		if !errors.As(err, &refused) || refused.GetStatus() != http.StatusNotFound || refused.Reason != "not_found" {
+			t.Errorf("%s: got = %v, want 404 not_found", name, err)
+		}
 	}
 }
 

@@ -307,7 +307,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 
 // maxAgentsReached refuses a researcher past max_agents, which counts researchers and nothing else.
 func maxAgentsReached(limit int) error {
-	return refuseSignup(400, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) have joined. One that finished or was cut still counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) have joined. One that finished or was cut still counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
 func maxHostedReached(limit int) string {
@@ -335,7 +335,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 		return nil
 	}
 	if pe.Status != domain.PlatformExpOpen {
-		return refuseSignup(400, "signup_closed", "experiment is %s", pe.Status)
+		return refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
 	}
 
 	inserted, err := s.store.Signup(ctx, platformExpID, signup)
@@ -350,7 +350,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 		return maxAgentsReached(pe.MaxAgents)
 	}
 	if errors.Is(err, db.ErrMaxHostedReached) {
-		return refuseSignup(400, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+		return refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
 	}
 	// Not found either way: an agent of another org is not this experiment's to learn of.
 	if errors.Is(err, db.ErrAgentOutsideOrg) {
@@ -367,7 +367,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 			return fmt.Errorf("platform_experiments.Signup: %w", err)
 		}
 		if !already {
-			return refuseSignup(400, "signup_closed", "experiment started")
+			return refuseSignup(409, "signup_closed", "experiment started")
 		}
 	}
 	s.logger.Info("agent signed up", zap.String("platformExpID", platformExpID),
@@ -538,7 +538,10 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 // Answer is the body of every route that answers one platform experiment, so each of them says
 // where it stands (Describe) as its reader is to read it.
 func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
-	reader, _ := auth.FromContext(ctx)
+	reader, err := h.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := h.svc.Describe(ctx, pe, reader); err != nil {
 		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
 	}
@@ -625,53 +628,72 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 	return quotas, nil
 }
 
-// SetSummary records the operator's narrative verdict on a run. Unlike every other field, this is
-// writable after the experiment closes — a summary only exists once the run is over.
-func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) error {
-	return s.store.SetPlatformExperimentSummary(ctx, id, summary)
+// stored reads the platform experiment id as a write just left it.
+func (s *PlatformExperimentsService) stored(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if pe == nil {
+		return nil, noPlatformExperiment(id)
+	}
+	return pe, nil
 }
 
-// Close transitions a running experiment to closed and records top-3 placements. by is whose
-// credential asked for it, nil when the platform closes it at its end time.
+func noPlatformExperiment(id string) error {
+	return api.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
+}
+
+// SetSummary records the operator's narrative verdict on a run and answers the platform
+// experiment with it. Unlike every other field, this is writable after the experiment closes: a
+// summary only exists once the run is over.
+func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) (*domain.PlatformExperiment, error) {
+	err := s.store.SetPlatformExperimentSummary(ctx, id, summary)
+	if errors.Is(err, db.ErrPlatformExperimentNotFound) {
+		return nil, noPlatformExperiment(id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.SetSummary: %w", err)
+	}
+	return s.stored(ctx, id)
+}
+
+// Close transitions a platform experiment that is not closed to closed, records top-3
+// placements and answers it as closed. by is whose credential asked for it, nil when the
+// platform closes it at its end time.
 // topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries). When it is
 // empty the standings are derived from the metrics store instead: closing must never silently
 // discard the outcome of a run just because the caller was a timer rather than a person.
-func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *domain.Actor, topResults []AgentResult) error {
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
+func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *domain.Actor, topResults []AgentResult) (*domain.PlatformExperiment, error) {
+	pe, err := s.stored(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if pe == nil {
-		return fmt.Errorf("not_found")
-	}
-	if pe.Status != domain.PlatformExpRunning && pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpDraft {
-		return fmt.Errorf("invalid_transition: experiment is %s", pe.Status)
+	if pe.Status == domain.PlatformExpClosed {
+		return nil, invalidTransition("platform experiment %s is already closed", id)
 	}
 	// A draft never ran: closing it abandons the plan, and there are no standings to record.
-	if pe.Status == domain.PlatformExpDraft {
-		return s.store.ClosePlatformExperiment(ctx, id, by)
-	}
-
-	if len(topResults) == 0 {
-		// Standings are what closing produces. Closing is irreversible, so deriving them failing
-		// has to stop the close and be retried, not quietly close an experiment with no result.
-		derived, err := s.derivedTopResults(ctx, id)
-		if err != nil {
-			return fmt.Errorf("close: derive standings for %s: %w", id, err)
+	if pe.Status != domain.PlatformExpDraft {
+		if len(topResults) == 0 {
+			// Standings are what closing produces. Closing is irreversible, so deriving them failing
+			// has to stop the close and be retried, not quietly close an experiment with no result.
+			if topResults, err = s.derivedTopResults(ctx, id); err != nil {
+				return nil, fmt.Errorf("close: derive standings for %s: %w", id, err)
+			}
 		}
-		topResults = derived
-	}
-
-	for i, r := range topResults {
-		if i >= 3 {
-			break
-		}
-		if err := s.store.RecordTop3(ctx, id, r.AgentID, r.FinalMetric); err != nil {
-			return fmt.Errorf("close: record placement for %s: %w", r.AgentID, err)
+		for i, r := range topResults {
+			if i >= 3 {
+				break
+			}
+			if err := s.store.RecordTop3(ctx, id, r.AgentID, r.FinalMetric); err != nil {
+				return nil, fmt.Errorf("close: record placement for %s: %w", r.AgentID, err)
+			}
 		}
 	}
-
-	return s.store.ClosePlatformExperiment(ctx, id, by)
+	if err := s.store.ClosePlatformExperiment(ctx, id, by); err != nil {
+		return nil, fmt.Errorf("close: %w", err)
+	}
+	return s.stored(ctx, id)
 }
 
 // SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, a
@@ -690,7 +712,7 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 			if closesAt.IsZero() || closesAt.After(now) {
 				continue
 			}
-			if err := s.Close(ctx, pe.ID, nil, nil); err != nil {
+			if _, err := s.Close(ctx, pe.ID, nil, nil); err != nil {
 				s.logger.Error("sweep_expired: close failed",
 					zap.String("platform_experiment_id", pe.ID), zap.Error(err))
 				continue

@@ -437,7 +437,7 @@ WHERE id = $1 AND status <> 'closed'`
 
 // SetPlatformExperimentSummary records the operator's narrative verdict on a run. Separate from
 // UpdatePlatformExperiment because it is the one field that is written *after* the experiment
-// closes, when everything else is frozen.
+// closes, when everything else is frozen. ErrPlatformExperimentNotFound for an id none has.
 func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Context, id, summary string) error {
 	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1`
 	tag, err := s.pool.pool.Exec(ctx, q, id, summary)
@@ -445,7 +445,7 @@ func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Cont
 		return fmt.Errorf("platform_experiments_store.SetSummary: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("platform_experiments_store.SetSummary: not_found")
+		return ErrPlatformExperimentNotFound
 	}
 	return nil
 }

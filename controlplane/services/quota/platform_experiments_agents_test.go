@@ -389,11 +389,11 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		wantCode   int
 		wantReason string
 	}{
-		"running":                {domain.PlatformExpRunning, "pe-1", `{}`, 400, "signup_closed"},
-		"closed":                 {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 400, "signup_closed"},
-		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 400, "signup_closed"},
-		"field full":             {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 400, "max_agents_reached"},
-		"registered, full":       {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 400, "max_agents_reached"},
+		"running":                {domain.PlatformExpRunning, "pe-1", `{}`, 409, "signup_closed"},
+		"closed":                 {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 409, "signup_closed"},
+		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "signup_closed"},
+		"field full":             {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
+		"registered, full":       {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
 		"no such experiment":     {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
 		"no such agent":          {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
 		"unknown role":           {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
@@ -452,8 +452,8 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 	addEach(t, r, 2, `{"hosted":true,"role":"reviewer"}`)
 	for _, body := range []string{`{"hosted":true,"role":"baseline"}`, `{"hosted":true,"role":"reviewer"}`, `{"hosted":true}`, `{"agent_id":"veteran","hosted":true,"role":"reviewer"}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-		if code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" {
-			t.Fatalf("%s with the coordinator and five agents hosted: got = %d %v, want = 400 max_hosted_reached", body, code, out)
+		if code != http.StatusConflict || out["reason"] != "max_hosted_reached" {
+			t.Fatalf("%s with the coordinator and five agents hosted: got = %d %v, want = 409 max_hosted_reached", body, code, out)
 		}
 		if message, _ := out["message"].(string); !strings.Contains(message, "at most 6 machines") {
 			t.Errorf("%s: the refusal does not say the bound: %q", body, message)
@@ -476,13 +476,13 @@ func TestOneMachineIsKeptForAnAgentThatMeasuresTheBaseline(t *testing.T) {
 	for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		message, _ := out["message"].(string)
-		if code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" || !strings.Contains(message, "One is kept for an agent of role baseline") {
-			t.Fatalf("%s for the last machine: got = %d %v, want = 400 max_hosted_reached naming the baseline", body, code, out)
+		if code != http.StatusConflict || out["reason"] != "max_hosted_reached" || !strings.Contains(message, "One is kept for an agent of role baseline") {
+			t.Fatalf("%s for the last machine: got = %d %v, want = 409 max_hosted_reached naming the baseline", body, code, out)
 		}
 	}
 	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"baseline"}`); code != http.StatusBadRequest || out["reason"] != "max_hosted_reached" {
-		t.Fatalf("a second baseline agent beside the first: got = %d %v, want = 400 max_hosted_reached", code, out)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"baseline"}`); code != http.StatusConflict || out["reason"] != "max_hosted_reached" {
+		t.Fatalf("a second baseline agent beside the first: got = %d %v, want = 409 max_hosted_reached", code, out)
 	}
 	// The first one finished without a baseline that can be declared: its machine is released,
 	// and the next takes its place.
@@ -519,8 +519,8 @@ func TestACoordinatorAddsNoAgentOnceItsExperimentHasStartedOrClosed(t *testing.T
 		r := agentsRouter(t, store, coordinator)
 		for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
 			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-			if code != http.StatusBadRequest || out["reason"] != "signup_closed" {
-				t.Fatalf("%s, %s: got = %d %v, want = 400 signup_closed", status, body, code, out)
+			if code != http.StatusConflict || out["reason"] != "signup_closed" {
+				t.Fatalf("%s, %s: got = %d %v, want = 409 signup_closed", status, body, code, out)
 			}
 		}
 		if len(store.signups) != 0 || len(store.agents) != 0 {
@@ -535,8 +535,8 @@ func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	agents := addEach(t, r, 2, `{"hosted":true}`)
 	first, second := agents[0]["agent_id"].(string), agents[1]["agent_id"].(string)
 
-	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusOK || out["status"] != "removed" {
-		t.Fatalf("remove: %d %v", code, out)
+	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusNoContent || len(out) != 0 {
+		t.Fatalf("remove: %d %v, want 204 and no body", code, out)
 	}
 	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusNotFound || out["reason"] != "not_signed_up" {
 		t.Fatalf("remove twice: %d %v", code, out)
@@ -570,11 +570,11 @@ func TestACoordinatorRemovesOnlyTheAgentsItAddedItself(t *testing.T) {
 	if code, out := call(t, coordinator, "DELETE", "/platform-experiments/pe-1/agents/"+owners, ""); code != http.StatusForbidden || out["reason"] != "agent_not_added_by_coordinator" {
 		t.Fatalf("a coordinator removing its owner's agent: got = %d %v, want 403 agent_not_added_by_coordinator", code, out)
 	}
-	if code, out := call(t, coordinator, "DELETE", "/platform-experiments/pe-1/agents/"+added["agent_id"].(string), ""); code != http.StatusOK {
-		t.Fatalf("a coordinator removing the agent it added: got = %d %v, want 200", code, out)
+	if code, out := call(t, coordinator, "DELETE", "/platform-experiments/pe-1/agents/"+added["agent_id"].(string), ""); code != http.StatusNoContent {
+		t.Fatalf("a coordinator removing the agent it added: got = %d %v, want 204", code, out)
 	}
-	if code, out := call(t, owner, "DELETE", "/platform-experiments/pe-1/agents/"+owners, ""); code != http.StatusOK {
-		t.Fatalf("the owner removing its own agent: got = %d %v, want 200", code, out)
+	if code, out := call(t, owner, "DELETE", "/platform-experiments/pe-1/agents/"+owners, ""); code != http.StatusNoContent {
+		t.Fatalf("the owner removing its own agent: got = %d %v, want 204", code, out)
 	}
 	if len(store.signups) != 0 {
 		t.Fatalf("signups left = %+v, want none", store.signups)
@@ -615,7 +615,7 @@ func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 			// What a refused caller is refused on, it is refused on for reading and removing too.
 			by := tc.caller.Actor()
 			store.signups = []domain.AgentSignup{{AgentID: "ag-seeded", PlatformExperimentID: "pe-1", Actor: &by}}
-			wantRead, wantRemove := http.StatusOK, http.StatusOK
+			wantRead, wantRemove := http.StatusOK, http.StatusNoContent
 			if !admitted {
 				wantRead, wantRemove = tc.want, tc.want
 			}
@@ -763,20 +763,24 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 
 // FinishAgent refuses as the store does: an agent finishes in a running platform experiment, and
 // one of role baseline also in an open one.
-func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, _ string) error {
-	signup, _ := f.GetAgentSignup(context.Background(), f.pe.ID, agentID)
-	switch {
-	case signup == nil:
-		return db.ErrNotSignedUp
-	case f.pe.Status == domain.PlatformExpRunning, f.pe.Status == domain.PlatformExpOpen && signup.Role == domain.SignupRoleBaseline:
-		return nil
+func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, reason string) error {
+	for i, signup := range f.signups {
+		if signup.AgentID != agentID {
+			continue
+		}
+		if f.pe.Status == domain.PlatformExpRunning || f.pe.Status == domain.PlatformExpOpen && signup.Role == domain.SignupRoleBaseline {
+			now := time.Now()
+			f.signups[i].FinishedAt, f.signups[i].FinishedReason = &now, reason
+			return nil
+		}
+		return db.ErrSignupClosed
 	}
-	return db.ErrSignupClosed
+	return db.ErrNotSignedUp
 }
 
 // A baseline agent that finished after its platform experiment closed was answered 409 not_running
 // and a paragraph about roles. Its token still works then, to file summaries, and anything else it
-// sends is answered experiment_closed.
+// sends is answered experiment_closed. A finish that is taken answers the agent as finished.
 func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 	for status, want := range map[domain.PlatformExperimentStatus]string{
 		domain.PlatformExpClosed: "experiment_closed", domain.PlatformExpOpen: "not_running", domain.PlatformExpRunning: "",
@@ -786,8 +790,8 @@ func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 		r := agentsRouter(t, store, auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}})
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents/dana/finish", `{"reason":"nothing left"}`)
 		if want == "" {
-			if code != http.StatusOK || out["status"] != "finished" {
-				t.Errorf("%s: got = %d %v, want = 200 finished", status, code, out)
+			if code != http.StatusOK || joined(t, out)[0]["agent_id"] != "dana" || joined(t, out)[0]["finished_reason"] != "nothing left" {
+				t.Errorf("%s: got = %d %v, want = 200 and the agent as finished", status, code, out)
 			}
 			continue
 		}

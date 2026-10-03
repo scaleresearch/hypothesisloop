@@ -204,7 +204,7 @@ func TestADraftIsAbandonedByClosingItAndByItsPlanningLimit(t *testing.T) {
 	svc, _ := planningAPI(t, store, planner)
 	// Closing a draft derives no standings: it never ran and has no metric to rank on.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
-	if err := svc.Close(context.Background(), "pe-dropped", &owner, nil); err != nil {
+	if _, err := svc.Close(context.Background(), "pe-dropped", &owner, nil); err != nil {
 		t.Fatalf("closing a draft: %v", err)
 	}
 	if err := svc.SweepExpired(context.Background()); err != nil {

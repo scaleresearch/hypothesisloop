@@ -140,7 +140,10 @@ func withTexts(experiment json.RawMessage, checked CreatePlatformExperimentReque
 // requirePlanner admits only the planner of the draft id: the agent the platform signed up to
 // plan it, with its own token.
 func (h *PlatformExperimentsHandler) requirePlanner(ctx context.Context, id string) error {
-	caller, _ := auth.FromContext(ctx)
+	caller, err := h.caller(ctx)
+	if err != nil {
+		return err
+	}
 	if caller.Kind != auth.KindAgent || caller.PlatformExperimentID != id {
 		return huma.Error403Forbidden("a proposal is written by the draft's planner, with its own token")
 	}
@@ -177,7 +180,10 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		if message == "" || len(message) > maxRevisionBytes {
 			return nil, huma.Error422UnprocessableEntity(fmt.Sprintf("message is required and at most %d bytes: say what to change in a sentence or two", maxRevisionBytes))
 		}
-		caller, _ := auth.FromContext(ctx)
+		caller, err := h.caller(ctx)
+		if err != nil {
+			return nil, err
+		}
 		switch err := h.svc.store.Revise(ctx, in.ID, message, caller.Actor(), time.Now().UTC().Add(h.planning.Limit)); {
 		case errors.Is(err, db.ErrNotDraft):
 			return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is revised", in.ID)
@@ -337,7 +343,10 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 
 	agents := make([]*domain.Agent, 0, len(req.Agents))
 	signups := make([]domain.AgentSignup, 0, len(req.Agents))
-	caller, _ := auth.FromContext(ctx)
+	caller, err := h.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	by := caller.Actor()
 	for i, asked := range req.Agents {
 		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
