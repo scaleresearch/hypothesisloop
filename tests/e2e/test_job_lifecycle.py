@@ -1,7 +1,8 @@
 """Job/platform-experiment termination semantics, ported 1:1 from tests/scenarios/job-lifecycle.sh:
-  1. A valid job that can never be scheduled (known flavor, impossible physical count) fails
-     closed -- stays QUEUED indefinitely, never debits guaranteed quota -- and cancelling it while
-     still QUEUED ends it as CANCELLED with its reservation returned.
+  1. A valid job that no connected cluster can ever hold (known flavor, none installed) is
+     refused at submit with 422 exceeds_cluster_capacity, is not stored and debits nothing. A job
+     that waits in the queue reserves its estimate, and cancelling it while still QUEUED ends it
+     as CANCELLED with its reservation returned.
   2. A RUNNING job that's cancelled is CANCELLED too (terminal, refunded) -- and stays so, unlike
      preemption (see preemption-requeue.sh).
   3. Closing a platform experiment is not just a status flip: controller.reconcileClosedExperiments
@@ -14,15 +15,37 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import make_agent
+from conftest import TEST_ACCELERATOR_TYPE, TEST_ACCH_RATE, make_agent
 from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
+UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
 
-def test_cancel_while_queued_is_rejected_and_refunded(api, experiment, run_id, deadline):
+
+def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, experiment, run_id):
+    agent = make_agent(api, run_id, "lifecycle-never")
+    pe_id = experiment("job-lifecycle-never", [agent], budget=10.0)
+
+    quota_before = api.quota_field(pe_id, agent, "used_guaranteed_acch")
+    # No cluster has an H200 installed and none scales up, so no wait admits this job. The type
+    # is stated alone, with no alternate a cluster could hold it on.
+    body = api.submission_body_for_id(api._job_id(), pe_id, agent)
+    body["job"].pop("acceptable_accelerator_types", None)
+    body["job"] |= {"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 3}
+    refused = api.post_experiment_body(body)
+    assert refused.status_code == 422, f"a job no cluster can hold: {refused.status_code} {refused.text}"
+    assert refused.json()["reason"] == "exceeds_cluster_capacity" and "hl capacity" in refused.json()["message"], refused.text
+    assert api.get(f"/experiments/{body['id']}").status_code == 404, "the refused job was stored"
+    debit = api.quota_field(pe_id, agent, "used_guaranteed_acch") - quota_before
+    assert abs(debit) < 1e-6, f"a job refused at submit debited {debit} AccH"
+
+
+def test_cancel_while_queued_is_cancelled_and_refunded(api, experiment, run_id, deadline):
     agent = make_agent(api, run_id, "lifecycle")
-    pe_id = experiment("job-lifecycle", [agent], budget=10.0)
+    # The experiment runs one accelerator at a time, so a job that asks for two fits the cluster,
+    # is accepted, and is never admitted.
+    pe_id = experiment("job-lifecycle", [agent], budget=10.0, max_concurrent_accelerators=1)
 
     quota_before = api.quota_field(pe_id, agent, "used_guaranteed_acch")
     stuck = api.submit_job(
@@ -31,49 +54,37 @@ def test_cancel_while_queued_is_rejected_and_refunded(api, experiment, run_id, d
         hours=0.02,
         # api.py auto-drops acceptable_accelerator_types when accelerator_type is overridden
         # (mirrors tests/lib/mk_body.py) -- an explicit type request must not silently fall back
-        # to a cheaper alternate, or this scenario's AccH arithmetic and its "genuinely
-        # unsatisfiable" premise both go stale.
-        job_overrides={"accelerator_type": "nvidia.com/gpu.product=NVIDIA-H200", "accelerator_count": 3},
+        # to an alternate priced otherwise, or this scenario's AccH arithmetic goes stale.
+        job_overrides={"accelerator_type": TEST_ACCELERATOR_TYPE, "accelerator_count": 2},
     )
 
-    # QUEUED and SUBMITTED are both "not yet admitted" -- the scheduler legitimately claims a
-    # QUEUED job as SUBMITTED on each attempt and reverts it when admission fails, so a single
-    # unsatisfiable job flaps between the two every reconcile tick without ever being admitted.
+    # QUEUED and SUBMITTED are both "not yet admitted" -- the scheduler may claim a QUEUED job as
+    # SUBMITTED on an attempt and revert it when admission fails.
     not_admitted = ("QUEUED", "SUBMITTED")
-    status = eventually(
-        f"{stuck} to settle",
-        lambda: api.experiment(stuck)["status"],
-        accept=lambda s: s in (*not_admitted, "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED"),
-        deadline=deadline,
-    )
-    if status not in not_admitted:
-        pytest.skip(f"unsatisfiable job settled as {status!r} at submission (also an acceptable fail-closed outcome)")
-
     exp = eventually(
         f"the admission loop's verdict on {stuck}",
         lambda: api.experiment(stuck),
         accept=lambda e: e.get("not_admitted_reason") not in (None, "awaiting_admission"),
+        reject=lambda e: e["status"] not in not_admitted,
         deadline=deadline,
     )
-    # No cluster has an H200 installed, so this is a job that waiting will not admit, and it says so.
-    assert exp.get("not_admitted_reason") == "exceeds_cluster_capacity", (
-        f"queued unsatisfiable job has wrong not_admitted_reason={exp.get('not_admitted_reason')!r}"
+    assert exp.get("not_admitted_reason") == "concurrency_cap", (
+        f"the job over its experiment's concurrency has wrong not_admitted_reason={exp.get('not_admitted_reason')!r}"
     )
 
     assert_stable(
-        "unsatisfiable job never falsely admitted, no flapping into a terminal state",
+        "the job over the cap is never falsely admitted, no flapping into a terminal state",
         lambda: api.experiment(stuck)["status"],
         ok=lambda s: s in not_admitted,
         duration=5,
     )
 
     # The still-QUEUED row IS the desired quota reservation; there is no reservation metric or
-    # secondary table. H200's acch_rate (1.25) is fixed in controlplane/settings/hypothesisloop.yaml
-    # regardless of TEST_ACCH_RATE (which prices TEST_ACCELERATOR_TYPE, not this deliberately
-    # unsatisfiable request): 0.02h * 3 H200 * 1.25 AccH/h = 0.075 AccH.
+    # secondary table: 0.02h * 2 accelerators * TEST_ACCH_RATE.
+    want = 0.02 * 2 * TEST_ACCH_RATE
     debit = api.quota_field(pe_id, agent, "used_guaranteed_acch") - quota_before
-    assert round(debit, 6) == pytest.approx(0.075, abs=1e-6), (
-        f"expected 0.075 AccH desired reservation for the QUEUED job, got {debit}"
+    assert round(debit, 6) == pytest.approx(want, abs=1e-6), (
+        f"expected {want} AccH desired reservation for the QUEUED job, got {debit}"
     )
 
     api.cancel_job(stuck)
