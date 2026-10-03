@@ -109,8 +109,8 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	if code := run([]string{"platform-experiments", "agents", "remove", "--platform-experiment", "pe-1", "ag-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("remove: exit %d, stderr %s", code, stderr.String())
 	}
-	if r := (*got)[0]; r.Method != "DELETE" || r.Path != "/platform-experiments/pe-1/agents/ag-1" || !strings.Contains(stdout.String(), "removed") {
-		t.Fatalf("remove request = %+v, stdout %q", r, stdout.String())
+	if r := (*got)[0]; r.Method != "DELETE" || r.Path != "/platform-experiments/pe-1/agents/ag-1" || !strings.Contains(stderr.String(), "removed ag-1 from platform experiment pe-1") {
+		t.Fatalf("remove request = %+v, stderr %q", r, stderr.String())
 	}
 	for _, args := range [][]string{{"remove"}, {"remove", "pe-1", "ag-1"}, {"list", "pe-1"}, {"add", "pe-1"}} {
 		if code := run(append([]string{"platform-experiments", "agents"}, args...), &stdout, &stderr); code != 2 {

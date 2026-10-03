@@ -213,8 +213,8 @@ func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 		t.Errorf("an update that names no field: exit %d, want 2", code)
 	}
 	want := []recorded{
-		{Method: "POST", Path: "/platform-experiments/pe-1/summary", Body: map[string]any{"summary": "what was found"}},
-		{Method: "POST", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
+		{Method: "PUT", Path: "/platform-experiments/pe-1/summary", Body: map[string]any{"summary": "what was found"}},
+		{Method: "PUT", Path: "/platform-experiments/pe-2/summary", Body: map[string]any{"summary": "from a file\n"}},
 		{Method: "POST", Path: "/platform-experiments/pe-1/close", Body: map[string]any{}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-1", Body: map[string]any{"description": "from a file\n"}},
 		{Method: "PATCH", Path: "/platform-experiments/pe-2", Body: map[string]any{"name": "renamed", "max_agents": float64(4)}},

@@ -652,7 +652,7 @@ func TestThereIsNoStartCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"platform-experiments", "start", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if code != 2 || len(*calls) != 0 || !strings.Contains(stderr.String(), `unknown subcommand "start"`) ||
-		!strings.Contains(stderr.String(), "--baseline-job") || strings.Contains(usage, "| start |") {
+		!strings.Contains(stderr.String(), "--baseline-job") || strings.Contains(usage(""), "| start |") {
 		t.Fatalf("exit %d, %d requests, stderr %q", code, len(*calls), stderr.String())
 	}
 }
@@ -916,6 +916,34 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 	code := run([]string{"watch", "--wake", "agent.finished,agent.finnished"}, &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), `"agent.finnished" is no event kind`) || len(*got) != 1 || (*got)[0].Path != "/watch/kinds" {
 		t.Fatalf("exit %d, stderr %q, requests %+v", code, stderr.String(), *got)
+	}
+}
+
+// A coordinator read `cluster` in its listing, ran hl cluster list and was refused "this is a
+// command of an org's people": each caller's listing holds the commands its token can run.
+func TestTheUsageListsOnlyTheCommandsTheCallersTokenCanRun(t *testing.T) {
+	listed := func(token string) string {
+		t.Setenv("HL_TOKEN", token)
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"--help"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("hl --help = %d", code)
+		}
+		return stdout.String()
+	}
+	person, agent, coordinator := listed("hlk_x"), listed(derivedToken("agent:pe-1/ag-1")), listed(derivedToken("coordinator:pe-1"))
+	for _, ofPeople := range []string{"\n  org ", "\n  project ", "\n  api-key ", "\n  cluster ", "\n  exec ", "--org defaults"} {
+		if !strings.Contains(person, ofPeople) || strings.Contains(agent, ofPeople) || strings.Contains(coordinator, ofPeople) {
+			t.Errorf("%q: listed to a person %v, an agent %v, a coordinator %v, want it to a person alone", ofPeople,
+				strings.Contains(person, ofPeople), strings.Contains(agent, ofPeople), strings.Contains(coordinator, ofPeople))
+		}
+	}
+	if !strings.Contains(agent, "\n  data-key ") || strings.Contains(coordinator, "\n  data-key ") {
+		t.Error("data-key acts as an agent: want it listed to an agent and not to a coordinator")
+	}
+	for _, both := range []string{"\n  capacity ", "\n  quota ", "\n  repo ", "\n  watch ", "An ID is positional"} {
+		if !strings.Contains(agent, both) || !strings.Contains(coordinator, both) {
+			t.Errorf("%q is not listed to an agent and a coordinator", both)
+		}
 	}
 }
 

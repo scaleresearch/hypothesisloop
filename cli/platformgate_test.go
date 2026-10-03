@@ -100,6 +100,51 @@ func admitted(routes http.Handler, r *http.Request) (status int, answer string) 
 	return 0, ""
 }
 
+// hl platform-experiments summary sent POST where the platform serves PUT, and nothing failed
+// until a coordinator's summary was refused in a run. Each command a coordinator is briefed to
+// run is sent here as a coordinator, with the method and the path the platform serves.
+func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
+	brief := filepath.Join(t.TempDir(), "brief.md")
+	writeJob(t, brief, "the brief\n")
+	token := derivedToken("coordinator:pe-1")
+	requests := 0
+	setAPIURL(t, withServer(t, asThePlatformAdmits(t, token, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = io.WriteString(w, "{}")
+	})))
+	t.Setenv("HL_TOKEN", token)
+	t.Setenv("HL_STATE_DIR", t.TempDir())
+
+	for _, command := range [][]string{
+		{"platform-experiments", "get"},
+		{"platform-experiments", "agents", "list"},
+		{"platform-experiments", "agents", "add", "--hosted", "--flavor", "generalist"},
+		{"platform-experiments", "agents", "remove", "ag-1"},
+		{"platform-experiments", "update", "--description-file", brief},
+		{"platform-experiments", "update", "--description-file", brief, "--baseline-job", "job-1"},
+		{"platform-experiments", "summary", "--file", brief},
+		{"platform-experiments", "close"},
+		{"job", "list", "--status", "QUEUED"},
+		{"job", "list", "--agent", "ag-1"},
+		{"job", "status", "job-1"},
+		{"job", "logs", "job-1"},
+		{"job", "stats"},
+		{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id"},
+		{"hypothesis", "comment", "h1", "--text", "a note"},
+		{"quota", "--all"},
+		{"results"},
+		{"capacity"},
+		{"watch", "--all", "--decisions", "--wake", "agent.finished,job.held!=summary_gate,experiment.status=FAILED", "--no-wait"},
+	} {
+		requests = 0
+		var stdout, stderr bytes.Buffer
+		run(command, &stdout, &stderr)
+		if requests == 0 || strings.Contains(stderr.String(), "may not call") || strings.Contains(stderr.String(), "the platform serves no") {
+			t.Errorf("hl %s as a coordinator: %d requests let through, stderr = %s", strings.Join(command, " "), requests, stderr.String())
+		}
+	}
+}
+
 // hl hypothesis checkout read the roster, which an agent's token may not call, and its tests
 // answered the roster to any token: every researcher of two runs was refused its own branch.
 // Each command an agent is briefed to run is sent here as an agent, and none may ask the

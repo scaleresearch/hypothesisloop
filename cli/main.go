@@ -65,12 +65,13 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	token := os.Getenv("HL_TOKEN")
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, usage)
+		fmt.Fprintln(stderr, usage(token))
 		return 2
 	}
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(stdout, usage)
+		fmt.Fprintln(stdout, usage(token))
 		return 0
 	}
 
@@ -79,7 +80,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	apiURL := os.Getenv("API_URL")
-	token := os.Getenv("HL_TOKEN")
 	client := apiclient.New(apiURL, token)
 
 	cmd, rest := args[0], args[1:]
@@ -113,38 +113,66 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "watch":
 		return cmdWatch(apiURL, token, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage)
+		fmt.Fprintf(stderr, "hl: unknown command %q\n\n%s\n", cmd, usage(token))
 		return 2
 	}
 }
 
-const usage = `usage: hl <command> ...
+// The commands of hl, as its usage lists them. Each caller is listed the ones its token can
+// run: those of an org's people are refused an agent and a coordinator, and those that act as
+// an agent are refused a coordinator, which is none.
+var commands = []struct {
+	name, about string
+	people      bool
+	asAgent     bool
+}{
+	{name: "platform-experiments", about: "[list] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session"},
+	{name: "quota", about: "your share of the budget and what a job submitted now may still hold of it; --all for every agent"},
+	{name: "results", about: "standings on the declared metrics"},
+	{name: "capacity", about: "live accelerators per cluster, available and total"},
+	{name: "data-key", about: `your S3 key to the experiment's data: eval "$(hl data-key)"`, asAgent: true},
+	{name: "git-credential", about: "git's credential helper for your experiment's repository; git runs it"},
+	{name: "hypothesis", about: "submit | checkout | link | comment | status | list | get | query"},
+	{name: "job", about: "submit | list | status | metrics | summary | logs | data | cost | cancel | stats"},
+	{name: "repo", about: "init | check: the files every experiment's repository holds"},
+	{name: "org", about: "list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept", people: true},
+	{name: "project", about: "list | create NAME | rename NAME", people: true},
+	{name: "api-key", about: "create NAME | list | revoke ID", people: true},
+	{name: "cluster", about: "add NAME | list | token | order | settings | disable | enable | forget-identity | remove", people: true},
+	{name: "watch", about: "--experiment JOB --until 'status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED' returns when the job ends, or after --timeout seconds (540): the wait that needs no sleep loop. With no flag, your own updates"},
+	{name: "exec", about: "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", people: true},
+}
 
-  platform-experiments  [list] | get | create [FILE] | update --description-file F [--baseline-job JOB] | propose [FILE] | decline --reason TEXT | close | summary | agents add|remove|list|finish|session
-  quota                 your share of the budget and what a job submitted now may still hold of it; --all for every agent
-  results               standings on the declared metrics
-  capacity              live accelerators per cluster, available and total
-  data-key              your S3 key to the experiment's data: eval "$(hl data-key)"
-  git-credential        git's credential helper for your experiment's repository; git runs it
-  hypothesis            submit | checkout | link | comment | status | list | get | query
-  job                   submit | list | status | metrics | summary | logs | data | cost | cancel | stats
-  repo                  init | check: the files every experiment's repository holds
-  org                   list | create NAME | rename NAME | members list|set-role|remove | invites create|list|revoke|accept
-  project               list | create NAME | rename NAME
-  api-key               create NAME | list | revoke ID
-  cluster               add NAME | list | token | order | settings | disable | enable | forget-identity | remove
-  watch                 --experiment JOB --until 'status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED' returns when the job ends, or after --timeout seconds (540): the wait that needs no sleep loop. With no flag, your own updates
-  exec                  --stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command
-
+const usageRules = `
 An ID is positional; --id ID works too. The platform experiment is never an operand. A command
 given the ID of a job or a hypothesis takes no --platform-experiment, since an ID is unique on
 the platform; every other command that works in a platform experiment takes it. --agent and
 --platform-experiment default to what the token names, an agent's its agent and platform
 experiment and a coordinator's its platform experiment, so neither writes them, and for
 another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
-has no default: write the id out. --org defaults to $HL_ORG and
+has no default: write the id out.`
+
+const usageOfPeople = ` --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
 --help and the --help of org, project, api-key and cluster list their commands with every flag.`
+
+// usage lists the commands the caller of token can run.
+func usage(token string) string {
+	kind := kindOf(token)
+	var b strings.Builder
+	b.WriteString("usage: hl <command> ...\n\n")
+	for _, command := range commands {
+		if (command.people && kind != callerOther) || (command.asAgent && kind == callerCoordinator) {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-22s%s\n", command.name, command.about)
+	}
+	b.WriteString(usageRules)
+	if kind == callerOther {
+		b.WriteString(usageOfPeople)
+	}
+	return b.String()
+}
 
 // subcommand is one command of a group. The group's listing takes its synopsis from the command's
 // own --help, so the two cannot drift.
@@ -1035,7 +1063,7 @@ experiment runs and after it closed.`, stderr)
 		return parseExit(misuse(fs, "the summary is empty"))
 	}
 	var out any
-	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": *text}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

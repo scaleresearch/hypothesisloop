@@ -115,7 +115,7 @@ experiment closing.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	return call(c, "DELETE", agentsPath(pe)+"/"+url.PathEscape(agent), nil, "", "", stdout, stderr)
+	return done(c, "DELETE", agentsPath(pe)+"/"+url.PathEscape(agent), fmt.Sprintf("removed %s from platform experiment %s", agent, pe), stderr)
 }
 
 func agentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
