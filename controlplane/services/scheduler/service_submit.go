@@ -56,6 +56,19 @@ func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 	return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("branch %q is no branch of platform experiment %s: a job runs a commit pushed on a branch under %s, which hl hypothesis checkout HYPOTHESIS_ID makes and hl job submit pushes and states", exp.Branch, exp.PlatformExperimentID, prefix)}
 }
 
+// shareOutlook tells an agent refused for quota whether waiting can raise its share. A share
+// grows at a stage boundary alone, by the hours of the agents cut there, so the boundary's latest
+// moment is all the platform knows: how much is given depends on who is cut.
+func shareOutlook(pe *domain.PlatformExperiment) string {
+	stage, ok := pe.CurrentStageDef()
+	if !ok || pe.CurrentStage >= len(pe.Stages) || stage.EvictPct <= 0 {
+		return "No later stage raises the agent's share: what remains is all it has for this platform experiment."
+	}
+	boundary := pe.StartedAt.Add(time.Duration(domain.BoundaryProgress(pe.Stages, pe.CurrentStage) * float64(pe.EndsAt.Sub(pe.StartedAt))))
+	return fmt.Sprintf("Stage %d of %d ends by %s, or sooner as the budget is spent: the agents ranked lowest are cut then and their hours go to those that remain, so the share rises only for an agent that passes it.",
+		pe.CurrentStage, len(pe.Stages), boundary.UTC().Format(time.RFC3339))
+}
+
 // ReasonUnknownJobImage refuses a job whose image is neither a job image the platform offers
 // nor a whole registry address.
 const ReasonUnknownJobImage = "unknown_job_image"
@@ -432,17 +445,14 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			}
 			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 		}
-		reason := ReasonInsufficientCredits
+		reason, message := ReasonInsufficientCredits, err.Error()+" "+shareOutlook(pe)
 		switch {
 		case strings.HasPrefix(err.Error(), db.RejectionRateLimited):
-			reason = ReasonRateLimited
+			reason, message = ReasonRateLimited, err.Error()
 		case strings.HasPrefix(err.Error(), db.RejectionAgentFinished):
-			reason = "agent_finished"
+			reason, message = "agent_finished", err.Error()
 		}
-		return &AdmissionError{
-			Reason:  reason,
-			Message: err.Error(),
-		}
+		return &AdmissionError{Reason: reason, Message: message}
 	}
 
 	// Re-submitting a job that is already QUEUED is legal and only refreshes its priority: it is

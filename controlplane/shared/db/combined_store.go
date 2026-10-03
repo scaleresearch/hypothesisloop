@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -212,8 +214,7 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
 	allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
 	if remaining := allocation.Remaining(exp.CapacityTier); exp.EstimatedCostAccH > remaining {
-		return AdmitRejected, fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours (%d of %s for the job's estimated_duration_hours of %g), have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s",
-			exp.CapacityTier, exp.EstimatedCostAccH, exp.AcceleratorCount, exp.AcceleratorType, exp.EstimatedDurationHours, remaining, heldByEstimates(holding, desiredGuaranteedAcc+desiredBurstAcc)), nil
+		return AdmitRejected, quotaRefusal(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc), nil
 	}
 	if err := createExperiment(ctx, tx, exp); err != nil {
 		return AdmitRejected, "", err
@@ -227,6 +228,31 @@ func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, ex
 	return AdmitInserted, "", nil
 }
 
+// quotaRefusal is the rejection of a job whose estimate is over what its agent has remaining. It
+// says what does fit, so the next submit is not a guess, and how much of what is used is only
+// reserved.
+func quotaRefusal(exp *domain.Experiment, remaining float64, holding int, reserved float64) string {
+	return fmt.Sprintf("insufficient_%s_quota: need %.3g accelerator_hours (%d of %s for the job's estimated_duration_hours of %g), have %.3g remaining: guaranteed and burst jobs spend one share of the budget, and burst gives no hours on top of it. %s %s",
+		exp.CapacityTier, exp.EstimatedCostAccH, exp.AcceleratorCount, exp.AcceleratorType, exp.EstimatedDurationHours, remaining,
+		largestEstimateThatFits(exp, remaining), heldByEstimates(holding, reserved))
+}
+
+// fitSteps is how many steps of an hour the largest estimate that fits is rounded down to: one
+// is 0.36 s.
+const fitSteps = 1e4
+
+// largestEstimateThatFits names the longest estimated_duration_hours a job of exp's size may
+// state within remaining. A job's hold is its hours times what its size costs an hour, so the
+// hours that fit are remaining over that, rounded down so that stating them is admitted.
+func largestEstimateThatFits(exp *domain.Experiment, remaining float64) string {
+	perHour := exp.EstimatedCostAccH / exp.EstimatedDurationHours
+	fits := math.Floor(remaining/perHour*fitSteps) / fitSteps
+	if fits <= 0 {
+		return "No estimated_duration_hours fits a job of this size now."
+	}
+	return fmt.Sprintf("The largest estimated_duration_hours a job of this size may state now is %s (%.0f s).", strconv.FormatFloat(fits, 'f', -1, 64), fits*3600)
+}
+
 // heldByEstimates tells a refused submitter how much of what is used is only reserved: a job
 // holds its whole estimate until it ends and then only what it spent, so over-estimated jobs
 // crowd out the next one though little has been spent.
@@ -234,7 +260,7 @@ func heldByEstimates(jobs int, reserved float64) string {
 	if jobs == 0 {
 		return "None of what is used is a reservation: it is spent."
 	}
-	return fmt.Sprintf("%d of your jobs that have not ended hold %.3g by their estimates and give back what they do not spend as each ends: wait for one, or state a lower estimated_duration_hours.", jobs, reserved)
+	return fmt.Sprintf("%d of your jobs that have not ended hold %.3g by their estimates and give back what they do not spend as each ends, so more fits once one does.", jobs, reserved)
 }
 
 // ReserveAdmittedFlavorTx rechecks the selected flavor's estimate, enforces the platform
