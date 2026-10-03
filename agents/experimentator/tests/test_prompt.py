@@ -125,6 +125,14 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("An ended job's update carries its machine and, completed, its metrics. File a COMPLETED job's summary at once "
                       "with `hl job summary JOB --text T`: your next job waits while one is owed.", " ".join(self.render("generalist").split()))
 
+    # A researcher finished with its share spent three minutes before the next stage more than
+    # doubled it, and two guessed a smaller estimate after a 402.
+    def test_quota_is_not_called_spent_before_the_next_stage_and_a_402_names_the_estimate_that_fits(self):
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("When a later stage raises your share it shows `next_stage_starts_at` and `next_stage_share_accelerator_hours`: "
+                      "before calling your quota spent, read them and wait for that boundary if work remains", prompt)
+        self.assertIn("A 402 states the largest estimate that fits: use it, never guess", prompt)
+
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
