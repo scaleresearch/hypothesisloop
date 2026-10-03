@@ -100,7 +100,7 @@ type AgentInstance struct {
 	// Restarts counts the machines that exited and were asked for again.
 	Restarts int `json:"restarts"`
 	// Renewals counts the machines that ended through no fault of their command and were asked
-	// for again with no restart spent: EndReason "expired".
+	// for again with no restart spent: EndReason "expired" or "progress_unreadable".
 	Renewals int `json:"-"`
 	// Stopped means the last machine exited with no restart left: the platform no longer asks
 	// for one, and the agent takes no further turn.
@@ -128,11 +128,13 @@ type AgentInstance struct {
 	// EndReason is why the last machine that ended was given up on: "exited" (its command
 	// ended), "gone" (its provider no longer lists it), "never_seen" (no machine came to be),
 	// "still_starting" (it did not come up in time), "silent" (it ran and made no progress),
-	// "expired" (its provider ended it at the provider's own limit on how long it rents one) or
-	// "released" (the platform took it down because its run was over, and ExitLog says which
-	// end that was). "released" is the platform's own doing and "expired" the provider's: neither
-	// is a failure of the machine, and neither spends a restart.
-	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,expired,released"`
+	// "progress_unreadable" (it ran and its launcher could not read its output for as long as a
+	// silent one is given), "expired" (its provider ended it at the provider's own limit on how
+	// long it rents one) or "released" (the platform took it down because its run was over, and
+	// ExitLog says which end that was). "released" is the platform's own doing, "expired" the
+	// provider's and "progress_unreadable" says nothing of the command: none of the three is a
+	// failure of the machine, and none spends a restart.
+	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,progress_unreadable,expired,released"`
 	// Released means the run the machine was for is over and its wind-down has passed: the
 	// platform experiment closed, or the agent was cut. The launcher is no longer asked for the
 	// machine and has destroyed it, so what it last reported of it says nothing any more.

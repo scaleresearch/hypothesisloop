@@ -31,6 +31,10 @@ const (
 	// InstanceSilent: the launcher reports it as running, and what it reports of the machine's
 	// progress has not changed for the limit. Inside the limit nothing is recorded.
 	InstanceSilent InstanceEnd = "silent"
+	// InstanceProgressUnreadable: the launcher reports it as running and could not read its
+	// progress, and none was recorded for the limit, by the clock InstanceSilent is held to.
+	// Whether its command works is not known. Inside the limit nothing is recorded.
+	InstanceProgressUnreadable InstanceEnd = "progress_unreadable"
 	// InstanceExpired: the launcher reported it as exited because its provider ended it at the
 	// provider's own limit on how long it rents one. Its command did nothing wrong.
 	InstanceExpired InstanceEnd = "expired"
@@ -41,9 +45,10 @@ const (
 
 // SpendsRestart says whether a machine given up on this way counts against its agent's restarts.
 // One that does not is a renewal: asked for again however many came before, and never what stops
-// the agent.
+// the agent. What bounds the machines rented that way is the run they are for: each is rented to
+// end by itself at its platform experiment's latest end, and none is asked for after it.
 func (e InstanceEnd) SpendsRestart() bool {
-	return e != InstanceExpired
+	return e != InstanceExpired && e != InstanceProgressUnreadable
 }
 
 // progressStampsPerLimit is how often inside one progress limit a machine's progress is written
@@ -129,7 +134,7 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
 // the same end reported again records nothing: recorded is false, as it is for a name that is
 // not the one asked for and for an end whose limit has not passed on the database's clock. limit
 // is the boot limit for a machine never seen or still starting, the progress limit for a silent
-// one, and unused otherwise. after is the instance as the write left it.
+// one or one whose progress could not be read, and unused otherwise. after is the instance as the write left it.
 func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
 	c := instanceOf(agentID)
 	// Every form names $6, so that one statement serves them all.
@@ -143,7 +148,7 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 		when = c.prefix + "seen_at IS NULL AND " + c.prefix + "asked_at <= now() - make_interval(secs => $6)"
 	case InstanceStillStarting:
 		when = c.prefix + "seen_at <= now() - make_interval(secs => $6)"
-	case InstanceSilent:
+	case InstanceSilent, InstanceProgressUnreadable:
 		when = c.prefix + "state = 'running' AND COALESCE(" + c.prefix + "progress_at, " + c.prefix + "seen_at) <= now() - make_interval(secs => $6)"
 	default:
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %q", how)

@@ -681,7 +681,7 @@ func TestOnlyTheEndOfTheMachineAskedForIsRecorded(t *testing.T) {
 		{{Name: name, State: "running"}, {Name: "pe1-agending-aaaaaaaaaaaa", State: "exited", Log: "finished its last turn"}},
 		{{Name: name, State: "running"}},
 	} {
-		store.Advance(testBootLimit)
+		store.Advance(testBootLimit / 2)
 		answer := mustReconcile(t, store, observed(reported...))
 		if len(answer.Instances) != 1 || answer.Instances[0].Name != name || !reflect.DeepEqual(answer.Ending, []string{"pe1-agending-aaaaaaaaaaaa"}) {
 			t.Errorf("%+v: answer = %+v", reported, answer)
@@ -757,10 +757,10 @@ func TestAMachineThatStaysStartingIsTimedFromWhenItWasFirstListed(t *testing.T) 
 		t.Fatalf("recorded %+v", recorded)
 	}
 
-	// Running, however long, is no boot.
+	// Running is no boot: it is held to the progress limit, which is longer.
 	next := answer.Instances[0].Name
 	mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
-	store.Advance(100 * testBootLimit)
+	store.Advance(testSettings.ProgressLimit - time.Second)
 	up := mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
 	if up.Instances[0].Name != next || store.Find("pe-1", "ag-1").Restarts != 1 {
 		t.Fatal("a running machine was held to the boot limit")
@@ -1186,22 +1186,73 @@ func TestAMachineThatNeverPrintsAMarkerIsSilentFromItsFirstSight(t *testing.T) {
 	}
 }
 
-// A provider whose output cannot be read for a while must not cost every agent a restart.
-func TestAReportWithoutAReadableMarkerEndsNothing(t *testing.T) {
+// With a provider's log down no marker is read, and a hung agent would run to the end of its
+// experiment. A machine whose progress cannot be read is held to the limit a silent one is, by
+// the same clock. Its end says nothing of its command, so an outage however long spends no
+// restart and stops no agent.
+func TestAMachineWhoseProgressCannotBeReadForTheLimitIsReplacedAndSpendsNoRestart(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
-	unread := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running"}, ObservedInstance{Name: first.Instances[1].Name, State: "running"})
-	mustReconcile(t, store, unread)
-	store.Advance(100 * testSettings.ProgressLimit)
-	answer := mustReconcile(t, store, unread)
-	if answer.Instances[0].Name != first.Instances[0].Name || store.Find("pe-1", "ag-1").Restarts != 0 {
-		t.Fatalf("a machine whose marker could not be read was ended: %+v", store.Find("pe-1", "ag-1"))
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	limit := testSettings.ProgressLimit
+	unread := func() Observed {
+		return observed(ObservedInstance{Name: agent, State: "running"}, ObservedInstance{Name: coordinator, State: "running"})
 	}
-	// Read again and still where it was before the outage: now it is silent.
-	stuck := unread
-	stuck.Instances = []ObservedInstance{{Name: first.Instances[0].Name, State: "running", Progress: marker("")}, unread.Instances[1]}
-	if answer := mustReconcile(t, store, stuck); answer.Instances[0].Name == first.Instances[0].Name {
-		t.Fatal("a machine read again and silent for a hundred limits was kept")
+	// The limit runs from the last progress recorded, and with none from the first sight.
+	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running", Progress: marker("1")}, ObservedInstance{Name: coordinator, State: "running"}))
+	store.Advance(limit / 2)
+	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running", Progress: marker("2")}, ObservedInstance{Name: coordinator, State: "running"}))
+	store.Advance(limit/2 - time.Second)
+	answer := mustReconcile(t, store, unread())
+	if answer.Instances[0].Name != agent || answer.Instances[1].Name != coordinator {
+		t.Fatalf("inside the limit of the agent's last progress and of the coordinator's first sight: %+v, want both kept", answer.Instances)
+	}
+	store.Advance(time.Second)
+	answer = mustReconcile(t, store, unread())
+	if answer.Instances[0].Name != agent || answer.Instances[1].Name == coordinator {
+		t.Fatalf("a limit after the coordinator was first seen: %+v, want it replaced and the agent kept", answer.Instances)
+	}
+	coordinator = answer.Instances[1].Name
+	store.Advance(limit / 2)
+	answer = mustReconcile(t, store, unread())
+	if answer.Instances[0].Name == agent {
+		t.Fatalf("a limit after the agent's last progress: %+v, want it replaced", answer.Instances)
+	}
+	recorded := store.Find("pe-1", "ag-1")
+	if recorded.Restarts != 0 || recorded.Renewals != 1 || recorded.Stopped || recorded.EndReason != string(db.InstanceProgressUnreadable) || !strings.Contains(recorded.ExitLog, "cannot read its output") || !strings.Contains(recorded.ExitLog, limit.String()) {
+		t.Fatalf("recorded %+v, want it ended as progress unreadable with no restart spent", recorded)
+	}
+
+	// The outage lasts: every machine is replaced once a limit, and the agent is never stopped.
+	seen := map[string]bool{agent: true}
+	agent = answer.Instances[0].Name
+	for round := 2; round <= domain.MaxAgentInstanceRestarts+3; round++ {
+		mustReconcile(t, store, unread())
+		store.Advance(limit - time.Second)
+		if kept := mustReconcile(t, store, unread()); kept.Instances[0].Name != agent {
+			t.Fatalf("round %d: replaced inside the limit", round)
+		}
+		store.Advance(time.Second)
+		answer = mustReconcile(t, store, unread())
+		if len(answer.Instances) != 2 || answer.Instances[0].Name == agent || seen[answer.Instances[0].Name] {
+			t.Fatalf("round %d: %+v, want the agent under a name not used before", round, answer.Instances)
+		}
+		seen[agent] = true
+		agent, coordinator = answer.Instances[0].Name, answer.Instances[1].Name
+		if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 0 || recorded.Renewals != round || recorded.Stopped {
+			t.Fatalf("round %d: recorded %+v", round, recorded)
+		}
+	}
+
+	// The log is back and the marker stands where it stood: that is a silent machine, and a restart.
+	mustReconcile(t, store, unread())
+	store.Advance(limit)
+	stuck := observed(ObservedInstance{Name: agent, State: "running", Progress: marker("")}, ObservedInstance{Name: coordinator, State: "running", Progress: marker("")})
+	if answer := mustReconcile(t, store, stuck); answer.Instances[0].Name == agent {
+		t.Fatal("a machine read again and silent for the limit was kept")
+	}
+	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceSilent) {
+		t.Fatalf("read again and silent: recorded %+v", recorded)
 	}
 }
 

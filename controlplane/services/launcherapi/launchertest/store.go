@@ -195,7 +195,7 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 		due = instance.SeenAt == nil && s.clock-s.askedAt[platformExpID+"/"+agentID] >= limit
 	case db.InstanceStillStarting:
 		due = instance.SeenAt != nil && now.Sub(*instance.SeenAt) >= limit
-	case db.InstanceSilent:
+	case db.InstanceSilent, db.InstanceProgressUnreadable:
 		since := instance.SeenAt
 		if instance.ProgressAt != nil {
 			since = instance.ProgressAt

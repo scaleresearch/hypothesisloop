@@ -557,6 +557,87 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 	}
 }
 
+// A running machine whose progress could not be read is ended by the clock a silent one is: the
+// last progress recorded, or its first sight. That end is a renewal and spends no restart.
+func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpendsNoRestart(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const limit, maxRestarts = 8 * time.Minute, 1
+	marker := "7"
+	for kind, thing := range hostedThings(t, pool) {
+		observe := func(name, state string, progress *string) {
+			t.Helper()
+			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, name, state, progress, limit, ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		unreadable := func(name string) bool {
+			t.Helper()
+			_, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, InstanceProgressUnreadable, "unread", limit, maxRestarts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return recorded
+		}
+		ask := func(name string) {
+			t.Helper()
+			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// Never read: the limit runs from the first sight, and only for a running machine.
+		ask("name-1")
+		observe("name-1", "starting", nil)
+		thing.age(thing.column("seen_at"), 10*limit)
+		if unreadable("name-1") {
+			t.Fatalf("%s: a starting machine was ended for its progress", kind)
+		}
+		observe("name-1", "running", nil)
+		thing.age(thing.column("seen_at"), limit-10*time.Second)
+		if unreadable("name-1") {
+			t.Fatalf("%s: ended inside the limit of its first sight", kind)
+		}
+		thing.age(thing.column("seen_at"), limit+time.Second)
+		if !unreadable("name-1") {
+			t.Fatalf("%s: unread for the limit since its first sight and not ended", kind)
+		}
+		if got := thing.instance(); got.Restarts != 0 || got.Renewals != 1 || got.Stopped || got.EndReason != "progress_unreadable" || got.ExitLog != "unread" || got.Shown() != "requested" {
+			t.Fatalf("%s: after the end: got = %+v, want a renewal and no restart", kind, got)
+		}
+
+		// Read once: the limit runs from that progress, however long ago the machine was seen.
+		ask("name-2")
+		observe("name-2", "running", &marker)
+		thing.age(thing.column("seen_at"), 10*limit)
+		thing.age(thing.column("progress_at"), limit-10*time.Second)
+		observe("name-2", "running", nil)
+		if unreadable("name-2") {
+			t.Fatalf("%s: ended inside the limit of its last progress", kind)
+		}
+		thing.age(thing.column("progress_at"), limit+time.Second)
+		if !unreadable("name-2") {
+			t.Fatalf("%s: unread for the limit since its last progress and not ended", kind)
+		}
+
+		// With every restart spent it is still asked for again.
+		ask("name-3")
+		if _, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, "name-3", InstanceExited, "boom", limit, maxRestarts); err != nil || !recorded {
+			t.Fatalf("%s: exit: %v, %v", kind, recorded, err)
+		}
+		ask("name-4")
+		observe("name-4", "running", nil)
+		thing.age(thing.column("seen_at"), limit+time.Second)
+		if !unreadable("name-4") {
+			t.Fatalf("%s: not ended with no restart left", kind)
+		}
+		if got := thing.instance(); got.Restarts != maxRestarts || got.Renewals != 3 || got.Stopped {
+			t.Fatalf("%s: with no restart left: got = %+v, want it asked for again", kind, got)
+		}
+	}
+}
+
 // A machine the launcher is no longer asked to keep is taken down by the launcher. That is the
 // platform's doing and is written down as such, with which end of the run it was, so that it is
 // never read as a machine the provider lost: a planner whose draft is revised is asked for a new

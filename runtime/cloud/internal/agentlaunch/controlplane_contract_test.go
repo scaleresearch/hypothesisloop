@@ -707,6 +707,60 @@ func TestAHungAgentIsReplacedByTheControlPlanesDecisionAndAWorkingOneIsKept(t *t
 	}
 }
 
+// With the vendor's log down the launcher reads no marker and says so by leaving it out. The
+// control plane holds such a machine to the progress limit as well, so a hung agent does not run
+// on unseen, and counts no restart for it, so an outage however long stops no agent. Each
+// machine rented meanwhile ends by itself at its platform experiment's latest end.
+func TestAnAgentWhoseOutputCannotBeReadIsReplacedAtTheProgressLimitAndNeverStopped(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	limit := contractSettings.ProgressLimit
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.rented.Print(name, "hl-progress 1")
+	c.pass()
+
+	c.rented.Fail = func(method, _ string) error {
+		if method == "Logs" {
+			return errors.New("vendor: HTTP 503: logs are unavailable")
+		}
+		return nil
+	}
+	seen := map[string]bool{}
+	for outage := 1; outage <= domain.MaxAgentInstanceRestarts+2; outage++ {
+		seen[name] = true
+		c.store.Advance(limit - time.Second)
+		c.pass()
+		if got := c.rented.Names(); len(got) != 1 || got[0] != name {
+			t.Fatalf("outage %d: rented %v inside the progress limit, want %q kept", outage, got, name)
+		}
+		c.store.Advance(time.Second)
+		c.pass()
+		names, recorded := c.rented.Names(), c.instance("ag-one")
+		if len(names) != 1 || seen[names[0]] || recorded.Restarts != 0 || recorded.Stopped || recorded.EndReason != string(db.InstanceProgressUnreadable) {
+			t.Fatalf("outage %d: rented %v (was %q), recorded %+v, want a new machine and no restart spent", outage, names, name, recorded)
+		}
+		name = names[0]
+		if left := time.Until(contractEndsBy); c.rented.Spec(name).Lifetime > left {
+			t.Fatalf("outage %d: the replacement is rented for %s, longer than the %s left to its platform experiment", outage, c.rented.Spec(name).Lifetime, left)
+		}
+		c.rented.Start(name)
+		c.pass()
+	}
+
+	// The log is back and the agent works: it is kept.
+	c.rented.Fail = nil
+	creates := c.rented.Calls("Create")
+	for step := 1; step <= 8; step++ {
+		c.rented.Print(name, fmt.Sprintf("hl-progress %d", step))
+		c.pass()
+		c.store.Advance(limit / 4)
+	}
+	if recorded := c.instance("ag-one"); c.rented.Calls("Create") != creates || recorded.Restarts != 0 || recorded.Reported != domain.InstanceRunning {
+		t.Fatalf("readable again and working: %d creates since, recorded %+v", c.rented.Calls("Create")-creates, recorded)
+	}
+}
+
 // What an agent is doing reaches the control plane on the question the launcher already asks,
 // and is kept as the latest sentence with the time it was first read: a pass that says the same
 // writes nothing, the machine's own token never arrives, and a machine that ends says nothing.
