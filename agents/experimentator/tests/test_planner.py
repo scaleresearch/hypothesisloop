@@ -224,10 +224,11 @@ class BaselinePromptTest(unittest.TestCase):
             self.assertNotIn("2>&1", render(cfg)[0])
 
     # A chip job that left its storage out was given a share of the node's disk and waited to
-    # the run's end for room the disk never had. A submit without it is now refused.
-    def test_every_job_states_its_storage(self):
-        self.assertIn("Every job states the storage it needs, e.g. `storage: 4Gi`, or is refused. `memory` and `max_retries` may be left out",
-                      render(baseline_agent())[1])
+    # the run's end for room the disk never had, and one that left out cpu and memory held a
+    # whole node. A submit without any of the three is now refused.
+    def test_every_job_states_its_cpu_memory_and_storage_and_takes_no_whole_node(self):
+        self.assertIn("Every job states `cpu`, `memory` and `storage` for what it needs, small enough that other jobs fit beside it, "
+                      "never a whole node: one left out is refused. `max_retries` may be left out", render(baseline_agent())[1])
 
 
 class RunEndedTest(unittest.TestCase):

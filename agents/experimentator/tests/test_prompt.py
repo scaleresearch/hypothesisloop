@@ -73,10 +73,12 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("\"the platform could not be reached\", from `hl` or in a failed `git push`, is the platform failing: "
                       "end your turn, and an update wakes you to retry once it is back.", " ".join(self.render("generalist").split()))
 
-    # A job that left its storage out waited for a share of the disk the node never had free.
-    def test_every_job_states_its_storage(self):
+    # A job that left its storage out waited for a share of the disk the node never had free,
+    # and a chip job that left out cpu and memory held a whole node, so nothing ran beside it.
+    def test_every_job_states_its_cpu_memory_and_storage_and_takes_no_whole_node(self):
         prompt = " ".join(self.render("generalist").split())
-        self.assertIn("CPU work: `cpu: N` in its place. Every job states the storage it needs, e.g. `storage: 4Gi`, or is refused", prompt)
+        self.assertIn("CPU work: `cpu: N` in its place. Every job states `cpu`, `memory` and `storage` for what it needs, "
+                      "small enough that other jobs fit beside it, never a whole node: one left out is refused", prompt)
 
     # Six hosted agents were told by a brief to block in `hl watch --until` and all did, for the
     # whole job: the turn stayed in flight, so a frozen agent had no stored session to resume.

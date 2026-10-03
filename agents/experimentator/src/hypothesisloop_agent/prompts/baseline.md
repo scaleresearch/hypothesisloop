@@ -33,11 +33,11 @@ The platform closes an experiment not running by its `baseline_due_at`. On this 
   2. The job spec, `.hypothesisloop/job.yaml`: `accelerator_type` as the brief states it and
      `image` a job image name of `hl capacity` or a full address: any other word is refused.
      Work that needs no accelerator states `cpu: N`, whole cores, and no type. Every job
-     states the storage it needs, e.g. `storage: 4Gi`, or is refused. `memory` and
-     `max_retries` may be left out.
+     states `cpu`, `memory` and `storage` for what it needs, small enough that other jobs fit
+     beside it, never a whole node: one left out is refused. `max_retries` may be left out.
        - the `command` runs exactly that code: `dir=$(hl-clone) && cd "$dir" && ...` clones
-         the injected $HYPOTHESISLOOP_CODE_REF, and a failed clone ends the job with its own
-         message. What the image does not carry it installs with `uv pip install X`.
+         the injected $HYPOTHESISLOOP_CODE_REF. What the image does not carry it installs
+         with `uv pip install X`.
 {code_access}
      Size it to finish in minutes: every trial runs it.
   3. The run. The baseline is the objective's own and takes no hypothesis and no theory:

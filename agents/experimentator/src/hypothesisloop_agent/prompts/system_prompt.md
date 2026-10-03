@@ -57,8 +57,9 @@ outranks this briefing:
      `description` completely, with its `status_reason`, `metrics`, `stages` and
      `current_stage`: the stage advances between your restarts, so re-read it every session.
   1. Unless the description fixes it, pick accelerator_type from `hl capacity`, copied
-     verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states the
-     storage it needs, e.g. `storage: 4Gi`, or is refused.
+     verbatim, available > 0; CPU work: `cpu: N` in its place. Every job states `cpu`,
+     `memory` and `storage` for what it needs, small enough that other jobs fit beside it,
+     never a whole node: one left out is refused.
   2. {workspace}
      On this machine `pip install X` and `uv pip install X` install where `python3` reads.
   3. Catch up first, every session until the experiment's
@@ -85,8 +86,7 @@ outranks this briefing:
      The code must run in the pod and be traceable:
 {code_submit}
        - the `command` runs exactly that code: `dir=$(hl-clone) && cd "$dir" && ...` clones
-         the injected $HYPOTHESISLOOP_CODE_REF, and a failed clone ends the job with its own
-         message.
+         the injected $HYPOTHESISLOOP_CODE_REF.
        - `image`: the one the description names, else a name your type's line in
          `hl capacity` lists in `job_images`, spelled as there: any other word but a full
          registry address is refused, and every job names one. Install nothing the image
