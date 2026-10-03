@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,7 +34,7 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...]
+	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
 
 FILE is a YAML job spec: metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis, env, estimate and
@@ -41,6 +42,9 @@ tier, with nothing to edit and nothing to commit. Prints the accepted job's id, 
 platform issues, status,
 code_ref, branch, capacity_tier and its estimate as applied: estimated_duration_hours, and
 estimated_cost_acch, what those hours hold of your quota; hl job status ID has the rest.
+A submit that is the same in every part (agent, hypothesis, commit, FILE and flags) is one job
+however often it is sent, so one that timed out is safe to send again; --repeat N (2, 3, ...)
+makes it the Nth job of that same request.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
 was billed (hl job cost ID). A job that states no estimate, in FILE or with
 --estimated-duration-hours, gets the one the platform measured on its platform experiment's
@@ -112,6 +116,7 @@ agents/coordinator/experiments.`, stderr)
 		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
 	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
+	repeat := fs.Int("repeat", 1, "which job of this same request it is: 2 for a second run of what was already submitted, `N` for the Nth")
 	var env stringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
 	var secretEnv stringList
@@ -161,6 +166,12 @@ agents/coordinator/experiments.`, stderr)
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata
+	if *repeat < 1 {
+		return parseExit(misuse(fs, "--repeat wants 1 or more, got %d", *repeat))
+	}
+	if body["submission_key"], err = submissionKey(body, *repeat); err != nil {
+		return fail(stderr, fmt.Errorf("job submit: %w", err))
+	}
 	// The reply repeats the submitted spec; only what the platform decided is printed.
 	var out struct {
 		ID             string  `json:"id"`
@@ -179,6 +190,17 @@ agents/coordinator/experiments.`, stderr)
 	out.Reason = ""
 	line, _ := json.Marshal(out)
 	fmt.Fprintf(stdout, "%s\n", line)
+	// A job this submit created is QUEUED in its answer, so any other status is that of the job
+	// an identical submit created before.
+	if out.Status != "QUEUED" {
+		again := fmt.Sprintf("--repeat %d submits the same request as another job", *repeat+1)
+		if slices.Contains(endedStatuses, out.Status) {
+			fmt.Fprintf(stderr, "hl: job submit: nothing was submitted: an identical submit already created %s, which ended %s. %s\n", out.ID, out.Status, again)
+			return 1
+		}
+		fmt.Fprintf(stderr, "hl: job submit: an identical submit already created %s, which is %s, and nothing more was submitted: %s. %s\n", out.ID, out.Status, resultArrives, again)
+		return 0
+	}
 	if !held {
 		fmt.Fprintln(stderr, "hl: job submit: "+resultArrives)
 		return 0
@@ -198,6 +220,19 @@ agents/coordinator/experiments.`, stderr)
 	}
 	fmt.Fprintln(stderr, "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: "+strings.Join(commands, "; "))
 	return 0
+}
+
+// endedStatuses are the statuses a job ends in.
+var endedStatuses = []string{"COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"}
+
+// submissionKey names a submit by everything it sends and which repeat of it this is, so that
+// the same submit sent twice is one job on the platform (submission_key of POST /experiments).
+func submissionKey(body map[string]any, repeat int) (string, error) {
+	request, err := json.Marshal(map[string]any{"request": body, "repeat": repeat})
+	if err != nil {
+		return "", fmt.Errorf("encoding the job: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(request)), nil
 }
 
 // summaryGate is the not_admitted_reason of a queued job whose agent owes a summary.
