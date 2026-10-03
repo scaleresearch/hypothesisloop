@@ -81,12 +81,7 @@ COPY controlplane/settings/examples/experiment-submission.yaml $WORKLOAD_SAMPLES
 # it is in the job image.
 RUN ln -s $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
 
-# The `hl` CLI, built in the hl-builder stage above. This is how the agent talks to the platform
-# for everything a human would use it for too -- hl platform-experiments
-# create/start, hl hypothesis query/submit/link, hl job submit job.yaml, hl watch
-# (`hl watch --experiment ID --until '...'` holds a websocket open and exits when the platform
-# says the thing happened). A job image that
-# wants it too can COPY it in the same way it copies a seed workload.
+# The `hl` CLI, built in the hl-builder stage above: the one way the agent acts on the platform.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
 
 # The harness lives outside the agent's home: a home with src/ and pyproject.toml in it looks
