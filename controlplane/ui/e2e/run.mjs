@@ -127,7 +127,7 @@ function unshare(platformExperimentID) {
 
 // A project's list of platform experiments with none of the project's own in it: the empty
 // state, or on a stack whose owner shares some, those and nothing else.
-function noneOfItsOwn(page, emptyState = 'None yet. Write what you want to find out above') {
+function noneOfItsOwn(page, emptyState = 'No experiments yet.') {
   return page.getByText(emptyState).or(page.getByText('Shared · read only').first()).first()
 }
 
@@ -437,10 +437,9 @@ async function scenarios(browser) {
   await findSandbox(await tokenOf(ada))
   if (sandbox.installation) hlAdmin('github', 'connect', adaHome.orgs[0].id, sandbox.installation)
   await page.goto(`${UI}/platform-experiments`)
-  await page.getByText(`New experiment in Default org / Default project`).waitFor()
   await page.getByLabel('What do you want to find out?').waitFor()
-  await page.getByText('None yet. Write what you want to find out above').waitFor()
-  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Configure it yourself')
+  await page.getByText('No experiments yet.').waitFor()
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Configure it myself')
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().waitFor()
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
@@ -448,7 +447,7 @@ async function scenarios(browser) {
   await noneOfItsOwn(page).waitFor()
 
   section('creating a platform experiment in the selected project')
-  await page.getByRole('button', { name: 'Configure it yourself', exact: true }).click()
+  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
   const experimentName = `ui-e2e-${run}`
   await page.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(experimentName)
   await choose(page, page.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
@@ -557,12 +556,12 @@ async function scenarios(browser) {
   await agentRows.filter({ hasText: 'ag-hosted-new' }).getByText('not reported yet').waitFor()
   await page.unroute(agentsAPI)
 
-  section('home: Configure it yourself opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
+  section('home: Configure it myself opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
   await page.goto(`${UI}/platform-experiments`)
   await page.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
   await page.getByText(experimentName).first().waitFor()
-  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Configure it yourself')
-  await page.getByRole('button', { name: 'Configure it yourself', exact: true }).click()
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Configure it myself')
+  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
   const homeDialog = page.getByRole('dialog')
   const homeExperimentName = `ui-e2e-home-${run}`
   await homeDialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(homeExperimentName)
@@ -632,7 +631,7 @@ async function scenarios(browser) {
   // Fills the form in the home dialog for hosted agents and presses Create and run.
   async function createAndRunFromHome(name, researchers) {
     await page.goto(`${UI}/platform-experiments`)
-    await page.getByRole('button', { name: 'Configure it yourself', exact: true }).click()
+    await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
     await choose(page, dialog.getByLabel('Common metric'), 'Val Accuracy (↑ max)')
@@ -813,8 +812,8 @@ async function scenarios(browser) {
   await page.getByLabel('Name of project second').waitFor()
   await page.getByRole('link', { name: 'Experiments', exact: true }).click()
   await page.waitForURL(/\/platform-experiments\?project=/)
-  await page.getByText(/New experiment in .+ \/ second$/).waitFor()
   await noneOfItsOwn(page).waitFor()
+  assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'second')
   assert.equal(await page.getByText(experimentName).count(), 0, 'the other project\'s experiment is not listed')
   await selectInNav(page, 'Project', 'Default project')
   await page.getByText(experimentName).first().waitFor()
@@ -1089,7 +1088,7 @@ async function scenarios(browser) {
     return route.fulfill({ headers: { ...cors, 'X-Total-Count': String(found.length) }, json: found })
   })
   await page.getByRole('link', { name: 'Experiments', exact: true }).click()
-  await page.getByRole('button', { name: 'Configure it yourself', exact: true }).click()
+  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
   const repositoryField = page.getByLabel('Repository').last()
   await repositoryField.click()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
@@ -1124,7 +1123,6 @@ async function scenarios(browser) {
   assert.equal(adaOrgs.filter(o => o.name === `${ada.name} Second`).length, 1, 'a double click created one org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), `${ada.name} Second`, 'the new org is selected')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
-  await page.getByText(`New experiment in ${ada.name} Second / Default project`).waitFor()
   await noneOfItsOwn(page).waitFor()
   assert.equal(await page.getByText(experimentName).count(), 0)
   await page.getByRole('link', { name: 'Settings', exact: true }).click()
@@ -1221,7 +1219,7 @@ async function scenarios(browser) {
     const card = otherPage.locator('[role="link"]', { hasText: sharedName })
     await card.getByText('Shared · read only').waitFor()
     assert.equal(await card.getByRole('button', { name: 'Edit' }).count(), 0, 'a shared experiment of another org offers no edit')
-    await otherPage.getByRole('button', { name: 'Configure it yourself', exact: true }).waitFor()
+    await otherPage.getByRole('button', { name: 'Configure it myself', exact: true }).waitFor()
 
     section('shared: it opens on the experiment page from the reader\'s own project, with nothing to change')
     await card.click()
@@ -1282,7 +1280,7 @@ async function scenarios(browser) {
 
     section('shared: it does not count as the reader\'s own, and the pickers offer it')
     await otherPage.goto(`${UI}/platform-experiments`)
-    await otherPage.getByText('New experiment in').waitFor()
+    await otherPage.getByLabel('What do you want to find out?').waitFor()
     await otherPage.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
     await otherPage.goto(`${UI}/jobs`)
     await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
