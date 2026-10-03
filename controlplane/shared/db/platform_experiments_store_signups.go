@@ -272,7 +272,8 @@ func nonNilObject(m map[string]any) map[string]any {
 }
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
-// once it has, ErrNotSignedUp when the agent is not in it. Only its place goes, and the quota a
+// once it has, ErrNotSignedUp when the agent is not in it, ErrWorkUnfinished while a job of it is
+// queued or running, which only an agent of role baseline has then. Only its place goes, and the quota a
 // baseline agent held with it: the agent itself
 // stays in its org however it came to be, as every agent that ever joined does, and can be added
 // again by its id. The experiment row is locked as in
@@ -286,6 +287,11 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// A submission of this agent in flight commits or rolls back first, as in FinishAgent, so the
+	// jobs read below include it, and one that starts later finds no quota to be admitted on.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
+		return fmt.Errorf("platform_experiments_store.RemoveAgent: lock: %w", err)
+	}
 	var status string
 	if err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -297,14 +303,23 @@ func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpI
 		return ErrSignupClosed
 	}
 	var accessKeyID string
+	var inFlight bool
 	err = tx.QueryRow(ctx, `
-SELECT data_access_key_id FROM experiment_signups
-WHERE platform_experiment_id=$1 AND agent_id=$2 FOR UPDATE`, platformExpID, agentID).Scan(&accessKeyID)
+SELECT s.data_access_key_id,
+       EXISTS (SELECT 1 FROM experiments
+               WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
+FROM experiment_signups s
+WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&accessKeyID, &inFlight)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotSignedUp
 	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: read signup: %w", err)
+	}
+	// The agent's quota goes with its place, and a job of it that still runs is charged to that
+	// quota by every pass of the controller: the job ends first.
+	if inFlight {
+		return ErrWorkUnfinished
 	}
 	if accessKeyID != "" {
 		if err := deleteDataKey(ctx, accessKeyID); err != nil {
@@ -325,7 +340,7 @@ WHERE platform_experiment_id=$1 AND agent_id=$2 FOR UPDATE`, platformExpID, agen
 }
 
 // ErrWorkUnfinished refuses finishing an agent that still has a job queued or running, or a
-// completed job without its summary.
+// completed job without its summary, and removing one that has a job queued or running.
 var ErrWorkUnfinished = errors.New("the agent has a job in flight or a summary due")
 
 // FinishAgent records that an agent of a running platform experiment has nothing left to do, or

@@ -569,3 +569,64 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 		t.Fatalf("got = %+v, %v, want the one COMPLETED objective job of the baseline agent that finished", left, err)
 	}
 }
+
+// The controller charges every running job to its agent's quota and reports an agent that runs
+// jobs with none as an error. A baseline agent holds its quota from the moment it joins, through
+// every state its job passes and through the start of the run. The one write that took the quota
+// away, a removal, took it from under a job still in flight: it waits for the job to end.
+func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"})[0]
+	holds := func(when string) {
+		t.Helper()
+		if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota == nil || quota.GuaranteedAcceleratorHours <= 0 {
+			t.Fatalf("%s: the baseline agent's quota = %+v, %v, want one it can run a job on", when, quota, err)
+		}
+	}
+	holds("as it joined")
+
+	job := seedPricedExperiment(t, pool, baseline, pe, quotaL40, 1, 1, domain.StatusQueued)
+	for _, status := range []domain.ExperimentStatus{domain.StatusQueued, domain.StatusSubmitted, domain.StatusRunning} {
+		if status != domain.StatusQueued {
+			if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = $2, not_admitted_reason = NULL WHERE id = $1`, job, status); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := pes.RemoveAgent(ctx, pe, baseline, nil); !errors.Is(err, ErrWorkUnfinished) {
+			t.Fatalf("removing it with a job %s: got = %v, want ErrWorkUnfinished", status, err)
+		}
+		holds("with a job " + string(status))
+	}
+	if running, err := NewExperimentsStore(pool).GetAgentRunningExperiments(ctx, baseline, pe); err != nil || len(running) != 1 {
+		t.Fatalf("its running jobs: %+v, %v, want the one", running, err)
+	}
+
+	// With the job ended the agent and its quota go together, and it joins again with one.
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'FAILED' WHERE id = $1`, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.RemoveAgent(ctx, pe, baseline, nil); err != nil {
+		t.Fatalf("removing it once its job ended: %v", err)
+	}
+	if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota != nil {
+		t.Fatalf("after the removal: quota = %+v, %v, want none", quota, err)
+	}
+	if added, err := pes.Signup(ctx, pe, domain.AgentSignup{AgentID: baseline, Role: domain.SignupRoleBaseline, Flavor: "generalist"}); err != nil || !added {
+		t.Fatalf("joining again: %v, %v", added, err)
+	}
+	holds("joined again")
+
+	// The run starts around a job of it that still runs: the quota that job is charged to stays.
+	seedPricedExperiment(t, pool, baseline, pe, quotaL40, 1, 1, domain.StatusRunning)
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe, time.Hour, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+		return nil, []domain.Stage{{LengthPct: 100}}, nil
+	})
+	if err != nil || !started {
+		t.Fatalf("start: got = %v, %v, want started", started, err)
+	}
+	holds("once the run started")
+}

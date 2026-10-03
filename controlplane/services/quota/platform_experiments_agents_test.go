@@ -33,6 +33,8 @@ type rosterStore struct {
 	unregistered bool
 	// left is the COMPLETED jobs on the objective its baseline agents that finished left.
 	left []*domain.Experiment
+	// inFlight is the agents that have a job queued or running.
+	inFlight map[string]bool
 }
 
 func (f *rosterStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
@@ -207,6 +209,9 @@ func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(c
 	}
 	for i, s := range f.signups {
 		if s.AgentID == agentID {
+			if f.inFlight[agentID] {
+				return db.ErrWorkUnfinished
+			}
 			f.signups = append(f.signups[:i], f.signups[i+1:]...)
 			return nil
 		}
@@ -550,6 +555,12 @@ func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-none/agents/"+second, ""); code != http.StatusNotFound || out["reason"] != "experiment_not_found" {
 		t.Fatalf("remove from no experiment: %d %v", code, out)
 	}
+	// Its quota goes with it, and a job of it still in flight is charged to that quota.
+	store.inFlight = map[string]bool{second: true}
+	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+second, ""); code != http.StatusConflict || out["reason"] != "work_unfinished" {
+		t.Fatalf("remove with a job in flight: %d %v, want 409 work_unfinished", code, out)
+	}
+	store.inFlight = nil
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		store.pe.Status = status
 		if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+second, ""); code != http.StatusConflict || out["reason"] != "experiment_started" {

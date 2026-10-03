@@ -314,6 +314,8 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
 		return refuseSignup(409, "experiment_started", "experiment is %s: once started, an agent leaves by being cut or by the experiment closing", pe.Status)
+	case errors.Is(err, db.ErrWorkUnfinished):
+		return refuseSignup(409, "work_unfinished", "agent %s has a job queued or running, and its quota, which that job is charged to, goes with the agent: cancel the job (`hl job cancel`) or wait for it to end, then remove the agent", agentID)
 	case err != nil:
 		return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
 	}
@@ -504,6 +506,7 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Takes the agent out while the experiment is open: its token stops working and, if the platform runs it, its machine is taken down. " +
 			"Only its place goes: the agent stays in the org and joins again with agent_id. " +
 			"409 once the experiment has started, when the roster is what quota was divided over: from then on an agent leaves by being cut or by the experiment closing. " +
+			"409 work_unfinished while the agent has a job queued or running, which an agent of role baseline may: the quota that job is charged to goes with the agent, so the job is cancelled or ends first. " +
 			"A coordinator's token removes only an agent it added itself (actor.kind coordinator in the roster): 403 agent_not_added_by_coordinator for one a person or an API key added, which its owner removes.",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
