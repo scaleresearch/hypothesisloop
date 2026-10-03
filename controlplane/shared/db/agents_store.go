@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -19,7 +21,10 @@ func NewAgentsStore(pool *Pool) *AgentsStore {
 	return &AgentsStore{pool: pool}
 }
 
-// CreateAgent inserts a new agent row.
+// ErrAgentExists reports that an agent with this id already exists.
+var ErrAgentExists = errors.New("agent already exists")
+
+// CreateAgent inserts a new agent row: ErrAgentExists for an id an agent already has.
 func (s *AgentsStore) CreateAgent(ctx context.Context, agent *domain.Agent) error {
 	const q = `
 INSERT INTO agents (id, name, org_id, performance_score, created_at)
@@ -28,6 +33,11 @@ VALUES ($1, $2, $3, $4, $5)`
 	_, err := s.pool.pool.Exec(ctx, q,
 		agent.ID, agent.Name, agent.OrgID, agent.PerformanceScore, agent.CreatedAt,
 	)
+	// The primary key is the table's only unique constraint.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return fmt.Errorf("%w: %s", ErrAgentExists, agent.ID)
+	}
 	if err != nil {
 		return fmt.Errorf("agents_store.CreateAgent: %w", err)
 	}

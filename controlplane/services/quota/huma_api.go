@@ -28,11 +28,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
-		Description:   "Registers an agent under an id of your choosing, for one whose standing should carry from one platform experiment to the next. Returns 409 if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
+		Description:   "Registers an agent under an id of your choosing, for one whose standing should carry from one platform experiment to the next. 409 agent_exists if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
 	}, func(ctx context.Context, in *struct {
 		Body struct {
 			ID    string `json:"id" doc:"Stable unique agent id"`
-			Name  string `json:"name,omitempty" required:"false" doc:"Human-readable display name; defaults to id"`
+			Name  string `json:"name" minLength:"1" doc:"The name the agent is shown under and its branches carry."`
 			OrgID string `json:"org_id,omitempty" required:"false" doc:"The org the agent belongs to. Needed only from a token that is not bound to a single org."`
 		}
 	}) (*struct{ Body *domain.Agent }, error) {
@@ -42,21 +42,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		if err := domain.ValidateIdentifier("id", in.Body.ID); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
-		// id is the only identity that matters; name is presentation-only (UI/leaderboard), so
-		// requiring it would reject an otherwise complete registration over a cosmetic field.
-		name := in.Body.Name
-		if name == "" {
-			name = in.Body.ID
-		}
 		orgID, err := access.Org(ctx, in.Body.OrgID)
 		if err != nil {
 			return nil, err
 		}
-		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, name, orgID)
+		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, in.Body.Name, orgID)
+		if errors.Is(err, db.ErrAgentExists) {
+			return nil, api.Refuse(http.StatusConflict, "agent_exists", "an agent with id "+in.Body.ID+" already exists: register under another id, or join with this one")
+		}
 		if err != nil {
-			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
-				return nil, huma.Error409Conflict("agent already exists: " + in.Body.ID)
-			}
 			return nil, auth.Internal(h.logger, "register agent", err, zap.String("agentID", in.Body.ID))
 		}
 		return &struct{ Body *domain.Agent }{Body: agent}, nil

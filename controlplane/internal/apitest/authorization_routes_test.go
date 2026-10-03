@@ -277,7 +277,7 @@ var routes = []route{
 	{method: "GET", path: "/watch/kinds", rule: listed(agentAudience, http.StatusOK)},
 
 	// ---- agents ----
-	{method: "POST", path: "/agents", body: `{"id":"agent-new","org_id":"<org>"}`, rule: inOrgOf(coordinatorAudience, reached)},
+	{method: "POST", path: "/agents", body: `{"id":"agent-new","name":"New","org_id":"<org>"}`, rule: inOrgOf(coordinatorAudience, reached)},
 	{method: "GET", path: "/agents", rule: listed(coordinatorAudience, reached)},
 	{method: "GET", path: "/agents/stats", rule: listed(coordinatorAudience, reached)},
 

@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -36,6 +38,38 @@ func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/platform-experiments/unknown/quotas", nil)))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+// takenAgents is an agent store in which every id in it is taken.
+type takenAgents struct {
+	Store
+	taken map[string]bool
+}
+
+func (s takenAgents) CreateAgent(_ context.Context, agent *domain.Agent) error {
+	if s.taken[agent.ID] {
+		return fmt.Errorf("%w: %s", db.ErrAgentExists, agent.ID)
+	}
+	return nil
+}
+
+// A taken id was told from the database's error text, and an agent registered without a name was
+// silently named after its id.
+func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
+	r := chi.NewRouter()
+	doc := apidocs.New(r, "test", "1.0.0", "", authtest.As(waitingPerson), auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	agents := NewHandler(NewService(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()), zap.NewNop())
+	RegisterHuma(doc, agents, NewPlatformExperimentsHandler(newSignupTestService(t, noExperimentStore{}), &fakeRepositories{}, testPlanning, zap.NewNop()))
+
+	if code, out := call(t, r, "POST", "/agents", `{"id":"veteran","name":"Veteran"}`); code != http.StatusConflict || out["reason"] != "agent_exists" {
+		t.Errorf("a taken id: got = %d %v, want 409 agent_exists", code, out)
+	}
+	if code, out := call(t, r, "POST", "/agents", `{"id":"rookie","name":"Rookie"}`); code != http.StatusCreated || out["name"] != "Rookie" {
+		t.Errorf("a free id: got = %d %v, want 201 with its name", code, out)
+	}
+	if code, out := call(t, r, "POST", "/agents", `{"id":"nameless"}`); code != http.StatusUnprocessableEntity {
+		t.Errorf("no name: got = %d %v, want 422", code, out)
 	}
 }
 
