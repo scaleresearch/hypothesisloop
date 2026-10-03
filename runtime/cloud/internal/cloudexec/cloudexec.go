@@ -70,11 +70,7 @@ type Executor struct {
 	shapes       []Shape
 	provider     provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
-	market provider.Market
-	// offers is the market's last answers, shared by the executor of every pass, and now the
-	// clock they are aged on.
-	offers    *offerCounts
-	now       func() time.Time
+	market    provider.Market
 	offerWait time.Duration
 	startup   time.Duration
 	pass      *view
@@ -110,8 +106,6 @@ func New(cfg Config) (*Executor, error) {
 	market, _ := rented.(provider.Market)
 	return &Executor{
 		market:       market,
-		offers:       &offerCounts{byShape: map[string]counted{}},
-		now:          time.Now,
 		clusterID:    cfg.ClusterID,
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,

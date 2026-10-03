@@ -28,8 +28,6 @@ log_tail_lines: 100
 # control plane bounds each wait on its own: it requeues a job whose stuck-pending timeout (300
 # seconds unless the cluster's settings give stuck_pending_timeout_seconds) has passed since
 # this runtime first reported the wait the job is in, so the two waits are never added up.
-# offer_wait_seconds is also how long one count of the provider's offers stands: a provider with
-# a market is searched once per shape in that time, and never once per pass.
 offer_wait_seconds: 180
 startup_seconds: 240
 

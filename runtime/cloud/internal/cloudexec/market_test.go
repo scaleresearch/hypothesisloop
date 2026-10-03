@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -56,14 +55,12 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	}
 }
 
-// The vendor's search is rate limited, and a pass comes every few seconds: the market is asked
-// once per shape and OfferWait, whatever the cluster is doing, and in between the last count
-// stands less what was rented since.
-func TestTheMarketIsAskedOncePerShapeAndOfferWaitAndNotOncePerPass(t *testing.T) {
+// A pass asks the market once per shape, however many capacity figures it reports, and the next
+// pass asks again: a market that dried up since the last pass is not reported free from a count
+// kept in the process, which placed a job on a slot there was no machine for.
+func TestEveryPassAsksTheMarketOncePerShapeAndKeepsNoCountForTheNext(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	clock := time.Now()
-	e.now = func() time.Time { return clock }
 	onOffer := 2
 	p.Market = func(provider.Spec) int { return onOffer }
 	free := func() int64 {
@@ -85,26 +82,14 @@ func TestTheMarketIsAskedOncePerShapeAndOfferWaitAndNotOncePerPass(t *testing.T)
 		return available[h100]
 	}
 
-	for range 5 {
-		if got := free(); got != 2 {
-			t.Fatalf("free = %d, want 2", got)
-		}
-		clock = clock.Add(10 * time.Second)
-	}
-	if calls := p.Calls("Rentable"); calls != len(testShapes) {
-		t.Fatalf("%d market calls in five passes, want one per shape (%d)", calls, len(testShapes))
+	if got := free(); got != 2 || p.Calls("Rentable") != len(testShapes) {
+		t.Fatalf("free = %d with %d market calls, want 2 from one call per shape (%d)", got, p.Calls("Rentable"), len(testShapes))
 	}
 
-	// One of the two machines counted is rented, and the vendor's other one goes too: the count
-	// in hand already knows the first, and learns the second when it is next asked.
-	mustCreate(t, e, job(t, "exp-1", 0, 1))
+	// The vendor's machines go to somebody else between two passes.
 	onOffer = 0
-	if got := free(); got != 1 || p.Calls("Rentable") != len(testShapes) {
-		t.Fatalf("after one rent: free = %d with %d market calls, want 1 from the count in hand", got, p.Calls("Rentable"))
-	}
-	clock = clock.Add(3 * time.Minute)
 	if got := free(); got != 0 || p.Calls("Rentable") != 2*len(testShapes) {
-		t.Fatalf("an offer wait later: free = %d with %d market calls, want the market asked again and 0", got, p.Calls("Rentable"))
+		t.Fatalf("the pass after the market dried up: free = %d with %d market calls, want the market asked again and 0", got, p.Calls("Rentable"))
 	}
 }
 

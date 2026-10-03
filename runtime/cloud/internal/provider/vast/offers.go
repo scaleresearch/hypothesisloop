@@ -75,8 +75,9 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 // is rented, ours included, for as long as the instance lives, so without it every job of a pass
 // is sent to the same few offers and all but one are refused.
 //
-// It saves requests and nothing else. A process that starts without it asks for an offer one of
-// its instances holds, is told the offer is taken and passes over it.
+// A process that starts without it asks for an offer one of its instances holds, is told the
+// offer is taken and passes over it. Until those instances are gone Rentable counts their offers
+// as rentable, since nothing the adapter reads says which offer an instance was rented from.
 type held struct {
 	mu     sync.Mutex
 	offers map[int64]holder
