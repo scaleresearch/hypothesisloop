@@ -25,15 +25,19 @@ pytestmark = pytest.mark.parallel
 
 BUDGET = 1.0
 # Must match the text index the control plane creates and documents in POST /hypotheses/query.
+# The platform ties the yielded node to $pe. A parenthesis opening with a parameter reads as a node
+# pattern and is refused, so the status filter needs none.
 TEXT_SEARCH = (
     "CALL text_search.search_all('hypothesis_text', $q) YIELD node, score "
-    "WITH node, score WHERE node.platform_experiment_id = $pe AND ($status = '' OR node.status = $status) "
+    "WITH node, score WHERE $status = '' OR node.status = $status "
     "RETURN node.id AS id, node.status AS status, score ORDER BY score DESC"
 )
 CHILDREN = (
     "MATCH (c:Hypothesis)-[:BUILDS_ON]->(p:Hypothesis {id: $id}) "
     "RETURN c.id AS id ORDER BY id"
 )
+# The objective is a node of its own label, which the platform ties to $pe by its id.
+OBJECTIVE_CHILDREN = "MATCH (c:Hypothesis)-[:BUILDS_ON]->(p:Objective) RETURN c.id AS id ORDER BY id"
 
 
 def _out(hyp: dict) -> set[tuple[str, str]]:
@@ -125,7 +129,7 @@ def test_tree_combination_and_cross_links(api, graph_pe, run_id):
     assert rows[root_child["id"]]["builds_on"] == [pe_id]
     assert sorted(rows[combined["id"]]["builds_on"]) == sorted([root_child["id"], sibling["id"]])
 
-    assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=pe_id)] == sorted([root_child["id"], sibling["id"]])
+    assert [r["id"] for r in api.query_rows(pe_id, OBJECTIVE_CHILDREN)] == sorted([root_child["id"], sibling["id"]])
     assert [r["id"] for r in api.query_rows(pe_id, CHILDREN, id=root_child["id"])] == sorted([grandchild["id"], combined["id"]])
 
     graph = api.hypothesis_graph(pe_id)
@@ -367,9 +371,12 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
     assert api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $planted}) RETURN count(h) AS n", planted=planted) == [{"n": 0}]
     assert planted not in {h["id"] for h in api.hypotheses(pe_id)}
 
-    bad = api.query(pe_id, "MATC (h:Hypothesis) RETURN h")
+    bad = api.query(pe_id, "MATCH (h:Hypothesis) RETRN h")
     assert bad.status_code == 400, f"malformed Cypher answered {bad.status_code}"
-    assert "mismatched input" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
+    assert "mismatched input 'RETRN'" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
+    # A statement that opens with no read clause never reaches Memgraph.
+    unknown = api.query(pe_id, "MATC (h:Hypothesis) RETURN h")
+    assert unknown.status_code == 400 and "a query starts with MATCH" in unknown.json().get("error", ""), unknown.text
 
     # Refused before it reaches the graph, each with its reason: a statement that reads a file on
     # the database's host, and a rune outside printable ASCII anywhere but in a string or a
