@@ -33,6 +33,8 @@ func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, sig
 	return ids
 }
 
+// setPEStatus puts pe in status as of ago. A running one is given a clock that runs, as a start
+// with a researcher at work leaves it.
 func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExperimentStatus, ago time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -40,7 +42,10 @@ func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExpe
 	if status == domain.PlatformExpClosed {
 		err = NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, nil)
 	} else {
-		_, err = pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = $2::platform_experiment_status WHERE id = $1`, pe, string(status))
+		_, err = pool.pool.Exec(ctx, `
+UPDATE platform_experiments
+SET status = $2::platform_experiment_status, started_at = CASE WHEN $2 = 'running' THEN COALESCE(started_at, now()) ELSE started_at END
+WHERE id = $1`, pe, string(status))
 	}
 	if err != nil {
 		t.Fatalf("set status %s: got = %v, want = nil", status, err)

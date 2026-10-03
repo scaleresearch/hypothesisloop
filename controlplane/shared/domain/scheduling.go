@@ -35,6 +35,10 @@ type QuotaConfig struct {
 	// BaselineLimit is how long a platform experiment may stay open before the platform closes
 	// it: the time it has to get its baseline declared and its run started.
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
+	// AgentsDue is how long a started platform experiment whose researchers the platform runs
+	// waits for the first one's machine to be running before the platform closes it: the time
+	// one machine and every restart of it may take to come up.
+	AgentsDue time.Duration `json:"agents_due,omitempty"`
 	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
 	// a single platform experiment.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`

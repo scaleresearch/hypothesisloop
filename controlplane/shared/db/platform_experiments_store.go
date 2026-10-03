@@ -417,8 +417,8 @@ func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, 
 		reason, actor = string(domain.CloseByRequest), *by
 	}
 	// What the platform closes is a run at its end, a draft nobody proposed for inside the
-	// planning limit or whose answer no person took up, or an open one that was not running by
-	// its baseline deadline.
+	// planning limit or whose answer no person took up, an open one that was not running by
+	// its baseline deadline, or a running one no researcher's machine came up for.
 	const q = `
 UPDATE platform_experiments
 SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
@@ -426,6 +426,7 @@ SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
                         WHEN status = 'draft' AND proposed_at IS NULL THEN '` + string(domain.ClosePlanningLimitReached) + `'
                         WHEN status = 'draft' THEN '` + string(domain.CloseProposalExpired) + `'
                         WHEN status = 'open' THEN '` + string(domain.CloseBaselineLimitReached) + `'
+                        WHEN started_at IS NULL THEN '` + string(domain.CloseAgentsNotStarted) + `'
                         ELSE '` + string(domain.CloseEndTimeReached) + `' END,
     closed_by_kind = $3, closed_by_id = $4
 WHERE id = $1 AND status <> 'closed'`
@@ -560,11 +561,36 @@ type StartParticipant struct {
 	QuotaTierOverride domain.QuotaTier
 }
 
+// sharesBudgetSQL is domain.AgentSignup.SharesBudget of the signup s: a researcher or any other
+// agent the start gives a share.
+const sharesBudgetSQL = `s.role NOT IN ('` + string(domain.SignupRoleBaseline) + `', '` + string(domain.SignupRolePlanner) + `')`
+
+// startClock starts the clock of a running platform experiment that waits for a researcher's
+// machine, once the machine asked for under name for agentID is reported running: started_at is
+// now and ends_at duration_hours later. It writes nothing for one whose clock runs.
+func (s *PlatformExperimentsStore) startClock(ctx context.Context, platformExpID, agentID, name string) error {
+	if _, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments pe
+SET started_at = NOW(), ends_at = NOW() + make_interval(secs => pe.duration_hours * 3600), updated_at = NOW()
+WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
+  AND EXISTS (SELECT 1 FROM experiment_signups s
+              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND s.instance_name = $3
+                AND s.instance_state = '`+domain.InstanceRunning+`' AND `+sharesBudgetSQL+`)`,
+		platformExpID, agentID, name); err != nil {
+		return fmt.Errorf("platform_experiments_store.startClock: %w", err)
+	}
+	return nil
+}
+
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
-// participating agent's quota and the ladder the run has (domain.RunStages) in one transaction. The run's clock starts here: started_at is
-// now and ends_at duration_hours later, so nothing of the time it was open is taken from it. quotasFor is called with the signup set read
-// inside that transaction; returning an error rolls the whole thing back, leaving the experiment
-// open and the call safe to retry.
+// participating agent's quota and the ladder the run has (domain.RunStages) in one transaction.
+// The run's clock starts once a researcher is at work, so nothing of the time it was open or
+// waited for a machine is taken from it. With a researcher its owner runs that is here:
+// started_at is now and ends_at duration_hours later. With only researchers the platform runs,
+// started_at stays empty until the first one's machine is reported running (startClock), and
+// ends_at is agentsDue from now: the sweep closes one whose machines never came. quotasFor is
+// called with the signup set read inside that transaction; returning an error rolls the whole
+// thing back, leaving the experiment open and the call safe to retry.
 //
 // Atomic because the two halves used to be separate: the signup list was read, quotas were
 // written, and only then was the status flipped. An agent signing up in that window was durably
@@ -574,7 +600,7 @@ type StartParticipant struct {
 // or fails.
 //
 // Returns started=false when the experiment was not open.
-func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
+func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: begin tx: %w", err)
@@ -582,9 +608,16 @@ func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	tag, err := tx.Exec(ctx, `
+WITH at_work AS (
+    SELECT EXISTS (SELECT 1 FROM experiment_signups s
+                   WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
+)
 UPDATE platform_experiments
-SET status='running', started_at=NOW(), ends_at=NOW() + make_interval(secs => duration_hours * 3600), updated_at=NOW()
-WHERE id=$1 AND status='open'`, id)
+SET status='running', updated_at=NOW(),
+    started_at = CASE WHEN at_work.already THEN NOW() END,
+    ends_at = NOW() + make_interval(secs => CASE WHEN at_work.already THEN duration_hours * 3600 ELSE $2 END)
+FROM at_work
+WHERE id=$1 AND status='open'`, id, agentsDue.Seconds())
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: claim: %w", err)
 	}
@@ -603,7 +636,7 @@ SELECT s.agent_id, s.role, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_to
        s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
-WHERE s.platform_experiment_id = $1 AND s.role NOT IN ('`+string(domain.SignupRoleBaseline)+`', '`+string(domain.SignupRolePlanner)+`')
+WHERE s.platform_experiment_id = $1 AND `+sharesBudgetSQL+`
 ORDER BY s.agent_id`, id)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)

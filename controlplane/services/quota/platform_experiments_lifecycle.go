@@ -515,14 +515,43 @@ func nextStep(pe *domain.PlatformExperiment, reason string, signups []domain.Age
 	return "Baseline agent " + strings.Join(measuring, ", ") + " is measuring: once its job is COMPLETED with a summary, declare it with " + declareBaseline + ". "
 }
 
-// Describe sets on a draft where it stands with its planner, and on an open pe why it is not
-// running yet and what reader does about it (StatusReason). It is the one place that says so.
+// runningReason is where a running pe stands with its clock.
+func runningReason(pe *domain.PlatformExperiment) *domain.StatusReason {
+	if pe.AwaitsAgents() {
+		return &domain.StatusReason{Reason: "agents_starting", Message: "the run has started and none of its duration_hours is counted yet: they count from the moment the first researcher's machine is running, which sets started_at and ends_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then"}
+	}
+	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at ends_at"}
+}
+
+// closedReason is why a closed pe closed: its close_reason and what that means.
+func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
+	how := map[domain.CloseReason]string{
+		domain.CloseEndTimeReached:       "the run reached its ends_at and the platform closed it",
+		domain.CloseByRequest:            "closed_by asked for it to be closed",
+		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
+		domain.CloseProposalExpired:      "no person accepted or revised its planner's answer by proposal_expires_at and the platform closed the draft",
+		domain.CloseBaselineLimitReached: "it was not running by baseline_due_at and the platform closed it: no baseline was declared, or the start still waited for something",
+		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. None of its duration_hours was counted and no researcher took a turn: read each agent's instance for why its machine did not come up, and create it again",
+	}
+	if sentence, known := how[pe.CloseReason]; known {
+		return &domain.StatusReason{Reason: string(pe.CloseReason), Message: sentence}
+	}
+	return &domain.StatusReason{Reason: "closed", Message: "it closed before the platform kept why"}
+}
+
+// Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
+// planner, on an open one why it is not running yet and what reader does about it, on a running
+// one whether its clock runs, and on a closed one why it closed. It is the one place that says so.
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
-	if pe.Status == domain.PlatformExpDraft {
+	switch pe.Status {
+	case domain.PlatformExpDraft:
 		pe.StatusReason = draftReason(pe)
 		return nil
-	}
-	if pe.Status != domain.PlatformExpOpen {
+	case domain.PlatformExpRunning:
+		pe.StatusReason = runningReason(pe)
+		return nil
+	case domain.PlatformExpClosed:
+		pe.StatusReason = closedReason(pe)
 		return nil
 	}
 	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
@@ -563,7 +592,7 @@ func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.Platf
 	if err != nil {
 		return nil, err
 	}
-	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
+	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, s.cfg.AgentsDue, func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		if len(participants) == 0 {
 			return nil, nil, noResearchers(pe.ID)
 		}
@@ -703,10 +732,10 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 	return s.stored(ctx, id)
 }
 
-// SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, a
-// draft whose planning limit passed or whose answer no person took up, which releases its
-// machine, and an open one that is not running by its BaselineDueAt: the machines that were to
-// measure its baseline would be rented for nothing.
+// SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, one
+// no researcher's machine came up for by its AgentsDueAt, a draft whose planning limit passed or
+// whose answer no person took up, which releases its machine, and an open one that is not running
+// by its BaselineDueAt: the machines that were to measure its baseline would be rented for nothing.
 func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 	now := time.Now()
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning} {

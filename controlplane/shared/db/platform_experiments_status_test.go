@@ -73,8 +73,10 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v hours, %v, want no end, no start, its baseline deadline and one hour", open.EndsAt, open.StartedAt, open.BaselineDueAt, open.DurationHours, err)
 	}
 
+	// A researcher its owner runs is at work from the start, so the clock starts with it.
+	spawnTestAgents(t, pes, pe.ID, domain.AgentSignup{})
 	before := time.Now().Add(-time.Second)
-	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
+	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, time.Hour, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
 	if err != nil || !started {
 		t.Fatalf("start: got = %v, %v, want started", started, err)
 	}
@@ -96,6 +98,92 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 	}
 	if closed, err := pes.GetPlatformExperiment(ctx, pe.ID); err != nil || !closed.EndsAt.Equal(running.EndsAt) || closed.CloseReason != domain.CloseEndTimeReached {
 		t.Fatalf("closed: got = ends %v, %s, %v, want the run's end kept and end_time_reached", closed.EndsAt, closed.CloseReason, err)
+	}
+}
+
+// A run started while its launcher was unreachable: no researcher's machine came up, its 45
+// minutes passed with nobody at work and it closed end_time_reached. The clock of a run whose
+// researchers the platform runs starts when the first one's machine is reported running, the wait
+// is bounded, and one closed waiting says so.
+func TestARunsLengthCountsFromTheFirstResearchersMachineRunning(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const agentsDue, windDown = 20 * time.Minute, 2 * time.Minute
+	start := func() (pe, researcher, baseline string) {
+		t.Helper()
+		launcher := "launcher-" + uuid.New().String()[:8]
+		pe = createTestPEWithCoordinator(t, pool, launcher)
+		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET duration_hours = 1 WHERE id = $1`, pe); err != nil {
+			t.Fatal(err)
+		}
+		ids := spawnTestAgents(t, pes, pe,
+			domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist"},
+			domain.AgentSignup{Hosted: true, Launcher: launcher, Flavor: "generalist", Role: domain.SignupRoleBaseline})
+		started, _, err := pes.StartPlatformExperimentTx(ctx, pe, agentsDue, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
+		if err != nil || !started {
+			t.Fatalf("start: got = %v, %v, want started", started, err)
+		}
+		return pe, ids[0], ids[1]
+	}
+	read := func(pe string) *domain.PlatformExperiment {
+		t.Helper()
+		got, err := pes.GetPlatformExperiment(ctx, pe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	observe := func(pe, agent, state string) {
+		t.Helper()
+		if err := pes.AskInstance(ctx, pe, agent, "machine-"+agent, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := pes.ObserveInstance(ctx, pe, agent, "machine-"+agent, state, nil, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pe, researcher, baseline := start()
+	waiting := read(pe)
+	if !waiting.AwaitsAgents() || !waiting.EndsAt.IsZero() || time.Until(waiting.AgentsDueAt) > agentsDue || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
+		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no clock and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, agentsDue)
+	}
+	agents, err := pes.ListLauncherAgents(ctx, waiting.Coordinator.Launcher, windDown)
+	if err != nil || len(agents) == 0 || !agents[0].EndsBy.Equal(waiting.AgentsDueAt.Add(time.Hour+windDown)) {
+		t.Fatalf("machines rented while it waits: got = %+v, %v, want them bound by the latest end the run can have, %s", agents, err, waiting.AgentsDueAt.Add(time.Hour+windDown))
+	}
+	observe(pe, baseline, domain.InstanceRunning)
+	observe(pe, researcher, domain.InstanceStarting)
+	if still := read(pe); !still.AwaitsAgents() {
+		t.Fatalf("a baseline agent's machine running and a researcher's starting: started %v, want no clock yet", still.StartedAt)
+	}
+	before := time.Now().Add(-time.Second)
+	observe(pe, researcher, domain.InstanceRunning)
+	running := read(pe)
+	if running.StartedAt.Before(before) || !running.EndsAt.Equal(running.StartedAt.Add(time.Hour)) || !running.AgentsDueAt.IsZero() {
+		t.Fatalf("a researcher's machine running: got = started %v, ends %v, agents due %v, want the clock started now for one hour", running.StartedAt, running.EndsAt, running.AgentsDueAt)
+	}
+	observe(pe, researcher, domain.InstanceRunning)
+	if again := read(pe); !again.StartedAt.Equal(running.StartedAt) {
+		t.Fatalf("the machine reported again: started moved from %v to %v", running.StartedAt, again.StartedAt)
+	}
+
+	pe, _, _ = start()
+	due := read(pe).AgentsDueAt
+	if err := pes.ClosePlatformExperiment(ctx, pe, nil); err != nil {
+		t.Fatal(err)
+	}
+	if closed := read(pe); closed.CloseReason != domain.CloseAgentsNotStarted || !closed.AgentsDueAt.Equal(due) || !closed.StartedAt.IsZero() || !closed.EndsAt.IsZero() {
+		t.Fatalf("closed waiting: got = %s, agents due %v, started %v, ends %v, want agents_not_started with its deadline kept and no run", closed.CloseReason, closed.AgentsDueAt, closed.StartedAt, closed.EndsAt)
+	}
+	// Applying the schema again leaves a run with no clock as it is: only a row from before
+	// started_at was kept is given one.
+	if err := applySchemaAt(ctx, testDSN()); err != nil {
+		t.Fatal(err)
+	}
+	if closed := read(pe); !closed.StartedAt.IsZero() {
+		t.Fatalf("after the schema is applied again: started %v, want none", closed.StartedAt)
 	}
 }
 

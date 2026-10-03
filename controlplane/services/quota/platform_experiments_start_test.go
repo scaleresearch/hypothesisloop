@@ -54,7 +54,7 @@ func (f *startStore) GetPlatformExperiment(ctx context.Context, id string) (*dom
 	return f.pe, nil
 }
 
-func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string,
+func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string, _ time.Duration,
 	quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	participants := slices.Clone(f.participants)
 	for i := range participants {
@@ -270,6 +270,43 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 	}
 }
 
+// A closed platform experiment answered close_reason and no status_reason, and a running one
+// neither: "why is it in this state" is one field in every status. A run that waits for its first
+// researcher's machine says that none of its duration counts yet and when the wait ends.
+func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
+	svc := newSignupTestService(t, &startStore{})
+	now := time.Now().UTC()
+	waiting := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning}
+	waiting.SetClosesAt(now.Add(20 * time.Minute))
+	started := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, StartedAt: now}
+	started.SetClosesAt(now.Add(time.Hour))
+	if !waiting.AwaitsAgents() || waiting.AgentsDueAt.IsZero() || !waiting.EndsAt.IsZero() || !waiting.ClosesAt().Equal(waiting.AgentsDueAt) {
+		t.Fatalf("a running one with no clock: agents due %v, ends %v, closes %v, want only its agents deadline", waiting.AgentsDueAt, waiting.EndsAt, waiting.ClosesAt())
+	}
+	if started.AwaitsAgents() || !started.AgentsDueAt.IsZero() || !started.ClosesAt().Equal(started.EndsAt) {
+		t.Fatalf("a running one whose clock runs: agents due %v, ends %v, want only its end", started.AgentsDueAt, started.EndsAt)
+	}
+	cases := map[string]*domain.PlatformExperiment{
+		"agents_starting": waiting,
+		"running":         started,
+		"closed":          {ID: "pe-1", Status: domain.PlatformExpClosed},
+	}
+	for _, reason := range []domain.CloseReason{domain.CloseEndTimeReached, domain.CloseByRequest, domain.ClosePlanningLimitReached,
+		domain.CloseProposalExpired, domain.CloseBaselineLimitReached, domain.CloseAgentsNotStarted} {
+		cases[string(reason)] = &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpClosed, CloseReason: reason}
+	}
+	for want, pe := range cases {
+		if err := svc.Describe(context.Background(), pe, auth.Principal{Kind: auth.KindUser}); err != nil || pe.StatusReason == nil || pe.StatusReason.Reason != want || pe.StatusReason.Message == "" {
+			t.Errorf("%s %s: status_reason = %+v, %v, want reason %s and a sentence", pe.Status, pe.CloseReason, pe.StatusReason, err, want)
+		}
+	}
+	closedWaiting := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpClosed, CloseReason: domain.CloseAgentsNotStarted}
+	closedWaiting.SetClosesAt(now)
+	if closedWaiting.AgentsDueAt.IsZero() || !closedWaiting.BaselineDueAt.IsZero() {
+		t.Errorf("closed with no machine up: agents due %v, baseline due %v, want the deadline it missed kept under its name", closedWaiting.AgentsDueAt, closedWaiting.BaselineDueAt)
+	}
+}
+
 // sweptStore is startStore with what the sweep reads, counting the starts that got through.
 type sweptStore struct {
 	startStore
@@ -282,12 +319,12 @@ func (f *sweptStore) ListPlatformExperimentsByStatus(context.Context, domain.Pla
 	return []*domain.PlatformExperiment{f.pe}, nil
 }
 
-func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
+func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	if f.lost {
 		return false, nil, nil
 	}
 	f.started++
-	return f.startStore.StartPlatformExperimentTx(ctx, id, quotasFor)
+	return f.startStore.StartPlatformExperimentTx(ctx, id, agentsDue, quotasFor)
 }
 
 // A field a boundary can cut from is started on the ladder: only the first stage's share is

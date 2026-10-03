@@ -84,7 +84,8 @@ WHERE `+c.key, platformExpID, agentID, name, launch)
 // marker the machine's command last printed, nil when the launcher could not read it. The time
 // of progress is the database's own, taken when the marker differs from the one stored, and at
 // most progressStampsPerLimit times per progressLimit. A report that changes nothing writes
-// nothing.
+// nothing. An agent's machine reported running starts the clock of a run that waited for it
+// (startClock).
 func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error {
 	c := instanceOf(agentID)
 	stamp := `($5::text IS NOT NULL AND $5 <> ` + c.prefix + `progress AND (` + c.prefix + `progress_at IS NULL OR ` + c.prefix + `progress_at <= now() - make_interval(secs => $6)))`
@@ -98,6 +99,9 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
 		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
+	}
+	if agentID != "" && state == domain.InstanceRunning {
+		return s.startClock(ctx, platformExpID, agentID, name)
 	}
 	return nil
 }
