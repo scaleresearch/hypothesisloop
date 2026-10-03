@@ -233,6 +233,10 @@ CREATE TABLE IF NOT EXISTS experiments (
     estimated_cost_acch       DOUBLE PRECISION  NOT NULL DEFAULT 0,
     queued_at                TIMESTAMPTZ,
     submitted_at             TIMESTAMPTZ,
+    -- When a runtime first reported the end of the run it measured under the job's current
+    -- admission. One before submitted_at is an earlier admission's. The run is placed in time by
+    -- it, so every later report of the same run places it where the first did.
+    run_reported_at          TIMESTAMPTZ,
 	-- Why the job's last attempt ended, as "code" or "code: detail": written by the requeue or
 	-- the terminal write that ended it and cleared by the claim that starts the next, so it never
 	-- explains an attempt other than the one the status is about (experiments_reason_of_attempt).
@@ -294,6 +298,7 @@ WHERE ran_on_accelerator_type = '' AND accelerator_type <> ''
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_access_key_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS data_secret_access_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiments ADD COLUMN IF NOT EXISTS secret_env JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE experiments ADD COLUMN IF NOT EXISTS run_reported_at TIMESTAMPTZ;
 
 -- artifacts held a file list no code ever wrote and no code ever read. Jobs may push metrics and
 -- nothing else, so a job could never report its own files; the real bytes live in the object

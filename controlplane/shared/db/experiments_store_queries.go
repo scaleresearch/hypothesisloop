@@ -316,6 +316,39 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 	return out, nil
 }
 
+// RunFirstReportedAt returns, for each named job that holds capacity, when the end of its run was
+// first reported under its current admission. A job no report has named since it was admitted
+// gets now, and keeps it: the claim is one conditional write, so two reports arriving together
+// read the same time.
+func (s *ExperimentsStore) RunFirstReportedAt(ctx context.Context, ids []string) (map[string]time.Time, error) {
+	if len(ids) == 0 {
+		return map[string]time.Time{}, nil
+	}
+	if _, err := s.pool.pool.Exec(ctx, `UPDATE experiments SET run_reported_at = NOW()
+WHERE id = ANY($1) AND submitted_at IS NOT NULL AND (run_reported_at IS NULL OR run_reported_at < submitted_at)`, ids); err != nil {
+		return nil, fmt.Errorf("experiments_store.RunFirstReportedAt: claim: %w", err)
+	}
+	rows, err := s.pool.pool.Query(ctx, `SELECT id, run_reported_at FROM experiments
+WHERE id = ANY($1) AND run_reported_at >= submitted_at`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.RunFirstReportedAt: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]time.Time, len(ids))
+	for rows.Next() {
+		var id string
+		var at time.Time
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, fmt.Errorf("experiments_store.RunFirstReportedAt: scan: %w", err)
+		}
+		out[id] = at
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("experiments_store.RunFirstReportedAt: %w", err)
+	}
+	return out, nil
+}
+
 // RecentlyTriedClusters reports the set of cluster_ids ANY experiment failed a speculative
 // scale-up attempt on within the last ttl — not just this job's own tried_clusters. Only those
 // two reasons count, and an entry from before reasons were kept, which was one of them: a job's

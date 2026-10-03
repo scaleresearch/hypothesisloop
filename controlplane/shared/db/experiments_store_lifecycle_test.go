@@ -348,3 +348,48 @@ func TestPlacementCarriesTheSlotAJobWasAdmittedTo(t *testing.T) {
 		t.Errorf("on no slot: %+v, want %+v", got[plain], want)
 	}
 }
+
+// A measured run is placed in time by the first report of its end, so that time is kept through
+// every later report of the same admission, and an admission after it starts over.
+func TestTheFirstReportOfARunIsKeptUntilTheJobIsAdmittedAgain(t *testing.T) {
+	pool, _, agentID, peID := setupCapTestPool(t, 4)
+	exps := NewExperimentsStore(pool)
+	ctx := context.Background()
+	placed, queued := "run-placed-"+peID, "run-queued-"+peID
+	seedExperimentForCapTest(t, pool, placed, agentID, peID, 1, domain.StatusSubmitted)
+	seedExperimentForCapTest(t, pool, queued, agentID, peID, 1, domain.StatusQueued)
+	admit := func(ago string) {
+		t.Helper()
+		if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET submitted_at = NOW() - $2::interval WHERE id = $1`, placed, ago); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reported := func() time.Time {
+		t.Helper()
+		got, err := exps.RunFirstReportedAt(ctx, []string{placed, queued})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, held := got[queued]; held || len(got) != 1 {
+			t.Fatalf("first reports = %v, want one for the placed job and none for the job that holds no capacity", got)
+		}
+		return got[placed]
+	}
+
+	admit("10 minutes")
+	first := reported()
+	if time.Since(first) > time.Minute {
+		t.Fatalf("first report at %v, want now", first)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET run_reported_at = run_reported_at - interval '5 minutes' WHERE id = $1`, placed); err != nil {
+		t.Fatal(err)
+	}
+	if again := reported(); !again.Equal(first.Add(-5 * time.Minute)) {
+		t.Errorf("a later report moved the first from %v to %v", first.Add(-5*time.Minute), again)
+	}
+
+	admit("1 minute")
+	if readmitted := reported(); readmitted.Before(first) {
+		t.Errorf("after a new admission the first report is %v, want one made since", readmitted)
+	}
+}
