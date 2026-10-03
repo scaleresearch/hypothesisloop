@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -239,6 +239,111 @@ describe('a proposed draft', () => {
     show(proposed())
     await userEvent.click(screen.getByRole('button', { name: 'Abandon this draft' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/close')
+  })
+})
+
+// A person who had nothing to change still had to find the button at the foot of the proposal
+// before anything ran.
+describe('a proposal the person sees for the first time', () => {
+  const proposedAt = '2026-10-05T12:10:00Z'
+  const proposed = (at = proposedAt) => draft('proposed', { proposal, proposed_at: at })
+  const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper, {}] }]
+  const countdown = () => screen.queryByRole('timer')?.textContent
+  // A second at a time: each second of the countdown is set from the render of the one before.
+  const pass = async (seconds: number) => {
+    for (let second = 0; second < seconds; second++) await act(() => vi.advanceTimersByTimeAsync(1_000))
+  }
+  const visibility = (state: 'visible' | 'hidden') => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state)
+    fireEvent(document, new Event('visibilitychange'))
+  }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('counts down from 10 s where the person can see it and stop it', async () => {
+    show(proposed())
+    expect(countdown()).toBe('Starting in 10 s')
+    expect(screen.getByRole('button', { name: 'Wait, let me edit' })).toBeTruthy()
+    await pass(3)
+    expect(countdown()).toBe('Starting in 7 s')
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+
+  it('accepts at zero with the values shown, once', async () => {
+    show(proposed())
+    await pass(10)
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith(...accepted)
+    expect(countdown()).toBeUndefined()
+    await pass(30)
+    expect(apiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['the person asks it to wait', () => fireEvent.click(screen.getByRole('button', { name: 'Wait, let me edit' }))],
+    ['a field takes the focus', () => act(() => screen.getByLabelText('Name').focus())],
+    ['a key is pressed in the form', () => fireEvent.keyDown(screen.getByLabelText('Budget (accelerator-hours)'), { key: '7' })],
+    ['the pointer moves over the proposal', () => fireEvent.pointerMove(screen.getByText('One seed only.'))],
+    ['the person starts to ask for a change', () => fireEvent.pointerDown(screen.getByLabelText('What should be different?'))],
+  ])('stops for good when %s, and accepts nothing by itself', async (_what, react) => {
+    show(proposed())
+    await pass(4)
+    react()
+    expect(countdown()).toBeUndefined()
+    await pass(30)
+    expect(apiSend).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', false)
+  })
+
+  it('stops for good when the tab is hidden, and does not start again when it is shown', async () => {
+    show(proposed())
+    await pass(4)
+    act(() => visibility('hidden'))
+    expect(countdown()).toBeUndefined()
+    act(() => visibility('visible'))
+    await pass(30)
+    expect(countdown()).toBeUndefined()
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+
+  it('does not start on a page that is hidden when the proposal arrives', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    show(proposed())
+    await pass(30)
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+
+  it('never starts again for a proposal an earlier load showed, and starts for the next proposal after a revision', async () => {
+    const first = show(proposed())
+    expect(countdown()).toBe('Starting in 10 s')
+    first.unmount()
+    const again = show(proposed())
+    expect(countdown()).toBeUndefined()
+    await pass(30)
+    expect(apiSend).not.toHaveBeenCalled()
+    again.unmount()
+    show(proposed('2026-10-05T12:40:00Z'))
+    expect(countdown()).toBe('Starting in 10 s')
+  })
+
+  it('shows why the API refused at zero, and does not count again', async () => {
+    vi.mocked(apiSend).mockRejectedValue(new Error('accelerator_unreachable: no cluster has rtx-4090 now'))
+    show(proposed())
+    await pass(10)
+    expect(screen.getByRole('alert').textContent).toMatch(/no cluster has rtx-4090 now/)
+    expect(countdown()).toBeUndefined()
+    await pass(30)
+    expect(apiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not count for a reader, nor while the planner revises', async () => {
+    render(<SWRConfig value={{ provider: () => new Map() }}><DraftView draft={proposed()} readOnly /></SWRConfig>)
+    expect(countdown()).toBeUndefined()
+    cleanup()
+    show(draft('revising', { proposal }))
+    expect(countdown()).toBeUndefined()
+    await pass(30)
+    expect(apiSend).not.toHaveBeenCalled()
   })
 })
 

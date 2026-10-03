@@ -91,6 +91,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   if (!draft.status_reason) throw new Error(`draft ${draft.id} came without a status_reason`)
   const state = draft.status_reason.reason
   const reread = () => void mutate(['pe', draft.id])
+  const revise = !readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
   async function abandon() {
     setAbandonError(null)
@@ -135,10 +136,11 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           </CardContent>
         </Card>
       )}
-      {draft.proposal && (
-        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} onDone={reread} />
-      )}
-      {!readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />}
+      {draft.proposal ? (
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} onDone={reread}>
+          {revise}
+        </ProposalForm>
+      ) : revise}
       {!readOnly && (
         <div className="mt-2 flex items-center gap-3">
           <Button variant="ghost" onClick={abandon}>Abandon this draft</Button>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { useAutoAccept } from '@/lib/auto-accept'
 import { acceleratorLabel, formatAccH } from '@/lib/format'
 import { acceptDraft } from '@/lib/planning'
 import type { Draft, Proposal, ProposedAgent } from '@/lib/planning'
@@ -12,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
-import { InlineError } from '@/components/ui/status-message'
+import { Callout, InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Pill } from '@/components/ui/text'
 
 function metricLine(metric: MetricDefinition): string {
@@ -73,9 +74,17 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
  * What the planner proposed, as the experiment filled in: what is measured, how and on what,
  * who runs it, and what it may spend. The name, the budget, the duration and the number of
  * researchers are the person's to change, and accepting sends them as shown. Nothing has run.
- * `editable` is off for a reader and while the planner revises, when it is only read.
+ * `editable` is off for a reader and while the planner revises, when it is only read. A proposal
+ * the person sees for the first time is accepted by itself after a countdown, unless they do
+ * anything in the form or in `children`, the box that asks the planner for a change.
  */
-export function ProposalForm({ draft, proposal, editable, onDone }: { draft: Draft; proposal: Proposal; editable: boolean; onDone: () => void }) {
+export function ProposalForm({ draft, proposal, editable, onDone, children }: {
+  draft: Draft
+  proposal: Proposal
+  editable: boolean
+  onDone: () => void
+  children?: ReactNode
+}) {
   const [name, setName] = useState(proposal.experiment.name)
   const [budget, setBudget] = useState(String(proposal.budget_accelerator_hours))
   const [hours, setHours] = useState(String(proposal.duration_hours))
@@ -103,10 +112,22 @@ export function ProposalForm({ draft, proposal, editable, onDone }: { draft: Dra
     }
   }
 
+  const auto = useAutoAccept(draft.id, editable ? draft.proposed_at : undefined, accept)
+
   return (
+    // Any sign of a person at work in here ends the countdown: they are deciding for themselves.
+    <div onFocus={auto.stop} onKeyDown={auto.stop} onPointerDown={auto.stop} onPointerMove={auto.stop} onWheel={auto.stop}>
     <Card>
       <CardHeader><CardTitle>Proposed experiment</CardTitle></CardHeader>
       <CardContent className="grid gap-4">
+        {auto.secondsLeft !== null && (
+          <Callout tone="accent" className="mb-0 flex flex-wrap items-center justify-between gap-3">
+            <span>
+              <span role="timer" className="font-semibold">Starting in {auto.secondsLeft} s</span> as proposed. Touch anything here to decide yourself.
+            </span>
+            <Button size="sm" onClick={auto.stop}>Wait, let me edit</Button>
+          </Callout>
+        )}
         <Sentences title="Before you start, the planner asks" items={proposal.questions} />
         <FormField label="Name">
           <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
@@ -186,5 +207,7 @@ export function ProposalForm({ draft, proposal, editable, onDone }: { draft: Dra
         )}
       </CardContent>
     </Card>
+    {children}
+    </div>
   )
 }
