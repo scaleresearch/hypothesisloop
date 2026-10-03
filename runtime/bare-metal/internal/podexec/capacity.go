@@ -25,6 +25,18 @@ type runningRequests struct {
 	memoryBytes  int64
 	storageBytes int64
 	accelerators map[string]int64 // "key=value" -> count in use
+	// unreadable is set when a container's requests cannot be read. What it holds is then
+	// unknown, so nothing of the node is reported free until it is gone: left out, its share read
+	// as free while it was held and a second job was booked onto it.
+	unreadable bool
+}
+
+// left is what of total no container holds, given taken is what the readable ones hold.
+func (r runningRequests) left(total, taken int64) int64 {
+	if r.unreadable {
+		return 0
+	}
+	return max(total-taken, 0)
 }
 
 // A job with an operation in flight is counted from the operation: its requests are taken from
@@ -57,15 +69,21 @@ func sumRequests(ops map[string]operation, containers []containerInfo) runningRe
 	out := runningRequests{accelerators: map[string]int64{}}
 	for _, c := range claims {
 		count, countErr := requestLabel(c, LabelAcceleratorCnt)
-		if acceleratorType := c.Labels[LabelAcceleratorType]; acceleratorType != "" && countErr == nil && count > 0 {
-			out.accelerators[acceleratorType] += count
+		acceleratorType := c.Labels[LabelAcceleratorType]
+		var typeErr error
+		if count > 0 && acceleratorType == "" {
+			typeErr = fmt.Errorf("podexec: container %s holds %d accelerators and names no type in label %s", c.name(), count, LabelAcceleratorType)
 		}
 		cpuMilli, cpuErr := requestLabel(c, LabelCPUCores)
 		memoryBytes, memoryErr := requestLabel(c, LabelMemoryBytes)
 		storageBytes, storageErr := requestLabel(c, LabelStorageBytes)
-		if err := errors.Join(countErr, cpuErr, memoryErr, storageErr); err != nil {
-			log.Printf("podexec: skipping a container in the capacity read, its requests are not counted as taken: %v", err)
+		if err := errors.Join(countErr, typeErr, cpuErr, memoryErr, storageErr); err != nil {
+			log.Printf("podexec: this node is reported with nothing free until the container is gone, what it holds cannot be read: %v", err)
+			out.unreadable = true
 			continue
+		}
+		if count > 0 {
+			out.accelerators[acceleratorType] += count
 		}
 		out.cpuMilli += cpuMilli
 		out.memoryBytes += memoryBytes
@@ -91,11 +109,7 @@ func (e *Executor) GetLiveCPUCapacity(ctx context.Context) (available, total flo
 		return 0, 0, err
 	}
 	total = totalCPUCores()
-	availMilli := int64(total*1000) - requests.cpuMilli
-	if availMilli < 0 {
-		availMilli = 0
-	}
-	return float64(availMilli) / 1000.0, total, nil
+	return float64(requests.left(int64(total*1000), requests.cpuMilli)) / 1000.0, total, nil
 }
 
 func (e *Executor) GetLiveRAMCapacity(ctx context.Context) (available, total int64, err error) {
@@ -107,11 +121,7 @@ func (e *Executor) GetLiveRAMCapacity(ctx context.Context) (available, total int
 	if err != nil {
 		return 0, 0, err
 	}
-	available = total - requests.memoryBytes
-	if available < 0 {
-		available = 0
-	}
-	return available, total, nil
+	return requests.left(total, requests.memoryBytes), total, nil
 }
 
 // storageReading is one look at the disk jobs write to.
@@ -170,7 +180,8 @@ func (e *Executor) readStorage(ctx context.Context) (storageReading, error) {
 	for _, c := range containers {
 		total += written[c.ID]
 	}
-	available := max(min(free, total-sumRequests(ops, containers).storageBytes), 0)
+	requests := sumRequests(ops, containers)
+	available := min(free, requests.left(total, requests.storageBytes))
 	return storageReading{available: available, total: total}, nil
 }
 
@@ -236,15 +247,11 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	}
 	available = map[string]int64{}
 	for label, t := range total {
-		free := t - inUse[strings.ToLower(label)]
-		if free < 0 {
-			free = 0
-		}
-		available[label] = free
+		available[label] = requests.left(t, inUse[strings.ToLower(label)])
 	}
 	// Every job holds cores, an accelerator job too, so the cores free are those no running job
 	// was given, whatever its type.
-	available[cores] = max(total[cores]*1000-requests.cpuMilli, 0) / 1000
+	available[cores] = requests.left(total[cores]*1000, requests.cpuMilli) / 1000
 	byNode = map[string]map[string]int64{e.nodeName: available}
 	labels := make(map[string]string, len(e.nodeLabels))
 	for k, v := range e.nodeLabels {

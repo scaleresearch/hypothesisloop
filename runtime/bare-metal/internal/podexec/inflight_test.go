@@ -801,7 +801,9 @@ func TestQuickEngineCallsCarryADeadlineAndSlowOnesDoNot(t *testing.T) {
 	}
 }
 
-func TestAContainerWithNoReadableRequestsIsSkippedAndKeepsItsDevice(t *testing.T) {
+// Left out of the capacity read, the container's share read as free while it was held, and a
+// second job was booked onto it.
+func TestAContainerWithNoReadableRequestsLeavesNothingFreeAndKeepsItsDevice(t *testing.T) {
 	f := newFakeEngine()
 	e := newFakeExecutor(f, "/dev/fake/0", "/dev/fake/1")
 	ctx := t.Context()
@@ -818,11 +820,11 @@ func TestAContainerWithNoReadableRequestsIsSkippedAndKeepsItsDevice(t *testing.T
 	if err != nil {
 		t.Fatalf("GetLiveCPUCapacity: got = %v, want = nil", err)
 	}
-	if available != total {
-		t.Fatalf("CPU available = %v of %v, want the unreadable container left out", available, total)
+	if available != 0 || total == 0 {
+		t.Fatalf("CPU available = %v of %v, want none free while what the container holds is unknown", available, total)
 	}
-	if free := freeAccelerators(t, ctx, e); free != 1 {
-		t.Fatalf("%d accelerators free, want the unreadable container's device still taken", free)
+	if free := freeAccelerators(t, ctx, e); free != 0 {
+		t.Fatalf("%d accelerators free, want none while what the container holds is unknown", free)
 	}
 
 	f.mu.Lock()
