@@ -56,7 +56,10 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
     stages, jobs = cross_first_boundary_ranked(api, pe_id, agents, deadline)
 
     cut_agents = stages["cut_agents"]
-    active_agents = stages["active_agents"]
+    # The agent that measured the baseline is never cut and is no part of the ranked field.
+    baseline = api.baseline_of[pe_id].agent
+    assert baseline in stages["active_agents"], stages
+    active_agents = [a for a in stages["active_agents"] if a != baseline]
     cut_n, active_n = len(cut_agents), len(active_agents)
     assert active_n + cut_n == len(agents), f"active({active_n})+cut({cut_n}) != {len(agents)} agents"
     # 50% of 6 survivors. Fewer is legitimate only if a tie group straddled the line; more is a bug.

@@ -360,7 +360,10 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
 
     stages, jobs = cross_first_boundary_ranked(api, pe_id, agents, deadline)
     cut = {c["agent_id"] for c in stages["cut_agents"]}
-    survivors = set(stages["active_agents"])
+    # The agent that measured the baseline is never cut and holds no machine once the run started.
+    baseline = api.baseline_of[pe_id].agent
+    assert baseline in stages["active_agents"] and baseline not in cut, stages
+    survivors = set(stages["active_agents"]) - {baseline}
     assert cut | survivors == set(agents)
     assert cut, "the boundary cut nobody, so no cut agent's machine was looked at"
 
@@ -477,7 +480,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         # A note it writes is its own and no agent's.
         idea = with_repo.register_human_hypothesis(pe_id, "an idea the coordinator has a note on")
         note = json.loads(as_coordinator.hl("hypothesis", "comment", idea["id"], "--text", "the coordinator's note"))
-        assert (note["agent_id"], note["actor"]) == ("", {"kind": "coordinator", "id": pe_id, "name": "coordinator"}), note
+        assert "agent_id" not in note and note["actor"] == {"kind": "coordinator", "id": pe_id, "name": "coordinator"}, note
 
         # Its machine exits: recorded on the platform experiment, asked for again under a new name.
         first = coordinator["name"]

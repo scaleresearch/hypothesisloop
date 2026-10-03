@@ -56,7 +56,7 @@ def test_stage_boundary_advances_and_terminal_jobs_settle(api, experiment, run_i
         accept=lambda st: st["current_stage"] >= 2,
         deadline=deadline,
     )
-    assert sorted(stages["active_agents"]) == sorted(agents), (
+    assert sorted(stages["active_agents"]) == sorted([*agents, api.baseline_of[pe_id].agent]), (
         f"cut {stages['cut_agents']} from a field in which nobody completed a job"
     )
 
