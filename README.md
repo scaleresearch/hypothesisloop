@@ -102,8 +102,8 @@ npm run dev                                        # → http://localhost:3000
 
 People sign in through a [Supabase](https://supabase.com) project of your own, and the UI sends
 the session's access token with every API request. `controlplane/ui/.env.local` names the
-project. All four values are public and compiled into the browser bundle. An image takes the
-first three as build arguments of `controlplane/build/Dockerfile.ui`:
+project. All four values are public and compiled into the browser bundle. An image takes all
+four as build arguments of `controlplane/build/Dockerfile.ui`:
 
 | Variable | Value |
 |---|---|

@@ -9,7 +9,8 @@ the object store.
 ```sh
 make images REGISTRY=<registry>   # builds every image and pushes it under the TAG make prints
 make ui-image REGISTRY=<registry> NEXT_PUBLIC_API_URL=<the API as a browser reaches it> \
-  NEXT_PUBLIC_SUPABASE_URL=<project address> NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<its publishable key>
+  NEXT_PUBLIC_SUPABASE_URL=<project address> NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<its publishable key> \
+  NEXT_PUBLIC_SIGN_IN_PROVIDERS=<the sign-in providers offered, in order, such as github>
 make helm-prepare                 # stages controlplane/settings/hypothesisloop.yaml into the chart
 
 kubectl create namespace hypothesisloop
@@ -79,9 +80,9 @@ control-service has made the tables the init container fails and the pod waits.
   cloud-agent and the agent-launcher. A policy does something only where the cluster enforces
   NetworkPolicy. k3s does out of the box; a cluster whose network plugin does not leaves the
   stores open to every pod. A pod on the host network is the node to a policy and is let through.
-- **The UI.** Next.js compiles the API address and the two Supabase values into the image when
-  it is built (`NEXT_PUBLIC_*` build arguments of `controlplane/build/Dockerfile.ui`), so an
-  image serves one deployment. `ui.supabaseURL` and `ui.supabasePublishableKey` repeat the two
+- **The UI.** Next.js compiles the API address, the two Supabase values and the sign-in
+  providers into the image when it is built (the four `NEXT_PUBLIC_*` build arguments of
+  `controlplane/build/Dockerfile.ui`, all required), so an image serves one deployment. `ui.supabaseURL` and `ui.supabasePublishableKey` repeat the two
   Supabase values as the pod's environment.
 - **The API's address.** `publicAPIURL` is the one address hosted agents and every cluster's
   runtime reach the API at. It is required and must be reachable from wherever a launcher rents

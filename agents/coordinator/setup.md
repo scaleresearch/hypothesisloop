@@ -417,8 +417,10 @@ shows each hosted agent's `instance`:
     restarts     how many times the machine was started again, 3 at most
     end_reason   why the last machine was given up on: exited, gone (the provider no longer
                  lists it), never_seen, still_starting (both past the boot limit), silent
-                 (running with no progress for the progress limit), or released (the platform
-                 took it down because its run was over: no failure, and no restart spent)
+                 (running with no progress for the progress limit), expired (the provider
+                 ended it at its own lifetime), progress_unreadable (its output could not be
+                 read for the progress limit), or released (the platform took it down because
+                 its run was over). The last three are no failure and spend no restart
     exited_at, exit_log   when that was, and the end of what the harness wrote, the reason
                  there is nothing, or for released which end of the run it was
 
