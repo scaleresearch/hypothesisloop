@@ -95,7 +95,8 @@ def test_unschedulable_job_is_evicted_early_refunded_and_attributed_to_the_agent
         deadline=deadline,
     )
     assert final["status"] in ("EVICTED", "FAILED"), f"unpullable job never terminated: {final['status']!r}"
-    assert final.get("eviction_reason") == "unschedulable"
+    # "code: detail", the detail what the runtime said: here why the image could not be pulled.
+    assert final.get("eviction_reason", "").startswith("unschedulable: image_pull_failed: "), final.get("eviction_reason")
 
     eventually(
         "unschedulable job's reservation to be returned",
