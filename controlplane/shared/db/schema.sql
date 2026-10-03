@@ -809,13 +809,14 @@ CREATE TRIGGER agent_quotas_touch BEFORE UPDATE ON agent_quotas
 
 CREATE OR REPLACE FUNCTION hypothesisloop_agent_quotas_notify() RETURNS trigger AS $$
 BEGIN
-    -- The value is the agent's total allocated accelerator hours and the detail its two parts:
-    -- enough for a waiting agent to see a grant or a stage move land without a read.
-    -- What is used of it comes from GET /quota. replayQuotas spells the same detail.
+    -- The value is the agent's share, all it may spend at either priority, as GET /quota answers
+    -- it (domain.AgentQuota.Share): its guaranteed hours, or its burst hours when it has none
+    -- guaranteed. Burst hours come out of the share and are never added to it. replayQuotas
+    -- answers the same figure.
     PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
-        (NEW.guaranteed_accelerator_hours + NEW.burst_accelerator_hours)::text,
-        'guaranteed ' || NEW.guaranteed_accelerator_hours::text || ' burst ' || NEW.burst_accelerator_hours::text,
-        NEW.platform_experiment_id, NEW.agent_id);
+        (CASE WHEN NEW.guaranteed_accelerator_hours > 0 THEN NEW.guaranteed_accelerator_hours
+              ELSE NEW.burst_accelerator_hours END)::text,
+        '', NEW.platform_experiment_id, NEW.agent_id);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

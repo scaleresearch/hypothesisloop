@@ -118,8 +118,8 @@ var EventKinds = []EventKindDoc{
 		Description: "Your job moved. detail carries why, when the platform knows, as a reason code, or the code, a colon and a sentence (code: sentence): the reason a job was evicted, rejected or requeued (no_offer: no machine to rent for shape rtx4090 in 3m0s of asking), or how a FAILED job's process ended (container_failed: command exited with code 1: the last lines it said, the most recent last), which a FAILED job always has. The code is the text before the first colon, and the same split as eviction_reason on the job. A job requeued for a fault of the platform's (code_unreachable, no_offer, stuck_pending and the like) is QUEUED with that detail and runs again at no cost. The queue reason is experiment.blocked."},
 	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
 		Description: "Why a job is still waiting. detail is the sentence that goes with the code (not_admitted_message). It changes while the status does not, so a stuck job has something to wait on. awaiting_admission and summary_gate are not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
-	{Kind: EventQuotaChanged, Subject: "agent id", Value: "total allocated accelerator hours",
-		Description: "A grant or a stage move landed. detail is its guaranteed and burst parts; what is used of it comes from GET /quota."},
+	{Kind: EventQuotaChanged, Subject: "agent id", Value: "share_accelerator_hours of GET /quota: all the agent may spend",
+		Description: "A grant or a stage move landed. What is used of the share comes from GET /quota."},
 	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
@@ -655,8 +655,8 @@ FROM agent_quotas WHERE platform_experiment_id = $1 AND updated_xid >= $2`
 		if err := rows.Scan(&agentID, &guaranteed, &burst, &position); err != nil {
 			return nil, fmt.Errorf("events_store.replayQuotas: scan: %w", err)
 		}
-		events = append(events, Event{Kind: EventQuotaChanged, Subject: agentID, Value: formatHours(guaranteed + burst),
-			Detail:               "guaranteed " + formatHours(guaranteed) + " burst " + formatHours(burst),
+		share := (&domain.AgentQuota{GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst}).Share()
+		events = append(events, Event{Kind: EventQuotaChanged, Subject: agentID, Value: formatHours(share),
 			PlatformExperimentID: peID, AgentID: agentID, Position: position})
 	}
 	if err := rows.Err(); err != nil {
