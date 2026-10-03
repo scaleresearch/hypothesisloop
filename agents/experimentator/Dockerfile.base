@@ -104,9 +104,13 @@ ENV AGENT_VENV=/agent/.venv
 RUN uv venv --seed --no-cache --python /usr/local/bin/python3 $AGENT_VENV
 WORKDIR /opt/hypothesisloop-agent
 COPY --chown=agent:agent agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
-RUN uv sync --no-dev --locked --no-cache
+RUN uv sync --no-dev --locked --no-cache --no-install-project
 
+# The harness itself is installed once its source is there. Installed before, it was recorded as
+# built without src/, and every `uv run` of a new machine fetched the build backend and built it
+# again before the harness started.
 COPY --chown=agent:agent agents/experimentator/src/ src/
+RUN uv sync --no-dev --locked --no-cache
 # No docs/ copy: the platform rules are fetched live at startup (api_client.PlatformClient.fetch_rules).
 
 # /agent/workspace is where the agent clones and works, and nothing else is ever written there:
