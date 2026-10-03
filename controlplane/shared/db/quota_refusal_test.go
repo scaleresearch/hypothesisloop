@@ -27,7 +27,7 @@ func TestAQuotaRefusalNamesTheLargestEstimateThatFits(t *testing.T) {
 		"less than a step left":                {job(16, 0.2), 0.001, 0, "No estimated_duration_hours fits a job of this size now."},
 	} {
 		got := quotaRefusal(tc.exp, tc.remaining, 0, 0)
-		if !strings.HasPrefix(got, "insufficient_guaranteed_quota: need ") || !strings.Contains(got, tc.says) {
+		if !strings.HasPrefix(got, "the guaranteed job would need ") || !strings.Contains(got, tc.says) {
 			t.Errorf("%s: %q, want it to say %q", name, got, tc.says)
 		}
 		if cost := float64(tc.exp.AcceleratorCount) * tc.fits; cost > tc.remaining {

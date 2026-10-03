@@ -28,13 +28,13 @@ func (f *inTxStore) GetPlatformExperiment(ctx context.Context, id string) (*doma
 	return testPE, nil
 }
 
-func (f *inTxStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), _ db.SubmissionRateLimit, _ func(context.Context) error) (db.AdmitDecision, string, error) {
+func (f *inTxStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), _ db.SubmissionRateLimit, _ func(context.Context) error) (db.AdmitDecision, error) {
 	f.inTx = true
 	defer func() { f.inTx = false }()
 	if _, err := observe(ctx); err != nil {
-		return db.AdmitRejected, "", err
+		return db.AdmitRejected, err
 	}
-	return db.AdmitInserted, "", nil
+	return db.AdmitInserted, nil
 }
 
 func (f *inTxStore) ReserveAdmittedFlavorTx(ctx context.Context, _ string, _ domain.AcceleratorType, _ float64, _, _ int, observe func(context.Context, string, string, time.Time) (*domain.AgentQuota, error)) (string, error) {

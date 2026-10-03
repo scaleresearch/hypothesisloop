@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -250,8 +249,9 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	admission := NewPlatformExperimentsFullStore(NewStore(pool, "http://metrics.invalid", 1))
 	late := &domain.Experiment{ID: "job-" + uuid.New().String()[:8], AgentID: runningAgents[3], PlatformExperimentID: running,
 		Actor: domain.Actor{Kind: domain.ActorAgent, ID: runningAgents[3]}, Status: domain.StatusQueued}
-	if decision, reason, err := admission.AdmitExperimentTx(ctx, late, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitRejected || !strings.HasPrefix(reason, RejectionAgentFinished) {
-		t.Errorf("admitting a finished agent's job: got = (%v, %q, %v), want = rejected as finished", decision, reason, err)
+	var refusal *AdmitRefusal
+	if decision, err := admission.AdmitExperimentTx(ctx, late, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || decision != AdmitRejected || refusal.Reason != RefusedAgentFinished {
+		t.Errorf("admitting a finished agent's job: got = (%v, %v), want = rejected as finished", decision, err)
 	}
 	submitting, err := pool.pool.Begin(ctx)
 	if err != nil {

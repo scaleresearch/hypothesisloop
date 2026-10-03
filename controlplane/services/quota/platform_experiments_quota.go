@@ -232,8 +232,9 @@ func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
 // possible: concurrent submissions observe a strict before-or-after ordering.
 // AdmitExperiment reports what the transaction decided: whether the desired-state row was
 // inserted, or the id was already QUEUED and this is a legal re-submission the caller should
-// answer by refreshing priority alone. createDataKey runs only for an inserted row, inside the
-// transaction (see db.AdmitExperimentTx).
+// answer by refreshing priority alone. A submission the transaction refuses is its
+// *db.AdmitRefusal. createDataKey runs only for an inserted row, inside the transaction (see
+// db.AdmitExperimentTx).
 func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
 	// Read before the transaction opens: created_at never changes, and a pool read made while the
 	// transaction holds its own connection needs a second one, which a burst of submissions as
@@ -245,20 +246,13 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 	if pe == nil {
 		return db.AdmitRejected, fmt.Errorf("platform_experiments.AdmitExperiment: platform experiment %s not found", exp.PlatformExperimentID)
 	}
-	decision, reason, err := s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
+	return s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
 		if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
 			return nil, err
 		}
 		return aq, nil
 	}, rateLimit, createDataKey)
-	if err != nil {
-		return decision, err
-	}
-	if reason != "" {
-		return decision, &insufficientQuotaError{message: reason}
-	}
-	return decision, nil
 }
 
 // ReserveAdmittedFlavor revalidates quota and the platform experiment's concurrency cap

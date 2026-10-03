@@ -47,10 +47,10 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	store, exp := admitDataKeyFixture(t)
 	ctx := context.Background()
 	created := 0
-	decision, reason, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{},
+	decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{},
 		func(context.Context) error { created++; return nil })
-	if err != nil || reason != "" || decision != AdmitInserted {
-		t.Fatalf("admit = %v %q %v, want inserted", decision, reason, err)
+	if err != nil || decision != AdmitInserted {
+		t.Fatalf("admit = %v %v, want inserted", decision, err)
 	}
 	got, err := store.GetExperiment(ctx, exp.ID)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	// A re-submission of the queued job keeps the first key and creates none in the store.
 	again := *exp
 	again.DataKey = domain.DataKey{AccessKeyID: "other", SecretAccessKey: "other"}
-	decision, _, err = store.AdmitExperimentTx(ctx, &again, noUsage, SubmissionRateLimit{},
+	decision, err = store.AdmitExperimentTx(ctx, &again, noUsage, SubmissionRateLimit{},
 		func(context.Context) error { created++; return nil })
 	if err != nil || decision != AdmitAlreadyQueued {
 		t.Fatalf("re-submit = %v %v, want already queued", decision, err)
@@ -85,21 +85,40 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	spent := func(context.Context) (*domain.AgentQuota, error) {
 		return &domain.AgentQuota{UsedGuaranteedAccH: 8}, nil
 	}
-	decision, reason, err = store.AdmitExperimentTx(ctx, &burst, spent, SubmissionRateLimit{}, func(context.Context) error { return nil })
-	if err != nil || decision != AdmitRejected || !strings.Contains(reason, "need 3 accelerator_hours (") || !strings.Contains(reason, "have 2 remaining") || !strings.Contains(reason, "it is spent") {
-		t.Fatalf("burst job past the share = %v %q %v, want it refused for the share, saying none of it is a reservation", decision, reason, err)
+	var refusal *AdmitRefusal
+	decision, err = store.AdmitExperimentTx(ctx, &burst, spent, SubmissionRateLimit{}, func(context.Context) error { return nil })
+	if !errors.As(err, &refusal) || decision != AdmitRejected || refusal.Reason != RefusedInsufficientQuota || !strings.Contains(refusal.Message, "need 3 accelerator_hours (") || !strings.Contains(refusal.Message, "has 2 remaining") || !strings.Contains(refusal.Message, "it is spent") {
+		t.Fatalf("burst job past the share = %v %v, want it refused for the share, saying none of it is a reservation", decision, err)
 	}
 
 	// Both researchers of a run were refused their second trial with nothing spent: the first
 	// held its whole estimate. The refusal says how many jobs hold how much.
 	held := *exp
 	held.ID, held.EstimatedCostAccH = exp.ID+"-held", 9
-	if decision, reason, err = store.AdmitExperimentTx(ctx, &held, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
-		t.Fatalf("a job inside the share = %v %q %v, want inserted", decision, reason, err)
+	if decision, err = store.AdmitExperimentTx(ctx, &held, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("a job inside the share = %v %v, want inserted", decision, err)
 	}
-	_, reason, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil })
-	if want := "have 1 remaining"; err != nil || !strings.Contains(reason, want) || !strings.Contains(reason, "1 of your jobs that have not ended hold 9 by their estimates") {
-		t.Fatalf("a job past what the queued one leaves = %q %v, want %q and the one job holding 9", reason, err, want)
+	_, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil })
+	if want := "has 1 remaining"; !errors.As(err, &refusal) || !strings.Contains(refusal.Message, want) || !strings.Contains(refusal.Message, "1 of your jobs that have not ended hold 9 by their estimates") {
+		t.Fatalf("a job past what the queued one leaves = %v, want %q and the one job holding 9", err, want)
+	}
+
+	// Each refusal carries its own reason: a cut agent and one with no quota were answered as
+	// short of credits, with a stage outlook that was not theirs.
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `DELETE FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`, exp.AgentID, exp.PlatformExperimentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedNoQuota {
+		t.Fatalf("an agent with no quota = %v, want %s", err, RefusedNoQuota)
+	}
+	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedRateLimited {
+		t.Fatalf("an agent at its hourly limit = %v, want %s", err, RefusedRateLimited)
+	}
+	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, exp.PlatformExperimentID, exp.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedAgentCut {
+		t.Fatalf("a cut agent = %v, want %s", err, RefusedAgentCut)
 	}
 }
 
@@ -109,7 +128,7 @@ func TestAdmitExperimentTxRollsBackWhenTheStoreCannotCreateTheKey(t *testing.T) 
 	store, exp := admitDataKeyFixture(t)
 	ctx := context.Background()
 	storeDown := errors.New("store down")
-	_, _, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{},
+	_, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{},
 		func(context.Context) error { return storeDown })
 	if !errors.Is(err, storeDown) {
 		t.Fatalf("admit = %v, want the store's error", err)
@@ -128,8 +147,8 @@ func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
 	store, exp := admitDataKeyFixture(t)
 	ctx := context.Background()
 	exp.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
-	if decision, reason, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
-		t.Fatalf("admit = %v %q %v, want inserted", decision, reason, err)
+	if decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("admit = %v %v, want inserted", decision, err)
 	}
 	got, err := store.GetExperiment(ctx, exp.ID)
 	if err != nil {
@@ -148,7 +167,7 @@ func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
 
 	_, onSpec := admitDataKeyFixture(t)
 	onSpec.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
-	if _, _, err := store.AdmitExperimentTx(ctx, onSpec, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err == nil {
+	if _, err := store.AdmitExperimentTx(ctx, onSpec, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err == nil {
 		t.Fatal("a job whose spec still carries secret_env was stored, want an error")
 	}
 }
@@ -158,8 +177,8 @@ func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
 func TestAnUnsummarisedJobIsOwedOnlyByWhatWasSubmittedAfterItEnded(t *testing.T) {
 	store, exp := admitDataKeyFixture(t)
 	ctx := context.Background()
-	if decision, reason, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
-		t.Fatalf("admit = %v %q %v, want inserted", decision, reason, err)
+	if decision, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil || decision != AdmitInserted {
+		t.Fatalf("admit = %v %v, want inserted", decision, err)
 	}
 	ended := time.Now().UTC().Truncate(time.Microsecond)
 	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'COMPLETED', not_admitted_reason = NULL, updated_at = $2 WHERE id = $1`, exp.ID, ended); err != nil {

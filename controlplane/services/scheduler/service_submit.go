@@ -354,24 +354,18 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit, func(ctx context.Context) error {
 		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, exp.AgentID, exp.ID)
 	})
-	if err != nil {
-		var insufficient interface{ InsufficientQuota() bool }
-		if !errors.As(err, &insufficient) {
-			// The transaction found the id taken, or lost the primary key to another agent
-			// racing the same id. Either way it is a duplicate, not a server fault.
-			if errors.Is(err, db.ErrDuplicateExperiment) {
-				return &AdmissionError{Reason: ReasonDuplicate, Message: err.Error()}
-			}
-			return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
-		}
-		reason, message := ReasonInsufficientCredits, err.Error()+" "+shareOutlook(pe)
-		switch {
-		case strings.HasPrefix(err.Error(), db.RejectionRateLimited):
-			reason, message = ReasonRateLimited, err.Error()
-		case strings.HasPrefix(err.Error(), db.RejectionAgentFinished):
-			reason, message = "agent_finished", err.Error()
-		}
-		return &AdmissionError{Reason: reason, Message: message}
+	var refusal *db.AdmitRefusal
+	switch {
+	case errors.As(err, &refusal) && refusal.Reason == ReasonInsufficientCredits:
+		return &AdmissionError{Reason: refusal.Reason, Message: refusal.Message + " " + shareOutlook(pe)}
+	case errors.As(err, &refusal):
+		return &AdmissionError{Reason: refusal.Reason, Message: refusal.Message}
+	// The transaction found the id taken, or lost the primary key to another agent racing the
+	// same id. Either way it is a duplicate, not a server fault.
+	case errors.Is(err, db.ErrDuplicateExperiment):
+		return &AdmissionError{Reason: ReasonDuplicate, Message: err.Error()}
+	case err != nil:
+		return fmt.Errorf("scheduler: atomically admit experiment: %w", err)
 	}
 
 	// Re-submitting a job that is already QUEUED is legal and only refreshes its priority: it is

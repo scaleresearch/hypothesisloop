@@ -7,6 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
@@ -24,10 +25,10 @@ var experimentIDPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // Admission error reason constants.
 const (
-	ReasonInsufficientCredits = "insufficient_credits"
+	ReasonInsufficientCredits = db.RefusedInsufficientQuota
 	ReasonDuplicate           = "duplicate"
 	ReasonMalformed           = "malformed"
-	ReasonRateLimited         = "rate_limited"
+	ReasonRateLimited         = db.RefusedRateLimited
 	ReasonJobTooLong          = "job_too_long"
 	ReasonEstimateRequired    = "estimate_required"
 	ReasonDataQuotaExceeded   = "data_quota_exceeded"

@@ -1,10 +1,14 @@
 package scheduler
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -32,5 +36,62 @@ func TestAQuotaRefusalSaysWhetherALaterStageRaisesTheShare(t *testing.T) {
 		if got := shareOutlook(tc.pe); !strings.HasPrefix(got, tc.wants) {
 			t.Errorf("%s: %q, want it to begin %q", name, got, tc.wants)
 		}
+	}
+}
+
+type admittingStore struct{ poolOnlyStore }
+
+func (admittingStore) GetRunningAndQueued(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+type novel struct{}
+
+func (novel) ComputeNovelty(context.Context, string, []*domain.Experiment) (float64, error) {
+	return 1, nil
+}
+
+// refusingQuota answers every admission with one error of the transaction.
+type refusingQuota struct {
+	QuotaService
+	err error
+}
+
+func (refusingQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
+	return nil, nil
+}
+
+func (q refusingQuota) AdmitExperiment(context.Context, *domain.Experiment, db.SubmissionRateLimit, func(context.Context) error) (db.AdmitDecision, error) {
+	return db.AdmitRejected, q.err
+}
+
+// The transaction's refusals were told apart by the first words of their text, and every one
+// that matched none was answered 402 insufficient_credits with a stage outlook: a cut agent, and
+// one with no quota. Each is answered with its own reason, and only a quota refusal says whether
+// a stage raises the share.
+func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testing.T) {
+	for reason, status := range map[string]int{
+		db.RefusedInsufficientQuota: http.StatusPaymentRequired,
+		db.RefusedRateLimited:       http.StatusTooManyRequests,
+		db.RefusedAgentCut:          http.StatusUnprocessableEntity,
+		db.RefusedAgentFinished:     http.StatusUnprocessableEntity,
+		db.RefusedNoQuota:           http.StatusUnprocessableEntity,
+	} {
+		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+			quota: refusingQuota{err: &db.AdmitRefusal{Reason: reason, Message: "the sentence of " + reason}}}
+		var refused *AdmissionError
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != reason || admissionHTTPStatus(refused.Reason) != status {
+			t.Fatalf("%s: got = %v, want that reason answered %d", reason, err, status)
+		}
+		if outlook := strings.Contains(refused.Message, "share"); outlook != (reason == db.RefusedInsufficientQuota) || !strings.HasPrefix(refused.Message, "the sentence of "+reason) {
+			t.Errorf("%s: message %q, want its own sentence, with the stage outlook for a quota refusal only", reason, refused.Message)
+		}
+	}
+
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+		quota: refusingQuota{err: errors.New("connection reset")}}
+	var refused *AdmissionError
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); err == nil || errors.As(err, &refused) {
+		t.Errorf("a failure of the transaction: got = %v, want a platform error and no refusal", err)
 	}
 }
