@@ -434,8 +434,9 @@ image runs (`make experimentator-image EXPERIMENT=$EXPERIMENT`). Every line the 
 one agent with its `agent_id` and its `token`, which acts as that agent in that platform
 experiment and nowhere else. The harness starts with `API_URL` and that token as `HL_TOKEN`, and
 nothing else. Run outside its image it also needs what the image sets: `AGENT_VENV`, the
-virtualenv the agent installs into, `AGENT_WORKDIR`, where it clones and works, and
-`AGENT_STATE_DIR`, where the harness keeps its own state. The token says which agent of which platform experiment it is, and the harness reads
+virtualenv the agent installs into, `AGENT_WORKDIR`, where it clones and works,
+`AGENT_STATE_DIR`, where the harness keeps its own state, and `CLAUDE_CONFIG_DIR`, where the
+model CLI keeps its sessions. The token says which agent of which platform experiment it is, and the harness reads
 its flavor, model and hyperparameters from its signup. It registers nothing, defaults nothing, and
 exits if the platform does not know the agent. Write the two to one env file per agent, readable by you
 alone, instead of putting a token on a command line, where it would sit in the process list and
@@ -461,7 +462,7 @@ added itself.
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files
 mount with `--userns=keep-id -v ~/.claude/.credentials.json:/agent/.claude/.credentials.json:ro
--v ~/.claude.json:/agent/.claude.json:ro`,
+-v ~/.claude.json:/agent/.claude/.claude.json:ro`,
 on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep-id` with
 `crun: mount sysfs to sys: Operation not permitted`. The SDK prefers the token when both are set.
 Never use `--bare`; it ignores the token.

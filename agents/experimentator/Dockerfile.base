@@ -119,6 +119,9 @@ RUN uv sync --no-dev --locked --no-cache
 # actually matches the agent user inside the container instead of mapping to root.
 ENV AGENT_WORKDIR=/agent/workspace
 ENV AGENT_STATE_DIR=/agent/.harness
+# Where the model CLI keeps its sessions, which the harness stores with the platform. The harness
+# requires it, so that the two never differ on where a transcript is.
+ENV CLAUDE_CONFIG_DIR=/agent/.claude
 
 ENTRYPOINT ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
 # A per-experiment overlay that needs to install/clone as root (e.g. tt-metal source) must

@@ -90,22 +90,26 @@ class SessionsTest(unittest.TestCase):
         self.assertTrue(machine.sessions.save(files, transcript))
         self.assertEqual(platform.puts, 2)
 
-    def test_a_store_that_fails_is_tried_again_after_the_next_turn(self):
+    def test_a_store_that_fails_says_why_and_the_next_one_sends_the_session(self):
         platform = Platform()
         machine = Machine(platform)
         machine.write(machine.workdir, ".claude_session_id", "s-1")
-        platform.fail = api_client.APIError("PUT", "http://x", 503, "away")
-        with self.assertLogs("llm_agent", "WARNING"):
-            self.assertFalse(machine.sessions.save([".claude_session_id"], []))
+        for failure, why in ((api_client.APIError("PUT", "http://x", 503, "away"), "the platform answered HTTP 503"),
+                             (api_client.APIError("PUT", "http://x", 0, "timed out"), "the platform could not be reached")):
+            platform.fail = failure
+            with self.assertLogs("llm_agent", "WARNING"), self.assertRaises(session.NotStored) as not_stored:
+                machine.sessions.save([".claude_session_id"], [])
+            self.assertEqual(str(not_stored.exception), why)
         platform.fail = None
         self.assertTrue(machine.sessions.save([".claude_session_id"], []))
 
     def test_a_session_above_what_the_platform_stores_is_not_sent(self):
         platform = Platform()
         machine = Machine(platform)
-        (machine.workdir / ".claude_session_id").write_bytes(os.urandom(4096))
-        with mock.patch.object(session, "MAX_BYTES", 1024), self.assertLogs("llm_agent", "ERROR"):
-            self.assertFalse(machine.sessions.save([".claude_session_id"], []))
+        (machine.workdir / ".claude_session_id").write_bytes(os.urandom(4 << 20))
+        with mock.patch.object(session, "MAX_BYTES", 1 << 20), self.assertRaises(session.NotStored) as not_stored:
+            machine.sessions.save([".claude_session_id"], [])
+        self.assertEqual(str(not_stored.exception), "it is 4.0 MiB packed and the platform stores 1 MiB")
         self.assertEqual(platform.puts, 0)
 
     def test_a_machine_with_no_stored_session_starts_fresh(self):
@@ -195,6 +199,47 @@ class ClaudeSessionFilesTest(unittest.TestCase):
         resume_id, prompt = run._restart_state(setup)
         self.assertIsNone(resume_id)
         self.assertIn("where things stand", prompt)
+
+
+class NotStoredTest(unittest.IsolatedAsyncioTestCase):
+    # A session over the limit, or one the platform would not take, was logged and skipped at
+    # every turn: the agent worked on, and a replacement machine resumed from an old snapshot
+    # with nothing having said so.
+    async def test_a_store_that_keeps_failing_is_said_in_the_activity_line_until_one_succeeds(self):
+        from hypothesisloop_agent import progress
+
+        platform = Platform()
+        machine = Machine(platform)
+        machine.write(machine.workdir, ".claude_session_id", "s-1")
+        setup = SimpleNamespace(statedir=str(machine.workdir))
+        said = []
+        beating = progress.Progress(quiet_limit_s=60, emit=said.append)
+        beating.doing("thinking")
+        platform.fail = api_client.APIError("PUT", "http://x", 413, "too large")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(machine.home)}), \
+                mock.patch.object(run, "_sessions", machine.sessions), mock.patch.object(run, "_progress", beating), \
+                mock.patch.object(run, "_not_stored_since", None):
+            with self.assertLogs("llm_agent", "WARNING") as logged:
+                await run._store_session(setup)
+            self.assertEqual(logged.records[-1].levelname, "WARNING")
+            beating.beat()
+            self.assertEqual(said[-1], "hl-activity thinking")
+            with mock.patch.object(run, "_NOT_STORED_SAID_S", 0), self.assertLogs("llm_agent", "ERROR") as logged:
+                await run._store_session(setup)
+            self.assertIn("the platform answered HTTP 413. A replacement machine would resume from the last one stored", logged.output[-1])
+            beating.beat()
+            self.assertEqual(said[-1], "hl-activity session not stored: the platform answered HTTP 413. thinking")
+            platform.fail = None
+            await run._store_session(setup)
+            self.assertEqual(platform.puts, 1)
+            self.assertIsNone(run._not_stored_since)
+            beating.beat()
+            self.assertEqual(said[-1], "hl-activity thinking")
+
+    def test_the_model_clis_home_is_named_by_the_environment_and_by_nothing_else(self):
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit) as missing:
+            run._model_home()
+        self.assertIn("CLAUDE_CONFIG_DIR", str(missing.exception))
 
 
 class MidTurnTest(unittest.IsolatedAsyncioTestCase):

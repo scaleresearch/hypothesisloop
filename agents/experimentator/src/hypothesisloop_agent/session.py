@@ -4,7 +4,6 @@ import gzip
 import hashlib
 import io
 import logging
-import os
 import tarfile
 import time
 from pathlib import Path
@@ -73,20 +72,19 @@ class Sessions:
 
     def save(self, state_files: list[str], model_home_files: list[str]) -> bool:
         """Stores the named files, relative to their roots, when they differ from what is stored.
-        True when something was sent. A failed store is logged and tried again after the next
-        turn: the agent's work does not wait for it."""
+        True when something was sent. Raises NotStored for a session the platform does not take
+        or could not be sent."""
         snapshot = self._pack({_STATE: state_files, _MODEL_HOME: model_home_files})
         digest = hashlib.sha256(snapshot).hexdigest()
         if digest == self._stored:
             return False
         if len(snapshot) > MAX_BYTES:
-            log.error("session is %d bytes packed, above the %d the platform stores: a replacement machine would resume from the last one stored", len(snapshot), MAX_BYTES)
-            return False
+            raise NotStored(f"it is {len(snapshot) / (1 << 20):.1f} MiB packed and the platform stores {MAX_BYTES >> 20} MiB")
         try:
             self._client.put_bytes(self._path, snapshot)
         except api_client.APIError as e:
-            log.warning("could not store the session (%s): trying again after the next turn", e)
-            return False
+            log.warning("could not store the session (%s)", e)
+            raise NotStored(f"the platform answered HTTP {e.status}" if e.status else "the platform could not be reached") from None
         self._stored = digest
         return True
 
@@ -107,5 +105,6 @@ class Sessions:
         return packed.getvalue()
 
 
-def model_home() -> str:
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+class NotStored(Exception):
+    """Why a session was not stored, in words that hold nothing secret. A replacement machine
+    would resume from the last one stored."""

@@ -45,6 +45,7 @@ class Progress:
         self._awaiting_since: float | None = None
         self._count = 0
         self._activity = ""
+        self._trouble = ""
         self._said = ""
         self._said_at: float | None = None
 
@@ -67,13 +68,23 @@ class Progress:
         """What the agent is doing from now on, in a few words that hold nothing secret: said at
         once when the last sentence is ACTIVITY_INTERVAL_S old, and with the next beat otherwise."""
         self._activity = sentence(text)
-        if self._activity != self._said and (self._said_at is None or self._clock() - self._said_at >= ACTIVITY_INTERVAL_S):
+        if self._sentence() != self._said and (self._said_at is None or self._clock() - self._said_at >= ACTIVITY_INTERVAL_S):
             self._say()
 
+    def trouble(self, text: str) -> None:
+        """What is wrong with the harness itself while the agent works on, "" for nothing: said
+        ahead of what the agent is doing, from the next sentence on, by the same rule on what it
+        may hold."""
+        self._trouble = text
+
+    def _sentence(self) -> str:
+        return sentence(f"{self._trouble}. {self._activity}") if self._trouble else self._activity
+
     def _say(self) -> None:
-        if self._activity:
-            self._emit(f"{ACTIVITY_PREFIX} {self._activity}")
-            self._said, self._said_at = self._activity, self._clock()
+        said = self._sentence()
+        if said:
+            self._emit(f"{ACTIVITY_PREFIX} {said}")
+            self._said, self._said_at = said, self._clock()
 
     def beat(self) -> None:
         if self.healthy():

@@ -236,6 +236,10 @@ _WATCH_STATE_DIR = ".hl-state"
 # How often a session is handed to the platform while a turn is in flight. A turn can last as
 # long as a job does, and nothing unchanged is sent.
 _SESSION_STORE_INTERVAL_S = 30
+# How long stores fail in a row before the agent's activity line says so: a platform that is
+# away for a moment is no news.
+_NOT_STORED_SAID_S = 90
+_not_stored_since: float | None = None
 
 _live_session_id: str | None = None
 _store_lock = asyncio.Lock()
@@ -259,12 +263,16 @@ def _forget_live_session(setup: core.RunSetup) -> None:
     _remove_file(os.path.join(setup.statedir, _LIVE_SESSION_FILE))
 
 
+def _model_home() -> str:
+    return config.required("CLAUDE_CONFIG_DIR", "the directory the model CLI keeps its sessions in")
+
+
 def _transcript_files(session_id: str | None) -> list[str]:
     """The model CLI's own record of the session, relative to its home: the transcript and
     whatever it keeps in a directory of the session's name beside it."""
     if not session_id:
         return []
-    home = Path(session.model_home())
+    home = Path(_model_home())
     found = []
     for transcript in home.glob(f"projects/*/{session_id}.jsonl"):
         found.append(transcript)
@@ -281,13 +289,38 @@ async def _store_session(setup: core.RunSetup) -> None:
     files += [str(path.relative_to(statedir)) for path in (statedir / _WATCH_STATE_DIR).rglob("*") if path.is_file()]
     transcripts = {name for session_id in (_load_resume_id(setup), _live_session_id) for name in _transcript_files(session_id)}
     async with _store_lock:
-        await asyncio.to_thread(_sessions.save, files, sorted(transcripts))
+        try:
+            await asyncio.to_thread(_sessions.save, files, sorted(transcripts))
+        except session.NotStored as why:
+            _not_stored(str(why))
+        else:
+            _not_stored("")
+
+
+def _not_stored(why: str) -> None:
+    """Notes a store that failed for why, "" for one that did not. The agent works on and the
+    next interval stores again. A failure that persists is said in the agent's activity line
+    until a store succeeds: a replacement machine would resume from an older session, silently."""
+    global _not_stored_since
+    if not why:
+        _not_stored_since = None
+        _progress.trouble("")
+        return
+    if _not_stored_since is None:
+        _not_stored_since = time.monotonic()
+    lasted = time.monotonic() - _not_stored_since
+    persists = lasted >= _NOT_STORED_SAID_S
+    log.log(logging.ERROR if persists else logging.WARNING,
+            "session not stored for %.0fs: %s. A replacement machine would resume from the last one stored. Storing again in %ds",
+            lasted, why, _SESSION_STORE_INTERVAL_S)
+    if persists:
+        _progress.trouble(f"session not stored: {why}")
 
 
 async def _keep_session_stored(setup: core.RunSetup) -> None:
     while True:
         await asyncio.sleep(_SESSION_STORE_INTERVAL_S)
-        if _live_session_id:
+        if _live_session_id or _not_stored_since is not None:
             await _store_session(setup)
 
 
@@ -702,7 +735,7 @@ def main() -> None:
     global _sessions
     started = time.monotonic()
     setup = core.prepare()
-    _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, session.model_home())
+    _sessions = session.Sessions(setup.client, setup.cfg, setup.statedir, _model_home())
     _restore_session(setup)
     model = setup.cfg.model
     # With the line the CLI connects with, this says where a slow start went: what precedes
