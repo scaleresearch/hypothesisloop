@@ -719,18 +719,7 @@ which account when the org connected several. With no account connected the answ
 github_not_connected: an owner connects GitHub in Settings first. On any other git host,
 repository names one created there beforehand, and leaving it out is 422 repository_required.
 
-To create several platform experiments in one call, use an experiments: list. Fields set
-alongside the list (e.g. a shared budget_accelerator_hours) default onto every item that
-doesn't set its own:
-
-  budget_accelerator_hours: 10
-  experiments:
-    - name: my-first-platform-experiment
-      description: ...
-    - name: my-second-platform-experiment
-      description: ...
-
-A bare top-level YAML list of mappings works the same way, without shared defaults.
+One file is one platform experiment: for several, run the command once for each.
 
 See controlplane/settings/examples/experiment.yaml for the full DSL reference.`, stderr)
 	project := fs.String("project", "", "project the platform experiments belong to (default $HL_PROJECT)")
@@ -739,30 +728,25 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 		return parseExit(err)
 	}
 	*project = orEnv(*project, projectEnv)
-	items, err := readYAMLItems(path, "experiments")
+	body, err := readYAMLBody(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
 	}
-	results := make([]any, 0, len(items))
-	for _, body := range items {
-		if _, ok := body["project_id"]; !ok {
-			if *project == "" {
-				return parseExit(misuse(fs, "a project is required: project_id in the file, --project, or $HL_PROJECT"))
-			}
-			body["project_id"] = *project
-		}
-		var out any
-		if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
-			return fail(stderr, err)
-		}
-		results = append(results, out)
+	if _, several := body["experiments"]; several {
+		return parseExit(misuse(fs, "%s holds an experiments: list, and one file is one platform experiment: write each as a file of its own and create it with a command of its own", path))
 	}
-	if len(results) == 1 {
-		printJSON(stdout, results[0])
-	} else {
-		printJSON(stdout, results)
+	if _, ok := body["project_id"]; !ok {
+		if *project == "" {
+			return parseExit(misuse(fs, "a project is required: project_id in the file, --project, or $HL_PROJECT"))
+		}
+		body["project_id"] = *project
 	}
+	var out any
+	if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
+		return fail(stderr, err)
+	}
+	printJSON(stdout, out)
 	return 0
 }
 
@@ -1123,15 +1107,9 @@ func readYAMLBody(path string) (map[string]any, error) {
 	return body, nil
 }
 
-// readYAMLItems reads FILE (or stdin for "-") and returns one map per item to submit, so a single
-// file can describe either one item (the historical shape) or many. Three top-level shapes are
-// accepted:
-//
-//   - a bare mapping: one item, exactly like readYAMLBody.
-//   - a bare list of mappings: each element is one item.
-//   - a mapping with a listKey (e.g. "hypotheses") holding a list of mappings: each element is one
-//     item, and every *other* top-level key is a default merged into any item that does not set
-//     that key itself -- e.g. a shared platform_experiment_id/agent_id above a list of ideas.
+// readYAMLItems reads the hypotheses of FILE (or stdin for "-"), one map each: a bare mapping is
+// one, a bare list of mappings one per element, and a mapping holding a listKey list one per
+// element of it, with every other top-level key the default of an item that does not set it.
 func readYAMLItems(path, listKey string) ([]map[string]any, error) {
 	var raw []byte
 	var err error

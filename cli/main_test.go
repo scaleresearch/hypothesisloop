@@ -112,48 +112,29 @@ func TestPlatformExperimentsListIsOneCompactLineEach(t *testing.T) {
 	}
 }
 
-func TestPlatformExperimentsCreateManyFromYAMLList(t *testing.T) {
-	var submittedBodies []map[string]any
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		submittedBodies = append(submittedBodies, body)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("pe-%d", len(submittedBodies))})
-	})
-	setAPIURL(t, url)
-
-	dir := t.TempDir()
-	file := dir + "/experiments.yaml"
-	yamlContent := "budget_accelerator_hours: 10\n" +
-		"project_id: prj-1\n" +
-		"experiments:\n" +
-		"  - name: first\n" +
-		"  - name: second\n" +
-		"    budget_accelerator_hours: 20\n"
-	if err := os.WriteFile(file, []byte(yamlContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
+// A file once held several platform experiments under experiments:, created one request after
+// another, so a refusal of the second left the first created and the command failed. One file is
+// one platform experiment, sent as written, and a list is refused before anything is created.
+func TestPlatformExperimentsCreateSendsTheOneMappingOfItsFile(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1"} })
+	file := writeFile(t, "name: first\nbudget_accelerator_hours: 10\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	if code := run([]string{"platform-experiments", "create", "--project", "prj-1", file}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), `"id": "pe-1"`) {
+		t.Fatalf("exit code = %d, stdout = %q, stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if len(submittedBodies) != 2 {
-		t.Fatalf("expected 2 POSTs, got %d: %+v", len(submittedBodies), submittedBodies)
+	// A time the file leaves out is the platform's to default or refuse.
+	want := []recorded{{Method: "POST", Path: "/platform-experiments", Body: map[string]any{"name": "first", "budget_accelerator_hours": float64(10), "project_id": "prj-1"}}}
+	if !reflect.DeepEqual(*got, want) {
+		t.Fatalf("requests = %+v, want %+v", *got, want)
 	}
-	if submittedBodies[0]["name"] != "first" || submittedBodies[0]["budget_accelerator_hours"] != float64(10) {
-		t.Fatalf("item 0 unexpected: %+v", submittedBodies[0])
-	}
-	if submittedBodies[1]["name"] != "second" || submittedBodies[1]["budget_accelerator_hours"] != float64(20) {
-		t.Fatalf("item 1 (override) unexpected: %+v", submittedBodies[1])
-	}
-	// The file is sent as written: a time it leaves out is the platform's to default or refuse.
-	for i, body := range submittedBodies {
-		if _, sent := body["starts_at"]; sent {
-			t.Fatalf("item %d carries a time the file did not state: %+v", i, body)
+	for _, several := range []string{"project_id: prj-1\nexperiments:\n  - name: first\n  - name: second\n", "- name: first\n- name: second\n"} {
+		stderr.Reset()
+		if code := run([]string{"platform-experiments", "create", writeFile(t, several)}, &stdout, &stderr); code != 2 || len(*got) != 1 {
+			t.Errorf("a file of several: exit %d with %d requests, want 2 and none more. stderr: %s", code, len(*got), stderr.String())
 		}
+	}
+	if !strings.Contains(stderr.String(), "not valid YAML") && !strings.Contains(stderr.String(), "mapping") {
+		t.Errorf("a bare list: stderr = %q, want it to ask for a mapping", stderr.String())
 	}
 }
 
