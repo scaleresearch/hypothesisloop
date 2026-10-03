@@ -919,3 +919,53 @@ func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(
 		t.Fatalf("the owner raising the budget: got = %d %v with baseline %q and %d starts, want job-1 declared and the run started", code, out, store.created[0].BaselineJobID, store.started)
 	}
 }
+
+// A person who wanted another name for the experiment had to ask the planner for a revision and
+// wait for it. The accept takes the name they typed, held to the rule of every name, and nothing
+// else of the proposal's experiment.
+func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
+	proposed := func() (*draftStore, func(method, path string, body any) (int, map[string]any)) {
+		store := draftWithPlanner()
+		_, propose := planningAPI(t, store, thePlanner)
+		if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+			t.Fatalf("propose: %d %v", code, out)
+		}
+		_, call := planningAPI(t, store, planner)
+		return store, call
+	}
+	accept := func(more map[string]any) map[string]any {
+		body := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "agents": []map[string]any{{}}}
+		for key, value := range more {
+			body[key] = value
+		}
+		return body
+	}
+
+	store, call := proposed()
+	code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"name": "  Cosine against constant, small transformer \n"}))
+	pe := store.created[0]
+	if code != http.StatusOK || pe.Name != "Cosine against constant, small transformer" || out["name"] != pe.Name {
+		t.Fatalf("accepting under another name: got = %d %v, stored %q, want the name given, trimmed", code, out, pe.Name)
+	}
+	if !strings.HasPrefix(pe.Description, "Train the small transformer") || len(pe.Metrics) != 1 || pe.Metrics[0].Key != "val_loss" {
+		t.Errorf("accepted %+v, want the proposal's brief and metrics unchanged", pe)
+	}
+
+	store, call = proposed()
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(nil)); code != http.StatusOK || store.created[0].Name != "Cosine or constant" {
+		t.Fatalf("accepting with no name: got = %d %v, stored %q, want the proposal's", code, out, store.created[0].Name)
+	}
+
+	for name, given := range map[string]string{"two lines": "Cosine\nor constant", "nothing but spaces": "   "} {
+		store, call = proposed()
+		code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"name": given}))
+		if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_experiment" || store.created[0].Status != domain.PlatformExpDraft {
+			t.Errorf("a name of %s: got = %d %v with the draft %s, want 422 invalid_experiment and the draft left a draft", name, code, out, store.created[0].Status)
+		}
+	}
+	// Nothing else of the experiment is the accept's to change.
+	store, call = proposed()
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"description": "another brief"})); code != http.StatusUnprocessableEntity || store.created[0].Status != domain.PlatformExpDraft {
+		t.Errorf("an accept that states a brief: got = %d %v, want 422 and nothing accepted", code, out)
+	}
+}

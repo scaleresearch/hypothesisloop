@@ -219,6 +219,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
+			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator, each researcher and one agent of role baseline, created here and named by its role, whose machine is asked for at once beside the coordinator's, and starts_at is now.Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
 			"and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. " +
@@ -302,6 +303,20 @@ type AcceptRequest struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, which is once its baseline is declared."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
+	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here: its metrics and its brief change by a revision."`
+}
+
+// named is the proposal's experiment under the name the person who accepts gave it.
+func named(experiment json.RawMessage, name string) (json.RawMessage, error) {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(experiment, &fields); err != nil {
+		return nil, err
+	}
+	var err error
+	if fields["name"], err = json.Marshal(name); err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
 }
 
 func invalidTransition(format string, args ...any) error {
@@ -334,6 +349,11 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	}
 	// The check the proposal passed, again with the cost and the agents the person states.
 	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.Agents
+	if req.Name != "" {
+		if proposal.Experiment, err = named(proposal.Experiment, req.Name); err != nil {
+			return nil, h.refusal("name the proposed experiment", err)
+		}
+	}
 	now := time.Now().UTC()
 	experiment, err := h.checkProposal(ctx, &proposal, pe.ProjectID, pe.MaxHosted)
 	if err != nil {
