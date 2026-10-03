@@ -703,26 +703,29 @@ func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 // planner, on an open one why it is not running yet and what reader does about it, on a running
 // one whether its clock runs, and on a closed one why it closed. It is the one place that says so.
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
+	var why *domain.StatusReason
 	switch pe.Status {
-	case domain.PlatformExpDraft:
-		pe.StatusReason = draftReason(pe)
-		return nil
-	case domain.PlatformExpRunning:
-		pe.StatusReason = runningReason(pe)
-		return nil
 	case domain.PlatformExpClosed:
 		pe.StatusReason = closedReason(pe)
 		return nil
+	case domain.PlatformExpDraft:
+		why = draftReason(pe)
+	case domain.PlatformExpRunning:
+		why = runningReason(pe)
+	default:
+		signups, err := s.store.ListAgentSignups(ctx, pe.ID)
+		if err != nil {
+			return fmt.Errorf("platform_experiments.Describe: %w", err)
+		}
+		if why, err = s.waiting(ctx, pe, signups); err != nil {
+			return err
+		}
+		why.Message = nextStep(why.Reason, signups, reader) + why.Message
 	}
-	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
-	if err != nil {
+	var err error
+	if why.WaitsFor, err = domain.WaitsFor(why.Reason, pe.CoordinatorHosted); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
-	why, err := s.waiting(ctx, pe, signups)
-	if err != nil {
-		return err
-	}
-	why.Message = nextStep(why.Reason, signups, reader) + why.Message
 	pe.StatusReason = why
 	return nil
 }

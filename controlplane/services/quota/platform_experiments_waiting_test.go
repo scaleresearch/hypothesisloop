@@ -88,6 +88,9 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 			t.Errorf("%s: status_reason = %+v, want %s", name, why, c.reason)
 			continue
 		}
+		if who, err := domain.WaitsFor(c.reason, true); err != nil || why.WaitsFor != who {
+			t.Errorf("%s: waits_for = %q, want %q, %v", name, why.WaitsFor, who, err)
+		}
 		for _, want := range c.names {
 			if !strings.Contains(why.Message, want) {
 				t.Errorf("%s: message %q does not name %q", name, why.Message, want)

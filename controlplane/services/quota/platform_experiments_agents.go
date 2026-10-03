@@ -63,6 +63,12 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 	now := time.Now()
 	for i, signup := range signups {
 		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
+		if why := out[i].StatusReason; why != nil {
+			var err error
+			if why.WaitsFor, err = domain.WaitsFor(why.Reason, false); err != nil {
+				return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+			}
+		}
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -79,6 +85,10 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 	if err != nil {
 		return nil, err
 	}
+	who, err := domain.WaitsFor(why.Reason, pe.CoordinatorHosted)
+	if err != nil {
+		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
+	}
 	for i, signup := range signups {
 		if !signup.SharesBudget() {
 			continue
@@ -92,7 +102,7 @@ func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID s
 			instance.Waiting = true
 			out[i].Instance = &instance
 		}
-		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message}
+		out[i].StatusReason = &domain.StatusReason{Reason: why.Reason, Message: waits + ": " + why.Message, WaitsFor: who}
 	}
 	return out, nil
 }

@@ -350,11 +350,12 @@ func (p *PlatformExperiment) OpenUntil(now time.Time, limit time.Duration) time.
 	return now.Add(limit)
 }
 
-// StatusReason says why a platform experiment is in its status: a stable code and a sentence for
-// whoever reads it.
+// StatusReason says why a platform experiment is in its status: a stable code, a sentence for
+// whoever reads it, and whose move it is (WaitsFor).
 type StatusReason struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Reason   string `json:"reason"`
+	Message  string `json:"message"`
+	WaitsFor Waiter `json:"waits_for,omitempty" enum:"owner,coordinator,platform" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its hosted coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget
