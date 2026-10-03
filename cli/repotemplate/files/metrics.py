@@ -14,19 +14,16 @@ import sys
 import urllib.request
 
 
-def _of_the_job(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"post_metric: ${name} is not set, so this process is no job of the platform and "
-                           "has nowhere to report: the platform sets it in a job, and hl job submit runs one")
-    return value
-
-
 def post_metric(fraction: float, value: float, metric_name: str) -> None:
     """Posts one reading. In a job it never raises: a failed report must not end the run it reports on."""
-    url = f"{_of_the_job('HYPOTHESISLOOP_API_URL')}/experiments/{_of_the_job('HYPOTHESISLOOP_EXPERIMENT_ID')}/metrics"
+    job = {name: os.environ.get(name) for name in ("HYPOTHESISLOOP_API_URL", "HYPOTHESISLOOP_EXPERIMENT_ID", "HYPOTHESISLOOP_TOKEN")}
+    if not all(job.values()):
+        unset = ", ".join("$" + name for name, value in job.items() if not value)
+        raise RuntimeError(f"post_metric: {unset} not set, so this process is no job of the platform and has "
+                           "nowhere to report: the platform sets them in a job, and hl job submit runs one")
+    url = f"{job['HYPOTHESISLOOP_API_URL']}/experiments/{job['HYPOTHESISLOOP_EXPERIMENT_ID']}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {_of_the_job('HYPOTHESISLOOP_TOKEN')}"})
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {job['HYPOTHESISLOOP_TOKEN']}"})
     try:
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:
