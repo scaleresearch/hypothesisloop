@@ -6,10 +6,10 @@ import os
 from dataclasses import dataclass, field
 
 
-def _required(name: str) -> str:
+def required(name: str, what: str = "") -> str:
     value = os.environ.get(name)
     if not value:
-        raise SystemExit(f"agent: missing required env var: {name}")
+        raise SystemExit(f"agent: missing required env var: {name}" + (f", {what}" if what else ""))
     return value
 
 
@@ -55,8 +55,8 @@ class Config:
     which platform experiment this is, or that it is the experiment's coordinator, and the rest is
     read from the platform at startup (core.prepare)."""
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
-    api_url: str = field(default_factory=lambda: _required("API_URL"))
-    token: str = field(default_factory=lambda: _required("HL_TOKEN"))
+    api_url: str = field(default_factory=lambda: required("API_URL"))
+    token: str = field(default_factory=lambda: required("HL_TOKEN"))
 
     # Stop condition. 0 = unlimited: runs until the agent decides it's done or the platform
     # experiment closes and submissions start getting rejected (see core.py's stop_reason).

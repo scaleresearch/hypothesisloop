@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -114,9 +115,7 @@ def own_python() -> None:
     """Puts the agent's virtualenv (AGENT_VENV, made with pip in the image) first on PATH for
     everything this process starts. uv run put the harness's own there, which has no pip: an
     agent's `pip install` went to a site the python3 on its PATH never read."""
-    venv = os.environ.get("AGENT_VENV")
-    if not venv:
-        raise SystemExit("agent: missing required env var: AGENT_VENV, the virtualenv the agent installs into")
+    venv = config.required("AGENT_VENV", "the virtualenv the agent installs into")
     os.environ["VIRTUAL_ENV"] = venv
     os.environ["PATH"] = os.path.join(venv, "bin") + os.pathsep + os.environ["PATH"]
 
@@ -137,10 +136,8 @@ def prepare() -> RunSetup:
         cfg.run_as(signup.get("flavor"), signup.get("model"), signup.get("hyperparameters"), signup.get("role"))
         platform_experiment = client.get_platform_experiment(cfg.platform_experiment_id)
 
-    # Per-agent by default: two agents launched from the same cwd (the natural way to run a
-    # multi-agent competition on one box) must not resolve to the same repo checkout.
-    workdir = os.environ.get("AGENT_WORKDIR", f"./workspace/{cfg.agent_id}")
-    statedir = os.environ.get("AGENT_STATE_DIR", f"./state/{cfg.agent_id}")
+    workdir = config.required("AGENT_WORKDIR", "the directory the agent clones into and works in")
+    statedir = config.required("AGENT_STATE_DIR", "the directory the harness keeps its own state in, outside AGENT_WORKDIR")
     os.makedirs(workdir, exist_ok=True)
     os.makedirs(statedir, exist_ok=True)
 
@@ -200,7 +197,7 @@ def run_ended(setup: RunSetup) -> str:
 def _closed_because(setup: RunSetup) -> str | None:
     cfg = setup.cfg
     pe = setup.client.get_platform_experiment(cfg.platform_experiment_id)
-    closed_at = pe.get("closed_at", "an unrecorded time")
+    closed_at = pe["closed_at"]
     if pe.get("close_reason") == "end_time_reached":
         return f"You are being stopped because the platform experiment reached its end time and the platform closed it at {closed_at}."
     if pe.get("close_reason") == "planning_limit_reached":
@@ -240,6 +237,74 @@ def stop_cause(setup: RunSetup) -> str | None:
         return "You are being stopped. The platform could not be asked why."
 
 
+# How long the platform may leave the check below unanswered before the harness ends itself. A
+# rented machine that nothing outside can reach bills until its process exits.
+UNANSWERED_LIMIT_S = 1800
+_RUN_CHECK_INTERVAL_S = 30
+
+# When the check first went unanswered in the outage under way. It is no clock of updates.py: that
+# one follows hl watch, whose exit code does not tell a refused token from a platform that is down.
+_unanswered_since: float | None = None
+
+
+def run_over(setup: RunSetup) -> str | None:
+    """Why this process has no run on the platform to work in, None while it has one: the one
+    place the harness asks. The platform ended the run, it refuses the token, which it does once
+    the wind-down after the end has passed, or it has not answered for UNANSWERED_LIMIT_S. An
+    outage shorter than that is waited out."""
+    global _unanswered_since
+    try:
+        # A planner's run ends with its answer and a revision starts it again with its session.
+        ended = run_ended(setup)
+    except api_client.APIError as e:
+        if e.status == 401:
+            return f"the platform refuses this token, so its run is over ({e.body.strip()[:200]})"
+        if _unanswered_since is None:
+            _unanswered_since = time.monotonic()
+            log.warning("the platform did not say whether the run goes on (%s): ending after %ds of this", e, UNANSWERED_LIMIT_S)
+        if time.monotonic() - _unanswered_since >= UNANSWERED_LIMIT_S:
+            return f"the platform has not said for {UNANSWERED_LIMIT_S}s whether the run goes on ({e})"
+        return None
+    _unanswered_since = None
+    return _ENDED + ended if ended else None
+
+
+_ENDED = "the platform ended the run: "
+
+
+def lost_platform(reason: str | None) -> bool:
+    """Whether reason, of run_over, leaves nothing to ask the platform or file with it."""
+    return bool(reason) and not reason.startswith(_ENDED)
+
+
+async def until_lost(setup: RunSetup) -> str:
+    """Returns once the platform refuses this process or has been out of reach for the limit,
+    with the reason. Whoever awaits it ends the process then, whatever turn or wait is in flight.
+    A run the platform ended is left to the turn boundary and the signal: its agent may still have
+    a last turn to file what it owes."""
+    while True:
+        reason = await asyncio.to_thread(run_over, setup)
+        if lost_platform(reason):
+            return reason
+        await asyncio.sleep(_RUN_CHECK_INTERVAL_S)
+
+
+async def run_until_lost(setup: RunSetup, work) -> None:
+    """Awaits work, the backend's loop, and exits the process as soon as the platform is lost:
+    its turn in flight is dropped and no last turn follows, since both need the platform."""
+    work, lost = asyncio.ensure_future(work), asyncio.ensure_future(until_lost(setup))
+    try:
+        await asyncio.wait({work, lost}, return_when=asyncio.FIRST_COMPLETED)
+        if work.done():
+            return work.result()
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+        raise SystemExit(f"agent: exiting: {lost.result()}")
+    finally:
+        work.cancel()
+        lost.cancel()
+
+
 def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | None:
     """Between-event stop check shared by both backends. Returns a reason string, or None."""
     if stop_flag[0]:
@@ -247,11 +312,4 @@ def stop_reason(setup: RunSetup, started_at: float, stop_flag: list) -> str | No
     cfg = setup.cfg
     if cfg.max_wall_hours and (time.time() - started_at) / 3600.0 >= cfg.max_wall_hours:
         return f"reached MAX_WALL_HOURS={cfg.max_wall_hours}"
-    try:
-        # A planner's run ends with its answer and a revision starts it again with its session.
-        ended = run_ended(setup)
-        if ended:
-            return f"the platform ended the run: {ended}"
-    except api_client.APIError as e:
-        log.warning("could not check platform experiment status (%s) — continuing", e)
-    return None
+    return run_over(setup)

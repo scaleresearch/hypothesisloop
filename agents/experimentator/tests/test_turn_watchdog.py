@@ -205,10 +205,20 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
                 stop_flag[0] = True
             return None, False
 
+        really_sleep = asyncio.sleep
+
         async def sleep(seconds):
-            sleeps.append(seconds)
+            # The beat and the session store sleep too, here for less than any backoff.
+            if seconds >= run._RECONNECT_BACKOFF_INITIAL_S:
+                sleeps.append(seconds)
+            await really_sleep(0)
+
+        async def never(setup):
+            await asyncio.Event().wait()
 
         with mock.patch.object(run, "_run_one_session", session), \
+                mock.patch.object(run.core, "until_lost", never), \
+                mock.patch.object(run, "_SESSION_STORE_INTERVAL_S", 1), \
                 mock.patch.object(run.core, "install_signal_handler", lambda: stop_flag), \
                 mock.patch.object(run.asyncio, "sleep", sleep), \
                 self.assertLogs("llm_agent"):

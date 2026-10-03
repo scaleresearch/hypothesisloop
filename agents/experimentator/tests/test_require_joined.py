@@ -162,6 +162,13 @@ class StartupTest(PlatformCase):
             self.prepare(AGENT_VENV=None)
         self.assertIn("AGENT_VENV", str(ctx.exception))
 
+    # Left out, both once fell to a path under whatever directory the harness was started in.
+    def test_prepare_requires_where_the_agent_works_and_where_the_harness_keeps_its_state(self):
+        for missing in ("AGENT_WORKDIR", "AGENT_STATE_DIR"):
+            with self.assertRaises(SystemExit) as ctx:
+                self.prepare(**{missing: None})
+            self.assertIn(f"missing required env var: {missing}", str(ctx.exception))
+
     def test_prepare_stops_an_agent_whose_platform_experiment_names_no_repository(self):
         FakePlatform.repository_url = ""
         with self.assertRaises(SystemExit) as refused:

@@ -630,7 +630,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     beat = asyncio.ensure_future(_progress.run())
     storing = asyncio.ensure_future(_keep_session_stored(setup))
     try:
-        await _run_until_stopped(setup, model, started_at, stop_flag, backoff_s)
+        await core.run_until_lost(setup, _run_until_stopped(setup, model, started_at, stop_flag, backoff_s))
     finally:
         beat.cancel()
         storing.cancel()

@@ -217,7 +217,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     # closed its own run were each interrupted in their closing words and given a turn to file
     # what they did not owe.
     def test_an_agent_whose_own_action_ended_its_run_gets_no_last_turn(self):
-        closed = {"status": "closed", "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}
+        closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}
         for experiment, signup, flavor in (
             ({"status": "running"}, {"ended": "finished"}, "generalist"),
             ({"status": "draft"}, {"ended": "planned"}, "planner"),

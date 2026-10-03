@@ -52,7 +52,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     # This backend has no watchdog over a turn, so the beat says only that the loop is alive.
     beat = asyncio.ensure_future(progress.Progress(quiet_limit_s=float("inf")).run())
     try:
-        await _run_thread(setup, model, started_at, stop_flag)
+        await core.run_until_lost(setup, _run_thread(setup, model, started_at, stop_flag))
     finally:
         beat.cancel()
 
