@@ -35,9 +35,10 @@ type AgentMetricSeries struct {
 	Points      []MetricSeriesPoint `json:"points"`
 }
 
-// JobMetric is the one value a job is read by on a declared metric, which the metric's role
-// decides (MetricDefinition.JobValueRule): the figure standings rank on a ranking metric and the
-// figure a bound is held against on a constraint.
+// JobMetric is the one value a job is read by on a declared metric: the last it reported, which
+// is what the code it ran ends with. Standings rank it on a ranking metric and a bound is held
+// against it on a constraint. A job read by the best point of its curve ranked on its luckiest
+// evaluation, and a baseline read so stood higher than its code measures.
 type JobMetric struct {
 	Name  string  `json:"name"`
 	Value float64 `json:"value"`

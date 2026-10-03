@@ -198,17 +198,17 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 	}
 }
 
-// A constraint and an attribute are read by each job's last value, and `last` is a range function
-// only: `last by (...)` is no PromQL, and the metrics store refused the whole results read on it.
-func TestBestPerAgentOnAConstraintOrAttributeReadsEachJobsLastValue(t *testing.T) {
+// Every metric is read by each job's last value, a ranking one too: read by its best point, a
+// job ranked on the luckiest evaluation of its curve. `last` is a range function only:
+// `last by (...)` is no PromQL, and the metrics store refused the whole results read on it.
+func TestBestPerAgentOnAnyMetricReadsEachJobsLastValue(t *testing.T) {
 	bound := 0.0
 	for _, metric := range []domain.MetricDefinition{
+		{Key: "val_accuracy", Direction: "maximize"},
+		{Key: "val_loss", Direction: "minimize", Role: domain.MetricRoleRanking},
 		{Key: "digest_mismatches", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
 		{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute},
 	} {
-		if metric.JobValueRule() != domain.JobValueLast {
-			t.Fatalf("%s is read by %q, want its last value", metric.Key, metric.JobValueRule())
-		}
 		var captured []string
 		server := promqlMockServer(t, &captured)
 		pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}

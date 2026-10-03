@@ -359,25 +359,6 @@ func TestEstimateHeldIsRateTimesUnitsTimesHours(t *testing.T) {
 	}
 }
 
-// One rule per role says which of a job's reported values it is read by: what ranks a job is
-// what is shown for it, and what a bound is held against likewise.
-func TestAMetricsRoleDecidesTheValueAJobIsReadBy(t *testing.T) {
-	bound := 60.0
-	for want, defs := range map[string][]MetricDefinition{
-		JobValueMax: {{Key: "acc", Direction: "maximize"}, {Key: "acc", Direction: "maximize", Role: MetricRoleRanking}},
-		JobValueMin: {{Key: "loss", Direction: "minimize"}, {Key: "loss", Direction: "minimize", Role: MetricRoleRanking}},
-		JobValueLast: {{Key: "seconds", Direction: "minimize", Role: MetricRoleConstraint, Bound: &bound},
-			{Key: "acc", Direction: "maximize", Role: MetricRoleConstraint, Bound: &bound},
-			{Key: "kind", Direction: "minimize", Role: MetricRoleAttribute}},
-	} {
-		for _, def := range defs {
-			if got := def.JobValueRule(); got != want {
-				t.Errorf("JobValueRule(%+v) = %q, want %q", def, got, want)
-			}
-		}
-	}
-}
-
 // A baseline agent's job is stored on the objective under the platform experiment's id, which
 // is no hypothesis: read as one it answers 404, so no answer hands it out as hypothesis_id.
 func TestAJobOnTheObjectiveIsAnsweredWithoutAHypothesisID(t *testing.T) {

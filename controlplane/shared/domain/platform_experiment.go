@@ -91,27 +91,6 @@ func (d MetricDefinition) Holds(value float64) bool {
 	return value >= *d.Bound
 }
 
-// The ways the values one job reported on a metric become the one value it is read by.
-const (
-	JobValueMax  = "max"
-	JobValueMin  = "min"
-	JobValueLast = "last"
-)
-
-// JobValueRule says how the values one job reported on the metric become the one it is read by,
-// everywhere a job's value is shown, ranked or judged. A ranking metric is read by the job's
-// best in the metric's direction, which standings and stage cuts rank. A constraint is read by
-// the last value, which its bound is held against, and so is an attribute, which nothing judges.
-func (d MetricDefinition) JobValueRule() string {
-	switch {
-	case d.EffectiveRole() != MetricRoleRanking:
-		return JobValueLast
-	case d.Direction == "minimize":
-		return JobValueMin
-	}
-	return JobValueMax
-}
-
 // ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream
 // (stage cuts, standings) needs to defend against a malformed one. Fail-fast per important.md #1.
 func ValidateMetricDefinitions(defs []MetricDefinition) error {

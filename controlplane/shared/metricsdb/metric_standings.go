@@ -31,10 +31,9 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 
 // UnrankableJobs gives, for each job of completed that ranks nowhere, the first constraint
 // metric of pe it does not hold and how. A constraint is judged per job, on the "raw"-basis
-// value the job is read by on it (domain.MetricDefinition.JobValueRule), its last, the one the
-// proposal check reads of a baseline. A
-// job that reported none, or whose value violates the bound, ran to the end and found its
-// result wrong: it stays a completed trial and none of its values rank.
+// value the job is read by on it (domain.JobMetric), its last, the one the proposal check reads
+// of a baseline. A job that reported none, or whose value violates the bound, ran to the end and
+// found its result wrong: it stays a completed trial and none of its values rank.
 //
 // Judged per agent, on the agent's best value of the constraint, a job that broke the gate with
 // the best number of the run ranked first as long as another job of its agent held the gate. So
@@ -46,8 +45,8 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
 			continue
 		}
-		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
-			metric.JobValueRule(), ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 		samples, err := QueryVector(ctx, dbURL, promQL)
 		if err != nil {
 			return nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
@@ -100,25 +99,24 @@ func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 //   - The window is the platform experiment's own lifetime, never a constant. A fixed bound made
 //     an agent whose best result was recorded earlier read as "no data", which sorts to the bottom
 //     of the cut order — eliminated for having peaked early.
-//   - A range function, not a bare selector: Pushgateway stores only the latest pushed value per
-//     label set, so recovering the historical best needs the range.
+//   - A range function, not a bare selector: a job that ended long ago reports nothing now, so
+//     its last value is read over the range.
 //   - Grouped by metric_basis, never collapsed out. A rescaled/non-"raw" value blended into the
 //     same aggregation as a raw one is the scale mismatch that made a ~20% "win" actually ~2x
 //     worse. Non-raw agents are reported separately, never ranked.
 //
 // job_id is in the grouping so the winning value carries the job that produced it (and with it the
-// code ref). Each job is read by the value its metric's role decides
-// (domain.MetricDefinition.JobValueRule), and the agent's best is the best of those in the
-// metric's direction.
+// code ref). Each job is read by the last value it reported (domain.JobMetric), and the agent's
+// best is the best of those in the metric's direction.
 func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
 	rankable, err := RankableJobs(ctx, dbURL, pe, completed)
 	if err != nil {
 		return nil, nil, err
 	}
-	// The job value rule names a range function (last_over_time), and last is no aggregation
-	// operator. Each (agent, basis, job) is one series, so the outer aggregation only drops labels.
-	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (%s_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
-		metric.JobValueRule(), ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
+	// last is a range function and no aggregation operator. Each (agent, basis, job) is one
+	// series, so the outer aggregation only drops labels.
+	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
+		ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
 	samples, err := QueryVector(ctx, dbURL, promQL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: %w", metric.Key, err)
