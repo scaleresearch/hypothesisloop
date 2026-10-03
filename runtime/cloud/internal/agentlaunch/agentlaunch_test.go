@@ -995,9 +995,9 @@ func (h *harness) logged(text string) int {
 	return count
 }
 
-// The launcher API reads three states. An instance whose host the provider cannot reach is told
-// as starting: told as exited it would be given up on with no output, and it is not rented again.
-func TestAnInstanceTheProviderCannotPlaceIsReportedAsStartingAndLeftAlone(t *testing.T) {
+// An instance whose host the provider cannot reach is told as unknown and left as it is: the
+// control plane decides how long an agent it cannot see is kept.
+func TestAnInstanceTheProviderCannotPlaceIsReportedAsUnknownAndLeftAlone(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a")}, nil)
 	h.mustPass()
@@ -1005,7 +1005,7 @@ func TestAnInstanceTheProviderCannotPlaceIsReportedAsStartingAndLeftAlone(t *tes
 	h.rented.Lose(full("a"))
 
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "starting"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []observedInstance{{Name: "a", State: "unknown"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Logs") != 0 {

@@ -352,6 +352,46 @@ func TestAMachineThatStaysStartingIsReplacedByTheControlPlanesDecisionAndCounted
 	}
 }
 
+// A host its provider cannot reach for a pass costs a running agent nothing, long after its boot
+// limit: the launcher says unknown and the control plane keeps the machine. A host that stays
+// away for the progress limit is given up on, and the machine replaced.
+func TestARunningAgentWhoseHostIsUnreachableIsKeptUntilTheProgressLimit(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	name := c.rented.Names()[0]
+	ids := c.rented.IDs(name)
+	c.rented.Start(name)
+	c.rented.Print(name, "hl-progress 1")
+	c.pass()
+
+	c.store.Advance(2 * contractBootLimit)
+	c.rented.Lose(name)
+	c.pass()
+	if recorded := c.instance("ag-one"); recorded.Restarts != 0 || recorded.Reported != domain.InstanceRunning || !reflect.DeepEqual(c.rented.IDs(name), ids) {
+		t.Fatalf("unreachable for a pass, past the boot limit: recorded %+v, rented %v, want the machine kept as running", recorded, c.rented.Names())
+	}
+
+	c.rented.Start(name)
+	c.rented.Print(name, "hl-progress 2")
+	c.pass()
+	if recorded := c.instance("ag-one"); recorded.Restarts != 0 || c.rented.Calls("Create") != 1 {
+		t.Fatalf("reachable again: recorded %+v with %d creates", recorded, c.rented.Calls("Create"))
+	}
+
+	c.rented.Lose(name)
+	c.store.Advance(contractSettings.ProgressLimit - time.Second)
+	c.pass()
+	if !reflect.DeepEqual(c.rented.IDs(name), ids) {
+		t.Fatal("a machine unreachable inside the progress limit was replaced")
+	}
+	c.store.Advance(time.Second)
+	c.pass()
+	names := c.rented.Names()
+	if recorded := c.instance("ag-one"); len(names) != 1 || names[0] == name || recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceSilent) {
+		t.Fatalf("unreachable for the progress limit: rented %v (was %q), recorded %+v", names, name, recorded)
+	}
+}
+
 // The launcher says nothing of a create that failed. The control plane sees a name it asked for
 // and was never shown, and decides from that.
 func TestACreateThatFailsOnEveryPassSpendsTheAgentsRestartsAndStopsIt(t *testing.T) {
