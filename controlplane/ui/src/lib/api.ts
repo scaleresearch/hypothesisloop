@@ -25,6 +25,7 @@ import type {
   HypothesisComment,
   HypothesisFinding,
   HypothesisGraph,
+  HypothesisLink,
   HypothesisLinkInput,
   HypothesisLinkType,
   HypothesisStatus,
@@ -381,6 +382,8 @@ export async function searchHypotheses(platformExperimentID: string, q: string):
 
 export interface RegisteredHypothesis extends Hypothesis {
   already_existed: boolean
+  /** Its outgoing links as stored. */
+  links: HypothesisLink[]
 }
 
 export interface SimilarHypothesis {
@@ -410,10 +413,11 @@ export async function registerHumanHypothesis(
 }
 
 // Links are append-only. Only a hypothesis no agent owns accepts links from a person as themselves.
-export async function addHumanHypothesisLink(
+// Answers the hypothesis's outgoing links.
+export function addHumanHypothesisLink(
   hypothesisID: string, type: HypothesisLinkType, to: string,
-): Promise<void> {
-  await apiSend('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
+): Promise<HypothesisLink[]> {
+  return apiSend<HypothesisLink[]>('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
 }
 
 export function addHumanHypothesisComment(hypothesisID: string, text: string): Promise<HypothesisComment> {

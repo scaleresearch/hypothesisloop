@@ -24,7 +24,7 @@ export interface Position {
   y: number
 }
 
-const COLUMN = NODE_WIDTH + 24
+export const COLUMN = NODE_WIDTH + 24
 export const ROW = NODE_HEIGHT + 64
 
 interface Contour {
@@ -102,6 +102,120 @@ export function layoutGraph(graph: HypothesisGraph): Map<string, Position> {
     }
   }
   return positions
+}
+
+// Keeps every node already placed where it is and puts each new one a row under its deepest
+// parent, in the free column nearest to it, so a node that joins never moves the rest.
+export function extendLayout(graph: HypothesisGraph, previous: Map<string, Position>): Map<string, Position> {
+  const positions = new Map([[graph.root, previous.get(graph.root) ?? { x: 0, y: 0 }]])
+  for (const n of graph.nodes) {
+    const p = previous.get(n.id)
+    if (p) positions.set(n.id, p)
+  }
+  let pending = graph.nodes.filter(n => !positions.has(n.id)).sort((a, b) => a.created_at.localeCompare(b.created_at))
+  while (pending.length > 0) {
+    const waiting = pending.filter(n => n.builds_on.length === 0 || n.builds_on.some(p => !positions.has(p)))
+    if (waiting.length === pending.length) break
+    for (const n of pending) {
+      if (waiting.includes(n)) continue
+      const parent = n.builds_on.map(p => positions.get(p)!).reduce((a, b) => (b.y > a.y ? b : a))
+      const y = parent.y + ROW
+      const taken = Array.from(positions.values()).filter(p => p.y === y).map(p => p.x)
+      for (let k = 0; ; k++) {
+        const x = [parent.x + k * COLUMN, parent.x - k * COLUMN].find(c => taken.every(t => Math.abs(t - c) >= COLUMN))
+        if (x !== undefined) {
+          positions.set(n.id, { x, y })
+          break
+        }
+      }
+    }
+    pending = waiting
+  }
+  return positions
+}
+
+export const LINK_KINDS: HypothesisLinkType[] = ['builds_on', 'related', 'contradicts']
+
+/** Each kind of link in plain words, read as "this idea <label> that one". */
+export const LINK_KIND_LABELS: Record<HypothesisLinkType, string> = {
+  builds_on: 'builds on',
+  related: 'related to',
+  contradicts: 'contradicts',
+}
+
+export type LinkPlan = { from: string; to: string } | { refused: string }
+
+// What the API takes from a person linking `from` to `to`: a link is stored on the idea it leaves,
+// and only an idea no agent owns takes one from a person. A related or contradicts link reads the
+// same both ways, so from an agent's idea it is stored on the other end when that one is free.
+export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, kind: HypothesisLinkType) => LinkPlan {
+  const byID = new Map(graph.nodes.map(n => [n.id, n]))
+  const edges = new Set(graph.edges.map(e => `${e.type}:${e.from}:${e.to}`))
+  const children = new Map<string, string[]>()
+  for (const n of graph.nodes) {
+    for (const p of n.builds_on) children.set(p, [...(children.get(p) ?? []), n.id])
+  }
+  let below: { of: string; ids: Set<string> } | undefined
+  function descendants(id: string): Set<string> {
+    if (below?.of === id) return below.ids
+    const ids = new Set<string>()
+    const stack = [...(children.get(id) ?? [])]
+    while (stack.length > 0) {
+      const c = stack.pop()!
+      if (ids.has(c)) continue
+      ids.add(c)
+      stack.push(...(children.get(c) ?? []))
+    }
+    below = { of: id, ids }
+    return ids
+  }
+  return (from, to, kind) => {
+    const source = byID.get(from)
+    if (!source) return { refused: 'Links start at an idea.' }
+    if (from === to) return { refused: 'An idea does not link to itself.' }
+    if (to === graph.root && kind !== 'builds_on') return { refused: 'Ideas only build on the objective.' }
+    if (to !== graph.root && !byID.has(to)) return { refused: 'That idea is not in this graph.' }
+    if (edges.has(`${kind}:${from}:${to}`) || (kind !== 'builds_on' && edges.has(`${kind}:${to}:${from}`))) {
+      return { refused: 'These two ideas are already linked this way.' }
+    }
+    if (kind === 'builds_on' && descendants(from).has(to)) return { refused: 'That idea already builds on this one.' }
+    if (!source.agent_id) return { from, to }
+    if (kind !== 'builds_on' && to !== graph.root && !byID.get(to)!.agent_id) return { from: to, to: from }
+    return { refused: 'Only the agent that owns this idea links from it.' }
+  }
+}
+
+type GraphEdge = HypothesisGraph['edges'][number]
+
+/** The graph with a just-registered idea in it, drawn before the next read brings it. */
+export function withHypothesis(graph: HypothesisGraph, node: HypothesisGraph['nodes'][number], edges: GraphEdge[]): HypothesisGraph {
+  if (graph.nodes.some(n => n.id === node.id)) return graph
+  const parents = new Set(node.builds_on)
+  return {
+    ...graph,
+    nodes: [...graph.nodes.map(n => (parents.has(n.id) ? { ...n, child_count: n.child_count + 1 } : n)), node],
+    edges: [...graph.edges, ...edges],
+  }
+}
+
+export function withEdge(graph: HypothesisGraph, edge: GraphEdge): HypothesisGraph {
+  if (graph.edges.some(e => e.type === edge.type && e.from === edge.from && e.to === edge.to)) return graph
+  return {
+    ...graph,
+    nodes: edge.type === 'builds_on'
+      ? graph.nodes.map(n => (n.id === edge.from ? { ...n, builds_on: [...n.builds_on, edge.to] } : n.id === edge.to ? { ...n, child_count: n.child_count + 1 } : n))
+      : graph.nodes,
+    edges: [...graph.edges, edge],
+  }
+}
+
+/** The ideas whose text holds every word of the query, for picking one without a round trip. */
+export function findIdeas(graph: HypothesisGraph, query: string): HypothesisListItem[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  return graph.nodes.filter(n => {
+    const text = n.text.toLowerCase()
+    return words.every(w => text.includes(w))
+  })
 }
 
 export interface OutlineRow {
