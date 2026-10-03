@@ -165,16 +165,23 @@ func TestListExperimentsDefaultsToOneSmallPageNewestFirst(t *testing.T) {
 	}
 }
 
-// An oversized ?limit must be clamped to the same ceiling rather than honoured.
-func TestListExperimentsClampsOversizedLimit(t *testing.T) {
-	spy := &filterSpyStore{}
-	r := schedulerRouter(t, spy)
-
-	if code, _ := get(t, r, "/experiments?limit=100000"); code != 200 {
-		t.Fatalf("status = %d, want 200", code)
+// A ?limit over the ceiling was clamped to it and answered 200, so a caller that asked for 200
+// read 50 as the whole list. It is refused, as the other lists refuse it, and nothing is read.
+func TestListExperimentsRefusesAPageItDoesNotServe(t *testing.T) {
+	for _, query := range []string{"limit=51", "limit=100000", "limit=-1", "offset=-1"} {
+		spy := &filterSpyStore{}
+		r := schedulerRouter(t, spy)
+		code, body := get(t, r, "/experiments?"+query)
+		if code != http.StatusUnprocessableEntity || !strings.Contains(string(body), `"reason":"invalid_page"`) || !strings.Contains(string(body), "limit must be 1 to 50") {
+			t.Errorf("?%s: status = %d, body = %s, want 422 invalid_page naming the ceiling", query, code, body)
+		}
+		if !reflect.DeepEqual(spy.gotList, domain.ExperimentFilter{}) {
+			t.Errorf("?%s: the store was read with %+v, want no read", query, spy.gotList)
+		}
 	}
-	if spy.gotList.Limit != 50 {
-		t.Errorf("limit = %d, want it clamped to 50", spy.gotList.Limit)
+	spy := &filterSpyStore{}
+	if code, _ := get(t, schedulerRouter(t, spy), "/experiments?limit=50"); code != 200 || spy.gotList.Limit != 50 {
+		t.Errorf("?limit=50: status = %d, limit = %d, want the ceiling itself served", code, spy.gotList.Limit)
 	}
 }
 
@@ -230,8 +237,6 @@ func TestInvalidSortAndPaginationAreRejected(t *testing.T) {
 		"/experiments?sort=-created", // near-miss for created_at
 		"/experiments?sort=bogus",
 		"/experiments?since=yesterday", // must be RFC3339, not prose
-		"/experiments?limit=-1",
-		"/experiments?offset=-1",
 	} {
 		if code, body := get(t, r, q); code != http.StatusBadRequest {
 			t.Errorf("GET %s = %d, want 400; body=%s", q, code, body)
