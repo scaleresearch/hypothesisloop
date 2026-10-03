@@ -39,8 +39,16 @@ const ReasonBaselineTestsNoHypothesis = "baseline_tests_no_hypothesis"
 const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 
 // branchOfExperiment checks that a job names the branch its commit was pushed on, and that the
-// branch is one of its platform experiment's: the default branch is nobody's implementation.
-func branchOfExperiment(exp *domain.Experiment) error {
+// branch is one of its platform experiment's: the default branch is nobody's implementation. The
+// baseline is measured on one branch, which the refusal of a baseline agent's job names with the
+// git command that makes it, since a baseline agent has no hypothesis to check out.
+func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
+	if measuresBaseline {
+		if baseline := domain.BaselineBranch(exp.PlatformExperimentID); exp.Branch != baseline {
+			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again", baseline, exp.Branch, baseline)}
+		}
+		return nil
+	}
 	prefix := domain.BranchPrefix(exp.PlatformExperimentID)
 	if len(exp.Branch) > len(prefix) && strings.HasPrefix(exp.Branch, prefix) && !strings.ContainsAny(exp.Branch, " \t\n") {
 		return nil
@@ -261,11 +269,8 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
 		return err
 	}
-	if err := branchOfExperiment(exp); err != nil {
+	if err := branchOfExperiment(exp, measuresBaseline); err != nil {
 		return err
-	}
-	if baseline := domain.BaselineBranch(pe.ID); measuresBaseline && exp.Branch != baseline {
-		return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again", baseline, exp.Branch, baseline)}
 	}
 	if err := s.resolveImage(&exp.Job); err != nil {
 		return err

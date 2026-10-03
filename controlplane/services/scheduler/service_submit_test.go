@@ -343,10 +343,15 @@ func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
 		if err := s.Submit(context.Background(), named); !errors.As(err, &refused) || refused.Reason != ReasonBaselineTestsNoHypothesis {
 			t.Errorf("%s, a baseline job naming a hypothesis: got = %v, want %s", status, err, ReasonBaselineTestsNoHypothesis)
 		}
-		elsewhere := baselineSubmission()
-		elsewhere.Branch = "hl/pe-1/baseline-1/control-abc123"
-		if err := s.Submit(context.Background(), elsewhere); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment || !strings.Contains(refused.Message, "hl/pe-1/baseline") {
-			t.Errorf("%s, a baseline job on another branch: got = %v, want %s naming hl/pe-1/baseline", status, err, ReasonBranchNotOfExperiment)
+		// A baseline agent has no hypothesis to check out, on a branch of the experiment or on
+		// the default one: the refusal names its branch and the git command that makes it.
+		for _, branch := range []string{"hl/pe-1/baseline-1/control-abc123", "main", ""} {
+			elsewhere := baselineSubmission()
+			elsewhere.Branch = branch
+			if err := s.Submit(context.Background(), elsewhere); !errors.As(err, &refused) || refused.Reason != ReasonBranchNotOfExperiment ||
+				!strings.Contains(refused.Message, "git checkout -b hl/pe-1/baseline") || strings.Contains(refused.Message, "hl hypothesis checkout") {
+				t.Errorf("%s, a baseline job on branch %q: got = %v, want %s naming git checkout -b hl/pe-1/baseline", status, branch, err, ReasonBranchNotOfExperiment)
+			}
 		}
 	}
 
