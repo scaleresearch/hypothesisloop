@@ -207,6 +207,8 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if err := exp.Job.ValidateSecretEnv(exp.SecretEnv); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 	}
+	// The two fields a job may leave out for a stated default, each written here and nowhere else
+	// and answered on the job: job.max_retries is 0, and capacity_tier is guaranteed.
 	if exp.Job.MaxRetries == nil {
 		exp.Job.MaxRetries = new(int)
 	}
@@ -214,7 +216,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries must not be negative"}
 	}
 	switch exp.CapacityTier {
-	case "", domain.CapacityGuaranteed, domain.CapacityBurst:
+	case "":
+		exp.CapacityTier = domain.CapacityGuaranteed
+	case domain.CapacityGuaranteed, domain.CapacityBurst:
 	default:
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("capacity_tier must be %q, %q, or omitted, got %q", domain.CapacityGuaranteed, domain.CapacityBurst, exp.CapacityTier)}
 	}

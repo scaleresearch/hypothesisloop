@@ -317,6 +317,10 @@ func TestCapacityTierAcceptsOnlyItsOwnEnum(t *testing.T) {
 		if err := validate(t, exp); err != nil {
 			t.Fatalf("capacity_tier = %q was rejected: %v", tier, err)
 		}
+		// Left out it is guaranteed, written on the job the submit answers with.
+		if tier == "" && exp.CapacityTier != domain.CapacityGuaranteed {
+			t.Fatalf("capacity_tier left out is answered as %q, want %q", exp.CapacityTier, domain.CapacityGuaranteed)
+		}
 	}
 	for _, tier := range []domain.CapacityTier{"burst_only", "guaranteed ", "Burst"} {
 		exp := validSubmission()

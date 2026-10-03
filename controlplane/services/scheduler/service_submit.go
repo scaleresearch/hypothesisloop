@@ -217,11 +217,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return err
 	}
 
-	// Default capacity tier so quota debit and DB insert agree.
-	if exp.CapacityTier == "" {
-		exp.CapacityTier = domain.CapacityGuaranteed
-	}
-
 	signedUp, err := s.store.IsSignedUp(ctx, exp.PlatformExperimentID, exp.AgentID)
 	if err != nil {
 		return fmt.Errorf("scheduler: check signup: %w", err)
