@@ -60,6 +60,8 @@ type observedInstance struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 	Log   string `json:"log,omitempty"`
+	// Expired is provider.Instance.Expired of an exited instance.
+	Expired bool `json:"expired,omitempty"`
 	// Progress is nil when the output of a running instance could not be read.
 	Progress *string `json:"progress,omitempty"`
 	// Activity is what the agent of a running instance last said it is doing, empty when it

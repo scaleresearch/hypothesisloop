@@ -428,7 +428,7 @@ const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_exper
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
-       s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
+       s.instance_name, s.instance_restarts, s.instance_renewals, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_asked_at, s.instance_launch,
        s.instance_state, s.instance_progress_at, s.instance_end_reason, s.instance_activity, s.instance_activity_at,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id,
@@ -449,7 +449,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
-		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
+		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &instance.Released, &signup.Ended}, more...)...); err != nil {
 		return domain.AgentSignup{}, err

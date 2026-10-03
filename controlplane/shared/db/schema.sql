@@ -554,6 +554,9 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_state TEXT NOT 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_end_reason TEXT NOT NULL DEFAULT '';
+-- Machines that ended through no fault of their command and were asked for again under a new
+-- name with no restart spent.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_renewals INTEGER NOT NULL DEFAULT 0;
 -- What the agent on the machine asked for last said it is doing, a short sentence its harness
 -- prints beside its progress marker, and when the platform first read that sentence. The latest
 -- only: there is no history. Empty while no machine is asked for and until one says something.
@@ -1178,6 +1181,7 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_s
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_end_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_renewals INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity_at TIMESTAMPTZ;
 -- How many machines the platform may run for this platform experiment, its coordinator included.

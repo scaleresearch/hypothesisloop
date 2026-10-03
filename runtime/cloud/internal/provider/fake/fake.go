@@ -209,6 +209,15 @@ func (p *Provider) Exit(name string, lines ...string) {
 	})
 }
 
+// Expire moves every instance of the name to StateExited with Expired set, as a vendor whose own
+// lifetime ended it lists it, after it wrote lines.
+func (p *Provider) Expire(name string, lines ...string) {
+	p.each(name, func(i *instance) {
+		i.logs = append(i.logs, lines...)
+		i.State, i.Expired = provider.StateExited, true
+	})
+}
+
 // Spec is what the first instance of the name was created from.
 func (p *Provider) Spec(name string) provider.Spec {
 	var spec provider.Spec

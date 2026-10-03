@@ -344,7 +344,7 @@ var liveness = map[provider.State]int{
 
 // observe is what the control plane is told with the question: every name of this launcher's
 // namespace once, live if any instance of it is, for a name whose instances all exited the end
-// of the output of the newest, and for a running one the progress marker its command last
+// of the output of the newest and whether its vendor's own lifetime ended it, and for a running one the progress marker its command last
 // printed and what it last said its agent is doing, both from one read of its output. A marker
 // that could not be read is left out, which the control plane tells apart from one that was
 // never printed. The output is sent and never logged here.
@@ -379,6 +379,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 				l.cfg.Log("read the output of exited %s: %v", name, err)
 			}
 			entry.Log = tail(l.withoutOwnEnvironment(strings.Join(lines, "\n")), exitLogBytes)
+			entry.Expired = last.Expired
 		}
 		observed = append(observed, entry)
 	}

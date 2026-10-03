@@ -99,6 +99,9 @@ type AgentInstance struct {
 	Name string `json:"name,omitempty"`
 	// Restarts counts the machines that exited and were asked for again.
 	Restarts int `json:"restarts"`
+	// Renewals counts the machines that ended through no fault of their command and were asked
+	// for again with no restart spent: EndReason "expired".
+	Renewals int `json:"-"`
 	// Stopped means the last machine exited with no restart left: the platform no longer asks
 	// for one, and the agent takes no further turn.
 	Stopped  bool       `json:"stopped"`
@@ -124,10 +127,12 @@ type AgentInstance struct {
 	ProgressAt *time.Time `json:"progress_at,omitempty"`
 	// EndReason is why the last machine that ended was given up on: "exited" (its command
 	// ended), "gone" (its provider no longer lists it), "never_seen" (no machine came to be),
-	// "still_starting" (it did not come up in time), "silent" (it ran and made no progress) or
+	// "still_starting" (it did not come up in time), "silent" (it ran and made no progress),
+	// "expired" (its provider ended it at the provider's own limit on how long it rents one) or
 	// "released" (the platform took it down because its run was over, and ExitLog says which
-	// end that was). Only "released" is the platform's own doing and no failure of the machine.
-	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,released"`
+	// end that was). "released" is the platform's own doing and "expired" the provider's: neither
+	// is a failure of the machine, and neither spends a restart.
+	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,expired,released"`
 	// Released means the run the machine was for is over and its wind-down has passed: the
 	// platform experiment closed, or the agent was cut. The launcher is no longer asked for the
 	// machine and has destroyed it, so what it last reported of it says nothing any more.

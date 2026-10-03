@@ -258,6 +258,52 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 	}
 }
 
+// A provider that ends every instance at its own lifetime would otherwise stop a healthy agent
+// at its fourth hour.
+func TestAnInstanceItsProviderExpiredIsAskedForUnderANewNameEveryTimeAndSpendsNoRestart(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	seen := map[string]bool{agent: true, coordinator: true}
+	for expiry := 1; expiry <= domain.MaxAgentInstanceRestarts+2; expiry++ {
+		answer := mustReconcile(t, store, observed(
+			ObservedInstance{Name: agent, State: "exited", Log: fmt.Sprintf("expiry %d", expiry), Expired: true},
+			ObservedInstance{Name: coordinator, State: "exited", Expired: true},
+		))
+		if len(answer.Instances) != 2 || seen[answer.Instances[0].Name] || seen[answer.Instances[1].Name] {
+			t.Fatalf("expiry %d: instances = %+v, want both under names not used before", expiry, answer.Instances)
+		}
+		for _, recorded := range []*domain.AgentInstance{store.Find("pe-1", "ag-1"), store.Find("pe-1", "")} {
+			if recorded.Restarts != 0 || recorded.Stopped || recorded.Renewals != expiry || recorded.EndReason != string(db.InstanceExpired) || recorded.ExitedAt == nil {
+				t.Fatalf("expiry %d: recorded %+v, want it expired with no restart spent", expiry, recorded)
+			}
+		}
+		if got := store.Find("pe-1", "ag-1").ExitLog; got != fmt.Sprintf("expiry %d", expiry) {
+			t.Fatalf("expiry %d: exit log %q", expiry, got)
+		}
+		// Reported again before the launcher destroyed it: nothing more is recorded.
+		again := mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "exited", Expired: true}))
+		if again.Instances[0].Name != answer.Instances[0].Name || store.Find("pe-1", "ag-1").Renewals != expiry {
+			t.Fatalf("expiry %d reported twice was recorded twice", expiry)
+		}
+		agent, coordinator = answer.Instances[0].Name, answer.Instances[1].Name
+		seen[agent], seen[coordinator] = true, true
+	}
+
+	// The restarts are all still there for a command that ends by itself.
+	crashed := mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "exited", Log: "boom"}))
+	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceExited) || seen[crashed.Instances[0].Name] {
+		t.Fatalf("a crash after the expiries: recorded %+v, asked for as %q", recorded, crashed.Instances[0].Name)
+	}
+
+	for _, state := range []string{"starting", "running", "unknown"} {
+		body := observed(ObservedInstance{Name: agent, State: state, Expired: true})
+		if code, raw := reconcileUnder(t, store, testSettings, body); code != http.StatusBadRequest || !strings.Contains(string(raw), "expired is reported of an exited instance") {
+			t.Fatalf("expired of a %s instance: %d %s, want 400", state, code, raw)
+		}
+	}
+}
+
 func TestTheLogOfAnExitIsKeptToItsLastBytes(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	name := mustReconcile(t, store, observed()).Instances[0].Name

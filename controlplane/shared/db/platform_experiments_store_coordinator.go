@@ -46,7 +46,7 @@ ORDER BY pe.id`, launcher, windDown.Seconds())
 		var c LauncherCoordinator
 		var hosted bool
 		if err := rows.Scan(&c.PlatformExperimentID, &hosted, &c.Launcher, &c.Model, &c.Instance.Name, &c.Instance.Restarts,
-			&c.Instance.Stopped, &c.Instance.ExitedAt, &c.Instance.ExitLog, &c.Instance.SeenAt, &c.Instance.AskedAt, &c.Instance.Launch, &c.Instance.Reported, &c.Instance.ProgressAt, &c.Instance.EndReason, &c.Instance.Released, &c.AgentImage, &c.Ending, &c.EndsBy); err != nil {
+			&c.Instance.Renewals, &c.Instance.Stopped, &c.Instance.ExitedAt, &c.Instance.ExitLog, &c.Instance.SeenAt, &c.Instance.AskedAt, &c.Instance.Launch, &c.Instance.Reported, &c.Instance.ProgressAt, &c.Instance.EndReason, &c.Instance.Released, &c.AgentImage, &c.Ending, &c.EndsBy); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherCoordinators: %w", err)
 		}
 		coordinators = append(coordinators, c)

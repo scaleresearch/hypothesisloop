@@ -130,6 +130,53 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 	}
 }
 
+// A machine its provider ended at the provider's own lifetime is no fault of what it ran: it is
+// counted as a renewal, however many came before, and neither spends a restart nor stops anything.
+func TestAnExpiredMachineSpendsNoRestartAndNeverStopsWhatItRan(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	const maxRestarts = 2
+	for kind, thing := range hostedThings(t, pool) {
+		end := func(name string, how InstanceEnd) domain.AgentInstance {
+			t.Helper()
+			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+			after, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, how, "log of "+name, time.Minute, maxRestarts)
+			if err != nil || !recorded {
+				t.Fatalf("%s: %s of %s: got = %v, %v, want = true", kind, how, name, recorded, err)
+			}
+			if _, again, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, how, "said twice", time.Minute, maxRestarts); err != nil || again {
+				t.Fatalf("%s: %s of %s reported again: got = %v, %v, want = false", kind, how, name, again, err)
+			}
+			got := thing.instance()
+			if after.Restarts != got.Restarts || after.Renewals != got.Renewals || after.Stopped != got.Stopped || after.EndReason != got.EndReason {
+				t.Fatalf("%s: %s of %s returned %+v, stored %+v", kind, how, name, after, got)
+			}
+			return got
+		}
+		for expiry := 1; expiry <= maxRestarts+2; expiry++ {
+			got := end(fmt.Sprintf("expired-%d", expiry), InstanceExpired)
+			if got.Name != "" || got.Restarts != 0 || got.Renewals != expiry || got.Stopped || got.EndReason != "expired" || got.ExitLog != fmt.Sprintf("log of expired-%d", expiry) || got.ExitedAt == nil {
+				t.Fatalf("%s: after expiry %d: got = %+v, want a renewal and no restart", kind, expiry, got)
+			}
+		}
+		// With every restart spent, one more expiry still stops nothing, and the next exit does.
+		for exit := 1; exit <= maxRestarts; exit++ {
+			if got := end(fmt.Sprintf("exited-%d", exit), InstanceExited); got.Restarts != exit || got.Renewals != maxRestarts+2 || got.Stopped {
+				t.Fatalf("%s: after exit %d: got = %+v", kind, exit, got)
+			}
+		}
+		if got := end("expired-last", InstanceExpired); got.Restarts != maxRestarts || got.Renewals != maxRestarts+3 || got.Stopped {
+			t.Fatalf("%s: an expiry with no restart left: got = %+v, want it asked for again", kind, got)
+		}
+		if got := end("exited-last", InstanceExited); !got.Stopped || got.Restarts != maxRestarts || got.EndReason != "exited" {
+			t.Fatalf("%s: an exit with no restart left: got = %+v, want it stopped", kind, got)
+		}
+	}
+}
+
 func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()

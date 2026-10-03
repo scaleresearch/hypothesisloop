@@ -31,10 +31,20 @@ const (
 	// InstanceSilent: the launcher reports it as running, and what it reports of the machine's
 	// progress has not changed for the limit. Inside the limit nothing is recorded.
 	InstanceSilent InstanceEnd = "silent"
+	// InstanceExpired: the launcher reported it as exited because its provider ended it at the
+	// provider's own limit on how long it rents one. Its command did nothing wrong.
+	InstanceExpired InstanceEnd = "expired"
 	// InstanceReleased: the platform stopped asking for it because its run is over, and the
 	// launcher took it down. Recorded by ReleaseInstances alone, and it spends no restart.
 	InstanceReleased InstanceEnd = "released"
 )
+
+// SpendsRestart says whether a machine given up on this way counts against its agent's restarts.
+// One that does not is a renewal: asked for again however many came before, and never what stops
+// the agent.
+func (e InstanceEnd) SpendsRestart() bool {
+	return e != InstanceExpired
+}
 
 // progressStampsPerLimit is how often inside one progress limit a machine's progress is written
 // down. A machine that keeps reporting progress costs that many writes per limit and no more,
@@ -114,7 +124,8 @@ WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
 
 // EndInstance records that the machine asked for under name is given up on, with exitLog as the
 // end of what it wrote or the reason there is nothing. A restart is counted while fewer than
-// maxRestarts were, and the agent or coordinator is stopped otherwise. The name is cleared, so
+// maxRestarts were, and the agent or coordinator is stopped otherwise. An end that spends no
+// restart (InstanceEnd.SpendsRestart) counts a renewal and stops nothing. The name is cleared, so
 // the same end reported again records nothing: recorded is false, as it is for a name that is
 // not the one asked for and for an end whose limit has not passed on the database's clock. limit
 // is the boot limit for a machine never seen or still starting, the progress limit for a silent
@@ -124,7 +135,7 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 	// Every form names $6, so that one statement serves them all.
 	var when string
 	switch how {
-	case InstanceExited:
+	case InstanceExited, InstanceExpired:
 		when = "$6::float8 IS NOT NULL"
 	case InstanceGone:
 		when = "$6::float8 IS NOT NULL AND " + c.prefix + "seen_at IS NOT NULL"
@@ -146,12 +157,13 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 UPDATE `+c.table+`
 SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
     `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
-    `+c.prefix+`stopped = `+c.prefix+`restarts >= $5,
-    `+c.prefix+`restarts = CASE WHEN `+c.prefix+`restarts >= $5 THEN `+c.prefix+`restarts ELSE `+c.prefix+`restarts + 1 END
+    `+c.prefix+`stopped = $8::boolean AND `+c.prefix+`restarts >= $5,
+    `+c.prefix+`restarts = `+c.prefix+`restarts + CASE WHEN $8::boolean AND `+c.prefix+`restarts < $5 THEN 1 ELSE 0 END,
+    `+c.prefix+`renewals = `+c.prefix+`renewals + CASE WHEN $8::boolean THEN 0 ELSE 1 END
 WHERE `+c.key+` AND NOT `+c.prefix+`stopped AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+when+`
-RETURNING `+c.prefix+`restarts, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch, `+c.prefix+`end_reason`,
-		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how)).
-		Scan(&after.Restarts, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
+RETURNING `+c.prefix+`restarts, `+c.prefix+`renewals, `+c.prefix+`stopped, `+c.prefix+`exited_at, `+c.prefix+`exit_log, `+c.prefix+`launch, `+c.prefix+`end_reason`,
+		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart()).
+		Scan(&after.Restarts, &after.Renewals, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return after, false, nil
 	}

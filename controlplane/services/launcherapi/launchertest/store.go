@@ -187,7 +187,7 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	now := epoch.Add(s.clock)
 	var due bool
 	switch how {
-	case db.InstanceExited:
+	case db.InstanceExited, db.InstanceExpired:
 		due = true
 	case db.InstanceGone:
 		due = instance.SeenAt != nil
@@ -207,9 +207,12 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	}
 	instance.Name, instance.ExitedAt, instance.ExitLog, instance.EndReason, instance.Reported = "", &now, exitLog, string(how), ""
 	delete(s.Activity, platformExpID+"/"+agentID)
-	if instance.Restarts >= maxRestarts {
+	switch {
+	case !how.SpendsRestart():
+		instance.Renewals++
+	case instance.Restarts >= maxRestarts:
 		instance.Stopped = true
-	} else {
+	default:
 		instance.Restarts++
 	}
 	return *instance, true, nil

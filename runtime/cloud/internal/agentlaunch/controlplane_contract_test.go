@@ -194,6 +194,48 @@ func TestAnExitTravelsToTheControlPlaneWhichRestartsTheAgentAFewTimesAndThenStop
 	}
 }
 
+// A vendor that rents an instance for an hour at most ends a healthy agent's every hour. Each
+// such end is the vendor's doing: the agent gets another machine every time, and its restarts
+// stay for the crashes they are meant for.
+func TestAnInstanceItsVendorsLifetimeEndsIsRentedAgainEveryTimeAndSpendsNoRestart(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	seen := map[string]bool{}
+	for expiry := 1; expiry <= domain.MaxAgentInstanceRestarts+1; expiry++ {
+		name := c.rented.Names()[0]
+		if seen[name] {
+			t.Fatalf("expiry %d: the agent runs as %q again, under which its expired machine would be kept", expiry, name)
+		}
+		seen[name] = true
+		c.rented.Start(name)
+		c.rented.Print(name, "hl-progress 1")
+		c.pass()
+		c.rented.Expire(name, "the last line before the lifetime ended")
+		c.pass()
+
+		recorded := c.instance("ag-one")
+		if recorded.Restarts != 0 || recorded.Stopped || recorded.EndReason != string(db.InstanceExpired) || recorded.ExitLog != "hl-progress 1\nthe last line before the lifetime ended" {
+			t.Fatalf("expiry %d: recorded %+v, want it expired with no restart spent", expiry, recorded)
+		}
+		if names := c.rented.Names(); len(names) != 1 || seen[names[0]] || c.rented.Calls("Create") != expiry+1 {
+			t.Fatalf("expiry %d: rented %v with %d creates, want one new machine", expiry, names, c.rented.Calls("Create"))
+		}
+	}
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.pass()
+	if recorded := c.instance("ag-one"); recorded.Reported != domain.InstanceRunning || recorded.Restarts != 0 {
+		t.Fatalf("after %d expiries: recorded %+v, want the agent running with every restart left", domain.MaxAgentInstanceRestarts+1, recorded)
+	}
+
+	// A crash after them is the first restart, under a name no expired machine had.
+	c.rented.Exit(name, "Traceback")
+	c.pass()
+	if recorded, names := c.instance("ag-one"), c.rented.Names(); recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceExited) || len(names) != 1 || seen[names[0]] || names[0] == name {
+		t.Fatalf("a crash after the expiries: recorded %+v, rented %v", recorded, names)
+	}
+}
+
 func TestAnAgentWhoseRunIsOverIsToldToStopAndItsNormalExitIsNoCrash(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
 	c.pass()

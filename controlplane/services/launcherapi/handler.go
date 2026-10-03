@@ -76,6 +76,9 @@ type ObservedInstance struct {
 	Name  string `json:"name" doc:"The name from an earlier answer, without the launcher's own prefix."`
 	State string `json:"state" enum:"starting,running,exited,unknown" doc:"unknown: the provider lists the instance and does not say whether its command runs, as when its host is unreachable."`
 	Log   string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
+	// Expired tells an instance its provider ended at the provider's own lifetime from one whose
+	// command ended.
+	Expired bool `json:"expired,omitempty" doc:"For an exited instance, true when its provider ended it at the provider's own limit on how long it rents one. Its end is recorded as expired, spends no restart and never stops the agent, which is asked for again under a new name."`
 	// Progress is a pointer so that "could not be read" differs from "read, and none printed".
 	Progress *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output. The platform compares it with the one before and reads nothing else from it."`
 	Activity string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
@@ -123,8 +126,9 @@ type kept struct {
 	// endsBy is the latest moment a machine rented for it now may still run.
 	endsBy time.Time
 	// launch is launchOf the image this one boots and the launcher's digest.
-	launch   string
-	describe func(restarts int) (Instance, error)
+	launch string
+	// describe takes how many machines of this one ended before, under its launch.
+	describe func(ended int) (Instance, error)
 }
 
 // launchOf identifies what a machine is started with on the platform's and the launcher's side.
@@ -181,8 +185,8 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		all = append(all, kept{
 			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(restarts int) (Instance, error) {
-				return instanceFor(signup, restarts, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
+			describe: func(ended int) (Instance, error) {
+				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
@@ -191,8 +195,8 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		all = append(all, kept{
 			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(restarts int) (Instance, error) {
-				return coordinatorInstanceFor(pe, model, restarts, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
+			describe: func(ended int) (Instance, error) {
+				return coordinatorInstanceFor(pe, model, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
@@ -202,8 +206,10 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
-		describe := func(restarts int) (Instance, error) {
-			instance, err := one.describe(restarts)
+		// A machine is named after how many ended before it, whether or not their end spent a
+		// restart, so every one that ends is followed by another name.
+		describe := func(restarts, renewals int) (Instance, error) {
+			instance, err := one.describe(restarts + renewals)
 			instance.EndsAt = one.endsBy.UTC()
 			return instance, err
 		}
@@ -223,7 +229,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		} else if current.Stopped {
 			continue
 		}
-		instance, err := describe(restarts)
+		instance, err := describe(restarts, current.Renewals)
 		if err != nil {
 			log.Error("hosted instance cannot be described", zap.Error(err))
 			continue
@@ -242,7 +248,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 					continue
 				}
 				current.Name = ""
-				if instance, err = describe(after.Restarts); err != nil {
+				if instance, err = describe(after.Restarts, after.Renewals); err != nil {
 					log.Error("hosted instance cannot be described", zap.Error(err))
 					continue
 				}
@@ -274,7 +280,8 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 
 // observe holds the machine asked for under one.instance.Name against what the launcher reports
 // of that name, and records its end when the report says so:
-//   - exited: at once, with the end of its output.
+//   - exited: at once, with the end of its output. One its provider ended at the provider's own
+//     lifetime (expired) is recorded as that, which spends no restart.
 //   - reported before and not now: at once. The provider took it away. A machine the platform
 //     released itself is never here: ReleaseInstances cleared its name when it stopped being
 //     asked for.
@@ -311,7 +318,11 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 		if token != "" {
 			exitLog = strings.ReplaceAll(exitLog, token, "<HL_TOKEN>")
 		}
-		return end(db.InstanceExited, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
+		how := db.InstanceExited
+		if reported.Expired {
+			how = db.InstanceExpired
+		}
+		return end(how, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
 	case reported.State == stateUnknown && one.instance.Reported == stateRunning:
 		return end(db.InstanceSilent, fmt.Sprintf("the machine was running, its provider stopped saying whether it still does, and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
 	}
@@ -371,6 +382,9 @@ func (o Observed) validate() error {
 		if instance.Progress != nil && instance.State != stateRunning {
 			return fmt.Errorf("progress is reported of a running instance, and %s is %s", instance.Name, instance.State)
 		}
+		if instance.Expired && instance.State != stateExited {
+			return fmt.Errorf("expired is reported of an exited instance, and %s is %s", instance.Name, instance.State)
+		}
 	}
 	if o.ReconcileIntervalSeconds <= 0 || o.CreatePauseMilliseconds < 0 {
 		return fmt.Errorf("reconcile_interval_seconds must be positive and create_pause_milliseconds must not be negative")
@@ -416,7 +430,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
 			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +
-			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. An instance reported unknown is held to the progress limit if it was last reported running and to the boot limit otherwise. That is recorded on its agent, and the launcher never replaces one on its own: " +
+			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. An instance reported unknown is held to the progress limit if it was last reported running and to the boot limit otherwise. An exited instance reported with expired, which its provider ended at the provider's own lifetime, is given up on as expired: that spends none of the agent's restarts and never stops it. That is recorded on its agent, and the launcher never replaces one on its own: " +
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one. " +
 			"A launcher whose pass can outlast the platform's boot limit or progress limit is answered 200 with refusal {reason: pass_does_not_fit, message}: the two lists stand and are acted on, so instances whose run is over are still stopped and destroyed, no instance that does not exist yet is asked for, and the launcher creates none until an answer carries no refusal.",
 	}, func(ctx context.Context, in *struct {
