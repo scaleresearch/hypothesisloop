@@ -542,9 +542,9 @@ On macOS:
 ### Option B - Existing cluster or bare-metal node
 
 Register the cluster for your org first. `hl cluster add` prints the Kubernetes install command
-with what the `runtimes` section of the control plane's settings holds: the two addresses the
-cluster's agents reach the platform at (`api_url`, `metrics_url`) and the registry and tag
-their images are pulled under (`registry`, `image_tag`):
+with what the control plane's settings hold: the two addresses the cluster's agents reach the
+platform at (`services.public_api_url`, `runtimes.metrics_url`) and the registry and tag their
+images are pulled under (`runtimes.registry`, `runtimes.image_tag`):
 
 ```bash
 hl cluster add my-cluster
@@ -690,8 +690,8 @@ accelerators under the names its drivers publish. Repeat for every additional cl
 
 A cluster exists for the platform once an org registers its name: `hl cluster add` or
 `POST /orgs/{id}/clusters`. Registering returns the cluster's runtime token and the two addresses
-its agent reaches the platform at, which are the `runtimes` section of the control plane's
-settings. The token is derived from the name, so it is never lost: registering the same name
+its agent reaches the platform at, `services.public_api_url` and `runtimes.metrics_url` of the
+control plane's settings. The token is derived from the name, so it is never lost: registering the same name
 again returns the same token, and `hl cluster token` prints it. A name another org holds is refused. The control plane refuses a token for
 a name nobody registered, so a typo'd `CLUSTER=` is an error and never a second cluster.
 An operator who holds the signing secret and the database can do the same without an API key:

@@ -136,8 +136,10 @@ silently improvise.
    is not in the data path) — the shipped value is the
    placeholder `http://REPLACE-WITH-HOST-ADDRESS:9000`, and loading a config whose endpoint is
    loopback is refused outright rather than failing later inside a job. `make controlplane-up`
-   publishes the S3 store (Silo) on `:9000` and creates the bucket; the host address is reachable from the
-   control-plane containers as well, so one value serves both.
+   publishes the S3 store (Silo) on `:9000` and creates the bucket. The control plane reaches the
+   store at an address of its own, `data_store.control_plane_endpoint`, which is required and
+   never taken from `endpoint`: `http://minio:9000` in the compose stack, `localhost` as
+   `make dev` renders it.
 4. **Job image.** Every job names its image, on CPU, GPU and chip clusters alike, and
    `job.image` is one of two things: the name of a job image exactly as `hl capacity` shows it,
    or the full registry address of an image of the experiment's own, host first
