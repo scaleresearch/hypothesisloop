@@ -415,7 +415,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        s.hosted, s.launcher, s.flavor, s.hyperparameters, s.model, s.signed_up_at,
        s.instance_name, s.instance_restarts, s.instance_stopped, s.instance_exited_at, s.instance_exit_log,
        s.instance_seen_at, s.instance_asked_at, s.instance_launch,
-       s.instance_state, s.instance_progress_at, s.instance_end_reason,
+       s.instance_state, s.instance_progress_at, s.instance_end_reason, s.instance_activity, s.instance_activity_at,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id,
        ` + domain.InstanceReleasedSQL(`LEAST(
            s.finished_at,
@@ -430,10 +430,12 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var hyperparameters []byte
 	var instance domain.AgentInstance
 	addedBy := domain.Actor{}
+	var activity string
+	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
 		&signup.Hosted, &signup.Launcher, &signup.Flavor, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
-		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason,
+		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &instance.Released, &signup.Ended}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
@@ -443,6 +445,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	signup.Actor = &addedBy
 	if signup.Hosted {
 		signup.Instance = &instance
+		signup.Activity = domain.ActivityOf(activity, activityAt)
 	}
 	if err := json.Unmarshal(hyperparameters, &signup.Hyperparameters); err != nil {
 		return domain.AgentSignup{}, fmt.Errorf("decode hyperparameters of %s: %w", signup.AgentID, err)

@@ -210,7 +210,7 @@ func (noLauncherAgents) AskInstance(context.Context, string, string, string, str
 	panic("the launcher handler reached its store")
 }
 
-func (noLauncherAgents) ObserveInstance(context.Context, string, string, string, string, *string, time.Duration) error {
+func (noLauncherAgents) ObserveInstance(context.Context, string, string, string, string, *string, time.Duration, string) error {
 	panic("the launcher handler reached its store")
 }
 

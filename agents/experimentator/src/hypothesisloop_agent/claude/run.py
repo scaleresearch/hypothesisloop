@@ -47,9 +47,11 @@ _FILE_TOOLS_NOTE = "\n\nWrite and Edit refuse an existing file you have not open
 
 
 def _log_message(message, agent: str) -> None:
-    """Prints the activity lines to stdout and logs the rest."""
+    """Prints the activity lines to stdout, notes what the agent is doing now and logs the rest."""
     for line in activity.lines(message, agent, waited=_progress.waited()):
         print(line, flush=True)
+    if doing := activity.doing(message):
+        _progress.doing(doing)
     if isinstance(message, ResultMessage):
         log.info(
             "result: subtype=%s turns=%d cost_usd=%s stop_reason=%s",
@@ -428,6 +430,7 @@ async def _last_turn(client, setup: core.RunSetup, watch_env: dict[str, str], ev
 async def _receive_turn(client):
     """client.receive_response(), failing with TurnStalled when the CLI goes silent."""
     messages = client.receive_response().__aiter__()
+    _progress.doing(progress.THINKING)
     try:
         while True:
             _progress.awaiting()
@@ -441,6 +444,7 @@ async def _receive_turn(client):
             yield message
     finally:
         _progress.resting()
+        _progress.doing(progress.WAITING)
 
 
 def _context_tokens(usage: dict) -> int:

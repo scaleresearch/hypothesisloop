@@ -308,6 +308,34 @@ func lastProgress(lines []string) string {
 	return ""
 }
 
+// activityPattern is the line an agent's harness prints beside its progress to say what the
+// agent is doing: a sentence the control plane stores and shows, and gives no other meaning to.
+var activityPattern = regexp.MustCompile(`^hl-activity (.+)$`)
+
+// maxActivityLength is the longest sentence the control plane takes, in characters.
+const maxActivityLength = 120
+
+// lastActivity is the sentence of the newest activity line among lines, or "" when none is one.
+func lastActivity(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if found := activityPattern.FindStringSubmatch(strings.TrimRight(lines[i], "\r")); found != nil {
+			return found[1]
+		}
+	}
+	return ""
+}
+
+// activityOf is what the control plane is told the agent whose output ends in lines is doing: its
+// newest sentence without this launcher's own environment, which may make it longer, cut to what
+// the control plane takes.
+func (l *Launcher) activityOf(lines []string) string {
+	said := []rune(l.withoutOwnEnvironment(lastActivity(lines)))
+	if len(said) > maxActivityLength {
+		said = said[:maxActivityLength]
+	}
+	return string(said)
+}
+
 // liveness orders the states of the instances of one name by how much each says the agent runs.
 // The name is reported in the highest.
 var liveness = map[provider.State]int{
@@ -317,8 +345,9 @@ var liveness = map[provider.State]int{
 // observe is what the control plane is told with the question: every name of this launcher's
 // namespace once, live if any instance of it is, for a name whose instances all exited the end
 // of the output of the newest, and for a running one the progress marker its command last
-// printed. A marker that could not be read is left out, which the control plane tells apart from
-// one that was never printed. The output is sent and never logged here.
+// printed and what it last said its agent is doing, both from one read of its output. A marker
+// that could not be read is left out, which the control plane tells apart from one that was
+// never printed. The output is sent and never logged here.
 func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []observedInstance {
 	observed := []observedInstance{}
 	for _, name := range sortedKeys(byName) {
@@ -341,6 +370,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 			} else {
 				progress := lastProgress(lines)
 				entry.Progress = &progress
+				entry.Activity = l.activityOf(lines)
 			}
 		}
 		if state == provider.StateExited {

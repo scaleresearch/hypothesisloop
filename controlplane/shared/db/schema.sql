@@ -554,6 +554,11 @@ ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_state TEXT NOT 
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress TEXT NOT NULL DEFAULT '';
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_progress_at TIMESTAMPTZ;
 ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_end_reason TEXT NOT NULL DEFAULT '';
+-- What the agent on the machine asked for last said it is doing, a short sentence its harness
+-- prints beside its progress marker, and when the platform first read that sentence. The latest
+-- only: there is no history. Empty while no machine is asked for and until one says something.
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_activity TEXT NOT NULL DEFAULT '';
+ALTER TABLE experiment_signups ADD COLUMN IF NOT EXISTS instance_activity_at TIMESTAMPTZ;
 
 -- The inline CONSTRAINT runs only where the table does not exist yet, so an existing database
 -- gets the check here.
@@ -1173,6 +1178,8 @@ ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_s
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress TEXT NOT NULL DEFAULT '';
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_progress_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_end_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity TEXT NOT NULL DEFAULT '';
+ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS coordinator_instance_activity_at TIMESTAMPTZ;
 -- How many machines the platform may run for this platform experiment, its coordinator included.
 -- Fixed at creation from config agents.max_hosted_per_platform_experiment.
 ALTER TABLE platform_experiments ADD COLUMN IF NOT EXISTS max_hosted INTEGER NOT NULL DEFAULT 0;

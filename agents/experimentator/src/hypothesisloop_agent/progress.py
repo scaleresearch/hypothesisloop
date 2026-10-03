@@ -9,10 +9,28 @@ import time
 PREFIX = "hl-progress"
 # domain.AgentProgressIntervalSeconds on the platform's side.
 INTERVAL_S = 15
+# The line that says what the agent is doing now. The launcher hands the newest to the platform
+# with the marker, and the platform shows it beside the agent: the latest sentence and nothing
+# before it. It is printed with every beat, so the newest is never far back in the output, and
+# when it changes, at most every ACTIVITY_INTERVAL_S.
+ACTIVITY_PREFIX = "hl-activity"
+ACTIVITY_INTERVAL_S = 3
+# domain.MaxAgentActivityLength on the platform's side.
+MAX_ACTIVITY_LENGTH = 120
+
+THINKING = "thinking"
+WAITING = "waiting for platform updates"
+
+
+def sentence(text: str) -> str:
+    """text as one printable line of at most MAX_ACTIVITY_LENGTH characters."""
+    text = " ".join("".join(c if c.isprintable() else " " for c in text).split())
+    return text if len(text) <= MAX_ACTIVITY_LENGTH else text[:MAX_ACTIVITY_LENGTH - 3] + "..."
 
 
 class Progress:
-    """Prints a new marker every INTERVAL_S for as long as the harness is doing what it should.
+    """Prints a new marker every INTERVAL_S for as long as the harness is doing what it should,
+    and beside it what the agent is doing.
 
     The beat runs on the harness's own event loop, so a frozen process or a blocked loop prints
     nothing. While a turn is in flight it also stops once the model session has been silent for
@@ -26,6 +44,9 @@ class Progress:
         self._emit = emit or (lambda line: print(line, flush=True))
         self._awaiting_since: float | None = None
         self._count = 0
+        self._activity = ""
+        self._said = ""
+        self._said_at: float | None = None
 
     def awaiting(self) -> None:
         """A turn is in flight and the next message from the model session is awaited from now."""
@@ -42,10 +63,23 @@ class Progress:
     def healthy(self) -> bool:
         return self._awaiting_since is None or self._clock() - self._awaiting_since <= self._quiet_limit_s
 
+    def doing(self, text: str) -> None:
+        """What the agent is doing from now on, in a few words that hold nothing secret: said at
+        once when the last sentence is ACTIVITY_INTERVAL_S old, and with the next beat otherwise."""
+        self._activity = sentence(text)
+        if self._activity != self._said and (self._said_at is None or self._clock() - self._said_at >= ACTIVITY_INTERVAL_S):
+            self._say()
+
+    def _say(self) -> None:
+        if self._activity:
+            self._emit(f"{ACTIVITY_PREFIX} {self._activity}")
+            self._said, self._said_at = self._activity, self._clock()
+
     def beat(self) -> None:
         if self.healthy():
             self._count += 1
             self._emit(f"{PREFIX} {self._count}")
+            self._say()
 
     async def run(self) -> None:
         while True:

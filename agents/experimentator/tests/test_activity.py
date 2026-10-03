@@ -90,5 +90,64 @@ class ActivityLinesTest(unittest.TestCase):
         self.assertEqual(activity.lines(SystemMessage(subtype="init", data={}), "a", NOW), [])
 
 
+def bash(command):
+    return assistant(ToolUseBlock(id="t", name="Bash", input={"command": command}))
+
+
+# What the platform shows of an agent beside its machine is read by its whole organisation. It
+# names the command, the file or the id of the tool call in flight, and nothing an argument holds.
+class DoingTest(unittest.TestCase):
+    def test_an_hl_command_is_said_by_its_words_and_its_ids(self):
+        job = "job-0199a1b2c3d4e5f60718293a4b5c6d7e"
+        for command, said in {
+            "hl capacity": "running hl capacity",
+            "hl platform-experiments agents add --hosted --role baseline": "running hl platform-experiments agents add",
+            f"hl job status {job} --json": f"running hl job status {job}",
+            f"cd /w/repo && API_URL=http://x hl job logs {job} | tail -5": f"running hl job logs {job}",
+            "hl job submit job.yaml": "running hl job submit",
+            "/usr/local/bin/hl quota": "running hl quota",
+        }.items():
+            self.assertEqual(activity.doing(bash(command)), said, command)
+
+    def test_no_argument_of_a_command_is_said(self):
+        secret = "hls_c2VjcmV0.c2lnbmF0dXJl"
+        for command, said in {
+            f"curl -H 'Authorization: Bearer {secret}' https://api.example.com/x": "running curl",
+            f"HL_TOKEN={secret} hl hypothesis comment --text 'the key is {secret}'": "running hl hypothesis comment",
+            f"hl login {secret}": "running hl login",
+            f"export TOKEN={secret}; python train.py --key {secret}": "running python train.py",
+            f"git clone https://user:{secret}@github.com/acme/model.git": "running git clone",
+            f"echo {secret} > .env": "running echo",
+            f"{secret}": "running a command",
+            "": "running a command",
+            "echo 'an unclosed quote": "running echo",
+        }.items():
+            got = activity.doing(bash(command))
+            self.assertEqual(got, said, command)
+            self.assertNotIn(secret, got)
+
+    def test_a_file_tool_is_said_by_the_files_name_and_no_content(self):
+        read = ToolUseBlock(id="t", name="Read", input={"file_path": "/w/repo/train.py"})
+        write = ToolUseBlock(id="t", name="Write", input={"file_path": "/w/proposal.yaml", "content": "password: hunter2"})
+        odd = ToolUseBlock(id="t", name="Edit", input={"file_path": "/w/a file with spaces", "old_string": "a", "new_string": "b"})
+        self.assertEqual(activity.doing(assistant(read)), "reading train.py")
+        self.assertEqual(activity.doing(assistant(write)), "writing proposal.yaml")
+        self.assertEqual(activity.doing(assistant(odd)), "editing a file")
+        self.assertEqual(activity.doing(assistant(ToolUseBlock(id="t", name="Grep", input={"pattern": "hunter2"}))), "searching the repository")
+        self.assertEqual(activity.doing(assistant(ToolUseBlock(id="t", name="Odd", input={"n": "hunter2"}))), "using Odd")
+
+    def test_the_last_call_of_a_message_stands_and_an_answer_is_thinking_again(self):
+        both = assistant(TextBlock(text="first the capacity"), ToolUseBlock(id="t", name="Read", input={"file_path": "a.py"}),
+                         ToolUseBlock(id="u", name="Bash", input={"command": "hl capacity"}))
+        self.assertEqual(activity.doing(both), "running hl capacity")
+        answered = UserMessage(content=[ToolResultBlock(tool_use_id="t", content="ok", is_error=False)])
+        self.assertEqual(activity.doing(answered), "thinking")
+        # What the agent says changes nothing, nor does anything a subagent does.
+        self.assertEqual(activity.doing(assistant(TextBlock(text="done"))), "")
+        inside = AssistantMessage(content=[ToolUseBlock(id="t", name="Bash", input={"command": "ls"})], model="m", parent_tool_use_id="task-1")
+        self.assertEqual(activity.doing(inside), "")
+        self.assertEqual(activity.doing(SystemMessage(subtype="init", data={})), "")
+
+
 if __name__ == "__main__":
     unittest.main()

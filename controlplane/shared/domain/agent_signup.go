@@ -44,6 +44,26 @@ type AgentSignup struct {
 	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`
+	// Activity is what the agent on the machine asked for last said it is doing.
+	Activity *AgentActivity `json:"activity,omitempty"`
+}
+
+// MaxAgentActivityLength bounds the sentence of an AgentActivity, in characters.
+const MaxAgentActivityLength = 120
+
+// AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it
+// beside its progress marker. The platform keeps the latest sentence only.
+type AgentActivity struct {
+	Text string    `json:"text" maxLength:"120" doc:"A short sentence of what the agent is doing now, written by its harness from the tool call in flight: \"thinking\", \"reading train.py\", \"running hl capacity\", \"waiting for platform updates\". It names commands, file names and ids, and carries no argument, file content or secret."`
+	At   time.Time `json:"at" doc:"When the platform first read this sentence from the agent's machine, which reports about every 15 seconds. An old time beside a running instance is an agent that has been at the same thing since."`
+}
+
+// ActivityOf is the activity stored as text since at, nil for none.
+func ActivityOf(text string, at *time.Time) *AgentActivity {
+	if text == "" || at == nil {
+		return nil
+	}
+	return &AgentActivity{Text: text, At: *at}
 }
 
 // RunEnd is why an agent's run in a platform experiment is over.
@@ -156,6 +176,8 @@ type HostedCoordinator struct {
 	Model    string `json:"model"`
 	// Instance is what became of its machine.
 	Instance AgentInstance `json:"instance"`
+	// Activity is what the coordinator last said it is doing.
+	Activity *AgentActivity `json:"activity,omitempty"`
 }
 
 var launcherNamePattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)

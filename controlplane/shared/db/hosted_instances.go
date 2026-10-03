@@ -70,6 +70,7 @@ func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpI
 UPDATE `+c.table+`
 SET `+c.prefix+`name = $3, `+c.prefix+`asked_at = now(), `+c.prefix+`seen_at = NULL, `+c.prefix+`launch = $4,
     `+c.prefix+`state = '', `+c.prefix+`progress = '', `+c.prefix+`progress_at = NULL,
+    `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
     `+c.prefix+`restarts = CASE WHEN `+c.prefix+`launch = $4 THEN `+c.prefix+`restarts ELSE 0 END,
     `+c.prefix+`stopped = `+c.prefix+`stopped AND `+c.prefix+`launch = $4
 WHERE `+c.key, platformExpID, agentID, name, launch)
@@ -80,23 +81,28 @@ WHERE `+c.key, platformExpID, agentID, name, launch)
 }
 
 // ObserveInstance records what the launcher reports of the machine asked for under name while
-// it lives: when it was first reported, the state it is in, and its progress. progress is the
-// marker the machine's command last printed, nil when the launcher could not read it. The time
-// of progress is the database's own, taken when the marker differs from the one stored, and at
-// most progressStampsPerLimit times per progressLimit. A report that changes nothing writes
-// nothing. An agent's machine reported running starts the clock of a run that waited for it
-// (startClock).
-func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error {
+// it lives: when it was first reported, the state it is in, its progress and what its agent says
+// it is doing. progress is the marker the machine's command last printed, nil when the launcher
+// could not read it. The time of progress is the database's own, taken when the marker differs
+// from the one stored, and at most progressStampsPerLimit times per progressLimit. activity is
+// the sentence the command last printed of what its agent does, empty when it printed none or
+// could not be read, which leaves the one stored: it is kept with the time it was first read,
+// the latest only. A report that changes nothing writes nothing. An agent's machine reported
+// running starts the clock of a run that waited for it (startClock).
+func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error {
 	c := instanceOf(agentID)
 	stamp := `($5::text IS NOT NULL AND $5 <> ` + c.prefix + `progress AND (` + c.prefix + `progress_at IS NULL OR ` + c.prefix + `progress_at <= now() - make_interval(secs => $6)))`
+	said := `($7 <> '' AND $7 <> ` + c.prefix + `activity)`
 	_, err := s.pool.pool.Exec(ctx, `
 UPDATE `+c.table+`
 SET `+c.prefix+`seen_at = COALESCE(`+c.prefix+`seen_at, now()), `+c.prefix+`state = $4,
     `+c.prefix+`progress = CASE WHEN `+stamp+` THEN $5 ELSE `+c.prefix+`progress END,
-    `+c.prefix+`progress_at = CASE WHEN `+stamp+` THEN now() ELSE `+c.prefix+`progress_at END
+    `+c.prefix+`progress_at = CASE WHEN `+stamp+` THEN now() ELSE `+c.prefix+`progress_at END,
+    `+c.prefix+`activity_at = CASE WHEN `+said+` THEN now() ELSE `+c.prefix+`activity_at END,
+    `+c.prefix+`activity = CASE WHEN `+said+` THEN $7 ELSE `+c.prefix+`activity END
 WHERE `+c.key+` AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> ''
-  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+stamp+`)`,
-		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit)
+  AND (`+c.prefix+`seen_at IS NULL OR `+c.prefix+`state <> $4 OR `+stamp+` OR `+said+`)`,
+		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
 	}
@@ -139,6 +145,7 @@ func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpI
 	err = tx.QueryRow(ctx, `
 UPDATE `+c.table+`
 SET `+c.prefix+`name = '', `+c.prefix+`exited_at = now(), `+c.prefix+`exit_log = $4, `+c.prefix+`end_reason = $7, `+c.prefix+`state = '',
+    `+c.prefix+`activity = '', `+c.prefix+`activity_at = NULL,
     `+c.prefix+`stopped = `+c.prefix+`restarts >= $5,
     `+c.prefix+`restarts = CASE WHEN `+c.prefix+`restarts >= $5 THEN `+c.prefix+`restarts ELSE `+c.prefix+`restarts + 1 END
 WHERE `+c.key+` AND NOT `+c.prefix+`stopped AND `+c.prefix+`name = $3 AND `+c.prefix+`name <> '' AND `+when+`
@@ -188,6 +195,7 @@ func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, launche
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE experiment_signups s
 SET instance_name = '', instance_state = '', instance_exited_at = now(), instance_end_reason = '`+string(InstanceReleased)+`',
+    instance_activity = '', instance_activity_at = NULL,
     instance_exit_log = $3::jsonb ->> (`+runEndSQL+`)
 WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
   AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
@@ -197,6 +205,7 @@ WHERE s.hosted AND s.launcher = $1 AND s.instance_name <> ''
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
 SET coordinator_instance_name = '', coordinator_instance_state = '', coordinator_instance_exited_at = now(),
+    coordinator_instance_activity = '', coordinator_instance_activity_at = NULL,
     coordinator_instance_end_reason = '`+string(InstanceReleased)+`', coordinator_instance_exit_log = $3
 WHERE pe.coordinator_hosted AND pe.coordinator_launcher = $1 AND pe.coordinator_instance_name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,

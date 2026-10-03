@@ -24,7 +24,7 @@ type Store interface {
 	ReleaseInstances(ctx context.Context, launcher string, windDown time.Duration) error
 	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
-	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error
+	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
 	SetLauncherHolds(ctx context.Context, launcher string, holds bool) error
 }
@@ -78,6 +78,7 @@ type ObservedInstance struct {
 	Log   string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
 	// Progress is a pointer so that "could not be read" differs from "read, and none printed".
 	Progress *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output. The platform compares it with the one before and reads nothing else from it."`
+	Activity string  `json:"activity,omitempty" maxLength:"120" doc:"For a running instance, what its agent last said it is doing: what follows hl-activity on the newest such line of the output the progress marker is read from, left out when it has printed none. It rides on the report the launcher already makes. The platform keeps the latest with the time it first read it and answers it as activity on the agent, the coordinator or the draft."`
 }
 
 const (
@@ -318,7 +319,11 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 	if state == stateUnknown {
 		state = stateStarting
 	}
-	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit); err != nil {
+	activity := ""
+	if reported.State == stateRunning {
+		activity = said(reported.Activity, token)
+	}
+	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit, activity); err != nil {
 		return domain.AgentInstance{}, false, err
 	}
 	switch {
@@ -328,6 +333,16 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 		return end(db.InstanceSilent, fmt.Sprintf("the machine was running and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
 	}
 	return domain.AgentInstance{}, false, nil
+}
+
+// said is the sentence an agent printed of what it is doing, as the platform stores it: one
+// line, without the token this API minted for the machine, which its output must not carry into
+// the database.
+func said(activity, token string) string {
+	if token != "" {
+		activity = strings.ReplaceAll(activity, token, "<HL_TOKEN>")
+	}
+	return strings.Join(strings.Fields(strings.ToValidUTF8(activity, "")), " ")
 }
 
 // lastBytes keeps the end of text, cut at a line where one starts inside the limit.
@@ -395,7 +410,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "launcher-reconcile", Method: "POST", Path: "/{name}/reconcile",
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
-		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, and how it paces its passes. The answer is its complete desired state. " +
+		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker and what its agent says it is doing (activity), and how it paces its passes. The answer is its complete desired state. " +
 			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
 			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +

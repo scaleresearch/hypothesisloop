@@ -62,6 +62,9 @@ type observedInstance struct {
 	Log   string `json:"log,omitempty"`
 	// Progress is nil when the output of a running instance could not be read.
 	Progress *string `json:"progress,omitempty"`
+	// Activity is what the agent of a running instance last said it is doing, empty when it
+	// said nothing in the output the progress was read from.
+	Activity string `json:"activity,omitempty"`
 }
 
 // reconcileQuestion is what the launcher tells the control plane with every question.

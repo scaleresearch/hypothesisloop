@@ -55,6 +55,44 @@ class ProgressTest(unittest.TestCase):
         self.progress.beat()
         self.assertEqual(self.lines, ["hl-progress 1", "hl-progress 2", "hl-progress 3"])
 
+    # What an agent was doing was read from its machine's log. The harness says it in one line
+    # the launcher reads with the marker: at once when it changes, at most every few seconds, and
+    # again with every beat, so the newest is never far back in the output.
+    def test_what_the_agent_is_doing_is_said_when_it_changes_and_with_every_beat(self):
+        self.progress.beat()
+        self.progress.doing("thinking")
+        self.progress.doing("thinking")
+        self.assertEqual(self.lines, ["hl-progress 1", "hl-activity thinking"])
+        # A change inside the interval waits for the beat, and only the latest is said.
+        self.clock.now = 1
+        self.progress.doing("reading train.py")
+        self.progress.doing("running hl capacity")
+        self.assertEqual(len(self.lines), 2)
+        self.clock.now = 2
+        self.progress.beat()
+        self.assertEqual(self.lines[2:], ["hl-progress 2", "hl-activity running hl capacity"])
+        self.clock.now = 2 + progress.ACTIVITY_INTERVAL_S
+        self.progress.doing("waiting for platform updates")
+        self.assertEqual(self.lines[4:], ["hl-activity waiting for platform updates"])
+        self.progress.beat()
+        self.assertEqual(self.lines[5:], ["hl-progress 3", "hl-activity waiting for platform updates"])
+
+    def test_a_sentence_is_one_printable_line_of_bounded_length(self):
+        self.progress.doing("reading\n a\tfile \x1b[31m" + "x" * 300)
+        [line] = self.lines
+        said = line.removeprefix("hl-activity ")
+        self.assertTrue(said.startswith("reading a file [31mxxx"), said)
+        self.assertEqual(len(said), progress.MAX_ACTIVITY_LENGTH)
+        # agentlaunch.activityPattern on the launcher's side.
+        self.assertRegex(line, r"^hl-activity .+$")
+        self.assertNotIn("\n", line)
+
+    def test_a_harness_that_has_said_nothing_prints_no_activity(self):
+        self.progress.beat()
+        self.progress.doing("  ")
+        self.progress.beat()
+        self.assertEqual(self.lines, ["hl-progress 1", "hl-progress 2"])
+
 
 class SilentClient:
     """Answers with one message and then nothing, as a model session that hung does."""
@@ -101,7 +139,10 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
                 await task
         self.assertGreaterEqual(alive, 2, "no marker while the turn was alive")
         self.assertEqual(len(printed), stopped_at, "markers kept coming from a turn silent past the limit")
-        self.assertEqual(len(set(printed)), len(printed))
+        markers = [line for line in printed if line.startswith(progress.PREFIX + " ")]
+        self.assertEqual(len(set(markers)), len(markers))
+        # Beside each marker the loop says what the agent is at: a turn in flight is thinking.
+        self.assertEqual({line for line in printed if line not in markers}, {"hl-activity thinking"})
 
 
 if __name__ == "__main__":

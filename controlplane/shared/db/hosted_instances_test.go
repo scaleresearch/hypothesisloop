@@ -169,20 +169,20 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		// ago it was asked for.
 		ask("starting")
 		thing.age(thing.column("asked_at"), 10*bootLimit)
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "another-name", "starting", nil, time.Hour, ""); err != nil {
 			t.Fatal(err)
 		}
 		if thing.instance().SeenAt != nil {
 			t.Fatalf("%s: seeing another name marked this one seen", kind)
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, ""); err != nil {
 			t.Fatal(err)
 		}
 		first := thing.instance().SeenAt
 		if first == nil || end("starting", InstanceNeverSeen) || end("starting", InstanceStillStarting) {
 			t.Fatalf("%s: a machine just seen: got = %+v, want it kept", kind, thing.instance())
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour); err != nil || !thing.instance().SeenAt.Equal(*first) {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "starting", "starting", nil, time.Hour, ""); err != nil || !thing.instance().SeenAt.Equal(*first) {
 			t.Fatalf("%s: seen again moved the first sight: %v", kind, err)
 		}
 		thing.age(thing.column("seen_at"), bootLimit+time.Second)
@@ -198,7 +198,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 		if end("gone", InstanceGone) {
 			t.Fatalf("%s: a machine never seen was recorded as gone", kind)
 		}
-		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "gone", "starting", nil, time.Hour); err != nil {
+		if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "gone", "starting", nil, time.Hour, ""); err != nil {
 			t.Fatal(err)
 		}
 		if !end("gone", InstanceGone) || thing.instance().Restarts != 3 || thing.instance().ExitLog != "why" {
@@ -421,7 +421,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 	for kind, thing := range hostedThings(t, pool) {
 		observe := func(state string, progress *string) {
 			t.Helper()
-			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit); err != nil {
+			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit, ""); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -526,7 +526,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 		if err := pes.AskInstance(ctx, pe, agent, name, "launch-1"); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.ObserveInstance(ctx, pe, agent, name, domain.InstanceRunning, &running, time.Hour); err != nil {
+		if err := pes.ObserveInstance(ctx, pe, agent, name, domain.InstanceRunning, &running, time.Hour, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -666,5 +666,103 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, answered); err != nil || got.Status != domain.PlatformExpDraft || got.ProposedAt == nil {
 		t.Fatalf("a draft whose planner stopped after it proposed: got = %+v, %v, want its proposal still waiting", got, err)
+	}
+}
+
+// A person watching an accepted experiment saw machines that were "running" and nothing of what
+// their agents did. The latest sentence each machine said is kept on its row with the time it
+// was first read, and answered on the agent, on the coordinator and, for a planner, on its draft.
+// It is what the machine asked for now says: a new machine, an ended one and a released one say
+// nothing.
+func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	launcher := "launcher-" + uuid.New().String()[:8]
+	pe := createTestPEWithCoordinator(t, pool, launcher)
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist"})[0]
+	draft, planner := createTestDraft(t, pool, launcher)
+
+	said := func(platformExpID, agentID string) *domain.AgentActivity {
+		t.Helper()
+		if agentID == "" {
+			got, err := pes.GetPlatformExperiment(ctx, platformExpID)
+			if err != nil || got.Coordinator == nil {
+				t.Fatalf("coordinator of %s: %+v, %v", platformExpID, got, err)
+			}
+			return got.Coordinator.Activity
+		}
+		signup, err := pes.GetAgentSignup(ctx, platformExpID, agentID)
+		if err != nil || signup == nil {
+			t.Fatalf("signup of %s: %v", agentID, err)
+		}
+		return signup.Activity
+	}
+	for _, one := range []struct{ pe, agent string }{{pe, agent}, {pe, ""}, {draft, planner}} {
+		if err := pes.AskInstance(ctx, one.pe, one.agent, "machine-1", "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+		observe := func(name, activity string) {
+			t.Helper()
+			if err := pes.ObserveInstance(ctx, one.pe, one.agent, name, domain.InstanceRunning, nil, time.Hour, activity); err != nil {
+				t.Fatal(err)
+			}
+		}
+		observe("machine-1", "")
+		if got := said(one.pe, one.agent); got != nil {
+			t.Fatalf("%q before it said anything: got = %+v, want none", one.agent, got)
+		}
+		observe("machine-1", "reading train.py")
+		first := said(one.pe, one.agent)
+		if first == nil || first.Text != "reading train.py" || time.Since(first.At) > time.Minute {
+			t.Fatalf("%q: got = %+v, want its sentence and when it was read", one.agent, first)
+		}
+		// The same sentence again keeps its time, one read with none keeps the sentence, and
+		// another machine's says nothing of this one.
+		observe("machine-1", "reading train.py")
+		observe("machine-1", "")
+		observe("another-machine", "running hl capacity")
+		if again := said(one.pe, one.agent); again == nil || *again != *first {
+			t.Fatalf("%q after reports that change nothing: got = %+v, want %+v", one.agent, again, first)
+		}
+		observe("machine-1", "running hl capacity")
+		if next := said(one.pe, one.agent); next == nil || next.Text != "running hl capacity" || next.At.Before(first.At) {
+			t.Fatalf("%q after its next sentence: got = %+v", one.agent, next)
+		}
+	}
+	// The draft answers its planner's, and an experiment that is no draft answers none of its own.
+	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Activity == nil || got.Activity.Text != "running hl capacity" {
+		t.Fatalf("the draft: activity %+v, %v, want its planner's", got.Activity, err)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, pe); err != nil || got.Activity != nil {
+		t.Fatalf("an open experiment: activity %+v, %v, want none beside its roster", got.Activity, err)
+	}
+	listed, err := pes.ListAgentSignups(ctx, pe)
+	if err != nil || len(listed) != 1 || listed[0].Activity == nil || listed[0].Activity.Text != "running hl capacity" {
+		t.Fatalf("the roster: %+v, %v, want the agent's activity on its entry", listed, err)
+	}
+
+	// A machine that ended says nothing, nor does the one asked for in its place until it speaks.
+	if _, recorded, err := pes.EndInstance(ctx, pe, agent, "machine-1", InstanceExited, "boom", time.Minute, 3); err != nil || !recorded {
+		t.Fatalf("end: %v, %v", recorded, err)
+	}
+	if got := said(pe, agent); got != nil {
+		t.Fatalf("after its machine ended: got = %+v, want none", got)
+	}
+	if err := pes.AskInstance(ctx, pe, "", "machine-2", "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := said(pe, ""); got != nil {
+		t.Fatalf("a coordinator asked for on a new machine: got = %+v, want none", got)
+	}
+	// Released with its draft's answer, the planner's machine says nothing either.
+	if err := pes.SetProposal(ctx, draft, []byte(`{}`), time.Now().UTC().Add(time.Hour), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.ReleaseInstances(ctx, launcher, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Activity != nil || said(draft, planner) != nil {
+		t.Fatalf("a released planner: activity %+v, %v, want none", got.Activity, err)
 	}
 }

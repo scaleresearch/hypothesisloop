@@ -139,7 +139,7 @@ func TestARunsLengthCountsFromTheFirstResearchersMachineRunning(t *testing.T) {
 		if err := pes.AskInstance(ctx, pe, agent, "machine-"+agent, "launch-1"); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.ObserveInstance(ctx, pe, agent, "machine-"+agent, state, nil, time.Hour); err != nil {
+		if err := pes.ObserveInstance(ctx, pe, agent, "machine-"+agent, state, nil, time.Hour, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1225,6 +1225,37 @@ func TestTheNewestProgressMarkerOfEachRunningInstanceIsReported(t *testing.T) {
 	}
 }
 
+// What an agent is doing was read from its machine's log by whoever could reach the machine. The
+// harness says it in a line beside its progress marker, and the launcher hands the newest to the
+// control plane with the report it already makes: no second read, and nothing of its own
+// environment in it.
+func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b"), agent("c")}, nil)
+	h.mustPass()
+	for _, name := range []string{"a", "b", "c"} {
+		h.rented.Start(full(name))
+	}
+	h.rented.Print(full("a"), "hl-progress 1", "hl-activity thinking", "hl-progress 2", "hl-activity running hl capacity", "2026-01-01T00:00:00Z a tool Bash: hl capacity")
+	h.rented.Print(full("b"), "hl-progress 1", "hl-activity", " hl-activity indented", "not hl-activity either")
+	h.rented.Print(full("c"), "hl-progress 1", "hl-activity running "+oauthToken+" "+strings.Repeat("é", 200))
+	before := h.rented.Calls("Logs")
+	h.mustPass()
+	told := h.cp.lastQuestion().Instances
+	if told[0].Activity != "running hl capacity" || told[0].Progress == nil || *told[0].Progress != "2" {
+		t.Fatalf("a: told %+v, want its newest sentence beside its newest marker", told[0])
+	}
+	if told[1].Activity != "" {
+		t.Fatalf("b, which printed no such line: told activity %q, want none", told[1].Activity)
+	}
+	if got := []rune(told[2].Activity); len(got) != maxActivityLength || !strings.HasPrefix(told[2].Activity, "running <CLAUDE_CODE_OAUTH_TOKEN> é") {
+		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, maxActivityLength)
+	}
+	if reads := h.rented.Calls("Logs") - before; reads != 3 {
+		t.Fatalf("the pass read the output of 3 running instances %d times, want once each", reads)
+	}
+}
+
 func TestAMarkerFurtherBackThanTheLinesReadIsNotReported(t *testing.T) {
 	h := newHarness(t)
 	h.cp.want([]entry{agent("a")}, nil)

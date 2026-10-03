@@ -50,14 +50,15 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     started_at = time.time()
     stop_flag = core.install_signal_handler()
     # This backend has no watchdog over a turn, so the beat says only that the loop is alive.
-    beat = asyncio.ensure_future(progress.Progress(quiet_limit_s=float("inf")).run())
+    beating = progress.Progress(quiet_limit_s=float("inf"))
+    beat = asyncio.ensure_future(beating.run())
     try:
-        await core.run_until_lost(setup, _run_thread(setup, model, started_at, stop_flag))
+        await core.run_until_lost(setup, _run_thread(setup, model, started_at, stop_flag, beating))
     finally:
         beat.cancel()
 
 
-async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_flag: list) -> None:
+async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_flag: list, beating: progress.Progress) -> None:
     async with AsyncCodex() as codex:
         thread = await codex.thread_start(
             model=model or None,
@@ -74,6 +75,8 @@ async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_
         watch_env = updates.watch_env(cfg.api_url, cfg.token, setup.statedir)
         prompt = "Begin."
         while True:
+            # Its notifications differ by SDK version, so what a turn is at is said no finer.
+            beating.doing("working on its turn")
             turn = await thread.turn(prompt)
             interrupted = False
             async for note in turn.stream():
@@ -98,6 +101,7 @@ async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_
             if reason:
                 log.info("stopping: %s", reason)
                 return
+            beating.doing(progress.WAITING)
             events = await updates.next_batch(
                 watch_env, lambda: core.stop_requested(setup, started_at, stop_flag), updates.IDLE_NUDGE_S)
             if events:

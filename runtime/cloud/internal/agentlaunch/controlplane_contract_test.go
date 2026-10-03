@@ -664,3 +664,42 @@ func TestAHungAgentIsReplacedByTheControlPlanesDecisionAndAWorkingOneIsKept(t *t
 		t.Fatal("the working agent's progress was not recorded")
 	}
 }
+
+// What an agent is doing reaches the control plane on the question the launcher already asks,
+// and is kept as the latest sentence with the time it was first read: a pass that says the same
+// writes nothing, the machine's own token never arrives, and a machine that ends says nothing.
+func TestWhatAnAgentIsDoingIsKeptAsItsLatestSentenceUntilItsMachineEnds(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	name := c.rented.Names()[0]
+	c.rented.Start(name)
+	c.rented.Print(name, "hl-progress 1", "hl-activity reading   train.py")
+	c.pass()
+	first, said := c.store.Activity["pe-1/ag-one"]
+	if !said || first.Text != "reading train.py" || c.store.ActivityWrites != 1 {
+		t.Fatalf("after its first sentence: kept %+v with %d writes, want it once, as one line", first, c.store.ActivityWrites)
+	}
+
+	c.store.Advance(time.Minute)
+	c.rented.Print(name, "hl-progress 2", "hl-activity reading train.py")
+	c.pass()
+	if again := c.store.Activity["pe-1/ag-one"]; again != first || c.store.ActivityWrites != 1 {
+		t.Fatalf("the same sentence a minute later: kept %+v with %d writes, want %+v and nothing written", again, c.store.ActivityWrites, first)
+	}
+
+	token, err := auth.Mint(contractSecret, auth.AgentScope("pe-1", "ag-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.rented.Print(name, "hl-progress 3", "hl-activity running hl quota "+token)
+	c.pass()
+	if next := c.store.Activity["pe-1/ag-one"]; next.Text != "running hl quota <HL_TOKEN>" || !next.At.After(first.At) {
+		t.Fatalf("its next sentence: kept %+v, want it without the machine's token and with its own time", next)
+	}
+
+	c.rented.Exit(name, "boom")
+	c.pass()
+	if left, said := c.store.Activity["pe-1/ag-one"]; said {
+		t.Fatalf("after its machine exited: kept %+v, want nothing said of a machine that is gone", left)
+	}
+}

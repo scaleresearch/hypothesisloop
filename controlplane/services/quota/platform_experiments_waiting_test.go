@@ -279,3 +279,27 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 		t.Errorf("a researcher after the start: state %q, want requested", got)
 	}
 }
+
+// The roster said which machines ran and nothing of what their agents did. Each entry answers
+// what its agent is doing now and since when, and one whose machine says nothing answers none.
+func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpRunning, 5)
+	since := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	running := &domain.AgentInstance{Name: "m-1", AskedAt: &since, SeenAt: &since, Reported: domain.InstanceRunning}
+	store.signups = []domain.AgentSignup{
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running},
+	}
+	code, out := call(t, agentsRouter(t, store, waitingPerson), "GET", "/platform-experiments/pe-1/agents", "")
+	if code != http.StatusOK {
+		t.Fatalf("list: got = %d %v", code, out)
+	}
+	roster := joined(t, out)
+	doing, _ := roster[0]["activity"].(map[string]any)
+	if doing["text"] != "running hl job submit" || doing["at"] != "2026-10-06T12:00:00Z" {
+		t.Errorf("an agent at work: activity %v, want its sentence and since when", roster[0]["activity"])
+	}
+	if _, says := roster[1]["activity"]; says {
+		t.Errorf("an agent whose machine said nothing: activity %v, want none", roster[1]["activity"])
+	}
+}

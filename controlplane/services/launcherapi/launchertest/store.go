@@ -32,6 +32,10 @@ type Store struct {
 	ProgressWrites int
 	// Holds is what each launcher's last question left recorded of it holding machines.
 	Holds map[string]bool
+	// Activity holds, by platform experiment and agent id joined with a slash, what the machine
+	// asked for last said its agent is doing, and ActivityWrites counts the times one was written.
+	Activity       map[string]domain.AgentActivity
+	ActivityWrites int
 
 	clock    time.Duration
 	askedAt  map[string]time.Duration
@@ -93,6 +97,7 @@ func (s *Store) ReleaseInstances(_ context.Context, launcher string, _ time.Dura
 		}
 		agent.Instance.Name, agent.Instance.Reported, agent.Instance.ExitedAt = "", "", &now
 		agent.Instance.EndReason, agent.Instance.ExitLog = string(db.InstanceReleased), end.ReleasedBecause()
+		delete(s.Activity, agent.PlatformExperimentID+"/"+agent.AgentID)
 	}
 	return nil
 }
@@ -128,6 +133,7 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	}
 	instance.Name, instance.Launch, instance.SeenAt, instance.Reported, instance.ProgressAt = name, launch, nil, "", nil
 	delete(s.progress, platformExpID+"/"+agentID)
+	delete(s.Activity, platformExpID+"/"+agentID)
 	if s.askedAt == nil {
 		s.askedAt = map[string]time.Duration{}
 	}
@@ -135,7 +141,7 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	return nil
 }
 
-func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration) error {
+func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
@@ -157,6 +163,13 @@ func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name,
 		}
 		s.progress[key], instance.ProgressAt = *progress, &at
 		s.ProgressWrites++
+	}
+	if activity != "" && activity != s.Activity[key].Text {
+		if s.Activity == nil {
+			s.Activity = map[string]domain.AgentActivity{}
+		}
+		s.Activity[key] = domain.AgentActivity{Text: activity, At: at}
+		s.ActivityWrites++
 	}
 	return nil
 }
@@ -193,6 +206,7 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 		return domain.AgentInstance{}, false, nil
 	}
 	instance.Name, instance.ExitedAt, instance.ExitLog, instance.EndReason, instance.Reported = "", &now, exitLog, string(how), ""
+	delete(s.Activity, platformExpID+"/"+agentID)
 	if instance.Restarts >= maxRestarts {
 		instance.Stopped = true
 	} else {
