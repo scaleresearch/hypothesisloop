@@ -859,6 +859,7 @@ between.
 | `make dev`                        | The control plane and the UI as host processes against the compose datastores; starts in seconds, nothing rents |
 | `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
 | `make dev-hosted`                 | `make dev` plus agent-launcher (Fly.io) and cloud-agent (vast.ai), with public tunnels (`make tunnels`); rents compute |
+| `make -C infra run-images`        | For `make dev-hosted`: build and push the agent image and the job images that changed since `IMAGE_TAG`, tag the rest without a build (`infra/README.md`) |
 | `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |
 | `make controlplane-up`            | Build images + start the control plane                             |
 | `make controlplane-down`          | Stop the control plane                                              |

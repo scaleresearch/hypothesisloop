@@ -121,7 +121,8 @@ tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
 
 # make dev, plus agent-launcher (Fly.io) and cloud-agent (vast.ai) as host processes, with the
-# settings naming the running tunnels and the images `make -C infra publish` pushed. Needs
+# settings naming the running tunnels and the images under IMAGE_TAG, which
+# `make -C infra run-images` pushes after a change to the agent image or a job image. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
 # machines, which cost money.
 dev-hosted: render-settings
@@ -344,12 +345,10 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 	$(MAKE) chart-push
 	$(MAKE) prune-images TAGS="$(TAG)"
 
-# The job images that carry a framework (job_images in the settings file): the upstream image
-# with the job image's own tools added. Apart from `images` because each pulls gigabytes.
-# An entry is name=base, or name=base=version for a base that gets CPU PyTorch at that version.
-# The tt-metal release ships no torch: 2.11.0 is what its v0.77.0 pins for x86_64 development.
-JOB_IMAGE_BASES := job-pytorch-cuda=docker.io/pytorch/pytorch@sha256:68c022c2f4627943a6f3e574cfd2c8ae4256210d5f66ae2b117942e0a8d4fa9d \
-	job-tenstorrent=ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0=2.11.0
+# The job images that carry a framework, built and pushed to $(REGISTRY), which a local cluster
+# pulls them from. Apart from `images` because each pulls gigabytes. The deployment's registry
+# gets them from `make -C infra run-images`.
+include infra/images/job/bases.mk
 
 job-images: check-tag
 	@for entry in $(JOB_IMAGE_BASES); do \

@@ -10,7 +10,7 @@
 #   hosted   the same with what rents compute elsewhere: agent-launcher (Fly.io or E2B, whichever
 #            HOSTED_SANDBOX_PROVIDER in .env names) and cloud-agent
 #            (vast.ai) as two more processes, and settings that name the running tunnels (make
-#            tunnels) and the images `make -C infra publish` pushed. Its inputs are keys of .env,
+#            tunnels) and the images `make -C infra run-images` pushed. Its inputs are keys of .env,
 #            and every missing one is named before anything is touched
 #   api      rebuild and restart the API and metrics-service with the settings as they were last
 #            rendered. Everything else keeps running
