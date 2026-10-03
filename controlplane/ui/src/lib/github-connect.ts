@@ -1,8 +1,17 @@
 import { useSyncExternalStore } from 'react'
-import { ApiError, INSTALLATION_CHOICE_REQUIRED } from '@/lib/api'
+import useSWR from 'swr'
+import { ApiError, INSTALLATION_CHOICE_REQUIRED, fetchGitHubApp } from '@/lib/api'
 import type { GitHubInstallation, ReachableInstallation } from '@/types'
 
 const KEY = 'hl-github-connect'
+
+/**
+ * The platform's GitHub App, read under one key by every component that needs it. An error whose
+ * reason is GITHUB_NOT_CONFIGURED says the deployment's git host is not GitHub.
+ */
+export function useGitHubApp(enabled = true) {
+  return useSWR(enabled ? 'github-app' : null, fetchGitHubApp, { shouldRetryOnError: false })
+}
 
 /**
  * Where GitHub returns the person: the callback and the setup address registered on the platform's

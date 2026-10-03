@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import {
-  APP_NOT_INSTALLED, ApiError, GITHUB_NOT_CONFIGURED, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations,
+  APP_NOT_INSTALLED, ApiError, GITHUB_NOT_CONFIGURED, disconnectGitHubInstallation, fetchGitHubInstallations,
 } from '@/lib/api'
-import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect } from '@/lib/github-connect'
+import { beginConnect, beginInstall, leaveFor, resetConnect, useConnect, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubApp, GitHubInstallation } from '@/types'
 import { Actor } from '@/components/actor'
@@ -23,7 +23,7 @@ export function OrgGitHub() {
   const { me, org, project, administers } = useTenant()
   const connect = useConnect()
   const { data, error, mutate } = useSWR(['github-installations', org.id], () => fetchGitHubInstallations(org.id))
-  const app = useSWR(administers ? 'github-app' : null, fetchGitHubApp, { shouldRetryOnError: false })
+  const app = useGitHubApp(administers)
   const [leaving, setLeaving] = useState(false)
   const [disconnecting, setDisconnecting] = useState<GitHubInstallation | null>(null)
   const [actionError, setActionError] = useState('')

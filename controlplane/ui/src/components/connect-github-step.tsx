@@ -1,8 +1,8 @@
 'use client'
 
 import useSWR from 'swr'
-import { fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api'
-import { GITHUB_CARD } from '@/lib/github-connect'
+import { fetchGitHubInstallations } from '@/lib/api'
+import { GITHUB_CARD, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { TextLink } from '@/components/ui/link'
 
@@ -14,7 +14,7 @@ import { TextLink } from '@/components/ui/link'
  */
 export function useGitHub(): 'connected' | 'unconnected' | undefined {
   const { org } = useTenant()
-  const app = useSWR(['github-app'], fetchGitHubApp, { shouldRetryOnError: false })
+  const app = useGitHubApp()
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   if (!app.data || !installations.data) return undefined
   return installations.data.total > 0 ? 'connected' : 'unconnected'

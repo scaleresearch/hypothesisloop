@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
-import { GITHUB_CARD } from '@/lib/github-connect'
+import { ApiError, GITHUB_NOT_CONFIGURED, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api'
+import { GITHUB_CARD, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import type { GitHubInstallation } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -43,7 +43,7 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
 export function RepositorySelect({ value, onChange, notCreated }: { value: string; onChange: (repository: string) => void; notCreated?: string }) {
   const { org } = useTenant()
   const [q, setQ] = useState('')
-  const app = useSWR(['github-app'], fetchGitHubApp, { shouldRetryOnError: false })
+  const app = useGitHubApp()
   const installations = useSWR(app.data ? ['github-installations', org.id] : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const [refreshing, setRefreshing] = useState(false)
