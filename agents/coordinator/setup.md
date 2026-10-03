@@ -97,13 +97,21 @@ silently improvise.
    `cpu`, `memory` and `storage` as quantities, since a submit without one is refused with 422
    `cpu_required`, `memory_required` or `storage_required`.
    `.hypothesisloop/experiment.yaml` states the name, the description and the metrics step 2
-   creates the experiment with. `hl repo init` in a clone adds the files it lacks, `metrics.py`
-   (the `post_metric` a Python job reports with) and a `.gitignore` among them, and overwrites
-   none. The platform checks no repository at a direct create, so before agents start run
-   `hl repo check` in a clone at the baseline commit and fix what it names
-   (`agents/coordinator/experiments/template/experiment-checklist.md`, "A ready repository"). It
-   checks the layout and that each file is valid, and never that the files describe this
-   experiment, so read them against the brief. A job spec here whose `image` is still a
+   creates the experiment with. Both commands below read the platform experiment, so they run
+   once it exists. `hl repo init`, run in a clone on a branch under `hl/PE/`, writes the
+   experiment file whole from the platform experiment and adds `README.md`, the job spec,
+   `metrics.py` (the `post_metric` a Python job reports with) and `.gitignore` where they are
+   missing. A file that is there is kept, unless it is still the unfilled template or the
+   clone's experiment file stated another experiment's name or metrics: those are replaced, and
+   one line per file says which. The platform checks no repository at a direct create, so
+   before agents start run `hl repo check` in a clone at the baseline commit and fix what it
+   names (`agents/coordinator/experiments/template/experiment-checklist.md`, "A ready
+   repository"). It checks that the README, the experiment file and the job spec are there and
+   valid with no `REPLACE-WITH` left, that the experiment file's name and metrics are the
+   platform experiment's, that the job spec states an image, `cpu`, `memory` and `storage` and
+   no `estimated_duration_hours`, and that a file of the clone names every declared metric. The
+   README's text and the code the job runs are not checked, so read those against the brief.
+   A job spec here whose `image` is still a
    `REPLACE-WITH` names an address only a deployment knows: fill it in in the clone as step 4
    says, commit and push.
    Agents can push to the repository, so protecting its default branch is the repository
