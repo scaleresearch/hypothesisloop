@@ -35,9 +35,11 @@ type captureExecutor struct {
 	uncreatable map[string]error
 	// onlyImage is the one image the runtime runs.
 	onlyImage string
-	mu        sync.Mutex
-	deleted   []string
-	created   int
+	// startedAt and endedAt are when the runtime says every job's command ran.
+	startedAt, endedAt time.Time
+	mu                 sync.Mutex
+	deleted            []string
+	created            int
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
@@ -76,7 +78,7 @@ func (e *captureExecutor) PollJobStatus(_ context.Context, id string) (agentexec
 		return agentexec.JobStatus{Phase: workload.JobPhasePending, Attempt: workload.AttemptUnknown},
 			fmt.Errorf("transient poll failure for %s", id)
 	}
-	return agentexec.JobStatus{Phase: workload.JobPhaseFailed, UID: "uid", Attempt: 0}, nil
+	return agentexec.JobStatus{Phase: workload.JobPhaseFailed, UID: "uid", Attempt: 0, StartedAt: e.startedAt, EndedAt: e.endedAt}, nil
 }
 func (e *captureExecutor) ResolveAdmittedAcceleratorType(context.Context, string) (domain.AcceleratorType, string, bool, error) {
 	return "nvidia.com/gpu.product=NVIDIA-L40", "node-a", true, nil
@@ -270,5 +272,42 @@ func TestReconcileDeletesUndesiredWorkloadEvenWhenTheFinalPushHangs(t *testing.T
 	}
 	if !reflect.DeepEqual(exec.deleted, []string{"exp-gone"}) {
 		t.Fatalf("deleted = %v, want [exp-gone] despite the final push never completing", exec.deleted)
+	}
+}
+
+// The control plane refuses a report that names one end of a run without the other, so a runtime
+// that timed nothing sends neither field.
+func TestAStatusReportCarriesTheRunItsExecutorTimedAndNoFieldOtherwise(t *testing.T) {
+	started := time.Date(2026, 10, 6, 21, 42, 50, 123e6, time.UTC)
+	ended := started.Add(15 * time.Second)
+	for name, tc := range map[string]struct {
+		exec *captureExecutor
+		want map[string]string
+	}{
+		"timed":   {&captureExecutor{startedAt: started, endedAt: ended}, map[string]string{"started_at": "2026-10-06T21:42:50.123Z", "ended_at": "2026-10-06T21:43:05.123Z"}},
+		"untimed": {&captureExecutor{}, map[string]string{}},
+	} {
+		agent := &Agent{Executor: tc.exec, Log: func(string, ...any) {}}
+		report, ok := agent.statusReportFor(context.Background(), tc.exec, "exp-1")
+		if !ok {
+			t.Fatalf("%s: no report", name)
+		}
+		raw, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sent map[string]any
+		if err := json.Unmarshal(raw, &sent); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, field := range []string{"started_at", "ended_at"} {
+			if value, present := sent[field]; present {
+				got[field] = fmt.Sprint(value)
+			}
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: sent %v, want %v", name, got, tc.want)
+		}
 	}
 }

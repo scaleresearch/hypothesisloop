@@ -12,6 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/exitline"
 )
 
 // workloadOf reports whether i is exp's workload: the instance of its current attempt in the slot
@@ -262,6 +263,10 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 //
 // Reporting an unreadable instance as still running instead is not bounded by anything: every
 // running report is recorded as liveness, so the job never reads as silent.
+//
+// The vendor's state says what the machine does, at the pace of the vendor's own reports and of
+// this runtime's reads of them, and a command can start and end between two of those. When the
+// command ran is therefore the wrapper's word, read from the output with the exit line.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -281,6 +286,9 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 		how, _, readErr := e.ending(ctx, v, i)
 		if readErr != nil {
 			log.Printf("cloudexec: reporting %s as gone: %v", i.Name, readErr)
+		}
+		if how != endingUnknown {
+			observed.StartedAt, observed.EndedAt, _ = exitline.FindRun(e.output(ctx, v, i).lines)
 		}
 		observed.Phase = map[ending]workload.JobPhase{
 			endingUnknown:   workload.JobPhaseGone,

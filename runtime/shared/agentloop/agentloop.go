@@ -400,6 +400,9 @@ type statusReportWire struct {
 	// rather than a number: the control plane reads absence as "cannot fence" and accepts the
 	// report, and reads a number as a claim it will check against desired state.
 	Attempt *int `json:"attempt,omitempty"`
+	// StartedAt and EndedAt are JobStatus's, sent together or not at all.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 func (a *Agent) statusReportLoop(ctx context.Context) {
@@ -551,9 +554,16 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		attempt = &observed.Attempt
 	}
 
+	var startedAt, endedAt *time.Time
+	if !observed.EndedAt.IsZero() {
+		startedAt, endedAt = &observed.StartedAt, &observed.EndedAt
+	}
+
 	return statusReportWire{
 		ExperimentID:            id,
 		Attempt:                 attempt,
+		StartedAt:               startedAt,
+		EndedAt:                 endedAt,
 		Phase:                   phase.String(),
 		AdmittedAcceleratorType: admittedAcceleratorType,
 		AdmittedNode:            admittedNode,

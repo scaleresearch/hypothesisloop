@@ -7,6 +7,7 @@ package agentexec
 
 import (
 	"context"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
@@ -144,4 +145,9 @@ type JobStatus struct {
 	// Machine is what the workload runs on, from an executor that knows more of it than the node
 	// ResolveAdmittedAcceleratorType names. Nil from every other.
 	Machine *domain.JobMachine
+	// StartedAt and EndedAt are when the workload's command started and ended, from an executor
+	// whose look at the workload cannot time it and that reads the times something beside the
+	// command measured. Both set once the command has ended, both zero until then and from
+	// every other executor.
+	StartedAt, EndedAt time.Time
 }
