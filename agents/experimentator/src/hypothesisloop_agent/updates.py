@@ -78,7 +78,9 @@ def watch_command(env: dict[str, str]) -> list[str]:
 
 
 async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[], bool],
-                  warn: bool = True) -> tuple[int | None, str]:
+                  warn: bool = True) -> tuple[int | None, str, str]:
+    """The exit code of command, None when stopped() ended it, its stdout and what it said on
+    stderr."""
     proc = await asyncio.create_subprocess_exec(*command, env=env, stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE)
     communicate = asyncio.ensure_future(proc.communicate())
@@ -87,16 +89,17 @@ async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[],
             if stopped():
                 proc.kill()
                 await communicate
-                return None, ""
+                return None, "", ""
             await asyncio.wait({communicate}, timeout=1)
         stdout, stderr = communicate.result()
     finally:
         if proc.returncode is None:
             proc.kill()
             await proc.wait()
+    said = stderr.decode(errors="replace").strip()
     if proc.returncode != 0 and warn:
-        log.warning("%s exited %s: %s", " ".join(command[:3]), proc.returncode, stderr.decode(errors="replace").strip()[-500:])
-    return proc.returncode, stdout.decode(errors="replace")
+        log.warning("%s exited %s: %s", " ".join(command[:3]), proc.returncode, said[-500:])
+    return proc.returncode, stdout.decode(errors="replace"), said
 
 
 def _events(stdout: str) -> list[dict]:
@@ -105,6 +108,9 @@ def _events(stdout: str) -> list[dict]:
 
 _UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
 _ENDED = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
+# The reason `hl quota` is refused for while the platform experiment is open: quota is granted
+# at the start, so there is none to read and nothing failed.
+_NO_QUOTA_YET = "quota_not_granted"
 
 
 def _machine(job: dict) -> str:
@@ -129,19 +135,26 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     """events, completed with what whoever is told of an ended job would otherwise read: the
     machine it ran on, and for a COMPLETED one its declared metrics and, when it ranks nowhere,
     why, as its event's detail. An agent's batch closes with two more events, the count of its
-    unfinished jobs and its quota used. One hl call each per batch; a call that failed is logged
-    and what it would have added is left out, so the batch is delivered either way."""
+    unfinished jobs and its quota used. One hl call each per batch. A call that failed adds the
+    event that says what was not read and the command that reads it: told COMPLETED with no
+    metric and nothing else, an agent took the job for one that reported none."""
     def ended(e: dict) -> bool:
         return e["kind"] == "experiment.status" and e["value"] in _ENDED
 
-    async def read(*command: str) -> list[dict]:
-        code, stdout = await _run_hl([hl, *command], env, lambda: False)
-        return _events(stdout) if code == 0 else []
+    not_read = []
+
+    async def read(what: str, *command: str) -> list[dict]:
+        code, stdout, said = await _run_hl([hl, *command], env, lambda: False)
+        if code == 0:
+            return _events(stdout)
+        if _NO_QUOTA_YET not in said:
+            not_read.append({"kind": "not_read", "value": f"{what}: `{' '.join(['hl', *command])}` reads it"})
+        return []
 
     ids = list(dict.fromkeys(e["subject"] for e in events if ended(e)))
     if not ids:
         return events
-    jobs = {job["id"]: job for job in await read("job", "status", *ids)}
+    jobs = {job["id"]: job for job in await read("the metrics and machine of the jobs that ended", "job", "status", *ids)}
 
     def told(e: dict) -> dict:
         job = jobs.get(e["subject"]) if ended(e) else None
@@ -152,17 +165,17 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     events = [told(e) for e in events]
     agent = _agent(env)
     if not agent:
-        return events
-    for stats in await read("job", "stats", "--agent", agent):
+        return events + not_read
+    for stats in await read("your unfinished jobs", "job", "stats", "--agent", agent):
         counts = stats["by_status"]
         events.append({"kind": "unfinished_jobs",
                        "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
-    for q in await read("quota"):
+    for q in await read("your quota", "quota"):
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
             f"room for a job of {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
             f"or {q['remaining_burst_accelerator_hours']:.3g} burst" + _next_stage(q))})
-    return events
+    return events + not_read
 
 
 def _next_stage(quota: dict) -> str:
@@ -178,8 +191,8 @@ async def drain(env: dict[str, str], command: list[str] | None = None) -> list[d
     """The events already waiting on the cursor, without waiting for more, and that an outage
     has ended. A drain runs after every tool call, so one that fails in an outage is not logged."""
     command = command or watch_command(env)
-    code, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
-                                 warn=not outage.under_way())
+    code, stdout, _ = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
+                                    warn=not outage.under_way())
     if code != 0:
         outage.suspect()
     return await _with_job_state([*_events(stdout), *outage.over()], env, command[0])
@@ -190,7 +203,7 @@ async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
     None for a coordinator whose platform experiment could not be read."""
     if _agent(env):
         return WAKES["agent"]
-    code, stdout = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
+    code, stdout, _ = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
     if code != 0:
         return None
     return WAKES["coordinator"] + (OPEN_WAKES if json.loads(stdout)["status"] == "open" else ())
@@ -202,7 +215,8 @@ async def _poll(env: dict[str, str], command: list[str], stopped: Callable[[], b
     wakes = await _wakes(env, command[0])
     if wakes is None:
         return 1, ""
-    return await _run_hl([*command, "--wake", ",".join(wakes)], env, stopped)
+    code, stdout, _ = await _run_hl([*command, "--wake", ",".join(wakes)], env, stopped)
+    return code, stdout
 
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,

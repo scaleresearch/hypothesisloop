@@ -17,19 +17,21 @@ COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","
 ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
 
 
-def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0) -> tuple[list[str], str]:
+def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
     `hl job status`, `hl job stats` and `hl quota` print status, stats and quota, record their
-    arguments and exit read_exit. A new one has had no outage."""
+    arguments and exit read_exit. With quota_refusal, `hl quota` says it on stderr and exits 1.
+    A new one has had no outage."""
     outage._since, outage._over, outage._suspected = None, None, False
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
-    for name, text in (("status", status), ("stats", stats), ("quota", quota)):
+    for name, text in (("status", status), ("stats", stats), ("quota", quota), ("refusal", quota_refusal)):
         with open(f"{path}.{name}", "w") as f:
             f.write(text)
     with open(path, "w") as f:
         f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit %d; }\n"
-                "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.quota\"; exit %d; }\n" % (read_exit, read_exit) +
+                "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; [ -s \"$0.refusal\" ] && { cat \"$0.refusal\" >&2; exit 1; }; "
+                "cat \"$0.quota\"; exit %d; }\n" % (read_exit, read_exit) +
                 "count=$(cat \"$0.runs\" 2>/dev/null || echo 0)\nRUNS=$((count + 1))\n"
                 "echo $RUNS > \"$0.runs\"\n" + script)
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
@@ -206,13 +208,26 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED")
 
     # The exit code of each read was ignored, so what a failed one had printed was taken for the
-    # platform's answer.
-    async def test_a_read_that_failed_is_logged_and_adds_nothing_to_the_batch(self):
+    # platform's answer. Left out and only logged, a failed read handed the agent COMPLETED with
+    # no metric, which reads as a job that reported none.
+    async def test_a_read_that_failed_is_named_in_the_batch_with_the_command_that_reads_it(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS, self.QUOTA, read_exit=1)
         with self.assertLogs("llm_agent", "WARNING") as logged:
             events = await updates.drain(ENV, command=command)
-        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED")
+        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED\n"
+                         "not_read the metrics and machine of the jobs that ended: `hl job status exp-1` reads it\n"
+                         "not_read your unfinished jobs: `hl job stats --agent agent-a` reads it\n"
+                         "not_read your quota: `hl quota` reads it")
         self.assertEqual(len(logged.records), 3)
+
+    # Quota is granted at the start. Before it `hl quota` exits 1 with the reason quota_not_granted,
+    # which is an answer and no failed read.
+    async def test_quota_not_granted_yet_is_no_read_that_failed(self):
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS,
+                             quota_refusal="hl: quota: quota_not_granted: agent agent-a holds no quota yet: it is granted when the platform experiment starts.\n")
+        with self.assertLogs("llm_agent", "WARNING"):
+            events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a").splitlines()[2:], ["unfinished_jobs 1 QUEUED, 2 RUNNING"])
 
 
 class DrainTest(unittest.IsolatedAsyncioTestCase):
