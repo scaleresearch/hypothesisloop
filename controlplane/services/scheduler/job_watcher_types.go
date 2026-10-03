@@ -35,10 +35,8 @@ type JobStatusStore interface {
 	// different state — used to prevent double-refunds when natural completion and controller
 	// eviction race.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
-	// TransitionStatusFromNonTerminal is TransitionStatus unless the row is already
-	// COMPLETED/FAILED/EVICTED — used where the caller can't name the exact prior status (see
-	// onFinished's branch for a job never observed RUNNING) but still must not resurrect an already-terminal job.
-	TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error)
+	// GetExperiment is the job as it is stored now, nil when there is none.
+	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 	// ResolveTermination atomically sets status and eviction_reason together in one UPDATE,
 	// guarded on from. Used by evictNeverStarted so an eviction can never persist a status
 	// change with its reason lost (e.g. a crash between the two separate writes).

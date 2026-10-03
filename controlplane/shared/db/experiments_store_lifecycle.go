@@ -27,22 +27,6 @@ func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from
 	return tag.RowsAffected() > 0, nil
 }
 
-// TransitionStatusFromNonTerminal is TransitionStatus from any status that is not terminal.
-// For callers that can't name the exact prior status (e.g. a watcher unsure if it ever observed
-// RUNNING) without risking overwriting a concurrent terminal write.
-func (s *ExperimentsStore) TransitionStatusFromNonTerminal(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
-	if to == domain.StatusQueued {
-		return false, fmt.Errorf("experiments_store.TransitionStatusFromNonTerminal: QUEUED requires MarkQueued with a reason")
-	}
-	const q = `UPDATE experiments SET status = $2, eviction_reason = NULLIF($3, ''), not_admitted_reason = NULL, updated_at = NOW()
-WHERE id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(to), reason)
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.TransitionStatusFromNonTerminal: %w", err)
-	}
-	return tag.RowsAffected() > 0, nil
-}
-
 // ListExperimentsWithStatus returns all experiments in the given status.
 func (s *ExperimentsStore) ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error) {
 	return s.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.AllTenants, Status: status})

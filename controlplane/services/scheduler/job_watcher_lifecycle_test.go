@@ -29,6 +29,8 @@ type lifecycleStore struct {
 	requeuedReasons []string
 	markedSettled   int
 	started         int
+	// leftSubmittedAs is the status the row has when it is no longer SUBMITTED, "" while it is.
+	leftSubmittedAs domain.ExperimentStatus
 }
 
 func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.ExperimentStatus) ([]*domain.Experiment, error) {
@@ -36,14 +38,12 @@ func (*lifecycleStore) ListExperimentsWithStatus(context.Context, domain.Experim
 }
 func (s *lifecycleStore) MarkStarted(context.Context, string) (bool, error) {
 	s.started++
-	return true, nil
+	return s.leftSubmittedAs == "", nil
+}
+func (s *lifecycleStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
+	return &domain.Experiment{ID: id, Status: s.leftSubmittedAs}, nil
 }
 func (s *lifecycleStore) TransitionStatus(_ context.Context, _ string, _, to domain.ExperimentStatus, reason string) (bool, error) {
-	s.transitioned = true
-	s.finished = append(s.finished, string(to)+" "+reason)
-	return true, nil
-}
-func (s *lifecycleStore) TransitionStatusFromNonTerminal(_ context.Context, _ string, to domain.ExperimentStatus, reason string) (bool, error) {
 	s.transitioned = true
 	s.finished = append(s.finished, string(to)+" "+reason)
 	return true, nil
@@ -104,6 +104,33 @@ func TestAJobThatEndedWhileSubmittedPassesThroughRunning(t *testing.T) {
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 	if err := w.onFinished(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusRunning}, domain.StatusCompleted, ""); err != nil || store.started != 0 {
 		t.Errorf("a RUNNING job that ended: err %v, marked running %d times", err, store.started)
+	}
+}
+
+// A job requeued after its machine failed was still reported ended by the old attempt. The report
+// found the row QUEUED, wrote it COMPLETED and settled its quota, and the job never ran again.
+// Only a job that is RUNNING is ended by a report that finds it no longer SUBMITTED.
+func TestTheEndOfAnOldAttemptDoesNotEndAJobThatWasRequeued(t *testing.T) {
+	for _, leftAs := range []domain.ExperimentStatus{domain.StatusQueued, domain.StatusEvicted, domain.StatusCompleted} {
+		for _, status := range []domain.ExperimentStatus{domain.StatusCompleted, domain.StatusFailed} {
+			store := &lifecycleStore{leftSubmittedAs: leftAs, requeueBudget: 1}
+			settler := &countingSettler{}
+			w := NewJobWatcher(store, nil, settler, zap.NewNop())
+			gang := gangExperiment(2, 1)
+			gang.Status = domain.StatusSubmitted
+			if err := w.onFinished(context.Background(), gang, status, ""); err != nil {
+				t.Fatalf("%s reported for a job now %s: onFinished = %v", status, leftAs, err)
+			}
+			if store.transitioned || len(store.requeueCalls) != 0 || settler.settles != 0 || store.markedSettled != 0 {
+				t.Errorf("%s reported for a job now %s: finished %v, requeue tried %d times, settled %d times, want the job left as it is", status, leftAs, store.finished, len(store.requeueCalls), settler.settles)
+			}
+		}
+	}
+
+	store := &lifecycleStore{leftSubmittedAs: domain.StatusRunning}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+	if err := w.onFinished(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}, domain.StatusCompleted, ""); err != nil || len(store.finished) != 1 {
+		t.Errorf("a job another pass marked RUNNING: err %v, finished %v, want it ended", err, store.finished)
 	}
 }
 

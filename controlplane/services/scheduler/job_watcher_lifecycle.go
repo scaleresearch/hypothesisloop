@@ -393,15 +393,27 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 	// ends between two reports, and a runtime that reads its machines' state from a vendor may
 	// never see one, so a terminal report for a job still SUBMITTED moves it through RUNNING
 	// first: no job is COMPLETED or FAILED without having been RUNNING, and the type it ran on
-	// is recorded (MarkStarted). A job that left SUBMITTED some other way is left as it is.
+	// is recorded (MarkStarted).
+	//
+	// A job that left SUBMITTED some other way is ended only if that way made it RUNNING. One
+	// that was requeued or has ended is left as it is: the report is of an attempt that is over,
+	// and ending a QUEUED job on it settled quota for a job still to run.
 	if exp.Status != domain.StatusRunning {
 		started, err := w.store.MarkStarted(ctx, exp.ID)
 		if err != nil {
 			return fmt.Errorf("job_watcher: mark %s running before its end: %w", exp.ID, err)
 		}
-		if started {
-			exp.Status = domain.StatusRunning
+		if !started {
+			current, err := w.store.GetExperiment(ctx, exp.ID)
+			if err != nil {
+				return fmt.Errorf("job_watcher: read %s after it left SUBMITTED: %w", exp.ID, err)
+			}
+			if current == nil || current.Status != domain.StatusRunning {
+				w.logger.Info("job_watcher: experiment left SUBMITTED before its end was reported, the report is of an attempt that is over", zap.String("id", exp.ID))
+				return nil
+			}
 		}
+		exp.Status = domain.StatusRunning
 	}
 
 	// A gang with retry budget goes straight back to QUEUED. Writing FAILED first would announce
@@ -410,32 +422,15 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 		return nil
 	}
 
-	// If seen as RUNNING, use a conditional transition so a concurrent controller eviction can
-	// only win once; if we lose the race, skip the refund — the controller already issued it.
-	if exp.Status == domain.StatusRunning {
-		updated, err := w.store.TransitionStatus(ctx, exp.ID, domain.StatusRunning, status, reason)
-		if err != nil {
-			w.logger.Error("job_watcher: transition status", zap.String("id", exp.ID), zap.Error(err))
-			return err
-		}
-		if !updated {
-			// Controller evicted it concurrently — refund already issued, nothing to do.
-			return nil
-		}
-	} else {
-		// Completed without this cycle observing a RUNNING poll — usually a true SUBMITTED →
-		// terminal transition, but a pod recreation can also land a genuinely-RUNNING job here.
-		// Guard with the non-terminal check, or a late completion from an already-evicted job's
-		// stale pod could resurrect it past a terminal state.
-		updated, err := w.store.TransitionStatusFromNonTerminal(ctx, exp.ID, status, reason)
-		if err != nil {
-			w.logger.Error("job_watcher: update status", zap.String("id", exp.ID), zap.Error(err))
-			return err
-		}
-		if !updated {
-			// Already terminal (e.g. controller evicted it concurrently) — nothing to do.
-			return nil
-		}
+	// A conditional transition, so a concurrent controller eviction can only win once; if we lose
+	// the race, skip the refund: the controller already issued it.
+	updated, err := w.store.TransitionStatus(ctx, exp.ID, domain.StatusRunning, status, reason)
+	if err != nil {
+		w.logger.Error("job_watcher: transition status", zap.String("id", exp.ID), zap.Error(err))
+		return err
+	}
+	if !updated {
+		return nil
 	}
 
 	// Durably settle each resource dimension's observed cost. See settleQuota's doc comment for
