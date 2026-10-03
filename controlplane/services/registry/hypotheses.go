@@ -221,7 +221,7 @@ func (s *Service) BaseRef(ctx context.Context, h *domain.Hypothesis) (string, er
 }
 
 // ListHypotheses returns one page of hypotheses, most recent first, each carrying its place in the
-// graph and its finding/comment counts. Bounded and defaulted by the graph store.
+// graph and its finding/comment counts. The caller states the page.
 func (s *Service) ListHypotheses(ctx context.Context, f graphdb.ListFilter) ([]*domain.HypothesisListItem, error) {
 	if f.Status != "" && !domain.ValidHypothesisStatus(f.Status) {
 		return nil, fmt.Errorf("registry.ListHypotheses: invalid status %q", f.Status)

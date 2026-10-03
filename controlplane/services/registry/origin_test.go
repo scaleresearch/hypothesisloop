@@ -295,6 +295,30 @@ func TestAHypothesisElsewhereReadsAsAbsent(t *testing.T) {
 	}
 }
 
+// A limit over the maximum was clamped to it, so a client asking for 500 read 200 as the whole
+// set. It is refused, as every list refuses it.
+func TestAHypothesisPageOverTheMaximumIsRefused(t *testing.T) {
+	f := newRegistryAs(t, ada)
+	for _, path := range []string{
+		"/hypotheses?limit=201",
+		"/hypotheses?limit=-1",
+		"/hypotheses?offset=-1",
+		"/hypotheses/" + url.PathEscape(f.own.ID) + "?limit=201",
+		"/hypotheses/" + url.PathEscape(f.own.ID) + "?offset=-1",
+	} {
+		rec := f.do(t, http.MethodGet, path, nil)
+		var refusal struct{ Reason string }
+		if err := json.Unmarshal(rec.Body.Bytes(), &refusal); err != nil || rec.Code != http.StatusUnprocessableEntity || refusal.Reason != "invalid_page" {
+			t.Errorf("GET %s: got = %d %s, want 422 invalid_page", path, rec.Code, rec.Body.String())
+		}
+	}
+	for limit, want := range map[int]int{0: defaultPageLimit, 1: 1, maxPageLimit: maxPageLimit} {
+		if got, _, err := page(limit, 0); err != nil || got != want {
+			t.Errorf("page(%d, 0): got = (%d, %v), want %d", limit, got, err, want)
+		}
+	}
+}
+
 // A job token reports metrics for its own job, and an agent token for no job but its own agent's.
 func TestMetricsAreAppendedByTheJobOrItsOwnAgentOnly(t *testing.T) {
 	sample := map[string]any{"metric_name": "loss", "fraction_complete": 0.5, "metric_value": 1.0}

@@ -150,9 +150,21 @@ var queryDescription = "Read-only Cypher against one platform experiment's hypot
 // here — a small default for the agent that does not think about it, a ceiling for the one that
 // asks. See db.defaultAgentListLimit for why the two differ.
 const (
-	defaultHypothesisDetailLimit = 20
-	maxHypothesisDetailLimit     = 200
+	defaultPageLimit = 20
+	maxPageLimit     = 200
 )
+
+// page returns the bounds of one page of a hypothesis listing. A limit over the maximum is
+// refused, so a short page is never read as the whole set.
+func page(limit, offset int) (int, int, error) {
+	if limit < 0 || limit > maxPageLimit || offset < 0 {
+		return 0, 0, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", fmt.Sprintf("limit must be 1 to %d and offset must not be negative", maxPageLimit))
+	}
+	if limit == 0 {
+		return defaultPageLimit, offset, nil
+	}
+	return limit, offset, nil
+}
 
 func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	access := doc.Access
@@ -512,7 +524,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
 			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
-			"for just that status, ?limit (default 20, max 200) and ?offset, most recent first. " +
+			"for just that status, ?limit (default 20, max 200, 422 invalid_page over it) and ?offset, most recent first. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
 			"(what each builds on; the platform_experiment_id stands for the objective), child_count " +
 			"(how many build on it) and finding_count/comment_count. To walk or search the graph use " +
@@ -522,7 +534,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		ProjectID            string                  `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
 		Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
 		Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
-		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. See X-Total-Count for how much you have not seen."`
+		Limit                int                     `query:"limit" doc:"Page size, default 20, maximum 200. A larger one is refused. See X-Total-Count for how much you have not seen."`
 		Offset               int                     `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 	}) (*struct {
 		Body       []*domain.HypothesisListItem
@@ -531,15 +543,16 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
 			return nil, huma.Error400BadRequest(fmt.Sprintf("invalid status %q", in.Status))
 		}
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
+		limit, offset, err := page(in.Limit, in.Offset)
+		if err != nil {
+			return nil, err
 		}
 		within, restricted, err := access.PlatformExperimentIDs(ctx, in.ProjectID)
 		if err != nil {
 			return nil, err
 		}
 		filter := graphdb.ListFilter{PlatformExperimentID: in.PlatformExperimentID, AgentID: in.Agent,
-			Restricted: restricted, Within: within, Status: in.Status, Limit: in.Limit, Offset: in.Offset}
+			Restricted: restricted, Within: within, Status: in.Status, Limit: limit, Offset: offset}
 		hs, err := h.svc.ListHypotheses(ctx, filter)
 		if err != nil {
 			return nil, auth.Internal(h.logger, "list hypotheses", err)
@@ -608,21 +621,17 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"A hypothesis and a branch are two things: any agent may run its own implementation of any hypothesis, and implementations lists " +
 			"them as the jobs show them, {agent_id, branch, code_ref}, code_ref being the commit the newest job on that branch ran. " +
 			"base_ref is the commit a new implementation starts from: the one the newest completed job of the first builds_on parent ran, " +
-			"that parent's own base_ref while it has no completed job, and the declared baseline job's commit where the chain ends at the objective. ?limit (default 20, max 200) and " +
+			"that parent's own base_ref while it has no completed job, and the declared baseline job's commit where the chain ends at the objective. ?limit (default 20, max 200, 422 invalid_page over it) and " +
 			"?offset apply to each of jobs, findings and comments alike, oldest first; " +
 			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, func(ctx context.Context, in *struct {
 		ID     string `path:"id"`
-		Limit  int    `query:"limit" doc:"Page size applied to each of jobs, findings and comments alike; default 20, maximum 200. job_count/finding_count/comment_count report the full size of each set."`
+		Limit  int    `query:"limit" doc:"Page size applied to each of jobs, findings and comments alike; default 20, maximum 200. A larger one is refused. job_count/finding_count/comment_count report the full size of each set."`
 		Offset int    `query:"offset" doc:"Rows to skip within each of the three lists."`
 	}) (*struct{ Body hypothesisWithJobs }, error) {
-		if in.Limit < 0 || in.Offset < 0 {
-			return nil, huma.Error400BadRequest("limit and offset must not be negative")
-		}
-		if in.Limit <= 0 {
-			in.Limit = defaultHypothesisDetailLimit
-		} else if in.Limit > maxHypothesisDetailLimit {
-			in.Limit = maxHypothesisDetailLimit
+		var err error
+		if in.Limit, in.Offset, err = page(in.Limit, in.Offset); err != nil {
+			return nil, err
 		}
 		hyp, err := loadHypothesis(ctx, in.ID)
 		if err != nil {

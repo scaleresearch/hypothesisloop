@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	defaultListLimit = 20
-	maxListLimit     = 200
+	maxListLimit = 200
 	// maxLinksPerDirection bounds the links GET /hypotheses/{id} returns each way. A hypothesis
 	// many others build on can have more children than that; child_count on the list item says
 	// how many, and the query endpoint walks them all.
@@ -343,17 +342,16 @@ RETURN h, builds_on, child_count
 ORDER BY h.created_at DESC, h.id DESC`
 
 // ListHypotheses returns one page of hypotheses, newest first, as list items without their
-// finding/comment counts (those live in Postgres). limit <= 0 means the default, and limit is
-// clamped to maxListLimit.
+// finding/comment counts (those live in Postgres). The caller states the page: a limit outside 1
+// to maxListLimit or a negative offset is an error, so a short page is never read as the whole
+// set.
 func (s *Store) ListHypotheses(ctx context.Context, f ListFilter) ([]*domain.HypothesisListItem, error) {
-	if f.Limit <= 0 {
-		f.Limit = defaultListLimit
-	} else if f.Limit > maxListLimit {
-		f.Limit = maxListLimit
+	if f.Limit < 1 || f.Limit > maxListLimit || f.Offset < 0 {
+		return nil, fmt.Errorf("graphdb.ListHypotheses: limit %d and offset %d are outside 1 to %d and 0 up", f.Limit, f.Offset, maxListLimit)
 	}
 	where, params := f.where()
 	params["limit"] = f.Limit
-	params["offset"] = max(f.Offset, 0)
+	params["offset"] = f.Offset
 	out, err := s.read(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		return listItems(ctx, tx, `MATCH (h:Hypothesis) WHERE `+where+`
 WITH h ORDER BY h.created_at DESC, h.id DESC SKIP $offset LIMIT $limit`+itemTail, params)

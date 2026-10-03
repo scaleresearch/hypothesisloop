@@ -366,7 +366,12 @@ func TestListAndLinksShowWhereEachHypothesisSits(t *testing.T) {
 	b := register(t, s, pe, "agent-2", "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}})
 	register(t, s, pe, "agent-2", "c", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}, {Type: domain.LinkContradicts, To: b.ID}})
 
-	items, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe})
+	for _, f := range []ListFilter{{PlatformExperimentID: pe}, {PlatformExperimentID: pe, Limit: maxListLimit + 1}, {PlatformExperimentID: pe, Limit: 1, Offset: -1}} {
+		if items, err := s.ListHypotheses(ctx, f); err == nil {
+			t.Errorf("ListHypotheses with limit %d and offset %d: got = %d items, want an error", f.Limit, f.Offset, len(items))
+		}
+	}
+	items, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe, Limit: maxListLimit})
 	if err != nil {
 		t.Fatalf("ListHypotheses: got = %v, want nil", err)
 	}
@@ -1003,7 +1008,7 @@ func TestImportLegacyPlacesOldHypothesesOnTheObjectiveAndIsRepeatable(t *testing
 			t.Fatalf("ImportLegacy: got = %v, want nil", err)
 		}
 	}
-	items, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe})
+	items, err := s.ListHypotheses(ctx, ListFilter{PlatformExperimentID: pe, Limit: maxListLimit})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("list after import: got = (%v, %v), want one hypothesis", items, err)
 	}
