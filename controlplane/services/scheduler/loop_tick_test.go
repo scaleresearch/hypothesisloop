@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -63,17 +64,44 @@ func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {
 	}
 	// Never fit this cluster to begin with: waiting for the queue to drain cannot admit it, so
 	// telling the submitter it was outranked would point them at the wrong remedy.
-	if got := notAdmittedReasonFor(false, false, nil, "c", holders{}); code(got) != domain.NotAdmittedCapacityUnavailable {
+	if got := notAdmittedReasonFor(false, false, false, nil, "c", holders{}); code(got) != domain.NotAdmittedCapacityUnavailable {
 		t.Fatalf("unchanged insufficient capacity reason = %q", got)
 	}
 	// Would have fit against the capacity the tick opened with; jobs ahead of it took that.
-	if got := notAdmittedReasonFor(true, false, nil, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
+	if got := notAdmittedReasonFor(true, false, false, nil, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
 		t.Fatalf("capacity consumed earlier in tick reason = %q", got)
 	}
 	// A shortage vector alongside a fit at tick start still means outranked: the shortfall is
 	// measured against what is left now, which is the definition of having lost it.
-	if got := notAdmittedReasonFor(true, true, domain.Footprint{cpuKey: 1000}, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
+	if got := notAdmittedReasonFor(true, true, false, domain.Footprint{cpuKey: 1000}, "c", holders{}); code(got) != domain.NotAdmittedOutranked {
 		t.Fatalf("outranked with a live shortfall reason = %q", got)
+	}
+}
+
+// Right after a job ended, the next one read "short of 61.7 GiB memory, which no job holds: the
+// cluster's nodes do not have it free". With every placed job counted the cluster had the room,
+// and its last report did not show it yet: the job waits for a report, and is told so. A device
+// can be held by something the platform never placed, so a job short of one is not promised it.
+func TestAShortageDesiredStateHasFreedWaitsForTheNextCapacityReport(t *testing.T) {
+	memory := domain.ResourceKey{Kind: domain.ResourceKindMemory}
+	cores := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "hypothesisloop.dev/cpu=core"}
+	chip := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "tenstorrent.com/chiparch=blackhole"}
+	const pending = "capacity_unavailable: cluster box-b is short of 16 cores, 61.7 GiB memory by its last capacity report, and no job the platform has placed there holds it: a job that ended is not reported gone yet, and this one is waiting for the cluster's next capacity report"
+	short := domain.Footprint{cores: 16, cpuKey: 16000, memory: 66302314496}
+	if got := notAdmittedReasonFor(false, false, true, short, "box-b", holders{}); got != pending {
+		t.Errorf("freed in desired state:\n%q, want\n%q", got, pending)
+	}
+	if got := notAdmittedReasonFor(false, false, true, short, "box-b", holders{others: 1}); got != pending {
+		t.Errorf("freed in desired state beside a job that holds some:\n%q, want\n%q", got, pending)
+	}
+	for name, got := range map[string]string{
+		"not freed in desired state": notAdmittedReasonFor(false, false, false, short, "box-b", holders{}),
+		"short of a device":          notAdmittedReasonFor(false, false, true, domain.Footprint{chip: 1, memory: 1 << 30}, "box-b", holders{}),
+		"outranked":                  notAdmittedReasonFor(true, false, true, short, "box-b", holders{}),
+	} {
+		if strings.Contains(got, "next capacity report") {
+			t.Errorf("%s: %q promises a report will free it", name, got)
+		}
 	}
 }
 
@@ -105,7 +133,7 @@ func TestAWaitForCapacitySaysWhatIsShortAndWhoHoldsIt(t *testing.T) {
 		"no cluster picked": {false, domain.Footprint{chip: 1, cpuKey: 8000}, "", holders{},
 			"no cluster that runs it has room for it now: it is short of 1 x tenstorrent.com/chiparch=blackhole, 8 cores"},
 	} {
-		reason, message := domain.SplitQueueReason(notAdmittedReasonFor(false, tc.scalarFits, tc.shortage, tc.cluster, tc.held))
+		reason, message := domain.SplitQueueReason(notAdmittedReasonFor(false, tc.scalarFits, false, tc.shortage, tc.cluster, tc.held))
 		if reason != domain.NotAdmittedCapacityUnavailable || message != tc.want {
 			t.Errorf("%s:\n got %s: %s\nwant %s: %s", name, reason, message, domain.NotAdmittedCapacityUnavailable, tc.want)
 		}

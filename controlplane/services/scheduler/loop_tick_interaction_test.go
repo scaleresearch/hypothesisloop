@@ -784,3 +784,36 @@ func TestTickDoesNotMoveAJobThatRanWhenItsQuotaNoLongerCoversItsType(t *testing.
 func (*scaleUpWaitingStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
 
 func (*noRunningListStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+// staleMemoryWorkload is cluster-a a moment after a job ended there: with every placed job
+// counted its memory is free, and the runtime's last report still shows 1 GiB of it.
+type staleMemoryWorkload struct{ holdWorkload }
+
+func (w staleMemoryWorkload) GetFlavorCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	available, desiredFree, err := w.holdWorkload.GetFlavorCapacity(ctx)
+	available["cluster-a"][domain.ResourceKey{Kind: domain.ResourceKindMemory}] = 1 << 30
+	return available, desiredFree, err
+}
+
+func (w staleMemoryWorkload) GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
+	nodes, err := w.holdWorkload.GetNodeResourceCapacity(ctx)
+	nodes["cluster-a"]["node-a"][domain.NodeResourceMemoryBytes] = 1 << 30
+	return nodes, err
+}
+
+func TestTickTellsAJobItWaitsForACapacityReportWhenDesiredStateHasTheRoom(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		job := holdJob("job", tier, h100, 1, "1")
+		job.Job.Memory = "8Gi"
+		job.ClusterName = "cluster-a"
+		store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{job}}}
+		l := holdLoop(store, staleMemoryWorkload{holdWorkload{cpuCores: 16}}, noopEvictor{})
+
+		tickOnce(t, l)
+
+		const want = "capacity_unavailable: cluster cluster-a is short of 7 GiB memory by its last capacity report, and no job the platform has placed there holds it: a job that ended is not reported gone yet, and this one is waiting for the cluster's next capacity report"
+		if got := store.notAdmitted["job"]; got != want {
+			t.Errorf("%s: not_admitted_reason =\n%q, want\n%q", tier, got, want)
+		}
+	}
+}

@@ -554,7 +554,7 @@ func (l *Loop) tick(ctx context.Context) error {
 					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list the jobs that hold capacity: %w", cerr))
 					continue
 				}
-				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
+				reason = notAdmittedReasonFor(fitAtTickStart, totalCovers, promised, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -691,7 +691,9 @@ func (l *Loop) tick(ctx context.Context) error {
 					l.skipExperiment(&tickErrs, exp, fmt.Errorf("list the jobs that hold capacity: %w", cerr))
 					continue
 				}
-				reason = notAdmittedReasonFor(fitAtTickStart, domain.Fits(bAvail[cluster], fp), shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
+				scalarFits := domain.Fits(bAvail[cluster], fp)
+				freed := !scalarFits && !hasSlots(nodeLabels[cluster]) && domain.Fits(desiredFree[cluster], fp)
+				reason = notAdmittedReasonFor(fitAtTickStart, scalarFits, freed, shortage, cluster, holdersOf(claimed, cluster, shortage, exp))
 			}
 			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
 				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -742,7 +744,14 @@ func (l *Loop) skipExperiment(errs *[]error, exp *domain.Experiment, err error) 
 // arrangement of the job's nodes over the cluster's nodes holds it. cluster is the one the job
 // was judged on, "" when none could be picked, and held the jobs that hold there what it is
 // short of.
-func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footprint, cluster string, held holders) string {
+//
+// freedInDesiredState is the case the cluster's own figures cannot explain yet: with every job
+// the platform has placed there counted, the cluster has room for this one, and its last capacity
+// report still shows less. Its totals are net of everything that is no platform job, so what is
+// missing is a job that ended and that the runtime has not reported gone. That holds for cores,
+// memory and storage. A device may be held by something the platform never placed, so a job
+// short of one is not told a report will free it.
+func notAdmittedReasonFor(fitAtTickStart, scalarFits, freedInDesiredState bool, shortage domain.Footprint, cluster string, held holders) string {
 	if fitAtTickStart {
 		return domain.NotAdmittedOutranked + ": it fit when this pass began, and jobs ahead of it in the queue took the room"
 	}
@@ -758,8 +767,20 @@ func notAdmittedReasonFor(fitAtTickStart, scalarFits bool, shortage domain.Footp
 		return fmt.Sprintf("%s: cluster %s has room for it in total and no node of it holds the job: the node nearest to holding it is short of %s", domain.NotAdmittedCapacityUnavailable, cluster, short)
 	case short == "":
 		return fmt.Sprintf("%s: cluster %s has no room for it now", domain.NotAdmittedCapacityUnavailable, cluster)
+	case freedInDesiredState && !shortOfADevice(shortage):
+		return fmt.Sprintf("%s: cluster %s is short of %s by its last capacity report, and no job the platform has placed there holds it: a job that ended is not reported gone yet, and this one is waiting for the cluster's next capacity report",
+			domain.NotAdmittedCapacityUnavailable, cluster, short)
 	}
 	return fmt.Sprintf("%s: cluster %s is short of %s, %s", domain.NotAdmittedCapacityUnavailable, cluster, short, held)
+}
+
+func shortOfADevice(shortage domain.Footprint) bool {
+	for key, short := range shortage {
+		if short > 0 && key.Kind == domain.ResourceKindAccelerator && !domain.CPUType.Is(domain.AcceleratorType(key.Flavor)) {
+			return true
+		}
+	}
+	return false
 }
 
 // holders counts the jobs that hold, on one cluster, what a queued job is short of there: those
