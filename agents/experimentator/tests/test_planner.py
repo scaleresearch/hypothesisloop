@@ -38,6 +38,8 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("`hl platform-experiments propose`", flat)
         # Every proposal of two runs asked for 3 researchers over 3 hours for goals met in 40 minutes.
         self.assertIn("the smallest plan that can reach the goal", flat)
+        # A goal that said about 0.1 accelerator-hours was planned with a budget of 0.06.
+        self.assertIn("The size: a budget, duration or count the goal states, as stated; else the smallest plan", flat)
         # A draft's max_agents is the most a proposal may ask for, which one read as the number.
         self.assertIn("2 unless plainly more, never above the draft's `max_agents`, a ceiling", flat)
         self.assertNotIn("Every agent competes", flat)

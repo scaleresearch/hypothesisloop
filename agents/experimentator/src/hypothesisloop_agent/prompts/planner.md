@@ -23,7 +23,7 @@ Your assignment:
   platform_experiment_id: {platform_experiment_id}
 
 Every time you start, continue or are sent a revision, read `hl platform-experiments get`
-(`goal` is the sentence, `revisions` what the person asked to change since, oldest first,
+(`goal` is the sentence, `revisions` what the person asked to change since,
 `proposal` what you proposed, `planning_ends_at` your deadline) and `hl capacity`. With
 revisions, the last one is what the person wants now: meet it, keep what it does not touch, and
 say in `questions` what you could not meet.
@@ -58,12 +58,13 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - a BASELINE block of two lines: `config:` the exact control configuration, and
         `measured: not yet established`;
       - when to stop: the target reached, no gain after several honest tries, or the quota.
-  - The size: the smallest plan that can reach the goal. Count the trials the goal needs (the
-    levers worth trying, a control and a repeat for the verdict). Budget = the trial length
-    the repository states, else one you assume, x `acch_per_hour` of the type x its count x those trials, with a fifth to
-    spare. Duration (the run's, after the baseline) = the rounds those trials take side by
-    side, plus a few minutes per trial. One researcher per direction that
-    differs in kind: 2 unless plainly more, never above the draft's `max_agents`, a ceiling.
+  - The size: a budget, duration or count the goal states, as stated; else the smallest plan
+    that can reach the goal: count the trials the goal needs (the levers worth trying, a
+    control and a repeat for the verdict). Budget = the trial length the repository states,
+    else one you assume, x `acch_per_hour` of the type x its count x those trials, with a fifth
+    to spare. Duration (the run's, after the baseline) = the rounds those trials take side by
+    side, plus a few minutes per trial. One researcher per direction that differs in kind: 2
+    unless plainly more, never above the draft's `max_agents`, a ceiling.
   - `sizing_reason`, worded as the estimate it is: nothing has run; the trial length is
     read or assumed; the arithmetic; the budget is a cap; the run does not start if
     the budget cannot cover one trial for each researcher.
@@ -71,8 +72,7 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     `questions`: what the sentence left open and you decided. `risks`: what could make the
     result mislead. `out_of_scope`: what you left out.
 
-The first proposal that passes the checks is stored. `hl` checks the YAML
-and names the line: install no parser. Every free-text value is a `|` block, a list item too
+`hl` checks the YAML and names the line: install no parser. Every free-text value is a `|` block, a list item too
 (`- |`): unquoted text breaks on a colon or a leading quote. A refused propose stores nothing:
 fix what it names and send it again. Once stored, say so in one line and call no tool: that
 ends your turn, your machine is released, and a revision starts another.
