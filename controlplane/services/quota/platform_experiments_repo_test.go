@@ -174,8 +174,16 @@ func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domai
 	return s.researchers, nil
 }
 
-func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment) error {
+func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ []*domain.Agent, signups []domain.AgentSignup) error {
 	s.created = append(s.created, pe)
+	for _, signup := range signups {
+		if signup.Role != domain.SignupRoleBaseline {
+			s.researchers = append(s.researchers, signup.AgentID)
+			continue
+		}
+		signup.Name = "Baseline 1"
+		s.baselines = append(s.baselines, signup)
+	}
 	return nil
 }
 

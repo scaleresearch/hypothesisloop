@@ -179,7 +179,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. " +
 			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Neither is read from the file and both are fixed from then on. " +
-			"This call creates the experiment and no agent: each agent joins by its own POST /platform-experiments/{id}/agents. " +
+			"With coordinator_hosted: true it also creates one hosted agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once beside the coordinator's, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_hosted_reached where the platform's limit holds no machine for it beside the coordinator's. " +
+				"Without coordinator_hosted this call creates the experiment and no agent. Every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
 			"max_hosted in the answer is how many machines the platform runs for this platform experiment at once, its hosted agents of every role and its coordinator together: " +
 			"one of them is kept for an agent of role baseline, and an agent that finished holds none. " +
 			"GET /platform-experiments/{id} shows the coordinator's launcher, model and what became of its machine.",
@@ -226,6 +227,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		by := caller.Actor()
 		hosting.createdBy = &by
+		if hosting.CoordinatorHosted {
+			if hosting.agents, hosting.signups, err = peh.hostedAgents(nil, by, time.Now().UTC()); err != nil {
+				return nil, peh.refusal("create platform experiment", err)
+			}
+		}
 		hosting.prepare = peh.provideRepository(hosting.Repository, in.Body.RepositoryAccount)
 		pe, err := peh.svc.Create(ctx, hosting)
 		// What is wrong with a body laid over the experiment file may be the file's doing.

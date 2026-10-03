@@ -45,7 +45,7 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		// AgentKind involved at all) — the exact case these tests exist to pin down.
 	}
 	pe.MaxHosted = 50
-	if err := pes.CreatePlatformExperiment(context.Background(), pe); err != nil {
+	if err := pes.CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create platform experiment: got = %v, want = nil", err)
 	}
 }

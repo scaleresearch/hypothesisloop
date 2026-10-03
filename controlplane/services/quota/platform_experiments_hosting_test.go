@@ -35,11 +35,11 @@ func (s *hostingStore) LauncherKnown(context.Context, string) (bool, error) {
 	return !s.unregistered, nil
 }
 
-func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
-	return s.createdStore.CreatePlatformExperiment(ctx, pe)
+	return s.createdStore.CreatePlatformExperiment(ctx, pe, create, signups)
 }
 
 func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
@@ -79,8 +79,18 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "model-default" {
 		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and default model", pe, pe.Coordinator)
 	}
-	if out["coordinator_hosted"] != true || out["signup_count"] != float64(0) || out["max_hosted"] != float64(hostingMaxHosted) {
-		t.Errorf("answer = %v, want coordinator_hosted, no agent and the bound on machines", out)
+	if out["coordinator_hosted"] != true || out["signup_count"] != float64(1) || out["max_hosted"] != float64(hostingMaxHosted) {
+		t.Errorf("answer = %v, want coordinator_hosted, its baseline agent and the bound on machines", out)
+	}
+	// What accepting a draft stands up for the time before the run, a create with a hosted
+	// coordinator does too: nobody adds the agent that measures the baseline.
+	owner := auth.Principal(ownerOfA).Actor()
+	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, Launcher: "main", Flavor: "generalist", Model: "model-default", Actor: &owner}
+	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
+		t.Errorf("created with %+v and researchers %v, want one hosted baseline agent added by the creator and no researcher", store.baselines, store.researchers)
+	}
+	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_measuring" || why["waits_for"] != "platform" {
+		t.Errorf("status_reason = %v, want baseline_measuring, which waits for the platform", out["status_reason"])
 	}
 
 	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
@@ -88,8 +98,17 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 		t.Fatalf("with a model: got = %d %v, created %+v", code, out, store.created)
 	}
 	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
+	code, out = create(run(nil))
+	if code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
 		t.Fatalf("without one: got = %d %v, created %+v", code, out, store.created[0])
+	}
+	// With no coordinator of the platform's a person coordinates: no agent is created, and the
+	// first answer names the command that person runs next.
+	why, _ := out["status_reason"].(map[string]any)
+	message, _ := why["message"].(string)
+	if out["signup_count"] != float64(0) || len(store.baselines) != 0 || why["reason"] != "baseline_required" || why["waits_for"] != "owner" ||
+		!strings.Contains(message, "`hl platform-experiments agents add --hosted --role baseline --platform-experiment "+store.created[0].ID+"`") {
+		t.Errorf("without one: %v agents, status_reason %v, want none and baseline_required of its owner with the command", out["signup_count"], why)
 	}
 	// How many may join is the creator's to say, and no setting stands in for it.
 	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
@@ -109,8 +128,8 @@ func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
 	}
 }
 
-// Creating makes the experiment and nothing else: an agent joins by a call of its own.
-func TestCreateAddsNoAgent(t *testing.T) {
+// A create states no agents: a researcher joins by a call of its own.
+func TestCreateTakesNoAgents(t *testing.T) {
 	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	if code, out := create(run(map[string]any{"hosted_agents": 2})); code != http.StatusUnprocessableEntity || len(store.created) != 0 {
 		t.Fatalf("hosted_agents in the body: got = %d %v with %d created, want 422 and nothing", code, out, len(store.created))

@@ -43,7 +43,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 	stopped.Instance = &domain.AgentInstance{Stopped: true}
 	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, Hosted: true}
 	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, Hosted: true}
-	const add, declare = "`hl platform-experiments agents add --hosted --role baseline`", "`hl platform-experiments update --baseline-job JOB"
+	const add, declare = "`hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`", "`hl platform-experiments update --baseline-job JOB --platform-experiment pe-1`"
 	job := func(id string) *domain.Experiment {
 		measured := *measuredBaseline().Job
 		measured.ID = id

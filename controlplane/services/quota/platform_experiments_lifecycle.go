@@ -151,7 +151,8 @@ func requireImage(offered []domain.JobImage, clusters []domain.Cluster, image st
 	return refuseUpdate(422, domain.NotAdmittedNoClusterForImage, "image %q runs on no cluster that has the accelerator_type: %s. State that image, as `hl capacity` shows it for the cluster", image, strings.Join(runEveryJobIn, "; "))
 }
 
-// Create creates a new platform experiment in open status (accepting signups immediately).
+// Create creates a new platform experiment in open status (accepting signups immediately), with
+// the agents req carries signed up in the same write.
 func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
 	req, err := s.validate(req)
@@ -199,10 +200,11 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 			return nil, err
 		}
 	}
-	if err := s.store.CreatePlatformExperiment(ctx, pe); err != nil {
+	if err := s.store.CreatePlatformExperiment(ctx, pe, req.agents, req.signups); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
 	}
-	s.logger.Info("platform experiment created", zap.String("id", pe.ID), zap.String("name", pe.Name))
+	s.logger.Info("platform experiment created", zap.String("id", pe.ID), zap.String("name", pe.Name), zap.Int("agents", len(req.signups)))
+	pe.SignupCount = len(req.signups)
 	return pe, nil
 }
 
@@ -393,16 +395,16 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 		return measured[0], nil
 	case len(measured) > 1:
 		return "", api.Refuse(http.StatusConflict, "baseline_undeclared", fmt.Sprintf("the baseline agents of platform experiment %s left %d COMPLETED jobs that report %s (%s), and the platform declares a job by itself only where there is one to declare: its coordinator declares the one the run is ranked against with %s",
-			pe.ID, len(measured), ranked.Key, strings.Join(measured, ", "), declareBaseline))
+			pe.ID, len(measured), ranked.Key, strings.Join(measured, ", "), declareBaseline(pe.ID)))
 	case len(measuring) > 0:
 		return "", api.Refuse(http.StatusConflict, "baseline_measuring", fmt.Sprintf("baseline agent %s is measuring the baseline of platform experiment %s: when it finishes the platform declares its COMPLETED job and starts the run, and nobody else has anything to do until then",
 			strings.Join(measuring, ", "), pe.ID))
 	case len(joined) == 0:
 		return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared and no agent of role baseline to measure one: its coordinator adds one with %s, and the platform declares the job it leaves and starts the run",
-			pe.ID, addBaselineAgent))
+			pe.ID, addBaselineAgent(pe.ID)))
 	}
 	return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the brief can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
-		pe.ID, ranked.Key, strings.Join(gaveUp, "; "), addBaselineAgent))
+		pe.ID, ranked.Key, strings.Join(gaveUp, "; "), addBaselineAgent(pe.ID)))
 }
 
 // DeclareMeasured declares the baseline of the open platform experiment id when its baseline
@@ -603,7 +605,7 @@ func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domai
 }
 
 func noResearchers(id string) error {
-	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id))
+	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
 }
 
 // Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
@@ -633,10 +635,15 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	return &domain.StatusReason{Reason: "planning", Message: "its planner is working out how to measure the goal and has until planning_ends_at"}
 }
 
-const (
-	addBaselineAgent = "`hl platform-experiments agents add --hosted --role baseline`"
-	declareBaseline  = "`hl platform-experiments update --baseline-job JOB`, which writes the job, its code_ref and what it measured into the description and starts the run"
-)
+// The commands a status_reason names are whole as a person types them, who coordinates where the
+// platform hosts no coordinator and whose token names no platform experiment.
+func addBaselineAgent(id string) string {
+	return "`hl platform-experiments agents add --hosted --role baseline --platform-experiment " + id + "`"
+}
+
+func declareBaseline(id string) string {
+	return "`hl platform-experiments update --baseline-job JOB --platform-experiment " + id + "`, which writes the job, its code_ref and what it measured into the description and starts the run"
+}
 
 // waiting is why the open pe, whose roster is signups, is not running yet: the reason and the
 // sentence its status_reason and its roster answer with.

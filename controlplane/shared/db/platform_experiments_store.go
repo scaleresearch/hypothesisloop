@@ -42,8 +42,27 @@ var coordinatorColumns = `pe.coordinator_hosted, pe.coordinator_launcher, pe.coo
        pe.coordinator_instance_state, pe.coordinator_instance_progress_at, pe.coordinator_instance_end_reason,
        ` + domain.InstanceReleasedSQL("pe.closed_at")
 
-func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment) error {
-	return insertPlatformExperiment(ctx, s.pool.pool, pe)
+// CreatePlatformExperiment stores pe and signs up the agents it is created with, the ones of
+// create made first, or stores nothing. The limits a signup holds are held here too
+// (ErrMaxAgentsReached, ErrMaxHostedReached).
+func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
+		return err
+	}
+	if len(signups) > 0 {
+		if _, err := enrolTx(ctx, tx, pe.ID, create, signups); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("platform_experiments_store.Create: commit: %w", err)
+	}
+	return nil
 }
 
 // ProjectOrg is the org a project belongs to: ErrProjectNotFound for no such project.

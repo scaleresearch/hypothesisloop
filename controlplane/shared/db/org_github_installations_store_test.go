@@ -304,7 +304,7 @@ func TestARepositorysAddressIsStoredAtCreationAndBackfilledOnceForGitHub(t *test
 			Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now,
 			Repository: repository, RepositoryURL: address,
 		}
-		if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+		if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		return pe.ID

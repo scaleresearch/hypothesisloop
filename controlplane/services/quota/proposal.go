@@ -373,35 +373,13 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.BaselineDueAt = pe.OpenUntil(now, h.svc.cfg.BaselineLimit)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
 
-	agents := make([]*domain.Agent, 0, len(req.Agents)+1)
-	signups := make([]domain.AgentSignup, 0, len(req.Agents)+1)
 	caller, err := h.caller(ctx)
 	if err != nil {
 		return nil, err
 	}
-	by := caller.Actor()
-	// The agent that measures the baseline joins with the accept: its machine is asked for with
-	// the coordinator's, and nothing waits for anyone to add it.
-	hosted := append([]ProposedAgent{}, req.Agents...)
-	hosted = append(hosted, ProposedAgent{})
-	for i, asked := range hosted {
-		role := domain.SignupRoleCompetitor
-		if i == len(req.Agents) {
-			role = domain.SignupRoleBaseline
-		}
-		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
-		if err != nil {
-			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
-		}
-		agentID, err := domain.NewID(domain.AgentIDPrefix)
-		if err != nil {
-			return nil, h.refusal("accept", err)
-		}
-		agents = append(agents, &domain.Agent{ID: agentID, PerformanceScore: 0.5, CreatedAt: now})
-		signups = append(signups, domain.AgentSignup{
-			AgentID: agentID, Role: role, Hosted: true, Launcher: h.launch.Launcher,
-			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters, Actor: &by,
-		})
+	agents, signups, err := h.hostedAgents(req.Agents, caller.Actor(), now)
+	if err != nil {
+		return nil, h.refusal("accept", err)
 	}
 	switch err := h.svc.store.AcceptDraft(ctx, pe, agents, signups); {
 	case errors.Is(err, db.ErrNotDraft):

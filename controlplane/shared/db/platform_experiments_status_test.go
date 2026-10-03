@@ -65,7 +65,7 @@ func TestARunsLengthCountsFromTheMomentItStarts(t *testing.T) {
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: created, UpdatedAt: created,
 	}
-	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	open, err := pes.GetPlatformExperiment(ctx, pe.ID)

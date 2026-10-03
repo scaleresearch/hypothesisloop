@@ -372,7 +372,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
 	}
-	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	add := func(signup domain.AgentSignup) error {
@@ -420,7 +420,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Launcher: "main", Model: "model-1"},
 	}
-	if err := pes.CreatePlatformExperiment(ctx, pe); err != nil {
+	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	add := func(role domain.SignupRole) (string, error) {

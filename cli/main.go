@@ -667,9 +667,10 @@ Minimal shape:
 Every field shown is required but coordinator_hosted. report_interval_seconds may be left out:
 the platform's default applies.
 
-It is created open and nothing runs yet. Add the researchers while it is open
+It is created open and no run has started. Add the researchers while it is open
 (hl platform-experiments agents add). It starts on a declared baseline: with coordinator_hosted
-the coordinator adds the baseline agent and declares its job. Without it you do both: add an
+the platform creates a hosted baseline agent with the experiment, as accepting a draft does, and
+declares the job it leaves when it finishes. Without it you do both: add an
 agent with --role baseline, and once its job is COMPLETED with a summary, run
 hl platform-experiments update --baseline-job JOB. That request starts the run when a
 researcher has joined and starts_at, when the file states one, has passed; otherwise the
