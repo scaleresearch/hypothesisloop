@@ -74,7 +74,7 @@ type Observed struct {
 
 type ObservedInstance struct {
 	Name  string `json:"name" doc:"The name from an earlier answer, without the launcher's own prefix."`
-	State string `json:"state" enum:"starting,running,exited"`
+	State string `json:"state" enum:"starting,running,exited,unknown" doc:"unknown: the provider lists the instance and does not say whether its command runs, as when its host is unreachable."`
 	Log   string `json:"log,omitempty" doc:"For an exited instance, the end of what its command wrote."`
 	// Progress is a pointer so that "could not be read" differs from "read, and none printed".
 	Progress *string `json:"progress,omitempty" maxLength:"64" doc:"For a running instance, the progress marker its command last printed: what follows hl-progress on the newest such line of its output, empty when it has printed none. Left out when the launcher could not read the output. The platform compares it with the one before and reads nothing else from it."`
@@ -84,6 +84,7 @@ const (
 	stateStarting = domain.InstanceStarting
 	stateRunning  = domain.InstanceRunning
 	stateExited   = "exited"
+	stateUnknown  = "unknown"
 )
 
 var launchDigestPattern = regexp.MustCompile(`^[0-9a-f]{16,64}$`)
@@ -282,6 +283,10 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 //   - running: once the progress limit has passed since its command last printed a progress
 //     marker the platform had not seen, or since it was first reported when it never printed
 //     one. A report whose marker the launcher could not read ends nothing.
+//   - unknown, of a machine last recorded running: nothing is recorded, so it stays running, and
+//     it is ended by the progress limit as a running one is. A host unreachable for a pass ends
+//     nothing, and one that stays away is not kept past the limit.
+//   - unknown, of a machine never recorded running: as starting.
 //
 // The limits are counted by the store on the database's clock. token is the one this API
 // minted for the machine, which its output must not carry into the database.
@@ -306,12 +311,18 @@ func (h *Handler) observe(ctx context.Context, one kept, seen map[string]Observe
 			exitLog = strings.ReplaceAll(exitLog, token, "<HL_TOKEN>")
 		}
 		return end(db.InstanceExited, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
+	case reported.State == stateUnknown && one.instance.Reported == stateRunning:
+		return end(db.InstanceSilent, fmt.Sprintf("the machine was running, its provider stopped saying whether it still does, and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
 	}
-	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, reported.State, reported.Progress, h.cfg.ProgressLimit); err != nil {
+	state := reported.State
+	if state == stateUnknown {
+		state = stateStarting
+	}
+	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit); err != nil {
 		return domain.AgentInstance{}, false, err
 	}
 	switch {
-	case reported.State == stateStarting:
+	case state == stateStarting:
 		return end(db.InstanceStillStarting, fmt.Sprintf("the machine was still starting %s after it was first listed, which is the boot limit", h.cfg.BootLimit))
 	case reported.State == stateRunning && reported.Progress != nil:
 		return end(db.InstanceSilent, fmt.Sprintf("the machine was running and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
@@ -390,7 +401,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
 			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +
-			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. That is recorded on its agent, and the launcher never replaces one on its own: " +
+			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. An instance reported unknown is held to the progress limit if it was last reported running and to the boot limit otherwise. That is recorded on its agent, and the launcher never replaces one on its own: " +
 			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one. " +
 			"A launcher whose pass can outlast the platform's boot limit or progress limit is answered 200 with refusal {reason: pass_does_not_fit, message}: the two lists stand and are acted on, so instances whose run is over are still stopped and destroyed, no instance that does not exist yet is asked for, and the launcher creates none until an answer carries no refusal.",
 	}, func(ctx context.Context, in *struct {

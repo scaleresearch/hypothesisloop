@@ -721,6 +721,49 @@ func TestAMachineThatStaysStartingIsTimedFromWhenItWasFirstListed(t *testing.T) 
 	}
 }
 
+// A provider that cannot reach a machine's host reports it unknown. One that ran is not held to
+// the boot limit, which passed long ago: it stays as recorded and is given up on only when its
+// command's last progress is a progress limit old. One that never ran is still starting.
+func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLimitBefore(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	first := mustReconcile(t, store, observed())
+	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
+	report := func(agentState string, progress *string) Observed {
+		return observed(ObservedInstance{Name: agent, State: agentState, Progress: progress}, ObservedInstance{Name: coordinator, State: "unknown"})
+	}
+
+	mustReconcile(t, store, report("running", marker("1")))
+	store.Advance(testBootLimit)
+	// The agent ran and its host is away for a pass. The coordinator never ran: its boot limit is up.
+	answer := mustReconcile(t, store, report("unknown", nil))
+	if recorded := store.Find("pe-1", "ag-1"); answer.Instances[0].Name != agent || recorded.Restarts != 0 || recorded.Reported != domain.InstanceRunning {
+		t.Fatalf("a running machine unknown for a pass: %+v, recorded %+v, want it kept as running", answer.Instances, recorded)
+	}
+	if recorded := store.Find("pe-1", ""); answer.Instances[1].Name == coordinator || recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceStillStarting) {
+		t.Fatalf("a machine unknown from its first listing: %+v, recorded %+v, want it replaced as still starting", answer.Instances, recorded)
+	}
+
+	// The host answers again and the agent goes on.
+	back := observed(ObservedInstance{Name: agent, State: "running", Progress: marker("2")})
+	store.Advance(testSettings.ProgressLimit / 2)
+	if answer := mustReconcile(t, store, back); answer.Instances[0].Name != agent || store.Find("pe-1", "ag-1").Restarts != 0 {
+		t.Fatalf("after the host answered again: %+v", answer.Instances)
+	}
+
+	// The host stays away: the agent is kept inside the progress limit and given up on at it.
+	away := observed(ObservedInstance{Name: agent, State: "unknown"})
+	store.Advance(testSettings.ProgressLimit - time.Second)
+	if answer := mustReconcile(t, store, away); answer.Instances[0].Name != agent {
+		t.Fatalf("unknown inside the progress limit: %+v, want it kept", answer.Instances)
+	}
+	store.Advance(time.Second)
+	answer = mustReconcile(t, store, away)
+	recorded := store.Find("pe-1", "ag-1")
+	if answer.Instances[0].Name == agent || recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceSilent) || !strings.Contains(recorded.ExitLog, "stopped saying whether it still does") {
+		t.Fatalf("unknown for a whole progress limit: %+v, recorded %+v, want it replaced as silent", answer.Instances, recorded)
+	}
+}
+
 func TestAMachineThatWasListedAndIsGoneIsAnExitAtOnce(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
