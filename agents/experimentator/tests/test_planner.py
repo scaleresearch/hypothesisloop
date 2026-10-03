@@ -144,15 +144,20 @@ class BaselinePromptTest(unittest.TestCase):
     def test_it_makes_the_repository_ready_from_the_template_or_runs_one_that_is(self):
         flat = render(baseline_agent())[1]
         self.assertIn("Run `hl repo init` in the clone before you write anything", flat)
-        self.assertIn("keeps every file it holds", flat)
-        self.assertIn("The job.yaml it gives is the one you fill in and submit, once `hl repo check` passes", flat)
+        # One copied a 54-line brief into experiment.yaml by hand, broke its YAML on a colon in
+        # the name and committed placeholders, beside a job.yaml an earlier experiment had left.
+        # `hl repo init` writes what the platform holds and replaces what is another
+        # experiment's, so the briefing names nothing to copy.
+        self.assertIn("it writes the experiment's files from what the platform holds and says which it kept", flat)
+        self.assertIn("Its job.yaml is the one you complete and submit, once `hl repo check` passes.", flat)
         self.assertIn("Only a harness that already measures these metrics on this config runs unchanged: go to 3", flat)
-        # `hl repo check` passed a repository whose files described a compression benchmark,
-        # straight after `hl repo init` had kept all three. It now holds them to the platform
-        # experiment, so the briefing asks only that it pass.
-        self.assertIn("once `hl repo check` passes: it names what a file still lacks and where one does not fit this experiment", flat)
-        self.assertNotIn("earlier experiment", flat)
-        self.assertIn("`hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H a generous guess", flat)
+        for typed_by_no_agent in ("earlier experiment", "`accelerator_type`", "`image`", "as the brief states"):
+            self.assertNotIn(typed_by_no_agent, flat)
+        # Told "H a generous guess", one asked 0.25 h of a share that held 0.13 h and was
+        # refused: the refusal states the largest estimate that fits.
+        self.assertIn("`hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H the most it may take: "
+                      "a refusal for quota states the largest H that fits", flat)
+        self.assertNotIn("guess", flat)
         # The repository template supplies the helper, so no briefing sends an agent to the samples.
         self.assertNotIn("$WORKLOAD_SAMPLES", flat)
         self.assertIn("once more at the end with the `post_metric` of the repository's `metrics.py`", flat)
@@ -230,7 +235,7 @@ class BaselinePromptTest(unittest.TestCase):
     # is the agent's to judge.
     def test_the_job_spec_is_sized_to_what_the_job_uses(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("`cpu`, `memory` and `storage` sized to what the job uses, so that other jobs fit beside it", flat)
+        self.assertIn("its command, and `cpu`, `memory` and `storage` sized to what the job uses, so that other jobs fit beside it", flat)
         for said_there in ("--help", "is refused", "experiment_closed", "pip install X` and", "default branch"):
             self.assertNotIn(said_there, flat)
 

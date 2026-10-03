@@ -8,10 +8,9 @@ run `git clone {repository_url} .` in {workdir}, the directory you start
 ==== start_baseline
 Work on branch
      `hl/{platform_experiment_id}/baseline` (`git checkout -b` it once): `hl job submit`
-     pushes it. Run `hl repo init` in the clone before you write anything: it adds the
-     experiment's files where missing and keeps every file it holds. The job.yaml it gives is
-     the one you fill in and submit, once `hl repo check` passes: it names what a file still
-     lacks and where one does not fit this experiment.
+     pushes it. Run `hl repo init` in the clone before you write anything: it writes the
+     experiment's files from what the platform holds and says which it kept. Its job.yaml is
+     the one you complete and submit, once `hl repo check` passes.
 ==== start_researcher
 A branch is your
      implementation of one hypothesis, named by hl: before working on an idea, and after a
