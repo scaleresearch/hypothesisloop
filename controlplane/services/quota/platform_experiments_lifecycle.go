@@ -983,7 +983,43 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	return nil
 }
 
-// StartExpirySweep runs SweepAutoStart and SweepExpired on a ticker until ctx is cancelled.
+// TellCoordinators records, for every open or running platform experiment whose coordinator the
+// platform hosts, the status_reason it waits for that coordinator with, and none where it waits
+// for someone else. A status_reason is derived from the roster and the clock and stored nowhere,
+// so what moves it writes nothing a coordinator is woken by: a researcher's machine that stops
+// with no restart left, a baseline agent's that does. The record is that write, and one that
+// changes is announced as platform_experiment.status (db.TellCoordinator).
+func (s *PlatformExperimentsService) TellCoordinators(ctx context.Context) error {
+	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
+		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
+		if err != nil {
+			return fmt.Errorf("list %s platform experiments: %w", status, err)
+		}
+		for _, pe := range pes {
+			if !pe.CoordinatorHosted {
+				continue
+			}
+			if err := s.tellCoordinator(ctx, pe); err != nil {
+				s.logger.Error("tell_coordinators: failed", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			}
+		}
+	}
+	return nil
+}
+
+func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *domain.PlatformExperiment) error {
+	if err := s.Describe(ctx, pe, auth.Principal{}); err != nil {
+		return err
+	}
+	reason := ""
+	if pe.StatusReason.WaitsFor == domain.WaitsForCoordinator {
+		reason = pe.StatusReason.Reason
+	}
+	return s.store.TellCoordinator(ctx, pe.ID, reason)
+}
+
+// StartExpirySweep runs SweepAutoStart, SweepExpired and TellCoordinators on a ticker until ctx
+// is cancelled.
 func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -997,6 +1033,9 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 			}
 			if err := s.SweepExpired(ctx); err != nil {
 				s.logger.Error("sweep_expired: scan", zap.Error(err))
+			}
+			if err := s.TellCoordinators(ctx); err != nil {
+				s.logger.Error("tell_coordinators: scan", zap.Error(err))
 			}
 		}
 	}

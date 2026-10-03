@@ -93,6 +93,20 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
             with open(counter.replace(".runs", ".args")) as f:
                 self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(wakes))
 
+    # A coordinator slept until ends_at in a run whose last researcher's machine had stopped for
+    # good: nothing it wakes on was sent. The platform sends the status event again when the
+    # status_reason begins to wait for the coordinator, with the reason as its detail.
+    async def test_a_status_reason_that_waits_for_the_coordinator_wakes_it_and_names_the_reason(self):
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        done = ('{"kind":"platform_experiment.status","subject":"pe-1","value":"running","detail":"researchers_done",'
+                '"agent_id":"","position":9,"cursor":9}')
+        command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
+                                   f'echo "$*" >> "$0.args"\necho \'{done}\'\n')
+        events = await updates.next_batch(coordinator, lambda: False, 10, command=command)
+        self.assertEqual(updates.message(events, ""), "Platform updates:\nplatform_experiment.status pe-1 running researchers_done")
+        with open(counter.replace(".runs", ".args")) as f:
+            self.assertIn("platform_experiment.status", f.read().splitlines()[0].split(" ")[-1].split(","))
+
     # A platform experiment that could not be read was taken as running, so a coordinator of an
     # open one waited without the wake for a failed job and nothing said so.
     async def test_a_wait_that_cannot_be_set_up_is_a_poll_that_failed(self):

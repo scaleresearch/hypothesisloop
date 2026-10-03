@@ -480,6 +480,19 @@ func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Cont
 	return nil
 }
 
+// TellCoordinator records reason as the status_reason the platform experiment id waits for its
+// coordinator with, "" when it waits for someone else. A reason that differs from the one
+// recorded is announced as platform_experiment.status with the reason as its detail, by the
+// trigger on the row, and one that is the same writes nothing. A closed one is told nothing.
+func (s *PlatformExperimentsStore) TellCoordinator(ctx context.Context, id, reason string) error {
+	const q = `UPDATE platform_experiments SET coordinator_reason = NULLIF($2, '')
+WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NULLIF($2, '')`
+	if _, err := s.pool.pool.Exec(ctx, q, id, reason); err != nil {
+		return fmt.Errorf("platform_experiments_store.TellCoordinator: %w", err)
+	}
+	return nil
+}
+
 // UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
 // expectedStatus — the service reads status, decides which fields are safe to change for that
 // status, then calls here; without this compare-and-swap, a concurrent Start() could flip the row

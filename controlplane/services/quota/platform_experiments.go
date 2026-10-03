@@ -31,6 +31,9 @@ type PlatformExperimentsStore interface {
 	// implementation's comment for why the compare-and-swap matters here.
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus) error
 	SetPlatformExperimentSummary(ctx context.Context, id, summary string) error
+	// TellCoordinator records the status_reason the experiment waits for its coordinator with,
+	// "" for none, and announces one that changed.
+	TellCoordinator(ctx context.Context, id, reason string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
 	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.

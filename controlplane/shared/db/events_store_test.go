@@ -441,6 +441,66 @@ func TestClosingThePlatformExperimentAnnouncesItsNewStatus(t *testing.T) {
 	}
 }
 
+// A status_reason is derived on every read, so a run whose last researcher's machine stopped for
+// good read researchers_done and wrote no row: nothing woke the coordinator that was to close it.
+// The reason that waits for the coordinator is recorded, and that write is the status event, sent
+// once for each change, live and replayed, and never for a reason of a status the row has left.
+func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusEventAndReplayedAsItsLiveTwin(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	_, peID, _ := seedRun(t, pool, "coordinator-reason", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	before := cursorNow(t, pool)
+	events, stop := listenForEvents(t, pool)
+	defer stop()
+	store := NewPlatformExperimentsStore(pool)
+	filter := EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{EventPlatformExperimentStatus: true}}
+	replay := func() []Event {
+		t.Helper()
+		replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, filter, before)
+		if err != nil {
+			t.Fatalf("replay: got = %v, want = nil", err)
+		}
+		return replayed
+	}
+
+	for _, reason := range []string{"", "researchers_done", "researchers_done"} {
+		if err := store.TellCoordinator(ctx, peID, reason); err != nil {
+			t.Fatalf("tell %q: got = %v, want = nil", reason, err)
+		}
+	}
+	live := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	if live.Value != "running" || live.Detail != "researchers_done" {
+		t.Fatalf("live event: got = %q %q, want = running researchers_done", live.Value, live.Detail)
+	}
+	if replayed := replay(); len(replayed) != 1 || replayed[0].Identity() != live.Identity() {
+		t.Fatalf("replay: got = %+v, want = the live event %+v alone", replayed, live)
+	}
+
+	// A researcher whose machine is asked for again leaves the run waiting for nobody, and the
+	// next time none is left is told again.
+	for _, reason := range []string{"", "researchers_done"} {
+		if err := store.TellCoordinator(ctx, peID, reason); err != nil {
+			t.Fatalf("tell %q: got = %v, want = nil", reason, err)
+		}
+	}
+	again := awaitEvent(t, events, EventPlatformExperimentStatus, peID)
+	if again.Detail != "researchers_done" || again.Position == live.Position {
+		t.Fatalf("told again: got = %+v, want = researchers_done at a position past %d", again, live.Position)
+	}
+
+	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
+	if closed := awaitEvent(t, events, EventPlatformExperimentStatus, peID); closed.Value != "closed" || closed.Detail != "" {
+		t.Fatalf("closing: got = %q %q, want = closed with no detail", closed.Value, closed.Detail)
+	}
+	if err := store.TellCoordinator(ctx, peID, "researchers_done"); err != nil {
+		t.Fatalf("tell a closed one: got = %v, want = nil", err)
+	}
+	if replayed := replay(); len(replayed) != 1 || replayed[0].Value != "closed" || replayed[0].Detail != "" {
+		t.Fatalf("replay of a closed one: got = %+v, want = its close alone", replayed)
+	}
+}
+
 // A grant was announced as its guaranteed and burst hours added up: 8.96 where the agent could
 // spend 2.24, of a budget of 6. It is announced as the share GET /quota answers, live and
 // replayed, and a connection drops a repeat only when the two are one.

@@ -695,7 +695,13 @@ ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_at    
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_at TIMESTAMPTZ;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS status_changed_xid      BIGINT;
 ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS description_changed_xid BIGINT;
-ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS updated_xid   BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
+-- The status_reason its coordinator was last told the experiment waits for it with, NULL while it
+-- waits for someone else. A status_reason is derived on every read and stored nowhere, so a
+-- change of it writes no row: this write is the event, live and replayed, as held_reason is of a
+-- job. A change of status clears it, so what it holds is of the status the row has.
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS coordinator_reason     TEXT;
+ALTER TABLE platform_experiments  ADD COLUMN IF NOT EXISTS coordinator_reason_xid BIGINT;
+ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS updated_xid  BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS queued_xid    BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS submitted_xid BIGINT;
 ALTER TABLE experiments           ADD COLUMN IF NOT EXISTS status_xid       BIGINT NOT NULL DEFAULT pg_current_xact_id()::text::bigint;
@@ -852,6 +858,10 @@ BEGIN
     IF NEW.status IS DISTINCT FROM OLD.status THEN
         NEW.status_changed_at := now();
         NEW.status_changed_xid := pg_current_xact_id()::text::bigint;
+        NEW.coordinator_reason := NULL;
+    END IF;
+    IF NEW.coordinator_reason IS DISTINCT FROM OLD.coordinator_reason THEN
+        NEW.coordinator_reason_xid := pg_current_xact_id()::text::bigint;
     END IF;
     IF NEW.description IS DISTINCT FROM OLD.description THEN
         NEW.description_changed_at := now();
@@ -872,6 +882,12 @@ BEGIN
     IF NEW.status IS DISTINCT FROM OLD.status THEN
         PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text, '',
             NEW.id, '');
+    END IF;
+    -- The status stayed and what it waits for became its coordinator's move. The machine of the
+    -- last researcher stopped for good, and no event told the coordinator the run was its to close.
+    IF NEW.coordinator_reason IS NOT NULL AND NEW.coordinator_reason IS DISTINCT FROM OLD.coordinator_reason THEN
+        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text,
+            NEW.coordinator_reason, NEW.id, '');
     END IF;
     -- The brief is the question every agent is working on, and it is edited mid-run when the
     -- coordinator resolves or redirects something. The new text is deliberately NOT carried: a

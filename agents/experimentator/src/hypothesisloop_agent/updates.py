@@ -31,7 +31,9 @@ _DRAIN_S = 5
 # wakes, after the next tool call, or once IDLE_NUDGE_S has passed. A coordinator has to learn
 # within seconds that an agent finished, that a job is held by what waiting will not clear or has
 # waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
-# advanced, that someone wrote a comment, that the brief changed or the run closed. An agent has
+# advanced, that someone wrote a comment, that the brief changed, that the run closed or that its
+# status_reason began to wait for the coordinator (platform_experiment.status, sent again with
+# the reason as its detail, as when the last researcher's machine stops for good). An agent has
 # to learn the same of its own jobs ending. Everything else is read when next acting. A kind
 # wakes only for what its reader can act on: a job held for a summary is cleared by its agent
 # alone, so it wakes no coordinator.

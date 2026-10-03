@@ -84,7 +84,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 6_909)
+        self.assertLess(len(prompt.encode()), 6_933)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
     # that only its own baseline agent could bring. The accept now creates that agent, the
@@ -117,7 +117,7 @@ class BriefingTest(unittest.TestCase):
     # looked at one.
     def test_a_failed_baseline_job_is_the_agents_to_fix_and_the_briefs_cause_the_coordinators(self):
         flat = " ".join(self.render().split())
-        self.assertIn("and while it is `open` when a job fails", flat)
+        self.assertIn("the run starts, closes or begins to wait for you, and while it is `open` when a job fails", flat)
         self.assertIn("A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: "
                       "if the cause is in the brief (an image, a type, a config that cannot run), fix the brief", flat)
         self.assertIn("State in it only what you read on the platform", flat)

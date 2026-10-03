@@ -154,6 +154,58 @@ func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *t
 	}
 }
 
+// toldStore keeps what the sweep tells the coordinator of its one platform experiment.
+type toldStore struct {
+	*rosterStore
+	told []string
+}
+
+func (f *toldStore) ListPlatformExperimentsByStatus(_ context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
+	if f.pe.Status != status {
+		return nil, nil
+	}
+	return []*domain.PlatformExperiment{f.pe}, nil
+}
+
+func (f *toldStore) TellCoordinator(_ context.Context, _, reason string) error {
+	f.told = append(f.told, reason)
+	return nil
+}
+
+// A coordinator was woken when the last researcher finished, by agent.finished, and by nothing
+// when the last one's machine stopped with no restart left: the run read researchers_done and
+// its coordinator slept until ends_at. The sweep records the reason that waits for a hosted
+// coordinator, and none while the experiment waits for someone else.
+func TestTheSweepTellsAHostedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
+	started := time.Now().Add(-time.Hour)
+	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
+	stopped := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Stopped: true}}
+	cut := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, Ended: domain.RunEndCut}
+
+	for name, c := range map[string]struct {
+		status            domain.PlatformExperimentStatus
+		coordinatorHosted bool
+		signups           []domain.AgentSignup
+		told              []string
+	}{
+		"a researcher at work":                    {domain.PlatformExpRunning, true, []domain.AgentSignup{atWork, cut}, []string{""}},
+		"the last one's machine stopped for good": {domain.PlatformExpRunning, true, []domain.AgentSignup{stopped, cut}, []string{"researchers_done"}},
+		"the same with a person coordinating":     {domain.PlatformExpRunning, false, []domain.AgentSignup{stopped, cut}, nil},
+		"open with no baseline agent":             {domain.PlatformExpOpen, true, []domain.AgentSignup{atWork}, []string{"baseline_required"}},
+		"closed":                                  {domain.PlatformExpClosed, true, []domain.AgentSignup{stopped}, nil},
+	} {
+		store := &toldStore{rosterStore: newRosterStore(c.status, 5)}
+		store.pe.CoordinatorHosted, store.signups, store.pe.StartedAt = c.coordinatorHosted, c.signups, started
+		store.pe.Metrics = openExperiment().Metrics
+		if err := newSignupTestService(t, store).TellCoordinators(context.Background()); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if strings.Join(store.told, ",") != strings.Join(c.told, ",") || len(store.told) != len(c.told) {
+			t.Errorf("%s: told = %q, want %q", name, store.told, c.told)
+		}
+	}
+}
+
 // Once the baseline is declared nobody but the platform acts, except a researcher, who still
 // prepares: the step is said for the reason it belongs to and for no other.
 func TestStatusReasonNamesNoStepWhereTheReaderOnlyWaits(t *testing.T) {
