@@ -371,23 +371,22 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
 	// enforced atomically against this pool's live SUBMITTED+RUNNING accelerator count, and
 	// speculation makes live capacity appear on demand — the cap is the only thing left bounding
-	// concurrency once that gate is open.
-	if exp.AcceleratorCount > 0 {
-		newEstCost := exp.EstimatedCostAccH
-		flavor := persistedFlavor
-		if exp.AcceleratorType != persistedFlavor {
-			held, err := exp.EstimateHeld()
-			if err != nil {
-				return fmt.Errorf("submitJob: %w", err)
-			}
-			newEstCost = held
-			flavor = exp.AcceleratorType
+	// concurrency once that gate is open. Every job holds units of a priced type (ValidateExperiment),
+	// cores on CPU and devices otherwise, so there is none it does not apply to.
+	newEstCost := exp.EstimatedCostAccH
+	flavor := persistedFlavor
+	if exp.AcceleratorType != persistedFlavor {
+		held, err := exp.EstimateHeld()
+		if err != nil {
+			return fmt.Errorf("submitJob: %w", err)
 		}
-		if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, flavor, newEstCost, exp.AcceleratorCount); err != nil {
-			return fmt.Errorf("reserve selected accelerator flavor: %w", err)
-		}
-		exp.EstimatedCostAccH = newEstCost
+		newEstCost = held
+		flavor = exp.AcceleratorType
 	}
+	if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, flavor, newEstCost, exp.AcceleratorCount); err != nil {
+		return fmt.Errorf("reserve selected accelerator flavor: %w", err)
+	}
+	exp.EstimatedCostAccH = newEstCost
 	fp := exp.Footprint()
 	var capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)
 	if speculative {
