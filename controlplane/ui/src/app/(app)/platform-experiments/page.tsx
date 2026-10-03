@@ -47,7 +47,7 @@ function LiveStrip() {
   const items = [
     // A status no job holds is absent from the answer.
     item('Jobs running', statsError, stats && String(stats.by_status?.RUNNING ?? 0), semantic.success),
-    item('Agents', agentsError, agents && String(agents.total), semantic.accent),
+    item('Agents', agentsError, agents && String(agents.total), semantic.neutral),
   ]
 
   return (
@@ -55,7 +55,7 @@ function LiveStrip() {
       {items.map(item => (
         <div key={item.label} title={item.title} className="flex items-center gap-2">
           <Dot color={item.color} />
-          <span className="font-mono text-sm font-bold text-foreground">{item.value}</span>
+          <span className="font-mono text-sm font-medium text-foreground">{item.value}</span>
           <span className="text-xs text-subtle">{item.label}</span>
         </div>
       ))}
