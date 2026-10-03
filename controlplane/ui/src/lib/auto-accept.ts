@@ -2,28 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 export const AUTO_ACCEPT_SECONDS = 10
 
-const seenKey = (draftID: string) => `hypothesisloop.proposal-seen.${draftID}`
-
 /**
- * Counts down to accepting a proposal by itself, for a person who reads it and has nothing to
- * change. A proposal gets one countdown: when the page first shows it, visible, and never when
- * this browser showed it before, which localStorage remembers by its proposed_at. A revision
- * makes a new proposal with a countdown of its own. `stop` ends it for good, as the page being
- * hidden does, and at zero `accept` is called once. `proposedAt` is undefined while there is
- * nothing this person may accept.
+ * Counts down to accepting a proposal by itself, for a person who watched it being planned and
+ * has nothing to change. `arrived` says the page saw this proposal arrive: it was open while the
+ * planner worked. One that is already there when the page loads never counts down. The countdown
+ * starts once, on a visible page, when the component showing the proposal mounts. `stop` ends it
+ * for good, as the page being hidden does, and at zero `accept` is called once.
  */
-export function useAutoAccept(draftID: string, proposedAt: string | undefined, accept: () => void): { secondsLeft: number | null; stop: () => void } {
+export function useAutoAccept(arrived: boolean, accept: () => void): { secondsLeft: number | null; stop: () => void } {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
   const latest = useRef(accept)
   latest.current = accept
+  const onMount = useRef(arrived)
 
   useEffect(() => {
-    if (!proposedAt) return
-    const key = seenKey(draftID)
-    if (window.localStorage.getItem(key) === proposedAt) return
-    window.localStorage.setItem(key, proposedAt)
-    if (document.visibilityState === 'visible') setSecondsLeft(AUTO_ACCEPT_SECONDS)
-  }, [draftID, proposedAt])
+    if (onMount.current && document.visibilityState === 'visible') setSecondsLeft(AUTO_ACCEPT_SECONDS)
+  }, [])
 
   const counting = secondsLeft !== null
   useEffect(() => {

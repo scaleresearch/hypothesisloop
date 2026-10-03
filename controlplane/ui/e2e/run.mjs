@@ -730,10 +730,20 @@ async function scenarios(browser) {
   await page.getByRole('status').filter({ hasText: 'The planner is working out how to measure this' }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
 
+  // A proposal that arrives on a page that watched it being planned is accepted by itself after
+  // a countdown. Here each proposal is stored while no page is open and met by a page loaded
+  // after, which never counts down, so no run, however slow, accepts by itself.
+  const draftURL = page.url()
+  async function openProposed(more) {
+    await page.goto('about:blank')
+    draftNow = { ...draftNow, ...more, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
+    await page.goto(draftURL)
+    await page.getByRole('heading', { name: 'Proposed experiment' }).waitFor()
+    assert.equal(await page.getByRole('timer').count(), 0, 'a proposal already there on load does not count down')
+  }
+
   // The planner proposed: the card says nothing has run yet, with no number nobody measured, and the questions first.
-  draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
-  await page.reload()
-  await page.getByRole('heading', { name: 'Proposed experiment' }).waitFor()
+  await openProposed({ proposal: draftProposal })
   assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Cosine or constant')
   await page.getByText('val_loss, lower is better', { exact: true }).waitFor()
   await page.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090/).waitFor()
@@ -745,8 +755,7 @@ async function scenarios(browser) {
   await page.getByText('It must fit one RTX 4090.').waitFor()
   assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}/revise`, body: { message: 'It must fit one RTX 4090.' } }])
 
-  draftNow = { ...draftNow, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
-  await page.reload()
+  await openProposed()
   draftWrites.length = 0
   await page.getByLabel('Budget (accelerator-hours)').fill('3')
   const draftAccepted = page.waitForResponse(response => response.url().endsWith(`/platform-experiments/${draftID}/accept`) && response.request().method() === 'POST')

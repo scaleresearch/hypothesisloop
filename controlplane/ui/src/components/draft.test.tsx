@@ -249,7 +249,7 @@ describe('a proposed draft', () => {
 
 // A person who had nothing to change still had to find the button at the foot of the proposal
 // before anything ran.
-describe('a proposal the person sees for the first time', () => {
+describe('a proposal that arrives while the person watches it being planned', () => {
   const proposedAt = '2026-10-05T12:10:00Z'
   const proposed = (at = proposedAt) => draft('proposed', { proposal, proposed_at: at })
   const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper, {}] }]
@@ -263,11 +263,20 @@ describe('a proposal the person sees for the first time', () => {
     fireEvent(document, new Event('visibilitychange'))
   }
 
+  const page = (d: Draft, readOnly = false) => <SWRConfig value={{ provider: () => new Map() }}><DraftView draft={d} readOnly={readOnly} /></SWRConfig>
+  // The page as it is while the planner works, then as the next read of the draft makes it.
+  function arrive(to = proposed(), from = draft('planning'), readOnly = false) {
+    const view = render(page(from, readOnly))
+    expect(countdown()).toBeUndefined()
+    view.rerender(page(to, readOnly))
+    return view
+  }
+
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
   it('counts down from 10 s where the person can see it and stop it', async () => {
-    show(proposed())
+    arrive()
     expect(countdown()).toBe('Starting in 10 s')
     expect(screen.getByRole('button', { name: 'Wait, let me edit' })).toBeTruthy()
     await pass(3)
@@ -276,7 +285,7 @@ describe('a proposal the person sees for the first time', () => {
   })
 
   it('accepts at zero with the values shown, once', async () => {
-    show(proposed())
+    arrive()
     await pass(10)
     expect(apiSend).toHaveBeenCalledExactlyOnceWith(...accepted)
     expect(countdown()).toBeUndefined()
@@ -291,7 +300,7 @@ describe('a proposal the person sees for the first time', () => {
     ['the pointer moves over the proposal', () => fireEvent.pointerMove(screen.getByText('One seed only.'))],
     ['the person starts to ask for a change', () => fireEvent.pointerDown(screen.getByLabelText('What should be different?'))],
   ])('stops for good when %s, and accepts nothing by itself', async (_what, react) => {
-    show(proposed())
+    arrive()
     await pass(4)
     react()
     expect(countdown()).toBeUndefined()
@@ -301,7 +310,7 @@ describe('a proposal the person sees for the first time', () => {
   })
 
   it('stops for good when the tab is hidden, and does not start again when it is shown', async () => {
-    show(proposed())
+    arrive()
     await pass(4)
     act(() => visibility('hidden'))
     expect(countdown()).toBeUndefined()
@@ -313,27 +322,39 @@ describe('a proposal the person sees for the first time', () => {
 
   it('does not start on a page that is hidden when the proposal arrives', async () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
-    show(proposed())
+    arrive()
+    expect(countdown()).toBeUndefined()
     await pass(30)
     expect(apiSend).not.toHaveBeenCalled()
   })
 
-  it('never starts again for a proposal an earlier load showed, and starts for the next proposal after a revision', async () => {
-    const first = show(proposed())
-    expect(countdown()).toBe('Starting in 10 s')
-    first.unmount()
-    const again = show(proposed())
+  // A proposal opened days later, in another browser or after a reload was accepted and spent
+  // with nobody having watched it come.
+  it('never counts for a proposal that is already there when the page loads, however often it is read again', async () => {
+    const loaded = show(proposed())
     expect(countdown()).toBeUndefined()
+    loaded.rerender(page(proposed()))
+    await pass(30)
+    expect(countdown()).toBeUndefined()
+    expect(apiSend).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', false)
+  })
+
+  it('counts again for the proposal that follows a revision the page watched, whichever came before', async () => {
+    const loaded = show(proposed())
+    loaded.rerender(page(draft('revising', { proposal })))
+    expect(countdown()).toBeUndefined()
+    loaded.rerender(page(proposed('2026-10-05T12:40:00Z')))
+    expect(countdown()).toBe('Starting in 10 s')
+    fireEvent.click(screen.getByRole('button', { name: 'Wait, let me edit' }))
+    loaded.rerender(page(proposed('2026-10-05T12:40:00Z')))
     await pass(30)
     expect(apiSend).not.toHaveBeenCalled()
-    again.unmount()
-    show(proposed('2026-10-05T12:40:00Z'))
-    expect(countdown()).toBe('Starting in 10 s')
   })
 
   it('shows why the API refused at zero, and does not count again', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('accelerator_unreachable: no cluster has rtx-4090 now'))
-    show(proposed())
+    arrive()
     await pass(10)
     expect(screen.getByRole('alert').textContent).toMatch(/no cluster has rtx-4090 now/)
     expect(countdown()).toBeUndefined()
@@ -342,10 +363,10 @@ describe('a proposal the person sees for the first time', () => {
   })
 
   it('does not count for a reader, nor while the planner revises', async () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><DraftView draft={proposed()} readOnly /></SWRConfig>)
+    arrive(proposed(), draft('planning'), true)
     expect(countdown()).toBeUndefined()
     cleanup()
-    show(draft('revising', { proposal }))
+    arrive(draft('revising', { proposal }))
     expect(countdown()).toBeUndefined()
     await pass(30)
     expect(apiSend).not.toHaveBeenCalled()

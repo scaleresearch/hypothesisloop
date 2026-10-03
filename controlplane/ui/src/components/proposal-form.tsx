@@ -75,13 +75,15 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
  * who runs it, and what it may spend. The name, the budget, the duration and the number of
  * researchers are the person's to change, and accepting sends them as shown. Nothing has run.
  * `editable` is off for a reader and while the planner revises, when it is only read. A proposal
- * the person sees for the first time is accepted by itself after a countdown, unless they do
- * anything in the form or in `children`, the box that asks the planner for a change.
+ * that `arrived` while the person watched it being planned is accepted by itself after a
+ * countdown, unless they do anything in the form or in `children`, the box that asks the planner
+ * for a change.
  */
-export function ProposalForm({ draft, proposal, editable, onDone, children }: {
+export function ProposalForm({ draft, proposal, editable, arrived, onDone, children }: {
   draft: Draft
   proposal: Proposal
   editable: boolean
+  arrived: boolean
   onDone: () => void
   children?: ReactNode
 }) {
@@ -112,7 +114,7 @@ export function ProposalForm({ draft, proposal, editable, onDone, children }: {
     }
   }
 
-  const auto = useAutoAccept(draft.id, editable ? draft.proposed_at : undefined, accept)
+  const auto = useAutoAccept(editable && arrived, accept)
 
   return (
     // Any sign of a person at work in here ends the countdown: they are deciding for themselves.

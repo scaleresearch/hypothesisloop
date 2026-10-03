@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate, relTime } from '@/lib/format'
 import { abandonDraft, reviseDraft } from '@/lib/planning'
@@ -73,6 +73,10 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
   const state = reasonOf(draft).reason
+  // Whether this page, since it loaded, saw the planner at work: a proposal that follows arrived
+  // in front of the person, and one already there on load did not.
+  const watchedPlanning = useRef(false)
+  if (state === 'planning' || state === 'revising') watchedPlanning.current = true
   const reread = () => void mutate(['pe', draft.id])
   const revise = !readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
@@ -120,7 +124,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         </Card>
       )}
       {draft.proposal ? (
-        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} onDone={reread}>
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} arrived={watchedPlanning.current} onDone={reread}>
           {revise}
         </ProposalForm>
       ) : revise}
