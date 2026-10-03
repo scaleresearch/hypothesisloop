@@ -12,6 +12,7 @@ import { useTenant } from '@/lib/tenant'
 import { budgetUnit } from '@/lib/units'
 import { CommandPaletteTrigger } from '@/components/command-palette'
 import { ProjectSwitcher } from '@/components/project-switcher'
+import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/components/ui/link'
 import { Logo } from '@/components/ui/logo'
@@ -108,7 +109,7 @@ export function Nav() {
                 aria-current={active ? 'page' : undefined}
                 className={clsx(
                   'flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium transition-colors',
-                  active ? 'bg-foreground/[0.07] text-foreground' : 'text-muted hover:bg-foreground/5 hover:text-foreground',
+                  active ? 'bg-highlight text-foreground' : 'text-muted hover:bg-hover hover:text-foreground',
                 )}
               >
                 <Icon aria-hidden="true" size={16} strokeWidth={2} className="flex-none" />
@@ -122,7 +123,10 @@ export function Nav() {
         <SystemStatus />
         <Account />
         <div className="border-t pt-3">
-          <p className="text-xs font-semibold text-muted">HypothesisLoop v2.0</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-muted">HypothesisLoop v2.0</p>
+            <ThemeSwitch />
+          </div>
           <p className="mt-0.5 text-2xs text-subtle">Budgets are counted in {budgetUnit('accelerator', 'long')}, or {budgetUnit('cpu', 'long')} for jobs on CPU.</p>
         </div>
       </div>

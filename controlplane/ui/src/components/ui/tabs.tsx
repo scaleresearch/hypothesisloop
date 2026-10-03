@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 
 interface TabsProps<T extends string> {
@@ -32,7 +33,8 @@ export function Tabs<T extends string>({ label, tabs, value, onChange }: TabsPro
 
 interface SegmentedProps<T extends string> {
   label: string
-  options: { value: T; label: string }[]
+  /** With an icon, the option shows only the icon and its label names it to a screen reader and on hover. */
+  options: { value: T; label: string; icon?: ReactNode }[]
   value: T
   onChange: (value: T) => void
   disabled?: boolean
@@ -48,13 +50,16 @@ export function Segmented<T extends string>({ label, options, value, onChange, d
           type="button"
           disabled={disabled}
           aria-pressed={option.value === value}
+          aria-label={option.icon ? option.label : undefined}
+          title={option.icon ? option.label : undefined}
           onClick={() => onChange(option.value)}
           className={clsx(
-            'px-3.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            'text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-disabled',
+            option.icon ? 'px-2 py-1' : 'px-3.5 py-1.5',
             option.value === value ? 'bg-primary font-bold text-primary-foreground' : 'bg-surface-inset text-muted enabled:hover:text-foreground',
           )}
         >
-          {option.label}
+          {option.icon ?? option.label}
         </button>
       ))}
     </div>
