@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -39,7 +40,7 @@ func containerReachable(rawURL string) string {
 	return rawURL
 }
 
-// hugepageMountPoints maps a k8s-style hugepage resource key ("hugepages-1Gi", "hugepages-2Mi")
+// hugepageSizes maps a k8s-style hugepage resource key ("hugepages-1Gi", "hugepages-2Mi")
 // to the hugetlbfs mount point the kernel already exposes for that page size on any Linux host
 // (confirmed against this node's own /proc/mounts: "hugetlbfs on /dev/hugepages type hugetlbfs
 // ...pagesize=2M", "hugetlbfs on /dev/hugepages-1G type hugetlbfs ...pagesize=1024M"). Unlike
@@ -47,16 +48,36 @@ func containerReachable(rawURL string) string {
 // no per-container hugepage accounting to offer — but the pages are still reserved node-wide (an
 // operator concern, same as k8s expects the node's boot params to already provide), so passing
 // the real mount through via a bind mount is what actually lets tt-metal's UMD driver find its
-// host DMA channel, not just accounting metadata to ignore.
-var hugepageMountPoints = map[string]string{
-	"hugepages-2Mi": "/dev/hugepages",
-	"hugepages-1Gi": "/dev/hugepages-1G",
+// host DMA channel, not just accounting metadata to ignore. With the mount goes where the kernel
+// says how many pages of the size the host reserved.
+var hugepageSizes = map[string]hugepageSize{
+	"hugepages-2Mi": {mount: "/dev/hugepages", reserved: "/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages"},
+	"hugepages-1Gi": {mount: "/dev/hugepages-1G", reserved: "/sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages"},
+}
+
+type hugepageSize struct {
+	mount    string
+	reserved string
+}
+
+// reservedPages reads how many pages of the size the host reserved.
+func (s hugepageSize) reservedPages() (int, error) {
+	raw, err := os.ReadFile(s.reserved)
+	if err != nil {
+		return 0, err
+	}
+	pages, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, fmt.Errorf("%s holds %q, which is no page count", s.reserved, strings.TrimSpace(string(raw)))
+	}
+	return pages, nil
 }
 
 // hugepageMountsFor resolves accelerator_pod_resources's hugepage keys to the hugetlbfs mount
-// points of this node. A key that names no hugepage size, or a size this node has no mount for,
-// makes the job unrunnable here: started without the mount it dies in its device driver with
-// nothing in its phase reason.
+// points of this node. A key that names no hugepage size, a size this node has no mount for, or
+// one it reserved no pages of makes the job unrunnable here: started like that it dies in its
+// device driver with nothing in its phase reason. A count that cannot be read is this node's
+// fault and no verdict on the job.
 func hugepageMountsFor(podResources map[string]string) ([]string, error) {
 	keys := make([]string, 0, len(podResources))
 	for key := range podResources {
@@ -65,14 +86,21 @@ func hugepageMountsFor(podResources map[string]string) ([]string, error) {
 	sort.Strings(keys)
 	var mounts []string
 	for _, key := range keys {
-		mount, known := hugepageMountPoints[key]
+		size, known := hugepageSizes[key]
 		if !known {
 			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] is not a hugepage size a bare node can give a job (it gives hugepages-2Mi and hugepages-1Gi)", key)}
 		}
-		if _, err := os.Stat(mount); err != nil {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs the hugetlbfs mount %s, which this node does not have: %v", key, mount, err)}
+		if _, err := os.Stat(size.mount); err != nil {
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs the hugetlbfs mount %s, which this node does not have: %v", key, size.mount, err)}
 		}
-		mounts = append(mounts, mount)
+		pages, err := size.reservedPages()
+		if err != nil {
+			return nil, fmt.Errorf("podexec: read how many %s pages this node reserved: %w", key, err)
+		}
+		if pages == 0 {
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs pages of that size, and this node has reserved none (%s is 0)", key, size.reserved)}
+		}
+		mounts = append(mounts, size.mount)
 	}
 	return mounts, nil
 }

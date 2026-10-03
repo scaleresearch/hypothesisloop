@@ -57,9 +57,15 @@ func TestResolveHostMounts(t *testing.T) {
 // 1 GiB hugetlbfs mount it died in its driver with nothing in its phase reason.
 func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	present, absent := t.TempDir(), filepath.Join(t.TempDir(), "hugepages-1G")
-	saved := hugepageMountPoints
-	hugepageMountPoints = map[string]string{"hugepages-2Mi": present, "hugepages-1Gi": absent}
-	defer func() { hugepageMountPoints = saved }()
+	reserved, none := filepath.Join(t.TempDir(), "nr_hugepages"), filepath.Join(t.TempDir(), "nr_hugepages")
+	for file, pages := range map[string]string{reserved: "8\n", none: "0\n"} {
+		if err := os.WriteFile(file, []byte(pages), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := hugepageSizes
+	hugepageSizes = map[string]hugepageSize{"hugepages-2Mi": {mount: present, reserved: reserved}, "hugepages-1Gi": {mount: absent, reserved: reserved}}
+	defer func() { hugepageSizes = saved }()
 	e := &Executor{apiURL: "http://example.invalid:8083"}
 	placement := Placement{DevicePaths: []string{"/dev/tenstorrent/0"}}
 
@@ -97,6 +103,20 @@ func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	}
 	if len(cs.Mounts) != 1 || cs.Mounts[0] != present {
 		t.Fatalf("mounts = %v, want the node's hugetlbfs mount %s", cs.Mounts, present)
+	}
+
+	// The mount is there on every Linux host; the pages behind it are the operator's to reserve.
+	// With none the job started and died in its driver all the same.
+	hugepageSizes["hugepages-2Mi"] = hugepageSize{mount: present, reserved: none}
+	_, err = e.BuildContainerSpec(exp, placement)
+	var unrunnable *agentexec.Unrunnable
+	if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, "reserved none") || !strings.Contains(unrunnable.Why, none) {
+		t.Fatalf("a mount with no pages reserved: err = %v, want an Unrunnable naming the count read", err)
+	}
+	// A count that cannot be read says nothing about the job.
+	hugepageSizes["hugepages-2Mi"] = hugepageSize{mount: present, reserved: absent}
+	if _, err = e.BuildContainerSpec(exp, placement); err == nil || errors.As(err, &unrunnable) {
+		t.Fatalf("an unreadable count: err = %v, want an error that does not end the job", err)
 	}
 }
 
