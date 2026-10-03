@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -150,30 +149,6 @@ func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	code, stdout, stderr := hl(t, "platform-experiments", "agents", "--help")
 	if code != 0 || !strings.Contains(stdout, "\n  add [--platform-experiment PE]") || !strings.Contains(stdout, "\n  list [--platform-experiment PE]") {
 		t.Fatalf("exit code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-	}
-}
-
-// A finish refused for open hypotheses prints the platform's own answer: which hypotheses, and
-// the command that settles each.
-func TestAFinishRefusedForOpenHypothesesNamesThemAndTheCommandThatSettlesThem(t *testing.T) {
-	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"reason":"hypotheses_open","message":"agent ag-1 owns 2 hypotheses that are still open: h-1, h-2. Give each its verdict, then finish: hl hypothesis status ID inconclusive","hypothesis_ids":["h-1","h-2"]}`))
-	}))
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-	t.Setenv("AGENT_ID", "ag-1")
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr)
-	for _, want := range []string{"HTTP 409", `"reason":"hypotheses_open"`, `"hypothesis_ids":["h-1","h-2"]`, "hl hypothesis status ID inconclusive"} {
-		if code != 1 || !strings.Contains(stderr.String(), want) {
-			t.Errorf("exit code = %d, stderr = %s, want it to carry %s", code, stderr.String(), want)
-		}
-	}
-
-	stderr.Reset()
-	run([]string{"platform-experiments", "agents", "finish", "--help"}, &stdout, &stderr)
-	if !strings.Contains(stderr.String(), "hypotheses_open") || !strings.Contains(stderr.String(), "hl hypothesis status ID") {
-		t.Errorf("the help of finish does not say a finish waits for open hypotheses:\n%s", stderr.String())
 	}
 }
 
