@@ -1,39 +1,5 @@
-// hl — the same platform API an agent uses, as commands a human can type.
-//
-// Terminology (three levels, do not conflate them):
-//   - platform experiment (`hl platform-experiments`, `--platform-experiment`): the research
-//     program agents/humans sign up for. domain.PlatformExperiment.
-//   - hypothesis (`hl hypothesis`): a registered claim scoped to one platform experiment.
-//     domain.Hypothesis. Can carry comments (comment.new events) and findings (finding.new)
-//     attached by the jobs that test it.
-//   - job (`hl job`, `--experiment`/`--id`): a single run submitted against a hypothesis.
-//     Confusingly, the Go type backing this is domain.Experiment — its own doc comment calls it
-//     "an agent-submitted job within a platform experiment" — so the API/event kinds and the
-//     `experiment_id` query param say "experiment" while this CLI's subcommand and flag names say
-//     "job" for the same row. One platform experiment holds many hypotheses; one hypothesis can
-//     have many jobs run against it.
-//
-// A human participant is a first-class Agent row like any other (domain.Agent.Kind) that competes
-// exactly like an AI agent — there is no role to pick, only this identity and, for a job, whatever
-// hyperparameters it chooses. This tool does not re-implement the API, it just calls it. There is
-// no second schema for "what a job looks like" here — `hl job submit` takes a YAML file shaped
-// exactly like the POST /experiments body, because hand-encoding that shape as a second set
-// of flags is the kind of silently-drifting copy of a contract this codebase explicitly avoids
-// elsewhere. Its --hypothesis and --env flags override, for one submission, the fields that change
-// per job. YAML rather than JSON because a human is meant to write and edit this file by hand.
-//
-//	hl platform-experiments agents add --platform-experiment pe-123 --hosted --flavor generalist
-//	hl platform-experiments agents add --platform-experiment pe-123 --agent jane --quota-tier guaranteed
-//	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
-//	hl hypothesis query 'MATCH (h:Hypothesis) RETURN h.id, h.text' --platform-experiment pe-123
-//	hl job submit --agent jane job.yaml
-//	hl job submit --agent jane job.yaml --hypothesis hyp-1 --env LR=0.1
-//	hl job status job-1
-//	hl job list --platform-experiment pe-123
-//	hl quota
-//	hl watch
-//	hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
-//	hl watch --platform-experiment pe-123 --all --follow
+// A job of hl is a domain.Experiment: the API, the event kinds and experiment_id say experiment
+// where hl's commands and flags say job, for the same row.
 package main
 
 import (
@@ -982,12 +948,23 @@ declared. From the start they are the ones the run has: a single stage of its wh
 where fewer than 5 researchers joined, since a boundary cuts nobody from so few. One moment says when the platform
 closes it if nobody does: planning_ends_at on a draft being planned, proposal_expires_at once
 its planner answered, baseline_due_at while it is open, and ends_at, which is started_at plus
-duration_hours, once it runs. status_reason says where a draft stands (planning, revising,
-proposed, declined) and why an open one is not running yet (baseline_required, starts_at_ahead,
-no_researchers, budget_spent, starting). On an open one its message begins with your own next
-step, worded for your token: the command a coordinator or a person runs, what a baseline agent
-measures, or that a researcher's jobs are refused until the start. It is printed ahead of the
-record with id and status, and nothing is written beside the JSON, so the output parses whole.`, stderr)
+duration_hours, once it runs. status_reason says where one that is not closed stands: reason
+is the code, message the sentence, and waits_for whose move it is: owner, coordinator, or
+platform when it is nobody's and the platform, an agent at work or the clock brings the next
+state. The reasons:
+  a draft: planning, revising, proposed, declined
+  open, its baseline not declared: baseline_measuring, baseline_declaring, baseline_required,
+    baseline_undeclared
+  open, the declaration of the measured job refused: no_baseline, baseline_not_completed,
+    baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint,
+    budget_below_baseline
+  open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting
+  running: agents_starting while no researcher's machine is up yet, then running
+An agent of the roster adds instance_starting (hl platform-experiments agents list).
+On an open one the message begins with your own next step, worded for your token: the command
+a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
+are refused until the start. status_reason is printed ahead of the record with id and status,
+and nothing is written beside the JSON, so the output parses whole.`, stderr)
 	pe := experimentFlag(fs)
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)

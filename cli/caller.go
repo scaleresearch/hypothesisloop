@@ -76,6 +76,8 @@ const (
 	everyone callers = iota
 	// asAgent acts as an agent: an agent's token does, and a person or an API key naming one.
 	asAgent
+	// theAgentItself is an agent's own token and no other: nobody acts in its place.
+	theAgentItself
 	// ofTheRun runs a platform experiment: its coordinator, or a person or an API key of its org.
 	ofTheRun
 	// ofPeople is an org's own: no token bound to one platform experiment reaches an org.
@@ -86,6 +88,8 @@ func (who callers) admits(kind callerKind) bool {
 	switch who {
 	case asAgent:
 		return kind != callerCoordinator
+	case theAgentItself:
+		return kind == callerAgent
 	case ofTheRun:
 		return kind != callerAgent
 	case ofPeople:
@@ -103,6 +107,11 @@ func (who callers) refusal(kind callerKind) error {
 	switch who {
 	case asAgent:
 		return errCoordinatorActsAsNoAgent
+	case theAgentItself:
+		if kind == callerCoordinator {
+			return errCoordinatorActsAsNoAgent
+		}
+		return errors.New("an agent does this itself, with its own token, and HL_TOKEN is no agent's: the platform refuses it from anyone else")
 	case ofTheRun:
 		return errors.New("this is a command of the platform experiment's coordinator and of its org's people, and HL_TOKEN is " + whose + ". hl --help lists the commands this token runs")
 	}

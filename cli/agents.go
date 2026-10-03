@@ -14,7 +14,7 @@ var agentsCommands = []subcommand{
 	{"add", "create one agent in a platform experiment, or join a registered one with --agent", agentsAdd, ofTheRun},
 	{"remove", "take an agent out of a platform experiment that has not started", agentsRemove, ofTheRun},
 	{"list", "the agents of a platform experiment and what each was launched with", agentsList, ofTheRun},
-	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish, asAgent},
+	{"finish", "say that you, an agent, have nothing left to do: your machine stops", agentsFinish, theAgentItself},
 	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession, everyone},
 }
 
@@ -51,7 +51,11 @@ func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, and only while it is open. The first form creates one agent; the second joins one that is
-registered already. For several agents, run it once for each. With --hosted the platform runs the agent:
+registered already: an agent that was removed joins again under its id, and for a self-run
+agent that joined it prints the token again. For several agents, run it once for each.
+A reviewer re-checks what other agents claim and records agreement or dispute; like a baseline
+agent it is not ranked, not cut and not counted against max_agents.
+With --hosted the platform runs the agent:
 a baseline agent's machine at once, any other's from the start of the run, and until then its
 status_reason says what the start waits for.
 max_agents counts researchers (role competitor) alone, finished ones too.
@@ -105,7 +109,8 @@ Takes the agent out of a platform experiment that is still open: its token stops
 hosted agent's machine is taken down. A coordinator's token removes only an agent it added,
 and 403 agent_not_added_by_coordinator answers for any other.
 Refused once the experiment has started; from then on an agent leaves by being cut or by the
-experiment closing.`, stderr)
+experiment closing. Refused with 409 work_unfinished while the agent has a job queued or
+running, which a baseline agent may: cancel the job or let it end first.`, stderr)
 	named := experimentFlag(fs)
 	agent, err := parseOne(fs, args, "AGENT", "", "agent")
 	if err != nil {
@@ -148,9 +153,9 @@ nothing you could still try is worth a job. Your machine is then stopped after t
 coordinator is told, with the reason. Refused while you have a job queued or running or a
 completed job without its summary (work_unfinished). Once the platform experiment closed the
 answer is experiment_closed: your run is over already and nothing is left to finish, so end
-your turn. It cannot be taken back.`, stderr)
-	named := experimentFlag(fs)
-	agent := fs.String("agent", "", "the agent that finishes, for a person or an API key; an agent's token says it")
+your turn. It cannot be taken back. Prints you as finished, the line of
+hl platform-experiments agents list. An agent finishes itself: the command takes who and where
+from its token, and the platform refuses any other.`, stderr)
 	reason := fs.String("reason", "", "why nothing is left to do")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -158,12 +163,6 @@ your turn. It cannot be taken back.`, stderr)
 	if strings.TrimSpace(*reason) == "" {
 		return parseExit(misuse(fs, "want --reason"))
 	}
-	if *agent = agentOf(c, *agent); *agent == "" {
-		return parseExit(misuse(fs, "want --agent: HL_TOKEN is no agent's token, so say which agent finishes"))
-	}
-	pe, err := namedExperiment(fs, c, *named)
-	if err != nil {
-		return parseExit(err)
-	}
-	return call(c, "POST", agentsPath(pe)+"/"+url.PathEscape(*agent)+"/finish", map[string]string{"reason": *reason}, "", "", stdout, stderr)
+	_, pe, agent := scopeOf(c.Token)
+	return call(c, "POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", map[string]string{"reason": *reason}, "agents", "", stdout, stderr)
 }

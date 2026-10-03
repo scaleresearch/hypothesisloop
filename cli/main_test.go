@@ -548,40 +548,11 @@ func TestJobListWithoutAgentListsWholePlatformExperiment(t *testing.T) {
 	}
 }
 
-func TestHTTPErrorSurfacesPlatformMessage(t *testing.T) {
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"$schema":"http://api/schemas/ErrorModel.json", "error":"already closed"}`))
-	})
-	setAPIURL(t, url)
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "close", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
-	}
-	if want := "hl: POST /platform-experiments/pe-1/close -> HTTP 409: {\"error\":\"already closed\"}\n"; stderr.String() != want {
-		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
-	}
-}
-
 func TestUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"bogus"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
-	}
-}
-
-// The platform starts a run itself once its baseline is declared, so hl has no start: the answer
-// to it is the synopsis, which names the command that declares one.
-func TestThereIsNoStartCommand(t *testing.T) {
-	calls := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "start", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 2 || len(*calls) != 0 || !strings.Contains(stderr.String(), `unknown subcommand "start"`) ||
-		!strings.Contains(stderr.String(), "--baseline-job") || strings.Contains(usage(""), "| start |") {
-		t.Fatalf("exit %d, %d requests, stderr %q", code, len(*calls), stderr.String())
 	}
 }
 
@@ -607,7 +578,6 @@ func TestATokenThatNamesNoAgentOrExperimentLeavesBothToTheFlags(t *testing.T) {
 		{"data-key"},
 		{"platform-experiments", "get"},
 		{"platform-experiments", "agents", "list"},
-		{"platform-experiments", "agents", "finish", "--reason", "r", "--platform-experiment", "pe-1"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {

@@ -10,7 +10,8 @@ const (
 	ExperimentFile = ".hypothesisloop/experiment.yaml"
 	JobSpec        = ".hypothesisloop/job.yaml"
 	Gitignore      = ".gitignore"
-	// MetricsHelper is the one way a job reports a metric, so no agent writes its own.
+	// MetricsHelper posts a job's metric. A repository may leave it out and post the metric
+	// itself, which hl repo check says how to do and fails nothing for.
 	MetricsHelper = "metrics.py"
 
 	// Placeholder marks what a file of the template leaves to be filled in.

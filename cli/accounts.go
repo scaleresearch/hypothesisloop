@@ -441,8 +441,8 @@ func clusterToken(c *apiclient.Client, args []string, stdout, stderr io.Writer) 
 	fs := newFlags("cluster token", `usage: hl cluster token NAME [--org ORG]
 
 Prints the runtime token of a cluster the org registered, and nothing else. The token is derived
-from the cluster's name and never changes: removing the cluster is what ends it. Meant for
-command substitution, as in the command hl cluster add prints.`, stderr)
+from the cluster's name and never changes: removing the cluster is what ends it. The command
+hl cluster add prints asks for it on stdin, so pipe it there and keep it out of a command line.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	name, err := parseOne(fs, args, "NAME", "", "name")
 	if err != nil {

@@ -3,8 +3,12 @@ package main
 import (
 	"bytes"
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
@@ -98,7 +102,7 @@ func TestAgentsRemoveAndList(t *testing.T) {
 			return nil
 		}
 		if r.Method == "POST" {
-			return map[string]any{"status": "finished"}
+			return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "finished_reason": "quota spent"}}}
 		}
 		return map[string]any{"agents": []map[string]any{}}
 	})
@@ -115,8 +119,11 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		}
 	}
 
-	// An agent's token says who finishes and where; a person names both.
+	// An agent finishes itself: its token says who and where, and the platform answers 403 to
+	// anyone else, so hl sends nothing for them. The answer is agents, a list of that one agent,
+	// printed as the line add and list print, where finish once printed the object around it.
 	stderr.Reset()
+	stdout.Reset()
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	*got = nil
 	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 0 {
@@ -125,13 +132,21 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	if r := (*got)[0]; r.Method != "POST" || r.Path != "/platform-experiments/pe-env/agents/ag-1/finish" || !reflect.DeepEqual(r.Body, map[string]any{"reason": "quota spent"}) {
 		t.Fatalf("finish request = %+v", r)
 	}
+	if want := `{"agent_id":"ag-1","finished_reason":"quota spent"}` + "\n"; stdout.String() != want {
+		t.Errorf("finish printed %q, want %q", stdout.String(), want)
+	}
 	if code := run([]string{"platform-experiments", "agents", "finish"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
 		t.Errorf("finish without a reason: exit %d with %d requests, want 2 and no further one", code, len(*got))
 	}
-	t.Setenv("HL_TOKEN", "test-token")
-	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
-		t.Errorf("finish by a person naming no agent: exit %d with %d requests, want 2 and no further one", code, len(*got))
+	t.Setenv("HL_TOKEN", "hlk_x")
+	stderr.Reset()
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 1 || len(*got) != 1 || !strings.Contains(stderr.String(), "an agent does this itself") {
+		t.Errorf("finish by a person: exit %d with %d requests, stderr %q, want 1, no further request and why", code, len(*got), stderr.String())
 	}
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent", "--agent", "ag-1"}, &stdout, &stderr); code != 1 || len(*got) != 1 {
+		t.Errorf("finish by a person naming an agent: exit %d with %d requests, want 1 and no further one", code, len(*got))
+	}
+	t.Setenv("HL_TOKEN", "test-token")
 	*got = nil
 	stderr.Reset()
 	if code := run([]string{"platform-experiments", "agents", "list", "--platform-experiment", "pe-env"}, &stdout, &stderr); code != 0 {
@@ -142,6 +157,30 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "no agents have joined pe-env") {
 		t.Fatalf("stderr = %q, want the empty roster said out loud", stderr.String())
+	}
+}
+
+// The help of get listed five of the reasons by hand while the platform answered a dozen more.
+// It names every reason of the platform's one table and each value of waits_for.
+func TestTheHelpOfGetNamesEveryStatusReasonThePlatformAnswers(t *testing.T) {
+	var help bytes.Buffer
+	run([]string{"platform-experiments", "get", "--help"}, &help, &help)
+	words := regexp.MustCompile(`[a-z_]+`).FindAllString(help.String(), -1)
+	for _, reason := range append(domain.StatusReasons(), "waits_for", string(domain.WaitsForOwner), string(domain.WaitsForCoordinator), string(domain.WaitsForPlatform)) {
+		if !slices.Contains(words, reason) {
+			t.Errorf("hl platform-experiments get --help does not name %s", reason)
+		}
+	}
+	// A reason the table dropped is one the help must drop too.
+	_, listed, _ := strings.Cut(help.String(), "The reasons:")
+	listed, _, _ = strings.Cut(listed, "On an open one")
+	listed = strings.NewReplacer("a draft:", "", "open, its baseline not declared:", "", "open, the declaration of the measured job refused:", "",
+		"open, its baseline declared:", "", "running:", "", "while no researcher's machine is up yet, then", "",
+		"An agent of the roster adds", "", "(hl platform-experiments agents list).", "").Replace(listed)
+	for _, reason := range strings.FieldsFunc(listed, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
+		if !slices.Contains(domain.StatusReasons(), reason) {
+			t.Errorf("hl platform-experiments get --help names %q, which is no status reason of the platform", reason)
+		}
 	}
 }
 

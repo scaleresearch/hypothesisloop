@@ -1,6 +1,10 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 // Waiter is whose move a platform experiment that is not closed waits for.
 type Waiter string
@@ -48,6 +52,12 @@ var statusWaiters = map[string]Waiter{
 	"running":         WaitsForPlatform,
 
 	"instance_starting": WaitsForPlatform,
+}
+
+// StatusReasons is every reason of the table, sorted: what a text that lists them is checked
+// against.
+func StatusReasons() []string {
+	return slices.Sorted(maps.Keys(statusWaiters))
 }
 
 // WaitsFor is who acts on a platform experiment that answers reason. Where it has no coordinator
