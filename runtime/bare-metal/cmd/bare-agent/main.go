@@ -15,6 +15,7 @@
 //	SCRATCH_DIR           — a directory measured as this node's storage in place of the engine's store,
 //	                        for an engine whose store is not on this host (default: the engine's store)
 //	NODE_NAME             — override this node's reported identity (default: OS hostname)
+//	NODE_LABELS           — this node's own labels, as k1=v1,k2=v2 (default: none)
 //
 // bare-agent install, detach and uninstall (node.go) put the agent on a node as a systemd unit
 // and take it off again.
@@ -115,28 +116,33 @@ func main() {
 }
 
 func newExecutor(clusterName, apiURL string) (*podexec.Executor, error) {
+	nodeLabels, err := parseNodeLabels(os.Getenv("NODE_LABELS"))
+	if err != nil {
+		return nil, err
+	}
 	return podexec.New(podexec.Config{
 		ClusterName: clusterName,
 		APIURL:      apiURL,
 		StorageDir:  os.Getenv("SCRATCH_DIR"),
-		NodeLabels:  parseNodeLabels(os.Getenv("NODE_LABELS")),
+		NodeLabels:  nodeLabels,
 		NodeName:    os.Getenv("NODE_NAME"),
 	})
 }
 
 // parseNodeLabels parses "k1=v1,k2=v2" into a map — the bare-node equivalent of one fleet.yaml
-// node entry's static labels.
-func parseNodeLabels(raw string) map[string]string {
+// node entry's static labels. A pair that is not key=value is refused: left out, the node would
+// run without a label its jobs are selected by, with nothing said.
+func parseNodeLabels(raw string) (map[string]string, error) {
 	labels := map[string]string{}
 	if raw == "" {
-		return labels
+		return labels, nil
 	}
 	for _, pair := range strings.Split(raw, ",") {
 		k, v, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
+		if k = strings.TrimSpace(k); !ok || k == "" {
+			return nil, fmt.Errorf("NODE_LABELS=%q: %q is not key=value", raw, pair)
 		}
-		labels[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		labels[k] = strings.TrimSpace(v)
 	}
-	return labels
+	return labels, nil
 }
