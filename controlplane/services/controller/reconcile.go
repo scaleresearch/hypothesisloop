@@ -127,29 +127,34 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// exhaustionTolerance is how far under a budget, in accelerator-hours, observed usage counts as
+// having reached it: usage is a sum of floats and can land a rounding error short of a budget it
+// equals.
+const exhaustionTolerance = 1e-6
+
 // checkQuotaExhaustion evicts all running jobs for an agent when actual AccH consumed
-// reaches their tier quota. No refund — budget genuinely exhausted.
+// reaches their tier quota. No refund: the budget is genuinely exhausted. One job's failed write does
+// not stop the others, and the failures are returned together.
 func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platformExpID string) error {
 	// Observed consumption only. A reservation-inclusive figure would trip this check on work
 	// that has merely been queued, and evict — irreversibly, unrefunded — running jobs for budget
 	// nobody has spent. RAM/storage are not enforced here because nothing observes them.
 	aq, err := c.quota.GetObservedAgentQuota(ctx, agentID, platformExpID)
-	if err != nil || aq == nil {
+	if err != nil {
 		return err
+	}
+	if aq == nil {
+		return fmt.Errorf("agent %s runs jobs in %s and has no quota there", agentID, platformExpID)
 	}
 
 	running, err := c.store.GetAgentRunningExperiments(ctx, agentID, platformExpID)
 	if err != nil {
 		return err
 	}
-	// 0.99 not 1.0: floating-point accumulation across many debit/refund calls means "exactly
-	// exhausted" may never compare equal/greater than the raw budget — a 1% margin avoids a
-	// budget that's genuinely spent sitting just under the threshold forever.
-	// Guard on a positive budget: a zero budget is not an exhaustion condition — it means
-	// "no quota of that kind to spend", not "quota spent". Without the guard 0 >= 0*0.99 is true on
-	// the first tick and every job is evicted for quota_exhaustion.
+	// A zero budget means there is no quota of that kind to spend. Without the guard 0 >= 0 is
+	// true on the first tick and every job is evicted for quota_exhaustion.
 	spent := func(budget, used float64) bool {
-		return budget > 0 && used >= budget*0.99
+		return budget > 0 && used >= budget-exhaustionTolerance
 	}
 	// Burst hours are inside the agent's share of the budget: a spent share ends work at either
 	// priority.
@@ -166,6 +171,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			(burstExhausted && exp.CapacityTier == domain.CapacityBurst)
 	}
 
+	var errs []error
 	for _, exp := range running {
 		if !tierExhausted(exp) {
 			continue
@@ -173,7 +179,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		outcome, err := c.store.ResolveTermination(ctx, exp.ID, domain.StatusRunning, domain.StatusEvicted,
 			string(domain.EvictionQuotaExhaustion))
 		if err != nil {
-			c.logger.Error("quota exhaustion evict", zap.String("id", exp.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("evict %s: %w", exp.ID, err))
 			continue
 		}
 		if outcome != domain.TerminationWritten {
@@ -190,8 +196,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 	// (budget genuinely exhausted), but pre-run reservations are returned.
 	preRun, err := c.store.GetAgentQueuedExperiments(ctx, agentID, platformExpID)
 	if err != nil {
-		c.logger.Error("quota exhaustion: list pre-run jobs", zap.String("agent", agentID), zap.Error(err))
-		return nil
+		return errors.Join(append(errs, fmt.Errorf("list pre-run jobs: %w", err))...)
 	}
 	for _, exp := range preRun {
 		if !tierExhausted(exp) {
@@ -200,7 +205,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		outcome, err := c.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusRejected,
 			string(domain.EvictionQuotaExhaustion))
 		if err != nil {
-			c.logger.Error("quota exhaustion cancel pre-run", zap.String("id", exp.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("cancel pre-run %s: %w", exp.ID, err))
 			continue
 		}
 		if outcome != domain.TerminationWritten {
@@ -217,7 +222,7 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 			zap.String("exp", exp.ID),
 		)
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // reconcileOne evicts exp when it has gone silent or has outrun the current stage's job-length
