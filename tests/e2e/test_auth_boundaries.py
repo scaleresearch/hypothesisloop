@@ -377,8 +377,7 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     again = org.key.post(f"/platform-experiments/{pe_id}/close", {"top_results": []})
     assert again.status_code == 409 and again.json()["reason"] == "invalid_transition", f"closing a closed one: {again.status_code} {again.text}"
 
-    new_job = org.key.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, member.agent)
-    new_job["metadata"]["hypothesis_id"] = member.hypothesis_id
+    new_job = org.key.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, member.agent, hypothesis_id=member.hypothesis_id)
     in_the_window = [
         ("GET", f"/platform-experiments/{pe_id}", None, 200),
         ("GET", f"/experiments/{member.job_id}", None, 200),
@@ -398,9 +397,13 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("POST", f"/platform-experiments/{pe_id}/agents", {}, 403),
         ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 403),
         ("POST", "/experiments", new_job, 403),
-        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("after the close"), agent_id=member.agent), 403),
-        ("POST", f"/hypotheses/{member.hypothesis_id}/comments", {"agent_id": member.agent, "text": "late"}, 403),
     ])
+    for method, path, body in [
+        ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("after the close"), agent_id=member.agent)),
+        ("POST", f"/hypotheses/{member.hypothesis_id}/comments", {"agent_id": member.agent, "text": "late"}),
+    ]:
+        got, text = _status(coordinator, method, path, body)
+        assert (got, json.loads(text).get("reason")) == (409, "experiment_closed"), f"the coordinator after the close {method} {path}: {got} {text}"
     assert org.key.get_json(f"/platform-experiments/{pe_id}")["summary"] == "what the run showed"
 
     time.sleep(max(0.0, AGENT_WIND_DOWN + 5 - (time.monotonic() - closed_at)))

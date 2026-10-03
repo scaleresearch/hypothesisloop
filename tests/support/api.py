@@ -658,8 +658,11 @@ class API:
         r = self.post("/experiments", body)
         return r.status_code, jid
 
-    def submission_body_for_id(self, job_id: str, pe_id: str, agent_id: str, tier: str = "guaranteed", hours: float = 0.02) -> dict:
-        hyp_id = self.register_hypothesis(pe_id, agent_id, "")["id"]
+    def submission_body_for_id(self, job_id: str, pe_id: str, agent_id: str, tier: str = "guaranteed", hours: float = 0.02,
+                               hypothesis_id: str | None = None) -> dict:
+        """A job body for a new hypothesis the agent registers, or for hypothesis_id when given:
+        no hypothesis is registered on a closed platform experiment."""
+        hyp_id = hypothesis_id or self.register_hypothesis(pe_id, agent_id, "")["id"]
         req = JobRequest(id=job_id, agent_id=agent_id, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=self.code_ref(pe_id), hours=hours, tier=tier)
         return yaml.safe_load(req.to_yaml())
 
