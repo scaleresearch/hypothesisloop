@@ -199,7 +199,7 @@ func TestTheHelpOfGetNamesEveryStatusReasonThePlatformAnswers(t *testing.T) {
 	_, listed, _ := strings.Cut(help.String(), "The reasons:")
 	listed, _, _ = strings.Cut(listed, "On an open one")
 	listed = strings.NewReplacer("a draft:", "", "open, its baseline not declared:", "", "open, the declaration of the measured job refused:", "",
-		"open, its baseline declared:", "", "running:", "", "while no researcher's machine is up yet, then", "",
+		"open, its baseline declared:", "", "running, every researcher finished, cut or stopped for good:", "", "running:", "", "while no researcher's machine is up yet, then", "",
 		"An agent of the roster adds", "", "(hl platform-experiments agents list).", "").Replace(listed)
 	for _, reason := range strings.FieldsFunc(listed, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
 		if !slices.Contains(domain.StatusReasons(), reason) {

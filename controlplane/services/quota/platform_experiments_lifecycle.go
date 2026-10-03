@@ -682,10 +682,24 @@ func nextStep(reason string, signups []domain.AgentSignup, reader auth.Principal
 	return ""
 }
 
-// runningReason is where a running pe stands with its clock.
-func runningReason(pe *domain.PlatformExperiment) *domain.StatusReason {
-	if pe.AwaitsAgents() {
+// researcherLeft says a researcher of signups may still work: one that neither finished nor was
+// cut, and whose machine, where the platform runs it, did not stop with no restart left.
+func researcherLeft(signups []domain.AgentSignup) bool {
+	return slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
+		stopped := signup.Hosted && signup.Instance != nil && signup.Instance.Stopped
+		return signup.Role == domain.SignupRoleCompetitor && signup.Ended == "" && !stopped
+	})
+}
+
+// runningReason is where a running pe, whose roster is signups, stands with its clock and with
+// the researchers that work in it.
+func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup) *domain.StatusReason {
+	switch {
+	case pe.AwaitsAgents():
 		return &domain.StatusReason{Reason: "agents_starting", Message: "the run has started and none of its duration_hours is counted yet: they count from the moment the first researcher's machine is running, which sets started_at and ends_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then"}
+	case !researcherLeft(signups):
+		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job and the run only waits for its ends_at, when the platform closes it: its coordinator writes the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and closes it with `hl platform-experiments close --platform-experiment %s`",
+			pe.ID, pe.ID, pe.ID)}
 	}
 	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at ends_at"}
 }
@@ -709,7 +723,7 @@ func closedReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
 // planner, on an open one why it is not running yet and what reader does about it, on a running
-// one whether its clock runs, and on a closed one why it closed. It is the one place that says so.
+// one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
 func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	var why *domain.StatusReason
 	switch pe.Status {
@@ -718,12 +732,14 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 		return nil
 	case domain.PlatformExpDraft:
 		why = draftReason(pe)
-	case domain.PlatformExpRunning:
-		why = runningReason(pe)
 	default:
 		signups, err := s.store.ListAgentSignups(ctx, pe.ID)
 		if err != nil {
 			return fmt.Errorf("platform_experiments.Describe: %w", err)
+		}
+		if pe.Status == domain.PlatformExpRunning {
+			why = runningReason(pe, signups)
+			break
 		}
 		if why, err = s.waiting(ctx, pe, signups); err != nil {
 			return err

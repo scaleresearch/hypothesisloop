@@ -274,7 +274,7 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 // neither: "why is it in this state" is one field in every status. A run that waits for its first
 // researcher's machine says that none of its duration counts yet and when the wait ends.
 func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
-	svc := newSignupTestService(t, &startStore{})
+	svc := newSignupTestService(t, &startStore{participants: []db.StartParticipant{{AgentID: "ag-r"}}})
 	now := time.Now().UTC()
 	waiting := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning}
 	waiting.SetClosesAt(now.Add(20 * time.Minute))

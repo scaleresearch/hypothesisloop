@@ -962,6 +962,7 @@ state. The reasons:
     budget_below_baseline
   open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting
   running: agents_starting while no researcher's machine is up yet, then running
+  running, every researcher finished, cut or stopped for good: researchers_done
 An agent of the roster adds instance_starting (hl platform-experiments agents list).
 On an open one the message begins with your own next step, worded for your token: the command
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs

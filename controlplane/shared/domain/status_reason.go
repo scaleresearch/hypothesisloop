@@ -50,6 +50,9 @@ var statusWaiters = map[string]Waiter{
 
 	"agents_starting": WaitsForPlatform,
 	"running":         WaitsForPlatform,
+	// Nobody is left to submit a job and the run only waits for its ends_at: whoever coordinates
+	// writes the summary and closes it. The platform closes nothing before ends_at by itself.
+	"researchers_done": WaitsForCoordinator,
 
 	"instance_starting": WaitsForPlatform,
 }

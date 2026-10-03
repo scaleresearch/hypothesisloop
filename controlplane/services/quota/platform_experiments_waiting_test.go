@@ -104,6 +104,56 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 	}
 }
 
+// A run whose last researcher had finished read running until its ends_at, with machines kept
+// and nobody told to close it. It reads researchers_done once no researcher can still work, and
+// names who closes it: its coordinator where the platform hosts one, its owner otherwise.
+func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *testing.T) {
+	finished := time.Now()
+	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
+	done := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
+	cut := domain.AgentSignup{AgentID: "ag-3", Role: domain.SignupRoleCompetitor, Ended: domain.RunEndCut}
+	stopped := domain.AgentSignup{AgentID: "ag-4", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Stopped: true}}
+	selfRun := domain.AgentSignup{AgentID: "ag-5", Role: domain.SignupRoleCompetitor}
+	baseline := domain.AgentSignup{AgentID: "ag-b", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
+	reviewer := domain.AgentSignup{AgentID: "ag-v", Role: domain.SignupRoleReviewer}
+
+	for name, c := range map[string]struct {
+		signups           []domain.AgentSignup
+		coordinatorHosted bool
+		clockRuns         bool
+		reason            string
+		waitsFor          domain.Waiter
+	}{
+		"one at work beside those that ended":    {[]domain.AgentSignup{baseline, done, cut, stopped, atWork}, true, true, "running", domain.WaitsForPlatform},
+		"one its owner runs, which says nothing": {[]domain.AgentSignup{baseline, done, selfRun}, true, true, "running", domain.WaitsForPlatform},
+		"every one finished, cut or stopped":     {[]domain.AgentSignup{baseline, done, cut, stopped, reviewer}, true, true, "researchers_done", domain.WaitsForCoordinator},
+		"the same with a person coordinating":    {[]domain.AgentSignup{baseline, done, cut, stopped}, false, true, "researchers_done", domain.WaitsForOwner},
+		"none up yet and its clock not started":  {[]domain.AgentSignup{baseline, stopped}, true, false, "agents_starting", domain.WaitsForPlatform},
+	} {
+		store := newRosterStore(domain.PlatformExpRunning, 5)
+		store.pe.CoordinatorHosted, store.signups = c.coordinatorHosted, c.signups
+		if c.clockRuns {
+			store.pe.StartedAt = finished.Add(-time.Hour)
+		}
+		store.pe.SetClosesAt(finished.Add(time.Hour))
+		if err := newSignupTestService(t, store).Describe(context.Background(), store.pe, waitingPerson); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		why := store.pe.StatusReason
+		if why == nil || why.Reason != c.reason || why.WaitsFor != c.waitsFor {
+			t.Errorf("%s: status_reason = %+v, want %s waiting for %s", name, why, c.reason, c.waitsFor)
+			continue
+		}
+		closes := strings.Contains(why.Message, "`hl platform-experiments close --platform-experiment pe-1`") && strings.Contains(why.Message, "`hl platform-experiments summary --file FILE --platform-experiment pe-1`")
+		if closes != (c.reason == "researchers_done") {
+			t.Errorf("%s: message %q names the summary and the close = %v", name, why.Message, closes)
+		}
+		if store.pe.Status != domain.PlatformExpRunning {
+			t.Errorf("%s: it is %s, want it left running for whoever closes it", name, store.pe.Status)
+		}
+	}
+}
+
 // Once the baseline is declared nobody but the platform acts, except a researcher, who still
 // prepares: the step is said for the reason it belongs to and for no other.
 func TestStatusReasonNamesNoStepWhereTheReaderOnlyWaits(t *testing.T) {
