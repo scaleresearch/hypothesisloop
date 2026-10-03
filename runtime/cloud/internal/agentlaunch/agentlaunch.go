@@ -127,15 +127,19 @@ func (cfg Config) Validate() error {
 }
 
 // Run passes until ctx is cancelled. A pass that fails is logged and the next one starts from
-// nothing, like every other. Only the control plane refusing this launcher's configuration ends
-// it: that is returned, since no later pass can end differently.
+// nothing, like every other. The control plane refusing this launcher's configuration is returned
+// from the first pass alone, where it is a config file to correct before anything is rented under
+// it. Refused later, the launcher holds instances only it can stop and destroy, so it goes on
+// asking: a refused pass creates nothing, and the first answer after it is acted on.
 func (l *Launcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(l.cfg.Interval)
 	defer ticker.Stop()
-	for {
-		if err := l.Pass(ctx); errors.Is(err, ErrRefused) {
+	for first := true; ; first = false {
+		err := l.Pass(ctx)
+		if first && errors.Is(err, ErrRefused) {
 			return err
-		} else if err != nil {
+		}
+		if err != nil {
 			l.cfg.Log("pass: %v", err)
 		}
 		select {

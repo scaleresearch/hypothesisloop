@@ -731,7 +731,58 @@ func TestEveryQuestionSaysHowTheLauncherPacesItsPasses(t *testing.T) {
 	}
 }
 
-func TestARefusalOfTheLaunchersConfigurationEndsRunWithTheControlPlanesWords(t *testing.T) {
+// The platform's limits can change under a launcher that holds machines. Its process is the only
+// thing that stops and destroys them, so it outlives the refusal.
+func TestARefusalAfterTheFirstPassKeepsRunPassingUntilItsInstancesAreEndedAndDestroyed(t *testing.T) {
+	const refusal = `{"error":"this launcher's pass does not fit the platform's agents.boot_limit_seconds"}`
+	h := newHarness(t)
+	launcher := h.launcherWith(func(*Config) {})
+	launcher.cfg.Interval = 5 * time.Millisecond
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- launcher.Run(ctx) }()
+	h.eventually("both instances rented", func() bool { return len(h.rented.Names()) == 2 })
+	h.rented.Start(full("a"))
+
+	h.cp.answer(http.StatusConflict, refusal)
+	h.eventually("refused passes logged", func() bool { return h.logged("agents.boot_limit_seconds") >= 3 })
+	select {
+	case err := <-done:
+		t.Fatalf("Run returned %v on a refusal after its first pass, with %v still rented", err, h.rented.Names())
+	default:
+	}
+	h.names(full("a"), full("b"))
+	if h.rented.Calls("Create") != 2 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Stop") != 0 {
+		t.Fatalf("refused passes changed the provider: creates %d destroys %d stops %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"), h.rented.Calls("Stop"))
+	}
+
+	h.cp.want(nil, []string{"a"})
+	h.eventually("the ending instance told to stop and the other destroyed", func() bool {
+		return h.rented.Stops(full("a")) > 0 && reflect.DeepEqual(h.rented.Names(), []string{full("a")})
+	})
+	h.cp.want(nil, nil)
+	h.eventually("nothing rented", func() bool { return len(h.rented.Names()) == 0 })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	if h.rented.Calls("Create") != 2 {
+		t.Fatalf("creates = %d", h.rented.Calls("Create"))
+	}
+}
+
+func (h *harness) eventually(what string, reached func() bool) {
+	h.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !reached(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("not reached in time: %s", what)
+		}
+	}
+}
+
+func TestARefusalOfTheLaunchersConfigurationOnTheFirstPassEndsRunWithTheControlPlanesWords(t *testing.T) {
 	h := newHarness(t)
 	rent(t, h.rented, full("kept"))
 	h.cp.answer(http.StatusConflict, `{"error":"2 x (10 new instances per answer x create_pause 30s + reconcile_interval 15s) = 10m30s is above agents.boot_limit_seconds 5m0s"}`)

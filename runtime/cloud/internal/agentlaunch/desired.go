@@ -62,8 +62,8 @@ type reconcileQuestion struct {
 	CreatePauseMilliseconds  int `json:"create_pause_milliseconds"`
 }
 
-// ErrRefused is the control plane refusing this launcher's own configuration. No later pass
-// can end differently, so the process stops on it.
+// ErrRefused is the control plane refusing this launcher's own configuration. The refusal
+// carries no list, so the pass it ends changes nothing.
 var ErrRefused = errors.New("the control plane refuses this launcher's configuration")
 
 func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
