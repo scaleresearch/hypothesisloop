@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/moby/moby/api/types/container"
 )
 
 // totalCPUCores returns this node's logical core count — the bare-node analogue of summing
@@ -68,6 +70,63 @@ var storageFreeBytes = func(dir string) (int64, error) {
 type acceleratorDevice struct {
 	DevicePath string
 	Labels     []string // e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
+}
+
+// deviceRequester is a vendor whose devices reach a container as an engine device request in
+// place of a plain device mapping. id reads the request's device id off a host device path the
+// vendor's probe returned, with ok false for a path that is not the vendor's, and path reverses it.
+type deviceRequester struct {
+	driver       string
+	capabilities [][]string
+	id           func(devicePath string) (id string, ok bool)
+	path         func(id string) string
+}
+
+var deviceRequesters = []deviceRequester{nvidiaRequester}
+
+// passDevices is how host device paths are handed to a container: one device request per vendor
+// that needs one, a plain mapping for every other path.
+func passDevices(devicePaths []string) ([]container.DeviceMapping, []container.DeviceRequest) {
+	mappings := make([]container.DeviceMapping, 0, len(devicePaths))
+	ids := map[string][]string{}
+next:
+	for _, d := range devicePaths {
+		for _, r := range deviceRequesters {
+			if id, ok := r.id(d); ok {
+				ids[r.driver] = append(ids[r.driver], id)
+				continue next
+			}
+		}
+		mappings = append(mappings, container.DeviceMapping{PathOnHost: d, PathInContainer: d, CgroupPermissions: "rwm"})
+	}
+	var requests []container.DeviceRequest
+	for _, r := range deviceRequesters {
+		if len(ids[r.driver]) > 0 {
+			requests = append(requests, container.DeviceRequest{Driver: r.driver, DeviceIDs: ids[r.driver], Capabilities: r.capabilities})
+		}
+	}
+	return mappings, requests
+}
+
+// devicesPassed reverses passDevices: the host device paths a container was created with.
+// Reading the mappings alone made every device passed by request look free, and placement handed
+// the same one to job after job.
+func devicesPassed(host *container.HostConfig) []string {
+	var devicePaths []string
+	for _, d := range host.Devices {
+		devicePaths = append(devicePaths, d.PathOnHost)
+	}
+	for _, req := range host.DeviceRequests {
+		for _, r := range deviceRequesters {
+			if r.driver != req.Driver {
+				continue
+			}
+			for _, id := range req.DeviceIDs {
+				devicePaths = append(devicePaths, r.path(id))
+			}
+		}
+	}
+	return devicePaths
 }
 
 // probeAccelerators discovers every local accelerator this bare node can find, across all

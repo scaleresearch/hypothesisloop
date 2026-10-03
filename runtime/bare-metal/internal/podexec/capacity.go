@@ -368,34 +368,18 @@ func (e *Executor) devicesInUseExcluding(ctx context.Context, excludeExperimentI
 		if resp.Container.HostConfig == nil {
 			continue
 		}
-		for _, d := range resp.Container.HostConfig.Devices {
-			inUse[strings.ToLower(d.PathOnHost)] = true
+		for _, d := range devicesPassed(resp.Container.HostConfig) {
+			inUse[strings.ToLower(d)] = true
 		}
-		// NVIDIA devices are never in HostConfig.Devices: startContainer passes them through
-		// DeviceRequests so the nvidia-container-toolkit hook runs. Reading only Devices meant
-		// every NVIDIA GPU always looked free, and placement handed the same chip to job after
-		// job while the rest of the node sat idle.
 		for _, req := range resp.Container.HostConfig.DeviceRequests {
-			if req.Driver != "nvidia" {
-				continue
-			}
 			if len(req.DeviceIDs) == 0 {
 				// startContainer always names the exact devices. A count-only request would let
-				// the runtime pick GPUs we cannot identify, so we could not tell which are taken.
-				log.Printf("podexec: container %s requests %d nvidia devices without naming them; occupancy is unreliable", c.name(), req.Count)
-				continue
-			}
-			for _, id := range req.DeviceIDs {
-				inUse[strings.ToLower(nvidiaDevicePath(id))] = true
+				// the engine pick devices we cannot identify, so we could not tell which are taken.
+				log.Printf("podexec: container %s requests %d %s devices without naming them; occupancy is unreliable", c.name(), req.Count, req.Driver)
 			}
 		}
 	}
 	return inUse, nil
-}
-
-// nvidiaDevicePath reverses startContainer's split of a device path into a DeviceRequest ID.
-func nvidiaDevicePath(deviceID string) string {
-	return "/dev/nvidia" + deviceID
 }
 
 // currentDevicesFor returns the device paths the experiment's container was created with, in the
@@ -421,19 +405,7 @@ func (e *Executor) currentDevicesFor(ctx context.Context, experimentID string) (
 		if resp.Container.HostConfig == nil {
 			continue
 		}
-		var devices []string
-		for _, d := range resp.Container.HostConfig.Devices {
-			devices = append(devices, d.PathOnHost)
-		}
-		for _, req := range resp.Container.HostConfig.DeviceRequests {
-			if req.Driver != "nvidia" {
-				continue
-			}
-			for _, id := range req.DeviceIDs {
-				devices = append(devices, nvidiaDevicePath(id))
-			}
-		}
-		return devices, nil
+		return devicesPassed(resp.Container.HostConfig), nil
 	}
 	return nil, nil
 }

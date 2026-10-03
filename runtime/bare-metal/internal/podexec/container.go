@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -144,25 +143,7 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 	for k, v := range spec.Env {
 		env = append(env, k+"="+v)
 	}
-	// NVIDIA devices go through DeviceRequests (--gpus), not a raw DeviceMapping, so the
-	// nvidia-container-toolkit hook injects the host driver libraries CUDA images need.
-	devices := make([]container.DeviceMapping, 0, len(spec.Devices))
-	var nvidiaDeviceIDs []string
-	for _, d := range spec.Devices {
-		if id, ok := strings.CutPrefix(d, "/dev/nvidia"); ok && id != "" && id[0] >= '0' && id[0] <= '9' {
-			nvidiaDeviceIDs = append(nvidiaDeviceIDs, id)
-			continue
-		}
-		devices = append(devices, container.DeviceMapping{PathOnHost: d, PathInContainer: d, CgroupPermissions: "rwm"})
-	}
-	var deviceRequests []container.DeviceRequest
-	if len(nvidiaDeviceIDs) > 0 {
-		deviceRequests = append(deviceRequests, container.DeviceRequest{
-			Driver:       "nvidia",
-			DeviceIDs:    nvidiaDeviceIDs,
-			Capabilities: [][]string{{"gpu"}},
-		})
-	}
+	devices, deviceRequests := passDevices(spec.Devices)
 	binds := make([]string, 0, len(spec.Mounts)+len(spec.ReadOnlyMounts))
 	for _, m := range spec.Mounts {
 		binds = append(binds, m+":"+m)

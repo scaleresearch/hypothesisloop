@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
@@ -56,9 +58,24 @@ func probeNVIDIA(_ context.Context) ([]acceleratorDevice, error) {
 			continue
 		}
 		devices = append(devices, acceleratorDevice{
-			DevicePath: fmt.Sprintf("/dev/nvidia%d", minor),
+			DevicePath: nvidiaDevicePrefix + strconv.Itoa(minor),
 			Labels:     []string{acceleratorname.NVIDIAProductLabel(name)},
 		})
 	}
 	return devices, nil
+}
+
+const nvidiaDevicePrefix = "/dev/nvidia"
+
+// nvidiaRequester passes NVIDIA devices as a device request (--gpus), so the
+// nvidia-container-toolkit hook injects the host driver libraries CUDA images need. The id of a
+// device is the minor number its path ends in; /dev/nvidiactl and its like are no device's path.
+var nvidiaRequester = deviceRequester{
+	driver:       "nvidia",
+	capabilities: [][]string{{"gpu"}},
+	id: func(devicePath string) (string, bool) {
+		id, ok := strings.CutPrefix(devicePath, nvidiaDevicePrefix)
+		return id, ok && id != "" && id[0] >= '0' && id[0] <= '9'
+	},
+	path: func(id string) string { return nvidiaDevicePrefix + id },
 }

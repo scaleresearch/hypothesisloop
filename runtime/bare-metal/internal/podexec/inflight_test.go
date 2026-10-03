@@ -539,6 +539,40 @@ func TestAJobIsPlacedOnTheDevicesItsResolvedSpecCounts(t *testing.T) {
 	}
 }
 
+// An NVIDIA device is handed over as a device request, which the engine keeps apart from the
+// plain mappings. Read back from the mappings alone it looked free and was given to every job.
+func TestADevicePassedByRequestIsReadBackAsHeld(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f, "/dev/nvidia0", "/dev/nvidia1", "/dev/nvidiactl")
+	ctx := t.Context()
+	first, second := fakeJob("first", "fast", 1), fakeJob("second", "fast", 1)
+
+	pass(t, ctx, e, first)
+	eventually(t, "the first job runs", func() bool { return f.state("first") == "running" })
+	eventually(t, "its start has returned", idle(e, "first"))
+	pass(t, ctx, e, first, second)
+	eventually(t, "the second job runs", func() bool { return f.state("second") == "running" })
+	eventually(t, "its start has returned", idle(e, "second"))
+	pass(t, ctx, e, first, second)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for _, id := range []string{"first", "second"} {
+		host := f.containers[containerName(id)].host
+		if len(host.Devices) != 0 || len(host.DeviceRequests) != 1 || host.DeviceRequests[0].Driver != "nvidia" || len(host.DeviceRequests[0].DeviceIDs) != 1 {
+			t.Fatalf("job %s was given mappings %v and requests %+v, want one nvidia request naming one device", id, host.Devices, host.DeviceRequests)
+		}
+		ids = append(ids, host.DeviceRequests[0].DeviceIDs[0])
+	}
+	if !slices.Equal(ids, []string{"0", "1"}) {
+		t.Fatalf("the two jobs were given devices %v, want 0 and 1", ids)
+	}
+	if mappings, requests := passDevices([]string{"/dev/nvidiactl", "/dev/fake/0"}); len(mappings) != 2 || len(requests) != 0 {
+		t.Fatalf("paths that are no NVIDIA device were passed as %v and %+v, want two plain mappings", mappings, requests)
+	}
+}
+
 func TestAJobCancelledMidPullEndsStopped(t *testing.T) {
 	f := newFakeEngine()
 	e := newFakeExecutor(f, "/dev/fake/0")
