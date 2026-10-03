@@ -74,47 +74,70 @@ func (c *JobWorkloadClient) ResolveAcceleratorPlacement(ctx context.Context, acc
 	return placement, nil
 }
 
-// resolveDRAPlacement looks for a DeviceClass whose driver is the type's vendor domain and whose
-// devices actually publish the type's attribute.
+// resolveDRAPlacement looks for the DeviceClass whose driver is the type's vendor domain and
+// whose devices actually publish the type's attribute.
+//
+// A DeviceClass that selects by anything but its driver is another tenant's and is passed over,
+// as the capacity read passes over it. A ResourceSlice that cannot be read is an error, as it is
+// there. Two DeviceClasses for the type's driver are an error as well: a claim names one class,
+// and nothing says which.
 func (c *JobWorkloadClient) resolveDRAPlacement(ctx context.Context, acceleratorType domain.AcceleratorType) (AcceleratorPlacement, bool, error) {
 	classes, err := c.dyn.Resource(deviceClassGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AcceleratorPlacement{}, false, fmt.Errorf("workload: list DRA DeviceClasses: %w", err)
 	}
-	if len(classes.Items) == 0 {
+	driver := acceleratorType.Domain()
+	var classNames []string
+	for _, class := range classes.Items {
+		if classDriver, err := deviceClassDriver(class); err == nil && classDriver == driver {
+			classNames = append(classNames, class.GetName())
+		}
+	}
+	if len(classNames) == 0 {
 		return AcceleratorPlacement{}, false, nil
 	}
 	slices, err := c.dyn.Resource(resourceSliceGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AcceleratorPlacement{}, false, fmt.Errorf("workload: list DRA ResourceSlices: %w", err)
 	}
+	published, err := publishedBy(slices.Items, driver, acceleratorType)
+	if err != nil || !published {
+		return AcceleratorPlacement{}, false, err
+	}
+	if len(classNames) > 1 {
+		sort.Strings(classNames)
+		return AcceleratorPlacement{}, false, fmt.Errorf(
+			"workload: %q is ambiguous — several DeviceClasses select driver %s (%v); cannot tell which one to claim from",
+			string(acceleratorType), driver, classNames)
+	}
+	return AcceleratorPlacement{DeviceClassName: classNames[0]}, true, nil
+}
 
-	for _, class := range classes.Items {
-		driver, err := deviceClassDriver(class)
-		if err != nil {
-			return AcceleratorPlacement{}, false, err
+// publishedBy reports whether a device of driver in slices publishes acceleratorType.
+func publishedBy(slices []unstructured.Unstructured, driver string, acceleratorType domain.AcceleratorType) (bool, error) {
+	for _, slice := range slices {
+		sliceDriver, found, err := unstructured.NestedString(slice.Object, "spec", "driver")
+		if err != nil || !found {
+			return false, fmt.Errorf("workload: ResourceSlice %q has no valid spec.driver", slice.GetName())
 		}
-		if driver != acceleratorType.Domain() {
+		if sliceDriver != driver {
 			continue
 		}
-		for _, slice := range slices.Items {
-			sliceDriver, _, _ := unstructured.NestedString(slice.Object, "spec", "driver")
-			if sliceDriver != driver {
-				continue
+		devices, found, err := unstructured.NestedSlice(slice.Object, "spec", "devices")
+		if err != nil || !found {
+			return false, fmt.Errorf("workload: ResourceSlice %q has no device inventory", slice.GetName())
+		}
+		for _, item := range devices {
+			device, ok := item.(map[string]interface{})
+			if !ok {
+				return false, fmt.Errorf("workload: ResourceSlice %q contains malformed device", slice.GetName())
 			}
-			devices, _, _ := unstructured.NestedSlice(slice.Object, "spec", "devices")
-			for _, item := range devices {
-				device, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				if acceleratorType.MatchesAttributes(driver, deviceAttributeStrings(device)) {
-					return AcceleratorPlacement{DeviceClassName: class.GetName()}, true, nil
-				}
+			if acceleratorType.MatchesAttributes(driver, deviceAttributeStrings(device)) {
+				return true, nil
 			}
 		}
 	}
-	return AcceleratorPlacement{}, false, nil
+	return false, nil
 }
 
 // resolveDevicePluginPlacement looks for nodes carrying the type's label, then for the extended
