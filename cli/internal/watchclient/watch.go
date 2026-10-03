@@ -95,7 +95,7 @@ type Options struct {
 // never connected, an event could not be written to Stdout, or the cursor could not be saved.
 func Run(opts Options) int {
 	if opts.URL == "" {
-		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL or pass --url)")
+		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL)")
 		return UsageExitCode
 	}
 	if opts.Token == "" {

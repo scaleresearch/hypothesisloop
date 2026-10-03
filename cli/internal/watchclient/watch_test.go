@@ -154,6 +154,15 @@ func TestRunWithoutATokenIsAUsageError(t *testing.T) {
 	}
 }
 
+// The missing address was answered with a --url flag hl watch does not have.
+func TestRunWithoutAnAddressNamesTheVariableAndNoFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{Token: "test-token", Experiment: "exp-1", Timeout: time.Second, Stdout: &stdout, Stderr: &stderr})
+	if code != UsageExitCode || stderr.String() != "hl watch: no API URL given (set API_URL)\n" {
+		t.Fatalf("exit code = %d, stderr = %q, want %d naming API_URL alone", code, stderr.String(), UsageExitCode)
+	}
+}
+
 // The token travels as the second subprotocol, where a browser can put it too.
 func TestTheTokenIsOfferedAsASubprotocol(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
