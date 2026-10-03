@@ -88,12 +88,11 @@ func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusConflict {
 		var refusal struct {
-			Detail string `json:"detail"`
-			Error  string `json:"error"`
+			Error string `json:"error"`
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		_ = json.Unmarshal(raw, &refusal)
-		return nil, fmt.Errorf("%w: %s%s", ErrRefused, refusal.Detail, refusal.Error)
+		return nil, fmt.Errorf("%w: %s", ErrRefused, refusal.Error)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)

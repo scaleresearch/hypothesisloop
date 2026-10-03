@@ -2,6 +2,7 @@ package agentlaunch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"reflect"
@@ -462,6 +463,23 @@ func TestAListLongerThanOnePassCanCreateIsRentedOverSeveralPassesAndSpendsNoRest
 	}
 	if c.rented.Calls("Create") != 5 || c.rented.Calls("Destroy") != 0 {
 		t.Fatalf("creates %d, destroys %d", c.rented.Calls("Create"), c.rented.Calls("Destroy"))
+	}
+}
+
+func TestTheControlPlanesRefusalOfALaunchersPacingReachesItWithTheArithmetic(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	cfg := c.launcher.cfg
+	cfg.CreatePause = 4 * time.Second
+	slow, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = slow.Pass(context.Background())
+	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "create_pause 4s") || !strings.Contains(err.Error(), "agents.boot_limit_seconds 5m0s") {
+		t.Fatalf("pass = %v, want the control plane's refusal in its own words", err)
+	}
+	if c.rented.Calls("Create") != 0 {
+		t.Fatal("a refused launcher rented an instance")
 	}
 }
 
