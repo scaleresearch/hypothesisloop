@@ -51,27 +51,11 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if pe.ReportIntervalSeconds > 0 {
 			reportIntervalByPE[pe.ID] = time.Duration(pe.ReportIntervalSeconds) * time.Second
 		}
-		var livenessKeys []string
+		// Every declared metric counts as a sign of progress, whatever its role. A ranking
+		// metric may be posted once, at completion, and a job judged by those alone was evicted
+		// as never_reported_metrics while its other declared metrics moved.
 		for _, m := range pe.Metrics {
-			// Ranking metrics always count. Most attribute metrics don't: wall_clock_seconds
-			// or similar keeps ticking whether or not the training loop is actually doing
-			// anything, so "it changed" proves nothing about whether the run is stuck. The
-			// declared key "step" is the one deliberate exception — by convention across
-			// HypothesisLoop experiments it only increments after a real completed training
-			// iteration, so it is exactly as strong a liveness signal as a ranking metric,
-			// and unlike a ranking metric it doesn't have to wait for the job to reach its
-			// target/diverge/exhaust its budget before it says anything. Without this, an
-			// experiment whose ranking metric (like this one's optimizer_flops_to_target) is
-			// only posted once at completion evicts its own still-progressing jobs as
-			// never_reported_metrics well before they're actually stuck — confirmed live on
-			// pe-37f991f5 (job at step 2650/3000, 530 metric points posted, evicted for
-			// "never" reporting a metric that by design only posts at the very end).
-			if m.EffectiveRole() == domain.MetricRoleRanking || m.Key == "step" {
-				livenessKeys = append(livenessKeys, m.Key)
-			}
-		}
-		if len(livenessKeys) > 0 {
-			declaredMetricKeysByPE[pe.ID] = livenessKeys
+			declaredMetricKeysByPE[pe.ID] = append(declaredMetricKeysByPE[pe.ID], m.Key)
 		}
 		// Read before advanceStages: a boundary crossed on this tick takes effect from the
 		// next one, so no job is evicted under a cap it was never running under.

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -44,6 +45,9 @@ type fakeObserved struct {
 	declaredReported     bool
 	declaredChanged      bool
 	declaredEverReported bool
+	// movingKey, when set, is the one metric the job reports, and it moves: the three declared
+	// reads answer true when asked about it and false otherwise.
+	movingKey string
 
 	// everReportedAny is the "did any metric at all ever arrive" read, used to tell a dead trainer
 	// apart from a reporting path that never worked.
@@ -93,11 +97,18 @@ func (f fakeObserved) ClusterSnapshotPresence(_ context.Context, _, _ string, _,
 	return f.presence, f.fail("ClusterSnapshotPresence")
 }
 
-func (f fakeObserved) AnyDeclaredMetricChanged(_ context.Context, _ string, _ []string, _ time.Duration) (bool, bool, error) {
+func (f fakeObserved) AnyDeclaredMetricChanged(_ context.Context, _ string, keys []string, _ time.Duration) (bool, bool, error) {
+	if f.movingKey != "" {
+		moving := slices.Contains(keys, f.movingKey)
+		return moving, moving, f.fail("AnyDeclaredMetricChanged")
+	}
 	return f.declaredReported, f.declaredChanged, f.fail("AnyDeclaredMetricChanged")
 }
 
-func (f fakeObserved) AnyDeclaredMetricReported(_ context.Context, _ string, _ []string, _ time.Duration) (bool, error) {
+func (f fakeObserved) AnyDeclaredMetricReported(_ context.Context, _ string, keys []string, _ time.Duration) (bool, error) {
+	if f.movingKey != "" {
+		return slices.Contains(keys, f.movingKey), f.fail("AnyDeclaredMetricReported")
+	}
 	return f.declaredEverReported, f.fail("AnyDeclaredMetricReported")
 }
 
