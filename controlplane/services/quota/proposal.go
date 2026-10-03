@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Proposal is what a draft's planner proposes: the experiment as its file would state it, and
@@ -37,6 +38,11 @@ type Proposal struct {
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
 	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
+	// CPU, Memory and Storage are what one node of the run's jobs asks for, as job.cpu, job.memory
+	// and job.storage state it, so that whoever writes a job copies them from here and from no prose.
+	CPU     string `json:"cpu,omitempty" doc:"What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one that is no quantity or is negative, as for memory and storage."`
+	Memory  string `json:"memory,omitempty" doc:"What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it."`
+	Storage string `json:"storage,omitempty" doc:"What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
@@ -95,6 +101,10 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	}
 	if err := requireImage(h.jobImages, clusters, p.Image); err != nil {
 		return experiment, err
+	}
+	p.CPU, p.Memory, p.Storage = strings.TrimSpace(p.CPU), strings.TrimSpace(p.Memory), strings.TrimSpace(p.Storage)
+	if err := workload.CheckNodeRequest(p.CPU, p.Memory, p.Storage); err != nil {
+		return experiment, refusedProposal("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {
 		if _, _, err := domain.ResolveAgentLaunch(agent.Flavor, agent.Model, h.launch.DefaultModel, agent.Hyperparameters); err != nil {

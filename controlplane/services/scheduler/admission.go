@@ -269,32 +269,12 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must be positive"}
 	}
 
-	// A negative quantity parses cleanly — resource.ParseQuantity accepts "-100Gi" — and every
-	// check below is an upper bound, so nothing else stops one. It must be rejected here, at the
-	// only point that sees the request before anything acts on it, and per group: the cap checks
-	// sum over groups, where one group's negative silently cancels another's real demand.
-	//
-	// Downstream the two views of the same job disagree about it, which is what makes it dangerous
-	// rather than merely wrong. Footprint carries the negative through, so reserving the job
-	// *credits* the cluster capacity it never had and bills the agent for less than it used, while
-	// NodeShapes drops the dimension entirely, so placement never sees it at all.
+	// Checked here, at the only point that sees the request before anything acts on it, and per
+	// group: the cap checks sum over groups, where one group's negative silently cancels
+	// another's real demand.
 	for _, group := range exp.Job.NodeGroups() {
-		for _, dimension := range []struct {
-			field string
-			qty   string
-			parse func(string) (float64, error)
-		}{
-			{"job.cpu", group.CPU, workload.ParseCPUCores},
-			{"job.memory", group.Memory, workload.ParseMemoryGB},
-			{"job.storage", group.Storage, workload.ParseStorageGB},
-		} {
-			value, err := dimension.parse(dimension.qty)
-			if err != nil {
-				return &AdmissionError{Reason: ReasonMalformed, Message: dimension.field + ": " + err.Error()}
-			}
-			if value < 0 {
-				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("%s must not be negative (%q)", dimension.field, dimension.qty)}
-			}
+		if err := workload.CheckNodeRequest(group.CPU, group.Memory, group.Storage); err != nil {
+			return &AdmissionError{Reason: ReasonMalformed, Message: "job." + err.Error()}
 		}
 	}
 

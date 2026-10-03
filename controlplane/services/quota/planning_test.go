@@ -376,13 +376,15 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	store := draftWithPlanner()
 	_, call := planningAPI(t, store, thePlanner)
 	before := time.Now()
-	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	// What a job of the run asks of a node was prose in the brief, copied by hand into every job.
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"cpu": "8", "memory": " 32Gi ", "storage": "100Gi"}))
 	if code != http.StatusOK {
 		t.Fatalf("got = %d %v, want 200", code, out)
 	}
 	pe := store.created[0]
 	var stored Proposal
-	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || len(stored.Agents) != 2 || stored.AcceleratorType != "rtx-4090" {
+	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || len(stored.Agents) != 2 || stored.AcceleratorType != "rtx-4090" ||
+		stored.CPU != "8" || stored.Memory != "32Gi" || stored.Storage != "100Gi" {
 		t.Fatalf("stored %s, %v", pe.Proposal, err)
 	}
 	if pe.ProposedAt == nil || out["proposed_at"] == nil || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
@@ -429,6 +431,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"no type":                                {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
 		"an image by a word of its own":          {map[string]any{"image": "pytorch"}, "unknown_job_image"},
 		"no image":                               {map[string]any{"image": ""}, "unknown_job_image"},
+		"memory that is no quantity":             {map[string]any{"memory": "lots"}, "invalid_resources"},
+		"negative storage":                       {map[string]any{"storage": "-100Gi"}, "invalid_resources"},
 	} {
 		store := draftWithPlanner()
 		_, call := planningAPI(t, store, thePlanner)
