@@ -61,16 +61,16 @@ func TestListMapsEveryMachineState(t *testing.T) {
 		"created":    {provider.StateStarting, true},
 		"creating":   {provider.StateStarting, true},
 		"starting":   {provider.StateStarting, true},
-		"restarting": {provider.StateStarting, true},
-		"updating":   {provider.StateStarting, true},
-		"replacing":  {provider.StateStarting, true},
+		"restarting": {provider.StateUnknown, true},
+		"updating":   {provider.StateUnknown, true},
+		"replacing":  {provider.StateUnknown, true},
 		"started":    {provider.StateRunning, true},
 		"stopping":   {provider.StateRunning, true},
 		"destroying": {"", false},
 		"destroyed":  {"", false},
 		"suspended":  {provider.StatePaused, true},
 		"suspending": {provider.StateRunning, true},
-		"brand-new":  {provider.StateStarting, true},
+		"brand-new":  {provider.StateUnknown, true},
 	}
 	for vendorState, want := range cases {
 		t.Run(vendorState, func(t *testing.T) {

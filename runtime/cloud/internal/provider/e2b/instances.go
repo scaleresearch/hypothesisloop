@@ -107,14 +107,15 @@ func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox,
 //     change, so the supervisor's word is gone for good and the caller should replace the
 //     instance.
 //   - Paused: paused, without a read. Reading a paused sandbox would resume it.
+//   - Any other state of the vendor's: unknown, without a read.
 func (p *Provider) stateOf(ctx context.Context, found sandbox) provider.State {
 	id, name := found.SandboxID, found.Metadata[nameKey]
 	if found.State == "paused" {
 		return provider.StatePaused
 	}
 	if found.State != "running" {
-		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter does not know; reporting it as starting", id, name, found.State)
-		return provider.StateStarting
+		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter does not know; reporting it as unknown", id, name, found.State)
+		return provider.StateUnknown
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.stateRead)
 	defer cancel()

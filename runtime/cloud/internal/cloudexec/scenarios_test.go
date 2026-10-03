@@ -73,6 +73,61 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	}
 }
 
+// A host that stops answering its vendor is listed as unknown, hours into a job as well. The
+// instance was rented longer ago than the startup bound and is not replaced for it: it stays the
+// job's workload, holds its slot, and reads as pending and placed with no output asked for, which
+// is what the control plane's check of a job gone silent bounds. The requeue that follows
+// destroys it.
+func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	const name = "hl-job-t1-exp-1-a0-h100-0"
+	exp := job(t, "exp-1", 0, 1)
+	mustCreate(t, e, exp)
+	p.Start(name)
+	p.Print(name, "epoch 41")
+	p.Lose(name)
+	e.startup = time.Nanosecond
+
+	for pass := 0; pass < 3; pass++ {
+		mustCreate(t, e, exp)
+		matches, err := e.WorkloadMatchesDesired(ctx, exp)
+		reason, message, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
+		phase, attempt := status(t, e, "exp-1")
+		if err != nil || detailErr != nil || !matches || phase != workload.JobPhasePending || attempt != 0 || scheduled != 1 || reason != "" || !strings.Contains(message, "does not say whether the job runs") {
+			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, reason %q, message %q, %v %v", pass, matches, phase, attempt, scheduled, reason, message, err, detailErr)
+		}
+		if tail, err := e.FetchLogTail(ctx, "exp-1", 10); err != nil || tail != nil {
+			t.Fatalf("pass %d: tail %v, %v", pass, tail, err)
+		}
+		if err := e.ReapTerminal(ctx, map[string]*domain.Experiment{"exp-1": exp}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.Calls("Create") != 1 || p.Calls("Destroy") != 0 || p.Calls("Logs") != 0 {
+		t.Fatalf("creates %d destroys %d log reads %d, want the instance kept and unread", p.Calls("Create"), p.Calls("Destroy"), p.Calls("Logs"))
+	}
+	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
+		t.Fatalf("available = %v, want its slot taken", available)
+	}
+
+	// The host answers again and the job is as it was.
+	p.Start(name)
+	if phase, _ := status(t, e, "exp-1"); phase != workload.JobPhaseRunning {
+		t.Fatalf("phase %v after the host answered again", phase)
+	}
+
+	// The control plane gives up on a host that stays away: the next attempt is not this instance.
+	p.Lose(name)
+	if matches, err := e.WorkloadMatchesDesired(ctx, job(t, "exp-1", 1, 1)); err != nil || matches {
+		t.Fatalf("after a requeue: matches %v, %v", matches, err)
+	}
+	// A grant has nothing to reach in an instance no signal is known to arrive at.
+	if err := e.DeleteWorkload(ctx, "exp-1", true); err != nil || len(p.Names()) != 0 || p.Calls("Stop") != 0 {
+		t.Fatalf("delete: %v, rented %v, stops %d", err, p.Names(), p.Calls("Stop"))
+	}
+}
+
 // A vendor can take a machine back at any time. The job then reads as gone, with no attempt to
 // fence on, and a pass that still desires it rents it again.
 func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {

@@ -43,7 +43,7 @@ func commandThatEnds(t *testing.T, r *run) {
 		}
 		if time.Now().After(deadline) {
 			runs := 0
-			if i.State != provider.StateStarting {
+			if i.State != provider.StateStarting && i.State != provider.StateUnknown {
 				runs = count(r.logs(t, ctx, id, logTail), "conformance-started")
 			}
 			t.Fatalf("instance %s never showed as exited (now %s); its command has been started %d times", id, i.State, runs)

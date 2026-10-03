@@ -78,7 +78,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			}
 			state, known := stateOf(found.ActualStatus)
 			if !known {
-				log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as starting", found.ID, name, *found.ActualStatus)
+				log.Printf("vast: instance %d (%s) has status %q, which this adapter does not know; reporting it as unknown", found.ID, name, *found.ActualStatus)
 			}
 			startedAt := time.Unix(0, int64(found.StartDate*float64(time.Second)))
 			if state == provider.StateStarting && time.Since(startedAt) > slowStart {
@@ -116,11 +116,11 @@ func logSlowStart(found instance, name string, startedAt time.Time) {
 	log.Printf("vast: instance %d (%s) on machine %d has been starting for %s: %s", found.ID, name, found.MachineID, time.Since(startedAt).Round(time.Second), message)
 }
 
-// stateOf maps the status the host last reported. It is null until the host has answered, and
-// "offline" while the host is unreachable; in both the command is not known to be running, which
-// is what starting means to a caller waiting on it. A status this adapter has never seen is
-// starting as well, and not known: the instance stays listed, so it keeps its slot and can be
-// destroyed, and the caller's boot timeout bounds it.
+// stateOf maps the status the host last reported. It is null until the host has answered, which
+// is starting. It is "offline" while the host is unreachable, at any point of the instance's
+// life, so the command may be hours in: that is unknown, as is a status this adapter has never
+// seen, which is also not known. The instance stays listed either way, so it keeps its slot and
+// can be destroyed.
 //
 // "exited" may be passed on as it is, although the contract allows StateExited only once the
 // whole output is readable. An instance is exited after its supervisor stopped it, which the
@@ -132,14 +132,16 @@ func stateOf(actualStatus *string) (state provider.State, known bool) {
 		return provider.StateStarting, true
 	}
 	switch *actualStatus {
-	case "loading", "created", "scheduling", "offline":
+	case "loading", "created", "scheduling":
 		return provider.StateStarting, true
 	case "running":
 		return provider.StateRunning, true
 	case "exited":
 		return provider.StateExited, true
+	case "offline":
+		return provider.StateUnknown, true
 	}
-	return provider.StateStarting, false
+	return provider.StateUnknown, false
 }
 
 // maxDestroyWait is the longest wait between two tries of a destroy the API refused as one call

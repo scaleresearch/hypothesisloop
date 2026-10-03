@@ -52,17 +52,20 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 	return listed, nil
 }
 
-// stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. A state this
-// adapter does not know is starting: the Machine stays listed, so it keeps its name and can be
-// destroyed, and the caller's boot timeout bounds it.
+// stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. One the vendor
+// restarts, updates or replaces has run its command and is not known to run it now, and a state
+// this adapter does not know says nothing either: both are unknown, and the Machine stays
+// listed, so it keeps its name and can be destroyed.
 //
 // A stopped Machine is exited only once its output is complete, and until then it is running:
 // the log trails the Machine by a moment, and the contract lets a caller read the last lines
 // once, at the first look that shows exited.
 func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (state provider.State, exists bool) {
 	switch found.State {
-	case "created", "creating", "starting", "restarting", "updating", "replacing":
+	case "created", "creating", "starting":
 		return provider.StateStarting, true
+	case "restarting", "updating", "replacing":
+		return provider.StateUnknown, true
 	case "started", "stopping", "suspending":
 		return provider.StateRunning, true
 	case "suspended":
@@ -75,8 +78,8 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 	case "destroying", "destroyed":
 		return "", false
 	}
-	log.Printf("fly: machine %s (%s) has state %q, which this adapter does not know; reporting it as starting", found.ID, found.Config.Metadata[nameKey], found.State)
-	return provider.StateStarting, true
+	log.Printf("fly: machine %s (%s) has state %q, which this adapter does not know; reporting it as unknown", found.ID, found.Config.Metadata[nameKey], found.State)
+	return provider.StateUnknown, true
 }
 
 // outputComplete tells whether everything a stopped Machine's command wrote is in the log: the

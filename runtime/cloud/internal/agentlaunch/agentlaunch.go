@@ -157,7 +157,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 func (l *Launcher) Pass(ctx context.Context) error {
 	rented, err := l.provider.List(ctx, l.prefix)
 	// The launcher pauses nothing yet (see the provider package's comment on capabilities).
-	rented = provider.PausedAsStarting(rented)
+	rented = unknownAsStarting(provider.PausedAsStarting(rented))
 	if err != nil {
 		return fmt.Errorf("list instances: %w", err)
 	}
@@ -282,6 +282,19 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		l.cfg.Log("NO INSTANCE COULD BE CREATED: all %d creates of this pass failed, the last with: %v. Look at the provider account and its limits, the image the control plane names, and instance in this launcher's config", creates, lastCreateError)
 	}
 	return errors.Join(failures...)
+}
+
+// unknownAsStarting is the list in the three states the control plane's launcher API reads. An
+// instance the provider does not know to be running is told as starting, the one of the three
+// that does not say its command runs or has ended, so it is never rented again or read as
+// exited from here.
+func unknownAsStarting(listed []provider.Instance) []provider.Instance {
+	for i := range listed {
+		if listed[i].State == provider.StateUnknown {
+			listed[i].State = provider.StateStarting
+		}
+	}
+	return listed
 }
 
 const (

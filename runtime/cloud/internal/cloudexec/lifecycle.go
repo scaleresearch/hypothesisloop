@@ -102,7 +102,9 @@ func (e *Executor) withoutOffer(exp *domain.Experiment, shape Shape) error {
 	return &agentexec.Waiting{Reason: domain.PhaseReasonWaitingForOffer, Why: fmt.Sprintf("%s yet; the job goes back to the queue as no_offer if none comes within %s of its admission", what, e.offerWait)}
 }
 
-// overdue says i was rented longer ago than Startup and has not started its command.
+// overdue says i was rented longer ago than Startup and has not started its command. An instance
+// the provider lists as unknown is never overdue: its command may be hours in, and StartedAt is
+// when it was rented.
 func (e *Executor) overdue(i instance) bool {
 	return i.State == provider.StateStarting && !i.StartedAt.IsZero() && time.Since(i.StartedAt) > e.startup
 }
@@ -116,8 +118,9 @@ func (e *Executor) overdue(i instance) bool {
 // arrives here again and stops it again, which the wrapper ignores after the first.
 //
 // Everything else is destroyed at once: a termination with no grant, an instance that never
-// started, and an instance still running after the control plane stopped listing its grant,
-// which bounds an instance whose wrapper never ends it.
+// started, one the provider does not know to be running, which a signal may not reach, and an
+// instance still running after the control plane stopped listing its grant, which bounds an
+// instance whose wrapper never ends it.
 func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, grantCheckpointWindow bool) error {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -224,6 +227,10 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 // and the next rents another, until the control plane's own deadline for a job that is not
 // running requeues or ends the job.
 //
+// An instance the provider does not know to be running matches: it is reported as pending, and
+// the control plane, which hears nothing of a job that ran and gives one that never ran its time
+// to start, requeues or ends the job. Only then is the instance destroyed.
+//
 // The workload of a desired job in a slot the configuration no longer has, as a renamed shape or
 // a lowered max_instances leaves one, is an error and is left running: it takes no slot, so it is
 // billed beside a full account, and destroying it would end a job the control plane still wants.
@@ -265,7 +272,9 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *domain.Exper
 // infrastructure fault: its own retries are not spent, and nothing is finished on a guess.
 //
 // Reporting an unreadable instance as still running instead is not bounded by anything: every
-// running report is recorded as liveness, so the job never reads as silent.
+// running report is recorded as liveness, so the job never reads as silent. For the same reason
+// an instance the provider does not know to be running is reported as pending, like one that is
+// starting: the control plane bounds a job that ran and reads pending with no sign of life.
 //
 // The vendor's state says what the machine does, at the pace of the vendor's own reports and of
 // this runtime's reads of them, and a command can start and end between two of those. When the

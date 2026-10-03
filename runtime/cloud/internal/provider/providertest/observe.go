@@ -9,19 +9,45 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
 )
 
-// find returns the instance as List shows it under the run's prefix.
+// find returns the instance as List shows it under the run's prefix. Every look holds every
+// instance listed to the contract's states.
 func (r *run) find(t *testing.T, ctx context.Context, id string) (provider.Instance, bool) {
 	t.Helper()
 	listed, err := r.p.List(ctx, r.prefix)
 	if err != nil {
 		t.Fatalf("List(%q): %v", r.prefix, err)
 	}
+	var found provider.Instance
+	ok := false
 	for _, i := range listed {
+		r.checkState(t, i)
 		if i.ID == id {
-			return i, true
+			found, ok = i, true
 		}
 	}
-	return provider.Instance{}, false
+	return found, ok
+}
+
+// checkState holds one listed state to the contract: it is a state the contract has, and an
+// instance whose command has run is not starting again, unless it was paused since. An adapter
+// that maps a vendor state it cannot place to starting fails here the first time the vendor
+// shows that state under a command that ran: a caller would destroy the instance as one that
+// never came up.
+func (r *run) checkState(t testing.TB, i provider.Instance) {
+	t.Helper()
+	switch i.State {
+	case provider.StateRunning, provider.StateExited:
+		r.ran[i.ID] = true
+	case provider.StatePaused:
+		delete(r.ran, i.ID)
+	case provider.StateStarting:
+		if r.ran[i.ID] {
+			t.Errorf("instance %s (%s) is starting after its command ran: what is not known to be running is %s", i.ID, i.Name, provider.StateUnknown)
+		}
+	case provider.StateUnknown:
+	default:
+		t.Errorf("instance %s (%s) is listed in state %q, which the contract does not have", i.ID, i.Name, i.State)
+	}
 }
 
 func (r *run) logs(t *testing.T, ctx context.Context, id string, tail int) []string {
@@ -40,7 +66,7 @@ func (r *run) awaitLine(t *testing.T, ctx context.Context, id, line string, limi
 	for {
 		if i, listed := r.find(t, ctx, id); !listed {
 			t.Fatalf("instance %s left List while waiting for %q", id, line)
-		} else if i.State != provider.StateStarting {
+		} else if i.State != provider.StateStarting && i.State != provider.StateUnknown {
 			if lines := r.logs(t, ctx, id, logTail); slices.Contains(lines, line) {
 				return lines
 			}

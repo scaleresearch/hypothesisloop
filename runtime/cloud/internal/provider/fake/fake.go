@@ -183,6 +183,12 @@ func (p *Provider) Start(name string) {
 	})
 }
 
+// Lose moves every instance of the name to StateUnknown, as a vendor that cannot reach its host
+// lists it.
+func (p *Provider) Lose(name string) {
+	p.each(name, func(i *instance) { i.State = provider.StateUnknown })
+}
+
 // RunsOn sets what every instance of the name runs on, as a vendor that says so lists it.
 func (p *Provider) RunsOn(name, host, acceleratorModel, cpuModel string, pricePerHour float64) {
 	p.each(name, func(i *instance) {

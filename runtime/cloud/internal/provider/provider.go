@@ -45,9 +45,16 @@ type State string
 
 const (
 	// StateStarting covers everything between Create returning and the command running:
-	// offer matching, image pull, boot.
+	// offer matching, image pull, boot. An instance whose command has run is never starting
+	// again, unless a Pauser paused it in between.
 	StateStarting State = "starting"
 	StateRunning  State = "running"
+	// StateUnknown is an instance that exists and is not known to be running: the vendor cannot
+	// reach its host, is moving or restarting it, or reports a state the adapter was not written
+	// for. It is rented and billed, its command may be running, and Logs need not work for it. An
+	// adapter maps every vendor state it knows to one State by name and everything else to this
+	// one, and never to StateStarting, which a caller bounds with its boot timeout.
+	StateUnknown State = "unknown"
 	// StateExited means the command has ended, the instance still exists, and everything the
 	// command wrote is readable through Logs. An adapter whose vendor delivers output late keeps
 	// reporting StateRunning until the output is complete: a caller reads how the command ended

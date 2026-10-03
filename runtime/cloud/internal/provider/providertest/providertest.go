@@ -64,6 +64,8 @@ type run struct {
 	p      provider.Provider
 	opts   Options
 	prefix string
+	// ran is the instances whose command has been seen running or exited (checkState).
+	ran map[string]bool
 }
 
 func newRun(t *testing.T, ctx context.Context, p provider.Provider, opts Options) *run {
@@ -72,7 +74,7 @@ func newRun(t *testing.T, ctx context.Context, p provider.Provider, opts Options
 	if _, err := rand.Read(raw); err != nil {
 		t.Fatalf("random prefix: %v", err)
 	}
-	r := &run{ctx: ctx, p: p, opts: opts, prefix: suitePrefix + hex.EncodeToString(raw) + "-"}
+	r := &run{ctx: ctx, p: p, opts: opts, prefix: suitePrefix + hex.EncodeToString(raw) + "-", ran: map[string]bool{}}
 	t.Cleanup(func() { r.destroyAll(t) })
 	return r
 }

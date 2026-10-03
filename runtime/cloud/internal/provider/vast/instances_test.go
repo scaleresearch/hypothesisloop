@@ -129,13 +129,14 @@ func TestListOfAnEmptyAccountIsEmpty(t *testing.T) {
 
 func TestListMapsVendorStatuses(t *testing.T) {
 	// "loading" is also where an instance stays when its image cannot be pulled or its host never
-	// brings it up: starting, until the caller's own boot timeout ends the wait.
+	// brings it up: starting, until the caller's own boot timeout ends the wait. "offline" is a
+	// host that stopped answering, which it also does under a command that is hours in.
 	cases := map[string]provider.State{
 		"":           provider.StateStarting,
 		"loading":    provider.StateStarting,
 		"created":    provider.StateStarting,
 		"scheduling": provider.StateStarting,
-		"offline":    provider.StateStarting,
+		"offline":    provider.StateUnknown,
 		"running":    provider.StateRunning,
 		"exited":     provider.StateExited,
 	}
@@ -157,8 +158,8 @@ func TestListMapsVendorStatuses(t *testing.T) {
 }
 
 // One instance in a status the adapter has never seen must not hide the account: it is listed as
-// starting, so it keeps its slot and can be destroyed, and the log says what the vendor reported.
-func TestListReportsAStatusItDoesNotKnowAsStartingAndLogsIt(t *testing.T) {
+// unknown, so it keeps its slot and can be destroyed, and the log says what the vendor reported.
+func TestListReportsAStatusItDoesNotKnowAsUnknownAndLogsIt(t *testing.T) {
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
@@ -175,9 +176,9 @@ func TestListReportsAStatusItDoesNotKnowAsStartingAndLogsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	want := []provider.State{provider.StateRunning, provider.StateStarting, provider.StateExited}
+	want := []provider.State{provider.StateRunning, provider.StateUnknown, provider.StateExited}
 	if len(got) != 3 || got[0].State != want[0] || got[1].State != want[1] || got[2].State != want[2] || got[1].Name != "hl-b" || got[1].ID != "2" {
-		t.Errorf("List = %v, want all three instances with hl-b as starting", got)
+		t.Errorf("List = %v, want all three instances with hl-b as unknown", got)
 	}
 	if line := logged.String(); !strings.Contains(line, "hl-b") || !strings.Contains(line, `"hibernating"`) {
 		t.Errorf("log = %q, want the instance name and the raw status", line)

@@ -140,6 +140,20 @@ func TestAPausedSandboxIsPausedAndNothingInsideItIsRead(t *testing.T) {
 	}
 }
 
+func TestASandboxInAStateTheAdapterDoesNotKnowIsUnknownAndNothingInsideItIsRead(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, sandboxesPath, answer(200, sandboxes(sandboxJSON("sb1", "hl-a", "migrating"))))
+	p := newTestProvider(t, api)
+
+	got, err := p.List(context.Background(), "hl-")
+	if err != nil || len(got) != 1 || got[0].State != provider.StateUnknown {
+		t.Fatalf("List = %+v, %v, want the sandbox listed as unknown, never as starting", got, err)
+	}
+	if api.total() != 1 {
+		t.Errorf("requests = %d, want the list alone", api.total())
+	}
+}
+
 func TestListFailsOnlyWhenTheVendorsOwnListDoes(t *testing.T) {
 	for name, list := range map[string]http.HandlerFunc{
 		"rate limited": answer(429, `{"code":429,"message":"rate limit exceeded"}`),
