@@ -108,7 +108,7 @@ func TestAClaimPlacesAJobOnlyOnARegisteredClusterThatTakesItsOrg(t *testing.T) {
 			t.Fatalf("after a refused claim on %s: status %s on %q, want it still queued", cluster, got.Status, got.ClusterName)
 		}
 	}
-	if _, _, err := w.clusters.SetClusterShared(context.Background(), w.ofB, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(context.Background(), w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	if !w.claim(t, job, w.ofB) {
@@ -149,7 +149,7 @@ func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	queue := NewClusterQueueStore(w.pool)
-	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofA, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	submitted := w.placed(t, "b-submitted", w.peB, w.ofA, domain.StatusSubmitted)
@@ -158,10 +158,10 @@ func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing
 	elsewhere := w.placed(t, "b-at-home", w.peB, w.ofB, domain.StatusRunning)
 	before := map[string]*domain.Experiment{submitted: w.get(t, submitted), running: w.get(t, running)}
 
-	if _, requeued, err := w.clusters.SetClusterShared(ctx, w.ofA, true); err != nil || len(requeued) != 0 {
+	if _, requeued, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil || len(requeued) != 0 {
 		t.Fatalf("sharing a shared cluster again requeued %v, %v, want nothing", requeued, err)
 	}
-	cluster, requeued, err := w.clusters.SetClusterShared(ctx, w.ofA, false)
+	cluster, requeued, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(false), domain.ClusterSettings{})
 	if err != nil || cluster.Shared {
 		t.Fatalf("stop sharing: got = %+v, %v", cluster, err)
 	}
@@ -232,7 +232,7 @@ func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing
 func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofA, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	job := w.queued(t, "b-late", w.peB)
@@ -278,7 +278,7 @@ func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *test
 		t.Fatal(err)
 	}
 	timeout := 600
-	if _, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
 		t.Fatal(err)
 	}
 	submitted := w.placed(t, "a-submitted", w.peA, w.ofA, domain.StatusSubmitted)
@@ -354,13 +354,13 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	// A cluster's settings are set by name, before any agent connects too, and read by the
 	// scheduler under the identity bound to it. A field left out stays, and 0 clears one.
 	timeout, limit, zero := 600, 8, 0
-	if _, err := w.clusters.SetClusterSettings(ctx, w.ofB, domain.ClusterSettings{MaxSpeculativeAccelerators: &limit}); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, nil, domain.ClusterSettings{MaxSpeculativeAccelerators: &limit}); err != nil {
 		t.Fatalf("settings of a cluster no agent has connected to: %v", err)
 	}
-	if _, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout, MaxSpeculativeAccelerators: &limit}); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout, MaxSpeculativeAccelerators: &limit}); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := w.clusters.SetClusterSettings(ctx, w.ofA, domain.ClusterSettings{MaxSpeculativeAccelerators: &zero})
+	changed, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{MaxSpeculativeAccelerators: &zero})
 	if err != nil || changed.MaxSpeculativeAccelerators != nil || changed.StuckPendingTimeoutSeconds == nil || *changed.StuckPendingTimeoutSeconds != timeout {
 		t.Fatalf("clearing one setting: got = %+v, %v, want the cap gone and the timeout kept", changed, err)
 	}

@@ -20,7 +20,7 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofB, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	listed := func() []string {
@@ -74,7 +74,7 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 		t.Fatalf("priorities as admission reads them: %d, %d and %d, %v", registered[third].Priority, registered[second].Priority, registered[w.ofB].Priority, err)
 	}
 	// Ending a sharing puts the cluster back among its org's own, at the default.
-	if unshared, _, err := w.clusters.SetClusterShared(ctx, w.ofB, false); err != nil || unshared.Priority != domain.DefaultClusterPriority {
+	if unshared, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(false), domain.ClusterSettings{}); err != nil || unshared.Priority != domain.DefaultClusterPriority {
 		t.Fatalf("once the sharing ended: %+v, %v, want priority %d", unshared, err, domain.DefaultClusterPriority)
 	}
 }

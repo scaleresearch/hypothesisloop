@@ -137,7 +137,7 @@ func TestOnlyScaleUpFailuresHoldOtherJobsOffACluster(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	scaled, stuck, old := w.bound(t, w.ofA), w.bound(t, w.ofB), "rid-old-"+w.suffix
-	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofB, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	onScaled := w.placed(t, "others-scale", w.peA, w.ofA, domain.StatusSubmitted)

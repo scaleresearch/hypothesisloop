@@ -307,21 +307,39 @@ func (s *memStore) withdraw(name, keepOrg string) []string {
 	return ids
 }
 
-func (s *memStore) SetClusterShared(_ context.Context, name string, shared bool) (*domain.Cluster, []string, error) {
+func (s *memStore) UpdateCluster(_ context.Context, name string, shared *bool, change domain.ClusterSettings) (*domain.Cluster, []string, error) {
 	c, ok := s.clusters[name]
 	if !ok {
 		return nil, nil, db.ErrClusterNotFound
 	}
-	switch {
-	case shared:
-		c.Priority = domain.SharedClusterPriority
-	case c.Shared:
-		c.Priority = domain.DefaultClusterPriority
-	}
-	c.Shared = shared
 	var requeued []string
-	if !shared {
-		requeued = s.withdraw(name, c.OrgID)
+	if shared != nil {
+		switch {
+		case *shared:
+			c.Priority = domain.SharedClusterPriority
+		case c.Shared:
+			c.Priority = domain.DefaultClusterPriority
+		}
+		c.Shared = *shared
+		if !*shared {
+			requeued = s.withdraw(name, c.OrgID)
+		}
+	}
+	for _, f := range []struct {
+		to   **int
+		from *int
+	}{
+		{&c.ScaleUpTimeoutSeconds, change.ScaleUpTimeoutSeconds},
+		{&c.MaxSpeculativeAccelerators, change.MaxSpeculativeAccelerators},
+		{&c.StuckPendingTimeoutSeconds, change.StuckPendingTimeoutSeconds},
+	} {
+		switch {
+		case f.from == nil:
+		case *f.from == 0:
+			*f.to = nil
+		default:
+			*f.to = f.from
+		}
 	}
 	out := *c
 	return &out, requeued, nil
@@ -341,31 +359,6 @@ func (s *memStore) SetClusterOrder(_ context.Context, orgID string, names []stri
 		s.clusters[name].Priority = domain.ClusterPriorityMax - i
 	}
 	return nil
-}
-
-func (s *memStore) SetClusterSettings(_ context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
-	c, ok := s.clusters[name]
-	if !ok {
-		return nil, db.ErrClusterNotFound
-	}
-	for _, f := range []struct {
-		to   **int
-		from *int
-	}{
-		{&c.ScaleUpTimeoutSeconds, change.ScaleUpTimeoutSeconds},
-		{&c.MaxSpeculativeAccelerators, change.MaxSpeculativeAccelerators},
-		{&c.StuckPendingTimeoutSeconds, change.StuckPendingTimeoutSeconds},
-	} {
-		switch {
-		case f.from == nil:
-		case *f.from == 0:
-			*f.to = nil
-		default:
-			*f.to = f.from
-		}
-	}
-	out := *c
-	return &out, nil
 }
 
 func (s *memStore) SetClusterEnabled(_ context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error) {

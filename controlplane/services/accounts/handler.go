@@ -50,10 +50,9 @@ type Accounts interface {
 type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
-	SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error)
+	UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error)
 	SetClusterEnabled(ctx context.Context, name, orgID, by string, enabled bool) (*domain.Cluster, error)
 	SetClusterOrder(ctx context.Context, orgID string, names []string) error
-	SetClusterSettings(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error)
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
@@ -643,8 +642,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				return nil, err
 			}
 		}
-		cluster, err := h.access.ClusterOf(ctx, in.ID, in.Name)
-		if err != nil {
+		if _, err := h.access.ClusterOf(ctx, in.ID, in.Name); err != nil {
 			return nil, err
 		}
 		if in.Body.Shared == nil && in.Body.ClusterSettings.Empty() {
@@ -653,16 +651,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := domain.ValidateClusterSettings(in.Body.ClusterSettings); err != nil {
 			return nil, huma.Error422UnprocessableEntity(err.Error())
 		}
-		var requeued []string
-		if in.Body.Shared != nil {
-			if cluster, requeued, err = h.clusters.SetClusterShared(ctx, in.Name, *in.Body.Shared); err != nil {
-				return nil, err
-			}
-		}
-		if !in.Body.ClusterSettings.Empty() {
-			if cluster, err = h.clusters.SetClusterSettings(ctx, in.Name, in.Body.ClusterSettings); err != nil {
-				return nil, err
-			}
+		cluster, requeued, err := h.clusters.UpdateCluster(ctx, in.Name, in.Body.Shared, in.Body.ClusterSettings)
+		if err != nil {
+			return nil, err
 		}
 		return &struct{ Body WithdrawnCluster }{Body: WithdrawnCluster{ClusterView: viewOf(cluster, in.ID), Requeued: orEmpty(requeued)}}, nil
 	})

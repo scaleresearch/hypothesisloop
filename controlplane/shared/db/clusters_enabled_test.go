@@ -62,7 +62,7 @@ func TestAClaimSkipsAClusterItsOrgTurnedOffAndTakesItAgainOnceOn(t *testing.T) {
 func TestOneOrgTurningASharedClusterOffLeavesItOnForTheOther(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	if _, _, err := w.clusters.SetClusterShared(ctx, w.ofA, true); err != nil {
+	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}
 	w.setEnabled(t, w.ofA, w.orgB, false)

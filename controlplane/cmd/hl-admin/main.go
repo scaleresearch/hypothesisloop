@@ -93,7 +93,7 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		return withPool(func(ctx context.Context, pool *db.Pool) error {
-			_, requeued, err := db.NewClustersStore(pool).SetClusterShared(ctx, args[2], shared)
+			_, requeued, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], &shared, domain.ClusterSettings{})
 			if err != nil {
 				return err
 			}

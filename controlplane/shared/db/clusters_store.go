@@ -188,38 +188,49 @@ func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*d
 	return out, rows.Err()
 }
 
-// SetClusterShared records whether the platform shares a cluster with every org. Ending the
-// sharing is a decision about the jobs of other orgs placed there too, so it is written with
-// them: in the same transaction they return to the queue, which is what makes the cluster's
-// runtime stop them and admission place them elsewhere. requeued names those jobs.
-func (s *ClustersStore) SetClusterShared(ctx context.Context, name string, shared bool) (cluster *domain.Cluster, requeued []string, err error) {
+// UpdateCluster changes a cluster in one transaction, so all of a change is written or none of
+// it. shared, when stated, records whether the platform shares the cluster with every org.
+// Ending the sharing is a decision about the jobs of other orgs placed there too, so it is
+// written with them: they return to the queue, which is what makes the cluster's runtime stop
+// them and admission place them elsewhere. requeued names those jobs. Of the settings, a value
+// sets the field, 0 puts it back on the scheduler's default and nil leaves it as it is.
+func (s *ClustersStore) UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error) {
+	if err := domain.ValidateClusterSettings(change); err != nil {
+		return nil, nil, err
+	}
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: begin: %w", err)
+		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: lock: %w", err)
+	if shared != nil {
+		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+			return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: lock: %w", err)
+		}
 	}
 	// A shared cluster holds the platform's priority, and one that is its org's alone again starts
 	// from the priority a cluster is registered with.
 	cluster, err = scanCluster(tx.QueryRow(ctx, `
-UPDATE clusters SET shared = $2,
-	priority = CASE WHEN $2 THEN $3 WHEN shared THEN $4 ELSE priority END
-WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority))
+UPDATE clusters SET shared = COALESCE($2::boolean, shared),
+	priority = CASE WHEN $2::boolean THEN $3 WHEN NOT $2::boolean AND shared THEN $4 ELSE priority END,
+	scale_up_timeout_seconds = CASE WHEN $5::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($5::int, 0) END,
+	max_speculative_accelerators = CASE WHEN $6::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($6::int, 0) END,
+	stuck_pending_timeout_seconds = CASE WHEN $7::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($7::int, 0) END
+WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority,
+		change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrClusterNotFound
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
+		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: %w", err)
 	}
-	if !shared {
+	if shared != nil && !*shared {
 		if requeued, err = withdraw(ctx, tx, name, cluster.OrgID); err != nil {
-			return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: %w", err)
+			return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.SetClusterShared: commit: %w", err)
+		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: commit: %w", err)
 	}
 	return cluster, requeued, nil
 }
@@ -296,27 +307,6 @@ FROM unnest($1::text[]) WITH ORDINALITY AS o(name, place) WHERE c.name = o.name`
 		return fmt.Errorf("clusters_store.SetClusterOrder: commit: %w", err)
 	}
 	return nil
-}
-
-// SetClusterSettings changes the settings of a cluster that change names: a value sets the field
-// and 0 puts it back on the scheduler's default. The fields it leaves nil stay as they are.
-func (s *ClustersStore) SetClusterSettings(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
-	if err := domain.ValidateClusterSettings(change); err != nil {
-		return nil, err
-	}
-	cluster, err := scanCluster(s.pool.pool.QueryRow(ctx, `
-UPDATE clusters SET
-	scale_up_timeout_seconds = CASE WHEN $2::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($2::int, 0) END,
-	max_speculative_accelerators = CASE WHEN $3::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($3::int, 0) END,
-	stuck_pending_timeout_seconds = CASE WHEN $4::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($4::int, 0) END
-WHERE name = $1 RETURNING `+clusterColumns, name, change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrClusterNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterSettings: %w", err)
-	}
-	return cluster, nil
 }
 
 // GetClusterSettings reads the settings of the cluster bound to the id its runtime reports, which
