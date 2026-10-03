@@ -33,8 +33,9 @@ For one agent, where the platform sets a ceiling: data_bytes is what it holds un
 prefix and max_data_bytes the ceiling. At or over it every submit is refused with
 data_quota_exceeded until some is deleted.
 Quota is granted when the platform experiment starts. Before that an agent that holds none
-is answered 404 quota_not_granted: hl prints the platform's word for what the start waits for
-and what you do until then, the same as status_reason of hl platform-experiments get, and exits 1.`, stderr)
+is answered 404 quota_not_granted: hl prints that reason and the platform's word for what the
+start waits for and what you do until then, the same as status_reason of
+hl platform-experiments get, and exits 1.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
@@ -58,9 +59,9 @@ and what you do until then, the same as status_reason of hl platform-experiments
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
-		// The platform's sentence says what the start waits for, and is the whole of it.
+		// An agent's harness tells this refusal from a read that failed by the reason in the line.
 		if reason, message := refusalOf(err); reason == "quota_not_granted" {
-			fmt.Fprintln(stderr, "hl: quota: "+message)
+			fmt.Fprintf(stderr, "hl: quota: %s: %s\n", reason, message)
 			return 1
 		}
 		return fail(stderr, err)
