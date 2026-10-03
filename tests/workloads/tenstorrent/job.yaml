@@ -43,5 +43,3 @@ job:
 
   accelerator_count: 1
   accelerator_type: tenstorrent.com/chipArch=blackhole
-  accelerator_pod_resources:
-    hugepages-1Gi: 4Gi

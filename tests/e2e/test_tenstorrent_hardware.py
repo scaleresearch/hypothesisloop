@@ -35,7 +35,7 @@ ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 
 # Overrides tests/workloads/tenstorrent/job.yaml's own fields on top of the generic base spec
 # api.submit_job() loads by default (workloads/generic/job.yaml): a real tt-metal workload needs
-# its own image/cpu/memory/hugepages, and must drop the generic spec's nvidia
+# its own image/cpu/memory, and must drop the generic spec's nvidia
 # accelerator_tolerations/acceptable_accelerator_types -- see that job.yaml's own comments for why
 # (256Mi OOMKilled every run; 4Gi clears it).
 BARE_IMAGE = "localhost/hypothesisloop-tenstorrent-workload:latest"
@@ -58,7 +58,6 @@ TT_JOB_OVERRIDES = {
     "max_retries": 3,
     "accelerator_count": 1,
     "accelerator_type": ACCEL_TYPE,
-    "accelerator_pod_resources": {"hugepages-1Gi": "4Gi"},
     "acceptable_accelerator_types": None,
     "accelerator_tolerations": None,
 }

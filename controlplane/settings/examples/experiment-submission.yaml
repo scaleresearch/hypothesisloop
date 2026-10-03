@@ -81,8 +81,9 @@ job:
   # nodes (whether a cluster taints them is a property of that cluster, not of the hardware).
   accelerator_tolerations: [nvidia.com/gpu]
 
-  # accelerator_pod_resources: extra per-node requests the accelerator itself needs, e.g.
-  # accelerator_pod_resources: {hugepages-1Gi: 4Gi}
+  # accelerator_pod_resources: extra per-node requests of this job's own beside the device.
+  # What a type always needs is the platform's: it adds the hugepages a Tenstorrent chip's
+  # driver maps to every job on that type, so no job states them.
 
   # node_selector: ordinary Kubernetes node selection for anything that is NOT the accelerator —
   # a zone, a disk class, a kernel version. ANDed with wherever the accelerator lives. Optional.
