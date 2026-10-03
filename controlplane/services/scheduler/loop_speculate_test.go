@@ -579,7 +579,7 @@ func TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast(t *t
 	accel := map[string]map[string]map[string]int64{
 		// cluster-amd's only live node group is a different flavor entirely (heterogeneous
 		// cluster with an h100 node group currently scaled to zero) — no live proof of fit.
-		"cluster-amd":  {"node-a": {"amd.com/gpu.product=MI300": 8}},
+		"cluster-amd":  {"node-a": {"amd.com/gpu.product=mi300": 8}},
 		"cluster-h100": {"node-a": {h100: 8}},
 	}
 	resources := map[string]map[string]map[string]int64{

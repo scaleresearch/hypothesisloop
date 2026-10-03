@@ -54,10 +54,10 @@ func disbalanceJob(id, cpu string, accelerators int) *domain.Experiment {
 	}
 }
 
-// disbalanceNodes reports freeChips accelerators still free on node-a, in the driver's own
-// casing (which differs from the canonical lowercase footprint key on purpose).
+// disbalanceNodes reports freeChips accelerators still free on node-a, keyed as the capacity
+// read keys them: in lower case, where the jobs here name the type in the driver's casing.
 func disbalanceNodes(freeChips int64) map[string]map[string]int64 {
-	return map[string]map[string]int64{"node-a": {disbalanceFlavor: freeChips}}
+	return map[string]map[string]int64{"node-a": {nodeAcceleratorKey(disbalanceFlavor): freeChips}}
 }
 
 func TestSelectDisbalanceVictimsEvictsHogStrandingIdleAccelerators(t *testing.T) {
@@ -312,7 +312,7 @@ func TestSelectDisbalanceVictimsUsesNodeLocalShareNotClusterWideAverage(t *testi
 	avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
 	// node-b has 7 chips free plus the hog's 1 held = 8 installed, matching the "8 chips" node
 	// shape the comment above assumes: 16000m / 8 chips = 2000m (2 cores) per chip.
-	nodeAvail := map[string]map[string]int64{"node-b": {disbalanceFlavor: 7}}
+	nodeAvail := map[string]map[string]int64{"node-b": {nodeAcceleratorKey(disbalanceFlavor): 7}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, clusterTotal,
 		nodesTotal, nodeAvail, nil, nil, []placedExperiment{{experiment: hog, node: "node-b"}}, testDisbalanceTolerance)
@@ -440,7 +440,7 @@ func TestAPendingEvictionCreditsItsNodeResources(t *testing.T) {
 	l.observed = fakeObserved{}
 	l.pendingEvictions["hog"] = pendingEviction{
 		cluster: "cluster-a", node: "node-a", footprint: hog.Footprint(),
-		acceleratorType: disbalanceFlavor, acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,
+		acceleratorType: nodeAcceleratorKey(disbalanceFlavor), acceleratorCount: 1, evictedAt: now, nodeFreeAtEviction: 3,
 	}
 
 	avail := map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)}

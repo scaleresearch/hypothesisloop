@@ -3,13 +3,14 @@ package scheduler
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-const h100 = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
+const h100 = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 
 // groupedExperiment is a heterogeneous job: one group per shape, in the order given.
 func groupedExperiment(groups ...domain.JobGroup) *domain.Experiment {
@@ -255,17 +256,17 @@ func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 	}
 }
 
-// foldMatchingKey must find a live-reported accelerator key regardless of the casing the driver
-// used, not just when it matches the job's key verbatim.
-func TestFoldMatchingKeyIsCaseInsensitive(t *testing.T) {
-	reported := map[string]int64{"NVIDIA.COM/GPU.PRODUCT=NVIDIA-H100-80GB-HBM3": 4}
-	if got := foldMatchingKey(reported, h100); got != "NVIDIA.COM/GPU.PRODUCT=NVIDIA-H100-80GB-HBM3" {
-		t.Fatalf("foldMatchingKey = %q, want the differently-cased key actually present in the map", got)
-	}
-	// No match at all, even case-insensitively: the input key is returned unchanged so a
-	// subsequent lookup misses cleanly rather than panicking on a nonexistent key.
-	if got := foldMatchingKey(map[string]int64{"other-flavor": 1}, h100); got != h100 {
-		t.Fatalf("foldMatchingKey with no match = %q, want the original key echoed back", got)
+// A job names its type as its agent cased it and a node's free accelerators are keyed in lower
+// case where they are read (queuebackend), so the placement of a job whose type is cased
+// otherwise finds them with an exact lookup.
+func TestAJobIsPlacedOnANodeWhateverCaseItNamesItsTypeIn(t *testing.T) {
+	exp := distributedExperiment(1, 2)
+	exp.AcceleratorType = domain.AcceleratorType(strings.ToUpper(h100))
+	byNode := map[string]map[string]int64{"node-a": {strings.ToLower(h100): 2}}
+	resources := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 1 << 40, domain.NodeResourceMemoryBytes: 1 << 50, domain.NodeResourceStorageBytes: 1 << 50}}
+	plan, ok := planPlacement(byNode, resources, map[string]map[string]string{"node-a": {}}, []*domain.Experiment{exp})
+	if !ok || len(plan) != 1 || plan[0].node != "node-a" || byNode["node-a"][strings.ToLower(h100)] != 0 {
+		t.Fatalf("plan %+v, ok %v, node left with %v: want the job on node-a holding both accelerators", plan, ok, byNode["node-a"])
 	}
 }
 
@@ -318,7 +319,7 @@ func TestNodeHasRoomEdgeCases(t *testing.T) {
 // preemption path reasons about the flavor the job actually asked for) and return the requested
 // flavor's own best-fit fallback, not the alternate's.
 func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *testing.T) {
-	const altFlavor = "nvidia.com/gpu.product=NVIDIA-A100-80GB"
+	const altFlavor = "nvidia.com/gpu.product=nvidia-a100-80gb"
 	exp := distributedExperiment(1, 8) // 8 accelerators, too many for either cluster below
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altFlavor}
 	fpRequested := exp.Footprint()

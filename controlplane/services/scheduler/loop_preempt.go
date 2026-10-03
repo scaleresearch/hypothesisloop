@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -291,7 +290,7 @@ func creditNode(accelerators, resources map[string]int64, exp *domain.Experiment
 		}
 	}
 	if accelerators != nil && count > 0 {
-		accelerators[foldMatchingKey(accelerators, strings.ToLower(string(exp.AcceleratorType)))] += count
+		accelerators[nodeAcceleratorKey(exp.AcceleratorType)] += count
 	}
 	if resources != nil {
 		addNodeResources(resources, least)

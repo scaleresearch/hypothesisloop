@@ -1140,31 +1140,10 @@ func shortfall(avail domain.Footprint, footprint domain.Footprint) domain.Footpr
 	return out
 }
 
-// foldLookup is map[key] with a case-insensitive fallback (see domain.AcceleratorType.MatchesLabels).
-func foldLookup(m map[string]int64, key string) int64 {
-	if v, ok := m[key]; ok {
-		return v
-	}
-	for k, v := range m {
-		if strings.EqualFold(k, key) {
-			return v
-		}
-	}
-	return 0
-}
-
-// foldMatchingKey returns the key in m matching want case-insensitively, or want itself if
-// none matches (a subsequent m[want] lookup then correctly misses/reads zero).
-func foldMatchingKey(m map[string]int64, want string) string {
-	if _, ok := m[want]; ok {
-		return want
-	}
-	for k := range m {
-		if strings.EqualFold(k, want) {
-			return k
-		}
-	}
-	return want
+// nodeAcceleratorKey is the key a node's free accelerators of a type are under: the type in lower
+// case, as the capacity read keys them (queuebackend.GetAcceleratorCapacityByNode).
+func nodeAcceleratorKey(t domain.AcceleratorType) string {
+	return strings.ToLower(string(t))
 }
 
 // preemptionShortfall keeps accelerator availability in the placement domain declared by the
@@ -1182,11 +1161,11 @@ func preemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 	if exp.Job.TotalAccelerators() <= 0 {
 		return out
 	}
-	key := strings.ToLower(string(exp.AcceleratorType))
+	key := nodeAcceleratorKey(exp.AcceleratorType)
 	capacities := make([]int64, 0, len(byNode))
 	for node, capacity := range byNode {
 		if labelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
-			capacities = append(capacities, foldLookup(capacity, key))
+			capacities = append(capacities, capacity[key])
 		}
 	}
 	sort.Slice(capacities, func(i, j int) bool { return capacities[i] > capacities[j] })
@@ -1445,8 +1424,8 @@ func reservePlacement(byNode, nodeResources map[string]map[string]int64, labelsB
 	return true
 }
 
-// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the exact
-// accelerator key under which that node reported the job's flavor (see foldMatchingKey).
+// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the
+// nodeAcceleratorKey of the job's type, "" for a rank that holds no accelerator.
 type rankAssignment struct {
 	job   int
 	shape domain.NodeShape
@@ -1475,7 +1454,7 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	}
 	var ranks []rank
 	for i, exp := range jobs {
-		key := string(exp.AcceleratorType)
+		key := nodeAcceleratorKey(exp.AcceleratorType)
 		// Two candidate sets: a node that reported accelerators, and any node the cluster
 		// reported resources for. A node needing no accelerator must not be confined to
 		// accelerator nodes.
@@ -1513,10 +1492,7 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		}
 		nodeKey := ""
 		if r.shape.AcceleratorCount > 0 {
-			// byNode retains each device's own raw driver-reported casing (see
-			// domain.AcceleratorType.MatchesLabels re: casing) — find the matching key
-			// case-insensitively rather than assuming it equals key verbatim.
-			nodeKey = foldMatchingKey(byNode[node], r.key)
+			nodeKey = r.key
 			if byNode[node][nodeKey] < r.shape.AcceleratorCount {
 				return "", false
 			}
@@ -1738,7 +1714,7 @@ func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[st
 	// them for the admission decisions that follow.
 	accelerators := cloneNodeCapacity(byNode)
 	resources := cloneNodeCapacity(nodeResources)
-	key := strings.ToLower(string(exp.AcceleratorType))
+	key := nodeAcceleratorKey(exp.AcceleratorType)
 	distinct := requiresDistinctHosts(exp)
 	occupied := map[string]bool{}
 
@@ -1763,7 +1739,7 @@ func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[st
 			// Only nodes that could host this rank's accelerators are candidates; where the
 			// accelerators themselves are missing, the per-node accelerator shortfall reported by
 			// preemptionShortfall already says so.
-			if shape.AcceleratorCount > 0 && foldLookup(accelerators[node], key) < shape.AcceleratorCount {
+			if shape.AcceleratorCount > 0 && accelerators[node][key] < shape.AcceleratorCount {
 				continue
 			}
 			deficit := map[string]int64{}
@@ -1785,8 +1761,7 @@ func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[st
 
 		if placed != "" {
 			if shape.AcceleratorCount > 0 {
-				nodeKey := foldMatchingKey(accelerators[placed], key)
-				accelerators[placed][nodeKey] -= shape.AcceleratorCount
+				accelerators[placed][key] -= shape.AcceleratorCount
 			}
 			subtractNodeResources(resources[placed], shape.Resources)
 			occupied[placed] = true

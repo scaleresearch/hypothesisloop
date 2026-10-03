@@ -110,6 +110,24 @@ func TestAnInconsistentClusterSnapshotCondemnsOnlyThatCluster(t *testing.T) {
 	}
 }
 
+// A node reports a type as its driver cases it and a job names it as its agent did, so every
+// lookup in the scheduler tried the key again without regard to case. The read keys a type one
+// way, and two reports of a node that differ only in case are one type.
+func TestANodesFreeAcceleratorsAreKeyedInLowerCase(t *testing.T) {
+	got := lowerAcceleratorTypes(map[string]map[string]map[string]int64{
+		"cluster-a": {
+			"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 4},
+			"node-b": {"tenstorrent.com/chipArch=blackhole": 1, "tenstorrent.com/chiparch=blackhole": 2},
+		},
+	})
+	if free := got["cluster-a"]["node-a"]; len(free) != 1 || free["nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"] != 4 {
+		t.Errorf("node-a = %v, want its four accelerators under the type in lower case alone", free)
+	}
+	if free := got["cluster-a"]["node-b"]; len(free) != 1 || free["tenstorrent.com/chiparch=blackhole"] != 3 {
+		t.Errorf("node-b = %v, want both reports counted as one type", free)
+	}
+}
+
 func TestInconsistentSnapshotsNamesEachSkippedClusterWithItsReason(t *testing.T) {
 	b := &Backend{}
 	var err error = InconsistentSnapshots(b.validateCapacitySnapshot(

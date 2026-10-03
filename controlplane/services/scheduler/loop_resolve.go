@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -105,10 +104,10 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 	if flavor.Kind() == domain.TypeKindCPU {
 		return installedCoresByNode(nodeAvail, nodeResourcesTotal), nil
 	}
-	key := strings.ToLower(string(flavor))
+	key := nodeAcceleratorKey(flavor)
 	installed := make(map[string]int64, len(nodeAvail))
 	for node, byFlavor := range nodeAvail {
-		installed[node] = foldLookup(byFlavor, key)
+		installed[node] = byFlavor[key]
 	}
 	claimed, err := c.loadClaimed(ctx)
 	if err != nil {

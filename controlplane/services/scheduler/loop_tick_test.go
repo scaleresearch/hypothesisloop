@@ -299,7 +299,7 @@ func TestASingleNodeJobIsNeverReportedAsNarrowedByTheMultiNodeFilter(t *testing.
 // nowhere else — the exact shape whose top-level accelerator_count a grouped submission REJECTS,
 // and which the store therefore never back-fills.
 func groupedAcceleratorExperiment() *domain.Experiment {
-	const flavor = "nvidia.com/gpu.product=NVIDIA-L40"
+	const flavor = "nvidia.com/gpu.product=nvidia-l40"
 	return &domain.Experiment{
 		AcceleratorType:  flavor,
 		AcceleratorCount: 3,
@@ -319,7 +319,7 @@ func groupedAcceleratorExperiment() *domain.Experiment {
 // no-accelerator path: it skipped the node-layout proof entirely and could be handed a cluster
 // whose only qualifying node had not a single free device of the hardware it asked for.
 func TestAGroupedJobIsPlacedOnAClusterWhoseNodesActuallyHaveItsAccelerators(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=NVIDIA-L40"
+	const flavor = "nvidia.com/gpu.product=nvidia-l40"
 	exp := groupedAcceleratorExperiment()
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"a-empty-nodes": fp, "b-real-devices": fp}

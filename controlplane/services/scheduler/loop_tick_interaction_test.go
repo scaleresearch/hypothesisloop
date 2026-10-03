@@ -509,7 +509,7 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 
 // --- Tick-level: a waiting guaranteed job holds free capacity against the burst pass ---
 
-const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
+const l40 = "nvidia.com/gpu.product=nvidia-l40"
 
 // holdWorkload is cluster-a with four h100 installed and three free, two free l40, and cluster-b
 // with one free h100. cpuCores is what cluster-a has free, terminating the h100 on cluster-a that

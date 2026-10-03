@@ -72,6 +72,12 @@ func TestPreemptionShortfallIsNeverEmptyForAJobThatDoesNotFit(t *testing.T) {
 		if reservePlacement(cloneNodeCapacity(c.nodeAccel), cloneNodeCapacity(c.nodeRes), nil, c.exp) {
 			continue // fits, so there is nothing to report
 		}
+		// A job of more ranks than the cluster has nodes, each on a host of its own, is short of
+		// nothing a stopped job gives back. While the node maps here were keyed in another case
+		// than the footprint, every such job read as short of its whole type and passed.
+		if requiresDistinctHosts(c.exp) && len(c.exp.NodeShapes()) > len(c.nodeRes) {
+			continue
+		}
 		checked++
 
 		got := preemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)

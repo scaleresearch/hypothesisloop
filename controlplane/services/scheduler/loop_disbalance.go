@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -68,7 +67,7 @@ type pendingEviction struct {
 	cluster          string
 	node             string
 	footprint        domain.Footprint
-	acceleratorType  string // lowercase, as looked up via foldMatchingKey against nodeAvail
+	acceleratorType  string // its nodeAcceleratorKey
 	acceleratorCount int64
 	evictedAt        time.Time
 	// nodeFreeAtEviction is what the victim's node reported free of its flavor at the moment it
@@ -98,7 +97,7 @@ func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]do
 		if pe.acceleratorCount > 0 && pe.acceleratorType != "" {
 			if byNode, ok := nodeAvail[pe.cluster]; ok {
 				if capacity, ok := byNode[pe.node]; ok {
-					if capacity[foldMatchingKey(capacity, pe.acceleratorType)] > pe.nodeFreeAtEviction {
+					if capacity[pe.acceleratorType] > pe.nodeFreeAtEviction {
 						delete(l.pendingEvictions, id)
 						continue
 					}
@@ -114,8 +113,7 @@ func (l *Loop) applyPendingEvictions(now time.Time, gAvail, bAvail map[string]do
 		if pe.acceleratorCount > 0 && pe.acceleratorType != "" {
 			if byNode, ok := nodeAvail[pe.cluster]; ok {
 				if capacity, ok := byNode[pe.node]; ok {
-					key := foldMatchingKey(capacity, pe.acceleratorType)
-					capacity[key] += pe.acceleratorCount
+					capacity[pe.acceleratorType] += pe.acceleratorCount
 				}
 			}
 		}
@@ -253,11 +251,8 @@ func (l *Loop) evictDisbalanced(
 		// Record the freed capacity as pending so the next tick(s) — until evictionTTL or a
 		// capacity read catches up, whichever first — credit it back rather than evicting a fresh
 		// victim to cover the same shortage again. See applyPendingEvictions.
-		acceleratorType := strings.ToLower(string(victim.experiment.AcceleratorType))
-		var nodeFree int64
-		if capacity, ok := nodeAvail[victim.node]; ok {
-			nodeFree = capacity[foldMatchingKey(capacity, acceleratorType)]
-		}
+		acceleratorType := nodeAcceleratorKey(victim.experiment.AcceleratorType)
+		nodeFree := nodeAvail[victim.node][acceleratorType]
 		l.pendingEvictions[victim.experiment.ID] = pendingEviction{
 			cluster:            cluster,
 			node:               victim.node,
@@ -317,7 +312,7 @@ func disbalancePremises(
 		}
 	}
 
-	flavor := strings.ToLower(string(blocked.AcceleratorType))
+	flavor := nodeAcceleratorKey(blocked.AcceleratorType)
 	// Per NODE, not per job: the question is whether some single node is stranding enough free
 	// devices to host one of blocked's nodes. hardestNodeShape is the same one-shape summary the
 	// shortfall vector uses, and covering the hardest node is what unblocks the job; for an
@@ -330,7 +325,7 @@ func disbalancePremises(
 		if !labelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
 			continue
 		}
-		if free := foldLookup(capacity, flavor); free >= perRank {
+		if free := capacity[flavor]; free >= perRank {
 			strandedNodes[node] = free
 		}
 	}
@@ -398,7 +393,7 @@ func selectDisbalanceVictims(
 		if flavor.Kind() == domain.TypeKindCPU {
 			return cores[node]
 		}
-		installed := foldLookup(nodeAvail[node], strings.ToLower(string(flavor)))
+		installed := nodeAvail[node][nodeAcceleratorKey(flavor)]
 		for _, p := range placed {
 			if p.node == node && p.experiment.AcceleratorType.Is(flavor) {
 				installed += int64(p.experiment.AcceleratorCount)

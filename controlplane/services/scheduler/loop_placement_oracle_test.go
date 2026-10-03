@@ -48,7 +48,7 @@ func oracleFits(nodeAccel, nodeRes map[string]map[string]int64, key string, rank
 			if r.distinct && used[jobNode] {
 				continue
 			}
-			nodeKey := foldMatchingKey(accel[node], key)
+			nodeKey := key
 			if r.acceleratorCount > 0 && accel[node][nodeKey] < r.acceleratorCount {
 				continue
 			}

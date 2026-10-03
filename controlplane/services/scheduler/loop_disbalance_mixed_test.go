@@ -59,7 +59,7 @@ func TestSharesOnANodeOfChipsAndCoresAreCountedPerType(t *testing.T) {
 		"nobody is evicted for a job on cores": {
 			queuedCores, []*domain.Experiment{chipJob("hog", "14", "")}, 2, 3, 56 << 30, "", ""},
 	} {
-		units := map[string]int64{disbalanceFlavor: tc.freeChips, string(cpuType): tc.freeCores}
+		units := map[string]int64{nodeAcceleratorKey(disbalanceFlavor): tc.freeChips, string(cpuType): tc.freeCores}
 		total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceFlavor: disbalanceNodeChips, string(cpuType): 16}, 64<<30, 0)
 		avail := domain.CapacityFootprint(float64(tc.freeCores), units, tc.freeMemory, 0)
 
@@ -83,7 +83,7 @@ func TestADeviceListedUnderTwoLabelsIsCountedOnce(t *testing.T) {
 	fair := disbalanceJob("fair", "4", 1)
 	total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceFlavor: disbalanceNodeChips, family: disbalanceNodeChips}, 64<<30, 0)
 	avail := domain.CapacityFootprint(1, map[string]int64{disbalanceFlavor: 3, family: 3}, 40<<30, 0)
-	nodeAvail := map[string]map[string]int64{"node-a": {disbalanceFlavor: 3, family: 3}}
+	nodeAvail := map[string]map[string]int64{"node-a": {nodeAcceleratorKey(disbalanceFlavor): 3, family: 3}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, total,
 		disbalanceNodesTotal(), nodeAvail, nil, nil, placedOnNodeA(fair), testDisbalanceTolerance)

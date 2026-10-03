@@ -8,22 +8,22 @@ import (
 
 func distributedExperiment(nodes, acceleratorsPerNode int) *domain.Experiment {
 	return &domain.Experiment{
-		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
+		AcceleratorType: "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3",
 		Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: nodes, AcceleratorCount: acceleratorsPerNode,
-			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
+			AcceleratorType: "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"},
 	}
 }
 
 func TestTopologyFitsRequiresEnoughDistinctHosts(t *testing.T) {
 	exp := distributedExperiment(3, 2)
 	byNode := map[string]map[string]int64{
-		"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 4},
-		"node-b": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 2},
+		"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 4},
+		"node-b": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2},
 	}
 	if topologyFits(byNode, nil, nil, exp) {
 		t.Fatal("aggregate six accelerators on two hosts must not satisfy three distinct ranks")
 	}
-	byNode["node-c"] = map[string]int64{"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 2}
+	byNode["node-c"] = map[string]int64{"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}
 	if !topologyFits(byNode, nil, nil, exp) {
 		t.Fatal("three qualifying hosts should satisfy three distinct ranks")
 	}
@@ -33,10 +33,10 @@ func TestTopologyFitsHonorsExplicitSpreadDisablement(t *testing.T) {
 	spread := false
 	exp := distributedExperiment(3, 2)
 	exp.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
-	if topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 2}}, nil, nil, exp) {
+	if topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}}, nil, nil, exp) {
 		t.Fatal("three ranks must not reuse the same two accelerators")
 	}
-	if !topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 6}}, nil, nil, exp) {
+	if !topologyFits(map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 6}}, nil, nil, exp) {
 		t.Fatal("explicitly disabling host spreading should allow all three ranks on one sufficiently large host")
 	}
 }
@@ -44,8 +44,8 @@ func TestTopologyFitsHonorsExplicitSpreadDisablement(t *testing.T) {
 func TestReserveTopologyPreventsSameTickDoubleClaim(t *testing.T) {
 	exp := distributedExperiment(2, 1)
 	byNode := map[string]map[string]int64{
-		"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1},
-		"node-b": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1},
+		"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1},
+		"node-b": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1},
 	}
 	if !topologyFits(byNode, nil, nil, exp) {
 		t.Fatal("initial topology should fit")
@@ -61,7 +61,7 @@ func TestReserveTopologyPreventsSameTickDoubleClaim(t *testing.T) {
 func TestTopologyFitsRequiresDeclaredNodeSelector(t *testing.T) {
 	exp := distributedExperiment(1, 1)
 	exp.Job.NodeSelector = map[string]string{"vendor.example/model": "wanted"}
-	capacity := map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1}}
+	capacity := map[string]map[string]int64{"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}}
 	if topologyFits(capacity, nil, map[string]map[string]string{"node-a": {"vendor.example/model": "other"}}, exp) {
 		t.Fatal("resource capacity on a node that fails the job-declared selector was accepted")
 	}
@@ -75,8 +75,8 @@ func TestResolveClusterAndFootprintSkipsTopologyInfeasibleCluster(t *testing.T) 
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fp, "cluster-b": fp}
 	nodes := map[string]map[string]map[string]int64{
-		"cluster-a": {"node-a": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 2}},
-		"cluster-b": {"node-b1": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1}, "node-b2": {"nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1}},
+		"cluster-a": {"node-a": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 2}},
+		"cluster-b": {"node-b1": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}, "node-b2": {"nvidia.com/gpu.product=nvidia-h100-80gb-hbm3": 1}},
 	}
 	cluster, _ := resolveClusterAndFootprint(avail, nil, nodes, nil, nil, exp)
 	if cluster != "cluster-b" {
@@ -89,7 +89,7 @@ func TestResolveClusterAndFootprintSkipsTopologyInfeasibleCluster(t *testing.T) 
 // were placed in desired state, held a reservation, and sat unschedulable until the stuck-pending
 // deadline, while the disbalance evictor never saw them because it only runs when admission fails.
 func TestReservePlacementRequiresTheWholeFootprintOnOneNode(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
+	const flavor = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 	exp := distributedExperiment(1, 1)
 	exp.Job.CPU = "4"
 
@@ -112,7 +112,7 @@ func TestReservePlacementRequiresTheWholeFootprintOnOneNode(t *testing.T) {
 
 // Cluster-wide room is not node room: two half-full nodes cannot host one indivisible rank.
 func TestReservePlacementDoesNotPoolCPUAcrossNodes(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
+	const flavor = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 	exp := distributedExperiment(1, 1)
 	exp.Job.CPU = "6"
 

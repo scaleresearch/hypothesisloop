@@ -144,7 +144,7 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 func TestOnlyASlotOfTheJobsOwnShapeTakesIt(t *testing.T) {
 	c := twoH100AndACPU()
 	otherType := h100Job("other-type", "2")
-	otherType.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
+	otherType.AcceleratorType = "nvidia.com/gpu.product=nvidia-l40"
 	twoDevices := h100Job("two-devices", "2")
 	twoDevices.AcceleratorCount, twoDevices.Job.AcceleratorCount = 2, 2
 	twoNodes := cpuJob("two-nodes", "2")
