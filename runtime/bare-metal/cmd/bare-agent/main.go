@@ -89,12 +89,6 @@ func main() {
 		log("%s", fact)
 	}
 
-	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
-	if err := exec.SetupCluster(setupCtx); err != nil {
-		log("SetupCluster: %v", err)
-	}
-	setupCancel()
-
 	a := &agentloop.Agent{
 		ClusterName:       clusterName,
 		APIURL:            apiURL,

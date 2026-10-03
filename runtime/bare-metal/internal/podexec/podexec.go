@@ -230,11 +230,6 @@ func (e *Executor) NodeName() string { return e.nodeName }
 // Engine returns the resolved container engine's name ("podman" or "docker").
 func (e *Executor) Engine() string { return e.engineName }
 
-// SetupCluster has nothing to bootstrap: the container engine needs no namespace/priority-class
-// equivalent created up front. Present only to keep the same call shape as
-// k8sexec.JobWorkloadClient.
-func (e *Executor) SetupCluster(_ context.Context) error { return nil }
-
 const machineIDPath = "/etc/machine-id"
 
 // GetClusterID returns the host's /etc/machine-id: set once at OS install, stable for the
