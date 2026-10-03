@@ -282,12 +282,13 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 			// Reporting it as running billed a wedged container as if it were training.
 			observed.Phase = workload.JobPhasePending
 		case "exited", "stopped":
-			code, err := e.exitCode(ctx, c.ID)
+			code, reported, err := e.exitCode(ctx, c.ID)
 			if err != nil {
 				return pending, err
 			}
+			// An exit nobody reported is not a success. PollPhaseDetail says why it is a failure.
 			observed.Phase = workload.JobPhaseFailed
-			if code == 0 {
+			if reported && code == 0 {
 				observed.Phase = workload.JobPhaseSucceeded
 			}
 		default:

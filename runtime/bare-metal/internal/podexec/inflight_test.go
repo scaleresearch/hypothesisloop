@@ -28,6 +28,8 @@ type fakeContainer struct {
 	exit   int
 	// written is the size of the writable layer, reported only to a list that asks for sizes.
 	written int64
+	// stateless makes an inspect answer without a state.
+	stateless bool
 }
 
 // fakeEngine is a container engine whose pulls, creates and stops block until the test lets
@@ -156,6 +158,9 @@ func (f *fakeEngine) ContainerInspect(ctx context.Context, id string, _ client.C
 	c := f.containers[id]
 	if c == nil {
 		return client.ContainerInspectResult{}, fmt.Errorf("container %s: %w", id, errdefs.ErrNotFound)
+	}
+	if c.stateless {
+		return client.ContainerInspectResult{Container: container.InspectResponse{HostConfig: c.host}}, nil
 	}
 	return client.ContainerInspectResult{Container: container.InspectResponse{HostConfig: c.host, State: &container.State{ExitCode: c.exit}}}, nil
 }

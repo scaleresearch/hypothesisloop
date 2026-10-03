@@ -100,16 +100,17 @@ func trimSlashPrefix(names []string) []string {
 
 // exitCode inspects id and returns its exit code — a separate call from listManagedContainers
 // because container.Summary (the list response) does not carry it, only container.InspectResponse
-// does. Called only for containers already known to be exited, not on every list.
-func (e *Executor) exitCode(ctx context.Context, id string) (int, error) {
+// does. Called only for containers already known to be exited, not on every list. reported is
+// false when the engine's answer carries no state, so how the command ended is not known.
+func (e *Executor) exitCode(ctx context.Context, id string) (code int, reported bool, err error) {
 	resp, err := e.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
-		return 0, fmt.Errorf("podexec: inspect container %s: %w", id, err)
+		return 0, false, fmt.Errorf("podexec: inspect container %s: %w", id, err)
 	}
 	if resp.Container.State == nil {
-		return 0, nil
+		return 0, false, nil
 	}
-	return resp.Container.State.ExitCode, nil
+	return resp.Container.State.ExitCode, true, nil
 }
 
 // containerSpec is the fully-resolved container configuration for one experiment, produced by

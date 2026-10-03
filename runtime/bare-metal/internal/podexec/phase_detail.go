@@ -40,6 +40,9 @@ func (e *Executor) PollPhaseDetail(ctx context.Context, experimentID string, _ i
 		// (Docker created it, it has landed), matching how a k8s pod that has bound is counted.
 		scheduledNodes = 1
 		if resp.Container.State == nil {
+			if c.State == "exited" || c.State == "stopped" {
+				return domain.PhaseReasonContainerFailed, "the engine reports no state for the exited container, so how its command ended is unknown", restartCount, scheduledNodes, "", nil
+			}
 			return "", "", restartCount, scheduledNodes, "", nil
 		}
 		if resp.Container.State.Error != "" {

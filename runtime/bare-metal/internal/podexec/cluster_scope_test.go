@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 	"log"
 	"os"
 	"slices"
@@ -99,6 +100,26 @@ func TestAContainerCarriesTheClusterThatStartedIt(t *testing.T) {
 	}
 	if cs.Labels[LabelCluster] != "east" {
 		t.Fatalf("labels = %v, want the cluster named", cs.Labels)
+	}
+}
+
+// An exited container the engine reports no state for read as exit code 0, a job that succeeded.
+func TestAnExitedContainerWithNoReportedStateIsFailedWithAReason(t *testing.T) {
+	engine := newFakeEngine()
+	c := jobContainer("east", "exited", true)
+	c.labels[LabelExperimentID] = "unknown-end"
+	c.stateless = true
+	engine.containers[containerName("unknown-end")] = c
+	east := newFakeExecutor(engine)
+	east.clusterName = "east"
+
+	status, err := east.PollJobStatus(context.Background(), "unknown-end")
+	if err != nil || status.Phase != workload.JobPhaseFailed {
+		t.Fatalf("status = %s (err %v), want failed: nothing says the command succeeded", status.Phase, err)
+	}
+	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "unknown-end", 0)
+	if err != nil || reason != domain.PhaseReasonContainerFailed || !strings.Contains(message, "no state") {
+		t.Fatalf("phase detail = %q %q (err %v), want the failure and that the engine reported no state", reason, message, err)
 	}
 }
 
