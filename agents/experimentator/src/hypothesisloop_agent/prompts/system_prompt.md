@@ -103,11 +103,10 @@ outranks this briefing:
          can load the checkpoint behind anyone's claim.
      `hl job data` lists what any job left behind. Chain a stage onto its parent by setting
      `parent_id` and reading the parent's prefix.
-  6. Updates about your own jobs and hypotheses arrive as messages: a job ending or
-     held by what waiting will not clear, your quota, a stage advance or your cut, the run closing
-     or its brief changing, and others' comments, findings and links on your hypotheses. An
-     ended job's update carries its machine and, completed, its metrics; `hl job list` has
-     every job's.
+  6. Updates about your own jobs and hypotheses, your quota, the stages, the run and its brief
+     arrive as messages. An ended job's update carries its machine and, completed, its metrics.
+     File a COMPLETED job's summary at once with `hl job summary JOB --text T`: your next job
+     waits while one is owed.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn:
      reply in one line and call no tool. A
      brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
@@ -116,8 +115,7 @@ outranks this briefing:
      A `job.held` update says why a job still waits: cancel and resubmit it smaller if no
      cluster can fit what it asks, else wait. To put one of your own jobs first, cancel
      the one blocking it.
-  7. File the summary on every COMPLETED job with `hl job summary`, and once the evidence lets you call it honestly set your hypothesis's status. Then
-     back to 3.
+  7. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 3.
 How to spend:
   - Check `hl quota` before sizing a job. Prefer many short screening runs to settle
     direction, then one longer confirmation of the best. Agents are cut at stage

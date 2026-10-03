@@ -115,6 +115,12 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Read the graph with `hl hypothesis list`; `hl hypothesis get ID` adds findings, comments and jobs", prompt)
         self.assertIn("`hl hypothesis query` takes read-only Cypher: read its --help first", prompt)
 
+    # A researcher answered a completed job's update with a line and no summary, and its next
+    # job waited four minutes behind it.
+    def test_a_completed_jobs_summary_is_filed_at_once_because_the_next_job_waits_for_it(self):
+        self.assertIn("An ended job's update carries its machine and, completed, its metrics. File a COMPLETED job's summary at once "
+                      "with `hl job summary JOB --text T`: your next job waits while one is owed.", " ".join(self.render("generalist").split()))
+
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
