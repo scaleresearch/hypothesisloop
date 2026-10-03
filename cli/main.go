@@ -1149,12 +1149,13 @@ func cmdWatch(apiURL, token string, args []string, stdout, stderr io.Writer) int
 
 Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
 or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.
-received_at is when hl read the event, in UTC: the platform sends no time with one. An event
-that happens while you watch is read as it happens. One that waited from before the watch
-carries the time of this read and happened earlier.
-A job that waits is told as experiment.blocked, and once as job.held when it has waited longer
-than its estimate: value is the code of what it waits for (not_admitted_reason), detail the
-sentence (not_admitted_message).`, stderr)
+occurred_at is when the change was made, in UTC, the same on an event that happens while you
+watch and on one replayed from before the watch. A change from before the platform kept the
+time is replayed without it.
+A job that waits is told as experiment.blocked and as job.held: at once when a summary you owe
+holds it (summary_gate), and for any other reason once, when it has waited longer than its
+estimate. value is the code of what it waits for (not_admitted_reason), detail the sentence
+(not_admitted_message).`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")

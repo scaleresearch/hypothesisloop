@@ -45,27 +45,23 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
 }
 
 // notAdmittedLabel is the label of a job's not_admitted_reason, followed by the scheduler's own
-// sentence (not_admitted_message) when it wrote one.
+// sentence (not_admitted_message), which the platform stores with every reason.
 export function notAdmittedLabel(reason: string, message?: string): string {
   const label = NOT_ADMITTED_REASON_LABELS[reason] ?? reason
   return message ? `${label}: ${message}` : label
 }
 
-// An eviction reason may carry an explanation after its code, as "code: detail": the disbalance
-// evictor states what the job requested, what it was entitled to and what that stranded.
-// Grouping or labelling must key on the code alone, or every distinct explanation becomes its own
-// category and no label ever matches.
-export function evictionCode(reason?: string | null): string {
-  if (!reason) return ''
-  const cut = reason.indexOf(':')
-  return cut === -1 ? reason : reason.slice(0, cut)
+// splitReason cuts a reason the platform wrote as "code: sentence" at its first ": ", as the
+// platform does (domain.SplitQueueReason). Grouping or labelling keys on the code alone, or every
+// distinct sentence becomes its own category and no label ever matches.
+function splitReason(reason?: string | null): [code: string, sentence: string] {
+  if (!reason) return ['', '']
+  const cut = reason.indexOf(': ')
+  return cut === -1 ? [reason, ''] : [reason.slice(0, cut), reason.slice(cut + 2).trim()]
 }
 
-// evictionDetail is the explanation without the code, empty when the reason carries none.
-function evictionDetail(reason?: string | null): string {
-  if (!reason) return ''
-  const cut = reason.indexOf(':')
-  return cut === -1 ? '' : reason.slice(cut + 1).trim()
+export function evictionCode(reason?: string | null): string {
+  return splitReason(reason)[0]
 }
 
 // saidLines is a runtime's message one line per row: that of a failed job ends with the last
@@ -76,17 +72,15 @@ export function saidLines(message: string): string[] {
 
 // evictionDetailLines is the explanation one line per row, empty when the reason carries none.
 export function evictionDetailLines(reason?: string | null): string[] {
-  const detail = evictionDetail(reason)
+  const [, detail] = splitReason(reason)
   return detail ? saidLines(detail) : []
 }
 
 // evictionLabel is what a reader should see: the mapped human label for the code, followed by the
 // scheduler's own explanation when there is one.
 export function evictionLabel(reason?: string | null): string {
-  if (!reason) return ''
-  const code = evictionCode(reason)
+  const [code, detail] = splitReason(reason)
   const label = EVICTION_REASON_LABELS[code] ?? code
-  const detail = evictionDetail(reason)
   return detail ? `${label} — ${detail}` : label
 }
 

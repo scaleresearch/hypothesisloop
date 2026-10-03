@@ -17,6 +17,8 @@ docstring previously blamed is no longer reproducible against this stack.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from conftest import make_agent
@@ -49,12 +51,27 @@ def test_summary_gate_matches_needs_summary_listing(api, experiment, run_id, dea
 
     held_code, held = api.submit_job_expect(pe_id, agent, hours=0.01)
     assert held_code < 400, f"a further submission answered {held_code}; it must be accepted and held in the queue"
-    eventually(
+    gated = eventually(
         f"{held} to be held by the summary gate",
         lambda: api.experiment(held),
         accept=lambda e: e["status"] == "QUEUED" and e.get("not_admitted_reason") == "summary_gate",
         deadline=deadline,
     )
+    sentence = gated["not_admitted_message"]
+    assert job in sentence and f"hl job summary {job} --text T" in sentence, f"the gate does not name the job owed and the command: {sentence!r}"
+    # The gate is announced at once, with no wait for the long-wait notice.
+    announced = eventually(
+        f"job.held for {held}",
+        lambda: [
+            json.loads(line)
+            for line in api.hl_expect("watch", "--experiment", held, "--kinds", "job.held", "--since", "1", "--no-wait", "--timeout", "5", timeout=20).stdout.splitlines()
+            if line.startswith("{")
+        ],
+        accept=lambda events: bool(events),
+        deadline=deadline,
+    )
+    assert [(e["kind"], e["subject"], e["value"], e["detail"]) for e in announced] == [("job.held", held, "summary_gate", sentence)], announced
+    assert announced[0]["occurred_at"], f"job.held says no time: {announced[0]}"
 
     api.file_finding(job)
     eventually(
