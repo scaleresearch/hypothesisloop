@@ -510,6 +510,19 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
     def stopped() -> bool:
         return stop_flag[0]
 
+    async def over(events: list[dict]) -> bool:
+        """Whether the run loop stops here, after the last turn when there is a platform to file
+        with: a run it ended and a machine told to stop get one, a refused token and a platform
+        out of reach for the limit get none. The one place a last turn is given."""
+        lost = core.run_over(setup)
+        if not lost and not stopped():
+            return False
+        log.info("stopping: %s", lost or "received signal")
+        if not core.lost_platform(lost):
+            await _last_turn(client, setup, watch_env, events)
+            await _store_session(setup)
+        return True
+
     connecting = time.monotonic()
     async with ClaudeSDKClient(options=options) as client:
         log.info("model CLI connected in %.1fs", time.monotonic() - connecting)
@@ -546,9 +559,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if got_result:
                 await _store_session(setup)
 
-            if stopped() and got_result and not rate_limited_resets_at:
-                await _last_turn(client, setup, watch_env, [])
-                await _store_session(setup)
+            if got_result and not rate_limited_resets_at and await over([]):
                 return None, False
 
             if rate_limited_resets_at:
@@ -572,11 +583,6 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # broken session as an idle agent. Route it through the same backoff as a
                 # transient error instead.
                 log.warning("turn completed with an underlying error (is_error) — treating as transient")
-                return None, False
-
-            reason = core.stop_reason(setup, stop_flag)
-            if reason:
-                log.info("stopping: %s", reason)
                 return None, False
 
             if context_tokens >= _CONTEXT_COMPACTION_THRESHOLD_TOKENS:
@@ -612,19 +618,13 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
                 # A batch that tells nothing held only a revision answered since: the wait goes on.
                 if told or not events or stopped():
                     break
-            if stopped():
-                await _last_turn(client, setup, watch_env, events)
-                await _store_session(setup)
+            if not told and await over(events):
                 return None, False
             if told:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
                 await client.query(told)
                 continue
-            reason = core.stop_reason(setup, stop_flag)
-            if reason:
-                log.info("stopping: %s", reason)
-                return None, False
             log.info("no platform updates for %ds, nudging", updates.IDLE_NUDGE_S)
             await client.query(updates.IDLE_PROMPT)
 
@@ -647,7 +647,7 @@ async def _run(setup: core.RunSetup, model: str) -> None:
     beat = asyncio.ensure_future(_progress.run())
     storing = asyncio.ensure_future(_keep_session_stored(setup))
     try:
-        await core.run_until_lost(setup, _run_until_stopped(setup, model, stop_flag))
+        await core.run_until_lost(setup, _run_until_stopped(setup, model, stop_flag), stop_flag)
     finally:
         beat.cancel()
         storing.cancel()

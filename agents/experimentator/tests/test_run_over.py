@@ -84,7 +84,7 @@ class RunUntilLostTest(unittest.IsolatedAsyncioTestCase):
 
         answers = [{}, REFUSED]
         with mock.patch.object(core, "_RUN_CHECK_INTERVAL_S", 0.01), self.assertRaises(SystemExit) as exited:
-            await asyncio.wait_for(core.run_until_lost(setup(lambda: answers.pop(0)), turn_in_flight()), timeout=5)
+            await asyncio.wait_for(core.run_until_lost(setup(lambda: answers.pop(0)), turn_in_flight(), [False]), timeout=5)
         self.assertTrue(str(exited.exception).startswith("agent: exiting: the platform refuses this token, so its run is over"))
         self.assertEqual(dropped, [True])
 
@@ -95,17 +95,24 @@ class RunUntilLostTest(unittest.IsolatedAsyncioTestCase):
         async def broken():
             raise KeyError("session_id")
 
-        await asyncio.wait_for(core.run_until_lost(setup(dict), done()), timeout=5)
+        await asyncio.wait_for(core.run_until_lost(setup(dict), done(), [False]), timeout=5)
         with self.assertRaises(KeyError):
-            await asyncio.wait_for(core.run_until_lost(setup(dict), broken()), timeout=5)
+            await asyncio.wait_for(core.run_until_lost(setup(dict), broken(), [False]), timeout=5)
 
-    async def test_a_run_the_platform_ended_is_left_to_the_turn_boundary(self):
+    # An experiment reached its end while its coordinator was in a turn. No signal had come when
+    # the turn ended, so the process exited with no last turn and the summary was never written.
+    async def test_a_run_the_platform_ended_asks_for_the_stop_and_leaves_the_work_its_last_turn(self):
+        stop_flag = [False]
+
         async def last_turn():
+            while not stop_flag[0]:
+                await asyncio.sleep(0.01)
             await asyncio.sleep(0.1)
-            return None
+            return "summary filed"
 
-        with mock.patch.object(core, "_RUN_CHECK_INTERVAL_S", 0.01):
-            await asyncio.wait_for(core.run_until_lost(setup(lambda: {"ended": "cut"}), last_turn()), timeout=5)
+        with mock.patch.object(core, "_RUN_CHECK_INTERVAL_S", 0.01), self.assertLogs("llm_agent"):
+            filed = await asyncio.wait_for(core.run_until_lost(setup(lambda: {"ended": "cut"}), last_turn(), stop_flag), timeout=5)
+        self.assertEqual(filed, "summary filed")
 
 
 if __name__ == "__main__":

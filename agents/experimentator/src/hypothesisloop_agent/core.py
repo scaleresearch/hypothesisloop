@@ -267,22 +267,25 @@ def lost_platform(reason: str | None) -> bool:
     return bool(reason) and not reason.startswith(_ENDED)
 
 
-async def until_lost(setup: RunSetup) -> str:
+async def until_lost(setup: RunSetup, stop_flag: list) -> str:
     """Returns once the platform refuses this process or has been out of reach for the limit,
     with the reason. Whoever awaits it ends the process then, whatever turn or wait is in flight.
-    A run the platform ended is left to the turn boundary and the signal: its agent may still have
-    a last turn to file what it owes."""
+    A run the platform ended asks for the stop a signal asks for: its agent may still have a last
+    turn to file what it owes, and only the wind-down its token has left to take it in."""
     while True:
         reason = await asyncio.to_thread(run_over, setup)
         if lost_platform(reason):
             return reason
+        if reason and not stop_flag[0]:
+            log.info("%s: stopping", reason)
+            stop_flag[0] = True
         await outage.next_read(_RUN_CHECK_INTERVAL_S)
 
 
-async def run_until_lost(setup: RunSetup, work) -> None:
+async def run_until_lost(setup: RunSetup, work, stop_flag: list) -> None:
     """Awaits work, the run loop, and exits the process as soon as the platform is lost:
     its turn in flight is dropped and no last turn follows, since both need the platform."""
-    work, lost = asyncio.ensure_future(work), asyncio.ensure_future(until_lost(setup))
+    work, lost = asyncio.ensure_future(work), asyncio.ensure_future(until_lost(setup, stop_flag))
     try:
         await asyncio.wait({work, lost}, return_when=asyncio.FIRST_COMPLETED)
         if work.done():
@@ -296,7 +299,5 @@ async def run_until_lost(setup: RunSetup, work) -> None:
 
 
 def stop_reason(setup: RunSetup, stop_flag: list) -> str | None:
-    """Why the run loop stops at a turn boundary, None while it goes on: a signal, or run_over."""
-    if stop_flag[0]:
-        return "received signal"
-    return run_over(setup)
+    """Why the run loop stops, None while it goes on: run_over, or a signal."""
+    return run_over(setup) or ("received signal" if stop_flag[0] else None)

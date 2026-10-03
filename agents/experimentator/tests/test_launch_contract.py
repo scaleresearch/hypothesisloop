@@ -77,6 +77,7 @@ class ErrorTurnClient:
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str):
         setup = SimpleNamespace(system_prompt="", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                client=SimpleNamespace(get_signup=lambda *_: {}),
                                 cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
         with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
@@ -107,6 +108,7 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
 
         with mock.patch.object(run, "ClaudeSDKClient", Client):
             setup = SimpleNamespace(system_prompt="BRIEFING", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
+                                    client=SimpleNamespace(get_signup=lambda *_: {}),
                                     cfg=SimpleNamespace(agent_id="ag-1", flavor="generalist", api_url="http://x", token=AGENT_TOKEN,
                                                         platform_experiment_id="pe-1"))
             with mock.patch.object(Client, "result", "Connection error."), contextlib.redirect_stdout(io.StringIO()):

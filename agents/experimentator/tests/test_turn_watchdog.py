@@ -164,6 +164,40 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_stop_between_turns_gives_one_last_turn(self):
         self.assertEqual(await self.stop_while_idle([], []), ["Begin.", LAST])
 
+    # A run that reached its end with no signal yet ended the process at the turn boundary, so
+    # a coordinator never wrote the summary its briefing promises a turn for. A token the
+    # platform refuses has nothing left to file with.
+    async def run_ends_while_idle(self, flavor: str, signup: dict | Exception, experiment: dict) -> list[str]:
+        async def nothing(env, stopped, idle_s):
+            return []
+
+        def get_signup(*_):
+            if isinstance(signup, Exception):
+                raise signup
+            return signup
+
+        setup = _setup()
+        setup.cfg.flavor = flavor
+        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=get_signup)
+        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(run.updates, "next_batch", nothing), \
+                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                contextlib.redirect_stdout(io.StringIO()):
+            await asyncio.wait_for(run._run_one_session(setup, "m", None, [False]), timeout=5)
+        return HangingClient.instances[-1].queries
+
+    async def test_a_run_the_platform_ended_gets_its_last_turn_with_no_signal(self):
+        closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "end_time_reached"}
+        self.assertEqual(await self.run_ends_while_idle("coordinator", {}, closed), [
+            "Begin.", "You are being stopped because the platform experiment reached its end time and the platform closed it at "
+                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT])
+        self.assertEqual(await self.run_ends_while_idle("generalist", {"ended": "cut"}, {"status": "running"}), [
+            "Begin.", "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT])
+
+    async def test_a_refused_token_gets_no_last_turn(self):
+        refused = run.core.api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
+        self.assertEqual(await self.run_ends_while_idle("generalist", refused, {"status": "running"}), ["Begin."])
+
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
         done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc 0.9"}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
@@ -211,7 +245,7 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
                 sleeps.append(seconds)
             await really_sleep(0)
 
-        async def never(setup):
+        async def never(setup, stop_flag):
             await asyncio.Event().wait()
 
         with mock.patch.object(run, "_run_one_session", session), \
