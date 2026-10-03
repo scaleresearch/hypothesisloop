@@ -18,6 +18,7 @@ vi.mock('@/lib/api', () => ({
   apiSend: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
 }))
 
+const sweeper = { flavor: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
 const proposal: Proposal = {
   experiment: {
     name: 'Cosine or constant',
@@ -30,7 +31,7 @@ const proposal: Proposal = {
   },
   budget_accelerator_hours: 6,
   duration_hours: 4,
-  agents: [{ flavor: 'hyperparameter-search' }, {}],
+  agents: [sweeper, {}],
   accelerator_type: 'rtx-4090',
   image: 'pytorch',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
@@ -131,8 +132,7 @@ describe('a proposed draft', () => {
     show(proposed())
     expect(await screen.findByText('val_loss, lower is better')).toBeTruthy()
     expect(screen.getByText('exact_match must stay at or above 1')).toBeTruthy()
-    const measured = screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090, in the image/)
-    expect(measured.textContent).toContain('in the image pytorch, before any researcher starts')
+    expect(screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090 before any researcher starts/)).toBeTruthy()
     expect(screen.getByText(/the figures are an estimate, since nothing has run, and the budget is a cap/)).toBeTruthy()
     expect(screen.queryByText(/baseline 1/)).toBeNull()
     expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()
@@ -154,8 +154,53 @@ describe('a proposed draft', () => {
     await userEvent.type(researchers, '3')
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}, {}],
+      name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [sweeper, {}, {}],
     })
+  })
+
+  it('shows the experiment filled in: its name, what it runs on, each researcher, the rules and the brief', async () => {
+    show(draft('proposed', {
+      proposed_at: '2026-10-05T12:10:00Z',
+      proposal: { ...proposal, cpu: '8', memory: '32Gi', experiment: { ...proposal.experiment, stages: [{ length_pct: 60, evict_pct: 50, max_job_hours: 1 }, { length_pct: 40, evict_pct: 0 }] } },
+    }))
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Cosine or constant')
+    const stated = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent
+    expect([stated('Accelerator'), stated('Image'), stated('CPU'), stated('Memory')]).toEqual(['rtx-4090', 'pytorch', '8', '32Gi'])
+    expect(screen.queryByText('Storage')).toBeNull()
+    const [first, second] = within(screen.getByText('Researchers', { selector: 'span' }).parentElement!).getAllByRole('listitem')
+    expect(first.textContent).toBe('Researcher 1specialization hyperparameter-searchmodel claude-opus-4-5Find the schedule: warmup length first, then the decay.')
+    expect(second.textContent).toBe('Researcher 2specialization generalistmodel the platform\'s defaultNo direction of its own: it works from the brief.')
+    expect(screen.getByText('Stage 1: 60% of the run, then the worst 50% of researchers are cut, no job longer than 1 h')).toBeTruthy()
+    expect(screen.getByText('Stage 2: 40% of the run, nobody is cut')).toBeTruthy()
+    expect(screen.getByText('Every job reports its metrics every 30 s')).toBeTruthy()
+    expect(screen.getByText('Train the small transformer in train.py and report val_loss.')).toBeTruthy()
+    expect(screen.getByText('One seed only.')).toBeTruthy()
+  })
+
+  it('accepts under the name the person gave it, and lists a researcher for each one asked for', async () => {
+    show(proposed())
+    const name = screen.getByLabelText('Name')
+    await userEvent.clear(name)
+    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', true)
+    await userEvent.type(name, 'Schedules on tiny transformers')
+    const researchers = screen.getByLabelText('Researchers')
+    await userEvent.clear(researchers)
+    await userEvent.type(researchers, '1')
+    expect(screen.queryByText('Researcher 2')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
+      name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, agents: [sweeper],
+    })
+  })
+
+  // A proposal stored before proposals named an image read "in the image undefined".
+  it('states no image, rule or resource the proposal does not', async () => {
+    const { image: _image, ...before } = proposal
+    show(draft('proposed', { proposed_at: '2026-10-05T12:10:00Z', proposal: { ...before, experiment: { ...proposal.experiment, report_interval_seconds: undefined } } }))
+    expect(screen.getByText('rtx-4090', { selector: 'dd' })).toBeTruthy()
+    expect(screen.queryByText('Image')).toBeNull()
+    expect(screen.queryByText('Rules of the run')).toBeNull()
+    expect(document.body.textContent).not.toContain('undefined')
   })
 
   it('says why the API refused to accept', async () => {
@@ -178,14 +223,15 @@ describe('a proposed draft', () => {
     show(draft('revising', { proposal, revisions: [{ message: 'It must fit one RTX 4090.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
     expect(screen.getByText('It must fit one RTX 4090.')).toBeTruthy()
     expect(screen.getByText(/Ada asked/)).toBeTruthy()
-    expect(screen.getByText('Proposed experiment: Cosine or constant')).toBeTruthy()
+    expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
   })
 
   it('shows a reader of a shared draft the proposal and no control that writes', async () => {
     render(<SWRConfig value={{ provider: () => new Map() }}><DraftView draft={proposed()} readOnly /></SWRConfig>)
-    expect(screen.getByText('Proposed experiment: Cosine or constant')).toBeTruthy()
+    expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
+    expect(screen.getByLabelText('Budget (accelerator-hours)')).toHaveProperty('disabled', true)
     for (const name of ['Accept and run', 'Revise', 'Abandon this draft']) expect(screen.queryByRole('button', { name })).toBeNull()
   })
 

@@ -16,7 +16,8 @@ export interface Proposal {
     name: string
     description: string
     metrics: MetricDefinition[]
-    report_interval_seconds: number
+    // Each left out is the platform's own setting.
+    report_interval_seconds?: number
     stages?: PlatformExperiment['stages']
   }
   budget_accelerator_hours: number
@@ -66,6 +67,7 @@ export type Draft = PlatformExperiment & {
 
 /** What the person who accepts states themselves, whatever was proposed. */
 export interface Acceptance {
+  name: string
   budget_accelerator_hours: number
   duration_hours: number
   agents: ProposedAgent[]

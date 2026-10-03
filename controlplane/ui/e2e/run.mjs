@@ -733,7 +733,8 @@ async function scenarios(browser) {
   // The planner proposed: the card says nothing has run yet, with no number nobody measured, and the questions first.
   draftNow = { ...draftNow, proposal: draftProposal, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
   await page.reload()
-  await page.getByText('Proposed experiment: Cosine or constant').waitFor()
+  await page.getByRole('heading', { name: 'Proposed experiment' }).waitFor()
+  assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Cosine or constant')
   await page.getByText('val_loss, lower is better', { exact: true }).waitFor()
   await page.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090/).waitFor()
   await page.getByText('Is four hours enough?').waitFor()
@@ -752,8 +753,8 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Accept and run' }).click()
   await draftAccepted
   assert.deepEqual(draftWrites, [
-    { path: `/platform-experiments/${draftID}/accept`, body: { budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}] } },
-  ], 'the budget the person typed, the proposal\'s duration and researchers, and no start: the platform starts it once its baseline is declared')
+    { path: `/platform-experiments/${draftID}/accept`, body: { name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}] } },
+  ], 'the proposal\'s name, the budget the person typed, the proposal\'s duration and researchers, and no start: the platform starts it once its baseline is declared')
   await page.unroute(draftAPI)
 
   section('the idea form has no name field and the idea is filed under the signed-in name')

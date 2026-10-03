@@ -2,136 +2,22 @@
 
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
-import { formatAccH, formatDate, relTime } from '@/lib/format'
-import { abandonDraft, acceptDraft, reviseDraft } from '@/lib/planning'
-import type { Draft, Proposal } from '@/lib/planning'
+import { formatDate, relTime } from '@/lib/format'
+import { abandonDraft, reviseDraft } from '@/lib/planning'
+import type { Draft } from '@/lib/planning'
 import { useRoster } from '@/lib/roster'
-import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
-import type { MetricDefinition } from '@/types'
 import { actorLabel } from '@/components/actor'
 import { AgentAtWork } from '@/components/agent-at-work'
+import { ProposalForm } from '@/components/proposal-form'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { FormField } from '@/components/ui/form-field'
-import { Input, Textarea } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { Callout, InlineError } from '@/components/ui/status-message'
-import { Eyebrow, Pill } from '@/components/ui/text'
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
-
-function metricLine(metric: MetricDefinition): string {
-  if (metric.role === 'constraint') {
-    return `${metric.key} must stay ${metric.direction === 'minimize' ? 'at or below' : 'at or above'} ${metric.bound}`
-  }
-  return `${metric.key}, ${metric.direction === 'minimize' ? 'lower is better' : 'higher is better'}`
-}
-
-function Sentences({ title, items }: { title: string; items?: string[] }) {
-  if (!items || items.length === 0) return null
-  return (
-    <div>
-      <Eyebrow className="mb-1 block">{title}</Eyebrow>
-      <ul className="list-disc pl-5 text-sm">
-        {items.map(item => <li key={item}>{item}</li>)}
-      </ul>
-    </div>
-  )
-}
-
-/** What the planner proposed, in the order a person decides by: what is measured, how, at what cost. Nothing has run. */
-function ProposalCard({ proposal }: { proposal: Proposal }) {
-  const metrics = proposal.experiment.metrics ?? []
-  return (
-    <Card>
-      <CardHeader>Proposed experiment: {proposal.experiment.name}</CardHeader>
-      <CardContent className="grid gap-4">
-        <Sentences title="Before you start, the planner asks" items={proposal.questions} />
-        <div>
-          <Eyebrow className="mb-1 block">What is measured</Eyebrow>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {metrics.map(metric => (
-              <Pill key={metric.key} tone={metric.role === 'constraint' ? 'warning' : 'success'} active={metric.role !== 'constraint' && metric.role !== 'attribute'}>
-                {metricLine(metric)}
-              </Pill>
-            ))}
-          </div>
-          <p className="text-sm">{proposal.metric_reason}</p>
-        </div>
-        <div>
-          <Eyebrow className="mb-1 block">How it is measured</Eyebrow>
-          <p className="text-sm">{proposal.measurement}</p>
-          <p className="mt-1 text-xs text-muted">
-            Nothing has run yet. Once you accept, the baseline is measured on {proposal.accelerator_type}, in the
-            image <span className="font-mono">{proposal.image}</span>, before any researcher starts.
-          </p>
-        </div>
-        <Sentences title="What could mislead" items={proposal.risks} />
-        <Sentences title="Left out on purpose" items={proposal.out_of_scope} />
-        <div>
-          <Eyebrow className="mb-1 block">The brief every researcher works from</Eyebrow>
-          <CollapsibleDescription text={proposal.experiment.description} />
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-/** What the run may spend and who runs it, stated by the person: the proposal's figures are where the fields start. */
-function Accept({ draft, proposal, onDone }: { draft: Draft; proposal: Proposal; onDone: () => void }) {
-  const [budget, setBudget] = useState(String(proposal.budget_accelerator_hours))
-  const [hours, setHours] = useState(String(proposal.duration_hours))
-  const [researchers, setResearchers] = useState(String(proposal.agents.length))
-  const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
-  const count = Number(researchers)
-  const valid = Number(budget) > 0 && Number(hours) > 0 && Number.isInteger(count) && count > 0
-
-  async function accept() {
-    setSending(true)
-    setError(null)
-    // The researchers proposed keep their flavors; one added beyond them is a generalist.
-    const agents = Array.from({ length: count }, (_, i) => proposal.agents[i] ?? {})
-    try {
-      await acceptDraft(draft.id, { budget_accelerator_hours: Number(budget), duration_hours: Number(hours), agents })
-      onDone()
-    } catch (e) {
-      setError(said(e))
-      setSending(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>Accept and run</CardHeader>
-      <CardContent className="grid gap-3">
-        <p className="text-sm text-muted">
-          These three are yours to state. The planner proposed {formatAccH(proposal.budget_accelerator_hours)} {unit} over {proposal.duration_hours} hours
-          for {proposal.agents.length} {proposal.agents.length === 1 ? 'researcher' : 'researchers'}; the figures are an estimate, since nothing has run, and the budget is a cap on everything the run spends, the baseline and burst hours included.
-        </p>
-        {proposal.sizing_reason && (
-          <div>
-            <Eyebrow className="mb-1 block">Why this size</Eyebrow>
-            <p className="text-sm">{proposal.sizing_reason}</p>
-          </div>
-        )}
-        <div className="grid gap-3 sm:grid-cols-3">
-          <FormField label={`Budget (${unit})`}><Input type="number" min={0} step="any" value={budget} onChange={e => setBudget(e.target.value)} /></FormField>
-          <FormField label="Duration (hours)"><Input type="number" min={0} step="any" value={hours} onChange={e => setHours(e.target.value)} /></FormField>
-          <FormField label="Researchers"><Input type="number" min={1} step={1} value={researchers} onChange={e => setResearchers(e.target.value)} /></FormField>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="primary" loading={sending} disabled={!valid} onClick={accept}>Accept and run</Button>
-          {error && <InlineError>{error}</InlineError>}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
 
 function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; onDone: () => void }) {
   const [message, setMessage] = useState('')
@@ -249,8 +135,9 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           </CardContent>
         </Card>
       )}
-      {draft.proposal && <ProposalCard proposal={draft.proposal} />}
-      {!readOnly && state === 'proposed' && draft.proposal && <Accept draft={draft} proposal={draft.proposal} onDone={reread} />}
+      {draft.proposal && (
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} onDone={reread} />
+      )}
       {!readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />}
       {!readOnly && (
         <div className="mt-2 flex items-center gap-3">
