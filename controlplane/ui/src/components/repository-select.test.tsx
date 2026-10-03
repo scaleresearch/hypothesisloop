@@ -27,28 +27,28 @@ const repositories: GitHubRepository[] = [
 
 const organisation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }
 
-function Picker({ initial = '' }: { initial?: string }) {
+function Picker({ initial = '', notCreated }: { initial?: string; notCreated?: string }) {
   const [value, setValue] = useState(initial)
   return (
     <>
-      <RepositorySelect value={value} onChange={setValue} />
+      <RepositorySelect value={value} onChange={setValue} notCreated={notCreated} />
       <output>{value}</output>
     </>
   )
 }
 
-function show(initial?: string) {
+function show(initial?: string, notCreated?: string) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <TenantContext.Provider value={resolved.tenant}><Picker initial={initial} /></TenantContext.Provider>
+      <TenantContext.Provider value={resolved.tenant}><Picker initial={initial} notCreated={notCreated} /></TenantContext.Provider>
     </SWRConfig>,
   )
 }
 
 beforeEach(() => {
-  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize' })
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockImplementation(async (_, params) => {
     const found = repositories.filter(r => r.repository.includes(params?.q ?? ''))
@@ -82,29 +82,24 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on second' }))
     expect(screen.getByRole('status').textContent).toBe('@second')
     expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
-    expect(screen.queryByText(/personal account/)).toBeNull()
   })
 
-  it('offers no new one on a personal account, and says why and what to do', async () => {
+  it('offers a new one on a personal account as on an organisation', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ ...organisation, account_login: 'ada', account_type: 'User' }], total: 1 })
-    show()
+    show('acme/open')
     await userEvent.click(await screen.findByRole('combobox'))
-    await screen.findByRole('option', { name: 'acme/open' })
-    expect(screen.queryByRole('option', { name: /A new private repository/ })).toBeNull()
-    expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('Choose a repository')
-    expect(screen.getByText(/GitHub lets the platform create no repository on a personal account \(ada\): create an empty private one there and choose it, or/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'connect an organisation', hidden: true }).getAttribute('href')).toBe('/settings?project=prj_1#github')
+    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository' }))
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
-  it('offers a new one on the organisation alone when a personal account is connected beside it', async () => {
+  it('offers a new one on either when a personal account is connected beside an organisation', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User' }], total: 2 })
     show()
     await userEvent.click(await screen.findByRole('combobox'))
-    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on acme' }))
-    expect(screen.getByRole('status').textContent).toBe('@acme')
-    expect(screen.queryByRole('option', { name: 'A new private repository on ada' })).toBeNull()
+    expect(await screen.findByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('option', { name: 'A new private repository on ada' }))
+    expect(screen.getByRole('status').textContent).toBe('@ada')
     expect(screen.queryByRole('option', { name: 'A new private repository' })).toBeNull()
-    expect(screen.getByText(/personal account \(ada\)/)).toBeTruthy()
   })
 
   it('offers no new one on an account whose type GitHub has not said', async () => {
@@ -113,7 +108,40 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.click(await screen.findByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
     expect(screen.queryByRole('option', { name: /A new private repository/ })).toBeNull()
-    expect(screen.queryByText(/personal account/)).toBeNull()
+    expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('Choose a repository')
+  })
+
+  it('leads to GitHub for a repository of the person\'s own, and lists it once they refresh', async () => {
+    show()
+    const create = await screen.findByRole('link', { name: 'create it on GitHub' })
+    expect(create.getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
+    expect(screen.getByRole('link', { name: 'add it to the App\'s repositories' }).getAttribute('href')).toBe('https://github.test/install')
+    await userEvent.click(screen.getByRole('combobox'))
+    await screen.findByRole('option', { name: 'acme/open' })
+    expect(screen.queryByRole('option', { name: /acme\/mine/ })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    repositories.push({ repository: 'acme/mine', installation_id: 7, private: true })
+    try {
+      await userEvent.click(screen.getByRole('button', { name: 'refresh this list' }))
+      await userEvent.click(screen.getByRole('combobox'))
+      await userEvent.click(await screen.findByRole('option', { name: /acme\/mine/ }))
+      expect(screen.getByRole('status').textContent).toBe('acme/mine')
+    } finally {
+      repositories.pop()
+    }
+  })
+
+  it('names no owner for a new repository on GitHub when several accounts are connected', async () => {
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User' }], total: 2 })
+    show()
+    expect((await screen.findByRole('link', { name: 'create it on GitHub' })).getAttribute('href')).toBe('https://github.test/new?visibility=private')
+  })
+
+  it('says what the API said when GitHub would not let the platform create one, beside the way on', async () => {
+    show('', 'the owner connects the account again')
+    expect((await screen.findByRole('alert')).textContent).toBe('The platform could not create the repository: the owner connects the account again')
+    expect(await screen.findByRole('link', { name: 'create it on GitHub' })).toBeTruthy()
+    expect(screen.getAllByRole('combobox')).toHaveLength(1)
   })
 
   it('is searched on the server once typing pauses', async () => {

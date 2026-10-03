@@ -951,7 +951,7 @@ async function scenarios(browser) {
   section('github: connecting leaves for GitHub once and returns to the card, with the real API\'s answer')
   await page.route(`${API}/github/app`, route => route.fulfill({
     headers: { 'access-control-allow-origin': UI },
-    json: { slug: 'hl-e2e', client_id: 'Iv1.e2e', install_url: `${IDP}/github/install`, authorize_url: `${IDP}/github/authorize?client_id=Iv1.e2e` },
+    json: { slug: 'hl-e2e', client_id: 'Iv1.e2e', install_url: `${IDP}/github/install`, authorize_url: `${IDP}/github/authorize?client_id=Iv1.e2e`, new_repository_url: `${IDP}/github/new` },
   }))
   const connects = []
   const returns = []
@@ -1083,9 +1083,10 @@ async function scenarios(browser) {
   const repositoryField = page.getByLabel('Repository').last()
   await repositoryField.click()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
-  // The one connected account is a personal one, where GitHub lets the platform create nothing.
-  assert.equal(await page.getByRole('option', { name: 'A new private repository' }).count(), 0)
-  await page.getByText('GitHub lets the platform create no repository on a personal account (ada-personal)').last().waitFor()
+  // The one connected account is a personal one, where the platform creates as on an organisation,
+  // and the way to a repository of the person's own is offered beside it.
+  assert.equal(await page.getByRole('option', { name: 'A new private repository' }).count(), 1)
+  await page.getByRole('link', { name: 'create it on GitHub' }).last().waitFor()
   await repositoryField.fill('wid')
   await page.getByRole('option', { name: /ada-personal\/open/ }).waitFor({ state: 'detached' })
   assert.ok(searches.includes('wid') && !searches.includes('w'), 'the search waited for typing to pause')

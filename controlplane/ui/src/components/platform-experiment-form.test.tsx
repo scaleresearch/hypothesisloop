@@ -49,7 +49,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 beforeEach(() => {
   onSaved.mockReset()
   vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
-  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize' })
+  vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: false }], total: 1 })
   vi.mocked(createPlatformExperiment).mockResolvedValue(created)
@@ -83,6 +83,28 @@ describe('a new platform experiment whose agents the operator runs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(vi.mocked(createPlatformExperiment).mock.calls[0][1].duration_hours).toBe(6)
+  })
+
+  // GitHub may refuse the platform a new repository. The form returns to where one is chosen
+  // and says so beside the way on: create it on GitHub, refresh, choose it.
+  it('returns to the repository when GitHub would not let the platform create one, and creates with the one then chosen', async () => {
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, 'the owner connects the account again, or creates a private repository on it', 'repository_authorization_required'))
+    show()
+    await essentials()
+    await userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('The platform could not create the repository: the owner connects the account again, or creates a private repository on it')
+    expect(screen.getByRole('link', { name: 'create it on GitHub' }).getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
+    expect((screen.getByPlaceholderText('e.g. Q3 Vision Benchmark') as HTMLInputElement).value).toBe('Run')
+    expect(onSaved).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole('button', { name: 'refresh this list' }))
+    await userEvent.click(screen.getByLabelText('Repository'))
+    await userEvent.click(await screen.findByRole('option', { name: 'acme/widgets' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Next: budget and rules' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created))
+    expect(vi.mocked(createPlatformExperiment).mock.calls[1][1].repository).toBe('acme/widgets')
   })
 })
 

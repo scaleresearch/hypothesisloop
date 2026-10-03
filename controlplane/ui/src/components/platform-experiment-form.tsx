@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { clsx } from 'clsx'
-import { ApiError, NO_EXPERIMENT_FILE, createPlatformExperiment, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api'
+import { ApiError, NO_EXPERIMENT_FILE, createPlatformExperiment, fetchExperimentFile, repositoryNotProvided, updatePlatformExperiment } from '@/lib/api'
 import type { PlatformExperimentPatch } from '@/lib/api'
 import { budgetUnit } from '@/lib/units'
 import type { TypeKind } from '@/lib/units'
@@ -333,6 +333,8 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   const [fromFile, setFromFile] = useState<{ repository: string; state: 'reading' | 'filled' | 'none' | 'failed'; message?: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // What the API said of a new repository GitHub would not give it, shown where one is chosen.
+  const [notCreated, setNotCreated] = useState<string | null>(null)
 
   // With hosted agents the experiment has the researchers asked for and nobody else joins, so
   // the cap follows their number until the person states one.
@@ -347,6 +349,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
   // is created. A name or a description already typed stays.
   async function chooseRepository(repository: string) {
     set('repository', repository)
+    setNotCreated(null)
     if (!repository) return setFromFile(null)
     setFromFile({ repository, state: 'reading' })
     try {
@@ -409,6 +412,7 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
+    setNotCreated(null)
     try {
       if (isEdit && initial) {
         const patch = changes()
@@ -436,7 +440,12 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
         onSaved(await createPlatformExperiment(project.id, payload))
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (repositoryNotProvided(err)) {
+        setNotCreated(err.message)
+        setStep(1)
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
       setSubmitting(false)
     }
@@ -467,9 +476,9 @@ export function PlatformExperimentForm({ initial, budgetKind, onSaved, onCancel 
                   <>
                     <FormField
                       label="Repository"
-                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, the platform creates a private repository for it on your connected GitHub organisation. Fixed once created."
+                      hint="Optional. The code this experiment works on: agents clone it and push their branches to it, and jobs check it out. A repository with a .hypothesisloop/experiment.yaml fills in the rest of this form. Left empty, the platform creates a private repository for it on your connected GitHub account. Fixed once created."
                     >
-                      <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} />
+                      <RepositorySelect value={form.repository} onChange={r => void chooseRepository(r)} notCreated={notCreated ?? undefined} />
                     </FormField>
                     {fromFile?.repository === form.repository && fromFile.state === 'reading' && (
                       <p className="text-xs text-subtle">Reading .hypothesisloop/experiment.yaml of {fromFile.repository}…</p>

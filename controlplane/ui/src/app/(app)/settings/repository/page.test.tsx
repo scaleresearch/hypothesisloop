@@ -61,7 +61,7 @@ describe('the address GitHub returns to', () => {
   it('connects through the API with the code, where GitHub returned it and the installation', async () => {
     arrive('code=c&state=s', { to: 'settings', projectID: 'prj_1' })
     const calls = vi.mocked(takeReturn).mock.calls[0][1]
-    vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a' })
+    vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', client_id: 'app', install_url: 'i', authorize_url: 'a', new_repository_url: 'n' })
     await expect(calls.authorizeURL()).resolves.toBe('a')
     await calls.connect('org_a', 'c', 9)
     expect(connectGitHubInstallation).toHaveBeenCalledExactlyOnceWith('org_a', {

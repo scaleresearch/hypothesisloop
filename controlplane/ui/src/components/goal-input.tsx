@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { repositoryNotProvided } from '@/lib/api'
 import { createDraft, MAX_GOAL_LENGTH } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
 import { Button } from '@/components/ui/button'
@@ -19,16 +20,20 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
   const [goal, setGoal] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // What the API said of a new repository GitHub would not give it, shown where one is chosen.
+  const [notCreated, setNotCreated] = useState<string | null>(null)
   const github = useGitHub()
   const [repository, setRepository] = useState('')
 
   async function plan() {
     setSending(true)
     setError(null)
+    setNotCreated(null)
     try {
       onCreated(await createDraft(projectID, goal.trim(), repositoryFields(repository)))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (repositoryNotProvided(e)) setNotCreated(e.message)
+      else setError(e instanceof Error ? e.message : String(e))
       setSending(false)
     }
   }
@@ -49,7 +54,7 @@ export function GoalInput({ projectID, onCreated }: { projectID: string; onCreat
       </FormField>
       {github === 'connected' && (
         <FormField label="Repository" hint="Where the planner and the agents keep their code, each on its own branch. Fixed once created.">
-          <RepositorySelect value={repository} onChange={setRepository} />
+          <RepositorySelect value={repository} onChange={r => { setRepository(r); setNotCreated(null) }} notCreated={notCreated ?? undefined} />
         </FormField>
       )}
       {github === 'unconnected' ? <ConnectGitHubStep /> : (
