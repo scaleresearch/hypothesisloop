@@ -245,7 +245,7 @@ or whatever an image of your own runs), each in one of four roles:
 - **Coordinator.** Watches the run, keeps the brief true to what is learned and writes the
   run's summary. It is no agent of the experiment: it holds no quota and runs no job. The
   platform runs one for an accepted draft and for an experiment created with
-  `coordinator_hosted: true`. Otherwise the person who created the experiment does its part
+  `coordinator_hosted: true`, which is also given its baseline agent. Otherwise the person who created the experiment does its part
   with their own token, from `agents/coordinator/setup.md` and `supervise.md`.
 - **Researchers.** Propose hypotheses, submit jobs and file findings, each with its own
   identity and its own share of the budget. They are ranked, and the API calls their role
@@ -257,9 +257,10 @@ A platform experiment begins one of two ways, and both end in the same run:
   it. The accept creates the coordinator, the baseline agent and the researchers the person
   stated, all run by the platform.
 - **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`): the request
-  states the experiment and creates no agent. Its owner adds the researchers
-  (`hl platform-experiments agents add`, `--hosted` to have the platform run each), and the
-  coordinator adds the baseline agent.
+  states the experiment. With `coordinator_hosted: true` it also creates the hosted
+  coordinator and one hosted baseline agent; without it, it creates no agent and its owner
+  adds the baseline agent. Either way the owner adds the researchers
+  (`hl platform-experiments agents add`, `--hosted` to have the platform run each).
 
 Either way it is `open` after that and no researcher runs. The baseline agent measures the
 control, and when it finishes the platform declares its job as the baseline and starts the run
@@ -312,8 +313,8 @@ The platform pays for planning, within the time limits of the `planning` section
 No platform experiment starts without a declared baseline, whether a person accepted a draft or
 created the experiment whole. While it is `open`:
 
-1. A baseline agent joins. Accepting a draft creates it. In an experiment created whole a
-   hosted coordinator adds it, and an owner without one adds it:
+1. A baseline agent joins. Accepting a draft creates it, and so does creating an experiment
+   whole with `coordinator_hosted: true`. An owner who coordinates adds it:
    `hl platform-experiments agents add --platform-experiment PE --role baseline --hosted`.
 2. The baseline agent builds the harness the brief describes, or runs the repository's job spec
    as it is when the files fit this experiment, measures the control with one real job and
@@ -341,7 +342,9 @@ researcher starts it, or `starts_at` does. The run lasts
 runs one, and otherwise the moment the first researcher's machine is reported running. Until
 then the experiment is `running` with `status_reason` `agents_starting`, and the platform
 closes it at `agents_due_at` (`close_reason: agents_not_started`) if no machine is running by
-then. While it
+then. A running experiment whose researchers have all finished, been cut or lost their machine
+with no restart left reads `researchers_done`: whoever coordinates writes the summary and
+closes it, and the platform closes it at `ends_at` otherwise. While it
 is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,
 `baseline_measuring`, `baseline_undeclared`, `baseline_declaring`, `starts_at_ahead`,
 `no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
@@ -379,7 +382,7 @@ description: what this research program is investigating
 budget_accelerator_hours: 10
 max_agents: 5             # researchers only: baseline agents and the coordinator never count
 duration_hours: 24        # counted from the moment the run starts. A run lasts 30 days at most
-coordinator_hosted: true  # optional: the platform runs the coordinator. Left out, you declare the baseline
+coordinator_hosted: true  # optional: the platform runs the coordinator and a baseline agent. Left out, you add one and declare the baseline
 metrics:
   - key: val_accuracy
     direction: maximize

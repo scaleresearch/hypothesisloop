@@ -615,7 +615,7 @@ func cmdPlatformExperimentsList(c *apiclient.Client, args []string, stdout, stde
 One platform experiment per line as compact JSON, without description and summary
 (hl platform-experiments get prints both). A closed one carries close_reason.
 hl platform-experiments with no command is this list.`, stderr)
-	limit := fs.Int("limit", 20, "max results")
+	limit := fs.Int("limit", 20, "page size (max 200)")
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
 	if err := fs.Parse(args); err != nil {

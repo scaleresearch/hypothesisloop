@@ -372,10 +372,11 @@ chart-push: check-tag
 
 # The UI image is no part of `images`: nothing the local stack runs uses it (local development
 # serves the UI with `npm run dev`), and it cannot be built without a Supabase project. Next.js
-# compiles into the browser bundle the API address as a browser reaches it and the project that
-# signs people in (controlplane/build/Dockerfile.ui), so all three are required here and have no
-# default. All three are public values. The helm chart's UI Deployment runs this image.
-# Usage: make ui-image REGISTRY=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+# compiles into the browser bundle the API address as a browser reaches it, the project that
+# signs people in and the sign-in providers it offers (controlplane/build/Dockerfile.ui), so all
+# four are required here and have no default. All four are public values. The helm chart's UI
+# Deployment runs this image.
+# Usage: make ui-image REGISTRY=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... NEXT_PUBLIC_SIGN_IN_PROVIDERS=...
 UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS
 check-ui-build-args:
 	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make ui-image: $(arg) is required (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
