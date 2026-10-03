@@ -191,7 +191,7 @@ export function CommandPalette() {
               >
                 <Icon size={15} strokeWidth={2} className={clsx('flex-none', active && 'text-accent')} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{item.label}</div>
+                  <div className="truncate text-sm font-medium">{item.label}</div>
                   {item.sub && <div className="text-xs text-subtle">{item.sub}</div>}
                 </div>
                 {active && <CornerDownLeft size={13} strokeWidth={2} className="flex-none text-accent" />}

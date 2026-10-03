@@ -3,9 +3,11 @@ import { clsx } from 'clsx'
 import type { Tone } from '@/lib/colors'
 import { toneText, toneTint } from '@/components/ui/tone'
 
-/** The small uppercase caption over a value or a group of controls. */
+/** The caption over a value or a group of controls, the same as the label of a FormField. */
+export const captionClass = 'text-xs font-medium'
+
 export function Eyebrow({ tone, className, ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
-  return <span className={clsx('font-mono text-2xs font-medium uppercase tracking-wider', tone ? toneText[tone] : 'text-muted', className)} {...props} />
+  return <span className={clsx(captionClass, tone ? toneText[tone] : 'text-muted', className)} {...props} />
 }
 
 export function Kbd({ className, ...props }: HTMLAttributes<HTMLElement>) {
@@ -17,7 +19,7 @@ export function Pill({ tone, active, className, ...props }: HTMLAttributes<HTMLS
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-2xs',
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs',
         tone ? [toneText[tone], toneTint[tone]] : 'bg-surface-inset text-muted',
         active && 'border-accent ring-1 ring-inset ring-accent',
         className,

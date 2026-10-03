@@ -117,7 +117,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       <HiddenHandles />
       <div className={NODE_TEXT}>{item.text}</div>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="font-mono text-2xs font-bold uppercase tracking-wide" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
+        <span className="inline-block text-2xs font-medium lowercase first-letter:uppercase" style={{ color }} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`}>{item.status}</span>
         <NodeMeta item={item} />
       </div>
     </div>

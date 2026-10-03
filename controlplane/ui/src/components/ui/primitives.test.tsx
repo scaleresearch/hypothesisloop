@@ -14,7 +14,7 @@ import { statusColor, statusTone, tint } from '@/lib/colors'
 describe('a badge', () => {
   it('shows the state it is given and takes its tone from it, whatever the case', () => {
     render(<Badge status="RUNNING" />)
-    expect(screen.getByText('RUNNING').className).toContain('text-success')
+    expect(screen.getByText('RUNNING').parentElement!.className).toContain('text-success')
     expect(statusTone('running')).toBe('success')
     expect(statusTone('Refuted')).toBe('danger')
   })

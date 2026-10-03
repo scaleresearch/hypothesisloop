@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { clustersInUse } from '@/lib/clusters'
 import { semantic } from '@/lib/colors'
@@ -13,8 +14,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { Dot } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-import { Chip } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
 import { Select } from '@/components/ui/select'
@@ -34,8 +34,8 @@ const SORT_OPTIONS = [
 const PLAN = 'Plan it for me'
 const CONFIGURE = 'Configure it myself'
 
-/** The project's running jobs and agents, each only while there are some. */
-function LiveStrip() {
+/** The project's running jobs and agents, each only while there are some, as the subtitle of the page. */
+function useLiveCounts(): ReactNode {
   const { project } = useTenant()
   // Both counts are server-side totals, not the length of a fetched page: see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
@@ -53,16 +53,18 @@ function LiveStrip() {
   if (items.length === 0) return null
 
   return (
-    <div className="-mt-2 mb-4 flex flex-wrap gap-4 text-xs tabular-nums text-muted">
+    <span className="flex flex-wrap gap-5 tabular-nums">
       {items.map(item => (
-        <span key={item.key} title={item.title} className="flex items-center gap-1.5">
+        <span key={item.key} title={item.title} className="flex items-center gap-2">
           <Dot color={item.color} />
           {item.text}
         </span>
       ))}
-    </div>
+    </span>
   )
 }
+
+const capitalised = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
 
 export default function PlatformExperimentsPage() {
   return (
@@ -108,6 +110,7 @@ function PlatformExperimentsPageContent() {
   const experiments = data?.items ?? []
   const total = data?.total ?? 0
   const statuses = ['', 'open', 'running', 'draft', 'closed']
+  const live = useLiveCounts()
 
   return (
     <div>
@@ -120,46 +123,47 @@ function PlatformExperimentsPageContent() {
         />
       )}
 
-      <PageHeader title="Experiments" />
-      <LiveStrip />
-
-      <Card className="mb-6 max-w-[720px]">
-        <CardContent className="grid gap-3">
+      <PageHeader
+        title="Experiments"
+        description={live}
+        actions={(
           <Segmented
             label="How to start"
             options={[{ value: 'plan', label: PLAN }, { value: 'configure', label: CONFIGURE }]}
             value={configuring ? 'configure' : 'plan'}
             onChange={way => way === 'configure' ? setDialog({ editing: null }) : planning.current?.querySelector('textarea')?.focus()}
           />
-          <div ref={planning}>
-            <GoalInput projectID={project.id} onCreated={open} />
-          </div>
-          {clusters && clustersInUse(clusters).online === 0 && (
-            <p className="text-xs text-muted">
-              No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
-            </p>
-          )}
-        </CardContent>
+        )}
+      />
+
+      {/* The box draws no edge of its own; the card is its edge, and darkens while the box has focus. */}
+      <Card className="mb-12 transition-colors focus-within:border-border-control">
+        <div ref={planning}>
+          <GoalInput projectID={project.id} onCreated={open} />
+        </div>
+        {clusters && clustersInUse(clusters).online === 0 && (
+          <p className="border-t px-6 py-3 text-xs text-muted">
+            No compute is online yet. <TextLink inline href="/cluster">Compute resources</TextLink>
+          </p>
+        )}
       </Card>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-1">
-          {statuses.map(s => (
-            <Chip key={s} active={statusFilter === s} onClick={() => { setStatusFilter(s); setPage(0) }}>
-              {s || 'All'}
-            </Chip>
-          ))}
-        </div>
-
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Segmented
+          label="Status"
+          size="sm"
+          options={statuses.map(s => ({ value: s, label: s ? capitalised(s) : 'All' }))}
+          value={statusFilter}
+          onChange={s => { setStatusFilter(s); setPage(0) }}
+        />
         <Input
           fieldSize="sm"
-          className="w-40"
+          className="ml-auto w-56"
           aria-label="Search"
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(0) }}
           placeholder="Search"
         />
-
         <Select fieldSize="sm" aria-label="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
       </div>
 
@@ -167,7 +171,7 @@ function PlatformExperimentsPageContent() {
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
 
       {data && experiments.length === 0 && (
-        <p className="text-sm text-muted">
+        <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted">
           {statusFilter || search
             ? `No experiments match${search ? ` "${search}"` : ' this filter'}.`
             : 'No experiments yet.'}

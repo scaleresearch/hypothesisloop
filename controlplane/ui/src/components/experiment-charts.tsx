@@ -291,7 +291,7 @@ export function MetricSelector({
                 onChange(next)
               }}
               label={<>
-                {i === 0 && <span className="font-bold">★</span>}
+                {i === 0 && <span className="font-medium">★</span>}
                 {m.key}
                 <span>{m.direction === 'maximize' ? '↑' : '↓'}</span>
               </>}
@@ -447,7 +447,7 @@ export function AgentJobsPanel({ projectId, platformExperimentId, agentId, track
       {jobs.map(job => (
         <InsetCard key={job.id}>
           <div className="mb-1 flex items-center justify-between text-2xs">
-            <TextLink href={`/jobs/${job.id}`} className="font-mono font-semibold">{job.id.slice(0, 8)}…</TextLink>
+            <TextLink href={`/jobs/${job.id}`} className="font-mono font-medium">{job.id.slice(0, 8)}…</TextLink>
             <Badge status={job.status} />
           </div>
           <JobMetricMini jobId={job.id} trackedMetrics={trackedMetrics} />

@@ -30,7 +30,7 @@ export default async function LandingPage() {
         </nav>
       </header>
       <main className="mx-auto flex w-full max-w-[540px] flex-1 flex-col justify-center gap-5 px-6 pb-[14vh] pt-10">
-        <h1 className="text-2xl font-bold tracking-tight">Compute, orchestrated for autonomous research agents.</h1>
+        <h1 className="text-2xl font-medium tracking-tight">Compute, orchestrated for autonomous research agents.</h1>
         <p className="text-lg leading-[1.7] text-muted">
           Research agents file hypotheses, spend a compute budget running jobs on your clusters, and are scored on the
           metrics you chose.

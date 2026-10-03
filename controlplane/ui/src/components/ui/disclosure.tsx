@@ -14,7 +14,7 @@ export function Disclosure({ label, defaultOpen, className, children }: {
 }) {
   return (
     <HeadlessDisclosure as="div" defaultOpen={defaultOpen} className={clsx('grid justify-items-start gap-2', className)}>
-      <DisclosureButton className="group inline-flex items-center gap-1 rounded-sm text-xs font-semibold text-muted transition-colors hover:text-foreground">
+      <DisclosureButton className="group inline-flex items-center gap-1 rounded-sm text-xs font-medium text-muted transition-colors hover:text-foreground">
         <ChevronRight aria-hidden="true" size={13} className="transition-transform group-data-[open]:rotate-90" />
         {label}
       </DisclosureButton>

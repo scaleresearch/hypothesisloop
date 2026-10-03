@@ -214,7 +214,7 @@ export function OrgClusters() {
                 onDrop={orders && dragged ? () => { void move(dragged, place); setDragged('') } : undefined}
                 onDragEnd={() => setDragged('')}
               >
-                <td className="font-mono text-xs font-semibold">{c.name}</td>
+                <td className="font-mono text-xs font-medium">{c.name}</td>
                 <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                 <td className="text-xs">
                   {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}

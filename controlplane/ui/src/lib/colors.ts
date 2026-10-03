@@ -93,16 +93,18 @@ export const hypothesisLinkStyles = {
 /** Props every recharts chart shares, so axes, grid and tooltip look the same on each. */
 export const chart = {
   grid: semantic.border,
-  tick: { fontSize: 10, fill: semantic.muted },
+  tick: { fontSize: 11, fill: semantic.muted },
   tooltip: {
     contentStyle: {
       background: semantic.surfaceRaised,
-      border: `1px solid ${semantic.borderStrong}`,
+      border: `1px solid ${semantic.border}`,
       borderRadius: 'var(--radius)',
+      boxShadow: 'var(--shadow-md)',
+      padding: '8px 12px',
       fontSize: 12,
     },
-    labelStyle: { color: semantic.text },
+    labelStyle: { color: semantic.text, fontWeight: 500 },
     cursor: { fill: tint(semantic.text, 'hover') },
   },
-  legend: { fontSize: 10 },
+  legend: { fontSize: 11 },
 } as const

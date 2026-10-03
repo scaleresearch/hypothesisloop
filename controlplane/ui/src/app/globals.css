@@ -5,33 +5,35 @@
 /* Colours are space-separated RGB channels; tailwind.config.ts turns them into classes.
    theme-contrast.test.ts holds every pair below, and the fills the --alpha-* states make, to WCAG AA
    in both themes. */
-/* Warm paper neutrals carry the interface; primary actions are ink; one petrol accent marks links,
-   focus and selection. Status tones only say how a thing is going. chart-1..8 is the ordered series
-   palette, checked for colour-blind separation on surface in both schemes. */
+/* Every neutral is one hue, a sand at about 38deg, from paper to ink, so a grey never reads cold
+   beside another: the page is paper, cards are near white, insets and the nav are a sand field,
+   rules are sand. Primary actions are the warm ink; one petrol accent marks links, focus and
+   selection. Status tones only say how a thing is going, each a little warm. chart-1..8 is the
+   ordered series palette, checked for colour-blind separation on surface in both schemes. */
 /* Light is the default. lib/theme.ts sets data-theme="dark" on <html> before first paint when a
    person chose Dark, or chose System on a machine in dark mode. */
 :root {
-  --background: 251 250 247;
-  --surface: 255 255 255;
-  --surface-inset: 240 239 236;
+  --background: 250 248 243;
+  --surface: 255 254 251;
+  --surface-inset: 244 240 232;
   --surface-raised: 255 255 255;
-  --border: 217 217 214;
-  --border-strong: 196 195 190;
-  --border-control: 134 133 128;
-  --text: 35 35 35;
-  --text-muted: 80 80 80;
-  --text-subtle: 98 98 96;
-  --primary: 35 35 35;
-  --primary-hover: 17 17 17;
-  --primary-foreground: 255 255 255;
+  --border: 231 224 211;
+  --border-strong: 213 202 183;
+  --border-control: 140 130 115;
+  --text: 38 34 29;
+  --text-muted: 90 82 71;
+  --text-subtle: 104 95 83;
+  --primary: 38 34 29;
+  --primary-hover: 18 16 13;
+  --primary-foreground: 255 254 251;
   --accent: 22 90 117;
-  --success: 37 106 55;
-  --warning: 122 79 16;
-  --danger: 160 52 52;
-  --info: 40 98 150;
-  --neutral: 88 88 86;
+  --success: 40 108 60;
+  --warning: 133 80 18;
+  --danger: 166 54 40;
+  --info: 38 96 146;
+  --neutral: 96 88 77;
   --ring: 22 90 117;
-  --overlay: 35 35 35;
+  --overlay: 38 34 29;
 
   --chart-1: 42 107 168;
   --chart-2: 192 122 36;
@@ -53,39 +55,41 @@
   --alpha-edge: 0.3;
   --alpha-scrim: 0.45;
 
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-lg: 10px;
+  /* sm for a mark inside a control, the default for every control, lg for a card or a dialog. */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
 
-  /* Surfaces in the page are told apart by a 1px border; only what floats over it has a shadow. */
+  /* Surfaces in the page are told apart by a 1px border; only what floats over it has a shadow,
+     soft and cast in the warm ink. */
   --shadow-sm: 0 0 #0000;
-  --shadow-md: 0 4px 16px -4px rgb(35 35 35 / 0.10), 0 1px 3px rgb(35 35 35 / 0.05);
-  --shadow-lg: 0 16px 48px -12px rgb(35 35 35 / 0.20);
+  --shadow-md: 0 8px 24px -10px rgb(38 34 29 / 0.16), 0 1px 2px rgb(38 34 29 / 0.05);
+  --shadow-lg: 0 24px 56px -20px rgb(38 34 29 / 0.28), 0 2px 6px rgb(38 34 29 / 0.05);
 
   color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --background: 20 20 19;
-  --surface: 28 28 26;
-  --surface-inset: 34 34 32;
-  --surface-raised: 38 38 36;
-  --border: 46 46 43;
-  --border-strong: 61 61 57;
-  --border-control: 117 115 109;
-  --text: 237 237 234;
-  --text-muted: 176 175 170;
-  --text-subtle: 168 167 161;
-  --primary: 237 237 234;
-  --primary-hover: 255 255 255;
-  --primary-foreground: 20 20 19;
-  --accent: 127 179 201;
-  --success: 120 190 138;
-  --warning: 214 168 98;
-  --danger: 236 150 141;
-  --info: 138 175 219;
-  --neutral: 176 175 170;
-  --ring: 127 179 201;
+  --background: 24 22 19;
+  --surface: 31 29 26;
+  --surface-inset: 38 35 31;
+  --surface-raised: 44 41 37;
+  --border: 56 52 46;
+  --border-strong: 76 70 62;
+  --border-control: 130 120 106;
+  --text: 241 236 227;
+  --text-muted: 189 180 166;
+  --text-subtle: 178 169 155;
+  --primary: 241 236 227;
+  --primary-hover: 255 252 246;
+  --primary-foreground: 24 22 19;
+  --accent: 130 182 202;
+  --success: 126 192 140;
+  --warning: 220 172 102;
+  --danger: 238 152 136;
+  --info: 140 178 220;
+  --neutral: 189 180 166;
+  --ring: 130 182 202;
   --overlay: 0 0 0;
 
   --chart-1: 74 138 198;
@@ -107,8 +111,8 @@
   --alpha-scrim: 0.6;
 
   --shadow-sm: 0 0 #0000;
-  --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.3);
-  --shadow-lg: 0 16px 48px -12px rgb(0 0 0 / 0.6);
+  --shadow-md: 0 8px 24px -10px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 24px 56px -20px rgb(0 0 0 / 0.6), 0 2px 6px rgb(0 0 0 / 0.3);
 
   color-scheme: dark;
 }
@@ -140,13 +144,18 @@
     background: rgb(var(--background));
     color: rgb(var(--text));
     font-family: var(--font-sans), system-ui, sans-serif;
-    font-size: 13.5px;
+    font-size: 14.5px;
     line-height: 1.55;
-    letter-spacing: -0.01em;
+    text-rendering: optimizeLegibility;
   }
 
   ::selection {
     background: rgb(var(--accent) / 0.2);
+  }
+
+  ::placeholder {
+    color: rgb(var(--text-subtle));
+    opacity: 1;
   }
 
   :focus-visible {

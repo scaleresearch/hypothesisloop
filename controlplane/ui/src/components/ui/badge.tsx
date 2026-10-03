@@ -28,13 +28,14 @@ export function Badge({ children, status, tone, className, title }: BadgeProps) 
     <span
       title={title}
       className={clsx(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm py-0.5 pl-1.5 pr-2 font-mono text-2xs font-medium uppercase tracking-wider',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-0.5 pl-2 pr-2.5 text-xs font-medium',
         toneClass[tone ?? statusTone(status)],
         className,
       )}
     >
-      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-[1px] bg-current" />
-      {children ?? status}
+      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
+      {/* States come as RUNNING or closed; every badge reads in sentence case. */}
+      <span className="inline-block lowercase first-letter:uppercase">{children ?? status}</span>
     </span>
   )
 }
@@ -47,8 +48,8 @@ export function Dot({ color, className }: { color: string; className?: string })
 /** A state in words with its dot, where a pill would be too heavy: connected, enabled. */
 export function StatusLabel({ tone, children }: { tone: Tone; children: ReactNode }) {
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-semibold', toneText[tone])}>
-      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-[1px] bg-current" />
+    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-medium', toneText[tone])}>
+      <span aria-hidden="true" className="h-1.5 w-1.5 flex-none rounded-full bg-current" />
       {children}
     </span>
   )

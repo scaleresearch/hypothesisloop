@@ -21,11 +21,11 @@ export function Dialog({ open, onClose, title, size = 'default', children }: Dia
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel
           className={clsx(
-            'max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-lg border border-border-strong bg-surface-raised p-5 shadow-lg',
+            'max-h-[calc(100vh-2rem)] w-full animate-rise overflow-y-auto rounded-lg border bg-surface-raised p-6 shadow-lg',
             size === 'sm' ? 'max-w-md' : size === 'wide' ? 'max-w-[90vw]' : 'max-w-2xl',
           )}
         >
-          <DialogTitle className="mb-3 text-lg font-semibold">{title}</DialogTitle>
+          <DialogTitle className="mb-4 text-xl font-normal">{title}</DialogTitle>
           {children}
         </DialogPanel>
       </div>

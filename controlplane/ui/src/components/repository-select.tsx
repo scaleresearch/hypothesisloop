@@ -98,7 +98,7 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
     <>
       <SearchableSelect
         mono={!compact}
-        fieldSize={compact ? 'sm' : 'default'}
+        fieldSize="default"
         className={compact ? 'w-56' : 'w-full'}
         value={value}
         onChange={onChange}

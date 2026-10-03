@@ -77,18 +77,18 @@ export function PlatformExperimentCard({
     : !live && !isZeroDate(pe.created_at) ? day(pe.created_at) : null
 
   return (
-    <Card className="mb-2 cursor-pointer transition-colors hover:border-border-strong">
+    <Card className="mb-2.5 cursor-pointer transition hover:border-border-strong hover:shadow-md">
       <div
-        className="flex items-center gap-3 px-4 py-2.5"
+        className="flex min-h-14 items-center gap-4 px-5 py-2.5"
         onClick={() => router.push(href)}
         tabIndex={0}
         role="link"
         onKeyDown={e => { if (e.key === 'Enter') router.push(href) }}
       >
-        <Badge status={pe.status}>{pe.status}</Badge>
-        <span className="min-w-0 truncate text-sm font-medium text-foreground">{pe.name}</span>
+        <span className="w-20 flex-none"><Badge status={pe.status}>{pe.status}</Badge></span>
+        <span className="min-w-0 truncate text-base text-foreground">{pe.name}</span>
         <SharedBadge pe={pe} />
-        <span className="ml-auto flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted">
+        <span className="ml-auto flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted">
           {figures.map(f => <span key={f}>{f}</span>)}
           {daysLeft != null && daysLeft > 0 && <span className={clsx(daysLeft < 2 && 'text-danger')}>{daysLeft}d left</span>}
           {when && <span>{when}</span>}

@@ -52,7 +52,7 @@ describe('the actor of a record', () => {
   it('says a name from before actors were kept is unverified', () => {
     render(<Actor actor={typed} />)
     expect(screen.getByText('Mallory')).toBeTruthy()
-    expect(screen.getByText('unverified').getAttribute('title')).toContain('no account stands behind it')
+    expect(screen.getByText('unverified').closest('[title]')!.getAttribute('title')).toContain('no account stands behind it')
     expect(screen.queryByText('human')).toBeNull()
   })
 

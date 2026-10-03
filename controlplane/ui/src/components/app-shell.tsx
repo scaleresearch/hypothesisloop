@@ -15,7 +15,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 const RECORD_PAGE = /^\/(platform-experiments|jobs|hypotheses)\/[^/]+$/
 
 function Standalone({ children }: { children: ReactNode }) {
-  return <main className="mx-auto mt-20 grid w-full max-w-xl content-start gap-4 px-8">{children}</main>
+  return <main className="mx-auto mt-24 grid w-full max-w-xl content-start gap-4 px-8">{children}</main>
 }
 
 /**
@@ -72,13 +72,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <TenantContext.Provider value={resolution.tenant}>
       <Nav />
-      <main key={project.id} className="max-w-[1220px] flex-1 overflow-auto px-8 py-7">
-        {error && (
-          <ErrorMessage className="mb-4">
-            Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
-          </ErrorMessage>
-        )}
-        {children}
+      <main key={project.id} className="min-w-0 flex-1 overflow-auto">
+        <div className="mx-auto w-full max-w-[1160px] px-10 pb-16 pt-10">
+          {error && (
+            <ErrorMessage className="mb-4">
+              Could not reread your account: {error.message}. Your organizations, projects and role are as last read. Retrying.
+            </ErrorMessage>
+          )}
+          {children}
+        </div>
       </main>
       <CommandPalette key={`palette-${project.id}`} />
     </TenantContext.Provider>

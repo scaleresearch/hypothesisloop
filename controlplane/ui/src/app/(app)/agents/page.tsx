@@ -239,7 +239,7 @@ function AgentsPageContent() {
                       onClick={() => setExpandedAgent(isExpanded ? null : a.id)}
                       onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) setExpandedAgent(isExpanded ? null : a.id) }}
                     >
-                      <td className="text-xs font-semibold" title={a.id}>{a.name}</td>
+                      <td className="text-xs font-medium" title={a.id}>{a.name}</td>
                       <td className="text-center">
                         {a.top3_count > 0 ? <Badge tone="success">+25%</Badge> : <span className="text-xs text-subtle">—</span>}
                       </td>

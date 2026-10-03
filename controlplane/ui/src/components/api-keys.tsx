@@ -109,7 +109,7 @@ export function APIKeys() {
             {keys.map(key => (
               <tr key={key.id}>
                 <td>
-                  <span className="font-semibold">{key.name}</span>
+                  <span className="font-medium">{key.name}</span>
                   {key.minted_by && (
                     <div className="text-xs text-subtle">minted from {keys.find(k => k.id === key.minted_by)?.name ?? 'a key no longer listed'}</div>
                   )}

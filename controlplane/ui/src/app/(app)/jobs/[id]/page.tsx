@@ -112,7 +112,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
       <PageHeader
         title={
           <>
-            <span className="line-clamp-3 min-w-0 text-lg font-semibold leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
+            <span className="line-clamp-3 min-w-0 text-lg font-medium leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
             <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
@@ -175,7 +175,7 @@ export default function JobDetailPage({ params }: { params: { id: string } }) {
           <CardContent>
             {(j.metrics ?? []).map(m => (
               <div key={m.name} className="mb-2.5 font-mono">
-                <span className={m.name === primaryMetricName ? 'text-2xl font-bold text-success' : 'text-lg font-semibold'}>
+                <span className={m.name === primaryMetricName ? 'text-2xl font-medium text-success' : 'text-lg font-medium'}>
                   {m.value.toFixed(4)}
                 </span>
                 <span className="ml-2 text-xs text-muted">

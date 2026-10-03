@@ -1,3 +1,4 @@
+/** The goals the empty goal box types as its placeholder, one after another, in this order. */
 export const GOAL_EXAMPLES = [
   'Beat the SOTA bits-per-point on lidar point cloud compression for KITTI',
   'Does Muon beat AdamW at equal compute for a 125M-parameter GPT on FineWeb?',
@@ -18,21 +19,3 @@ export const GOAL_EXAMPLES = [
   'Shrink a 3D Gaussian splatting scene on Mip-NeRF 360 tenfold at equal PSNR',
   'Lower Chamfer distance of point cloud completion on ShapeNet-55 with a transformer decoder',
 ]
-
-const IGNORED = new Set(['a', 'an', 'the', 'of', 'on', 'for', 'to', 'in', 'with', 'and', 'or', 'at', 'is', 'by'])
-
-const words = (text: string) => text.toLowerCase().match(/[a-z0-9]+/g) ?? []
-
-/**
- * The examples that hold every word typed so far, each word matching the start of one of theirs,
- * so a word still being typed matches too. An empty box shows the first ones.
- */
-export function matchingGoals(typed: string, limit = 3, examples: readonly string[] = GOAL_EXAMPLES): string[] {
-  const text = typed.trim()
-  if (text === '') return examples.slice(0, limit)
-  const wanted = words(text).filter(word => !IGNORED.has(word))
-  if (wanted.length === 0) return []
-  return examples
-    .filter(example => example !== text && wanted.every(word => words(example).some(own => own.startsWith(word))))
-    .slice(0, limit)
-}

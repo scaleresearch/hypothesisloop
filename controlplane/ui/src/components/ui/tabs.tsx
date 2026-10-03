@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
+import type { FieldSize } from '@/components/ui/field'
 
 interface TabsProps<T extends string> {
   label: string
@@ -11,7 +12,7 @@ interface TabsProps<T extends string> {
 /** A row of underlined tabs; the caller renders the panel of the chosen one. */
 export function Tabs<T extends string>({ label, tabs, value, onChange }: TabsProps<T>) {
   return (
-    <div role="tablist" aria-label={label} className="flex gap-4 border-b">
+    <div role="tablist" aria-label={label} className="flex gap-6 border-b">
       {tabs.map(tab => (
         <button
           key={tab.id}
@@ -20,8 +21,8 @@ export function Tabs<T extends string>({ label, tabs, value, onChange }: TabsPro
           aria-selected={tab.id === value}
           onClick={() => onChange(tab.id)}
           className={clsx(
-            '-mb-px border-b-2 pb-2 text-xs transition-colors',
-            tab.id === value ? 'border-accent font-bold text-foreground' : 'border-transparent text-muted hover:text-foreground',
+            '-mb-px border-b-2 pb-2.5 text-sm transition-colors',
+            tab.id === value ? 'border-accent text-foreground' : 'border-transparent text-muted hover:text-foreground',
           )}
         >
           {tab.label}
@@ -38,12 +39,18 @@ interface SegmentedProps<T extends string> {
   value: T
   onChange: (value: T) => void
   disabled?: boolean
+  /** The height of the controls beside it, as in field.ts. */
+  size?: FieldSize
 }
 
-/** A few exclusive choices side by side, one always chosen. */
-export function Segmented<T extends string>({ label, options, value, onChange, disabled }: SegmentedProps<T>) {
+/** A few exclusive choices side by side, one always chosen: a control of field.ts cut into segments. */
+export function Segmented<T extends string>({ label, options, value, onChange, disabled, size = 'default' }: SegmentedProps<T>) {
   return (
-    <div role="group" aria-label={label} className="inline-flex overflow-hidden rounded border border-border-control">
+    <div
+      role="group"
+      aria-label={label}
+      className={clsx('inline-flex flex-none gap-0.5 rounded border border-border-control bg-surface p-0.5', size === 'sm' ? 'h-8' : 'h-9')}
+    >
       {options.map(option => (
         <button
           key={option.value}
@@ -54,9 +61,10 @@ export function Segmented<T extends string>({ label, options, value, onChange, d
           title={option.icon ? option.label : undefined}
           onClick={() => onChange(option.value)}
           className={clsx(
-            'text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-disabled',
-            option.icon ? 'px-2 py-1' : 'px-3.5 py-1.5',
-            option.value === value ? 'bg-primary font-bold text-primary-foreground' : 'bg-surface-inset text-muted enabled:hover:text-foreground',
+            'inline-flex items-center justify-center whitespace-nowrap rounded-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-disabled',
+            size === 'sm' ? 'text-xs' : 'text-sm',
+            option.icon ? 'px-2' : size === 'sm' ? 'px-2.5' : 'px-3.5',
+            option.value === value ? 'bg-primary text-primary-foreground' : 'text-muted enabled:hover:bg-hover enabled:hover:text-foreground',
           )}
         >
           {option.icon ?? option.label}

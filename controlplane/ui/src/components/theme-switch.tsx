@@ -16,5 +16,5 @@ const options: { value: ThemeChoice; label: string; icon: JSX.Element }[] = [
 /** Light, Dark, or what the operating system says; this browser remembers the choice. */
 export function ThemeSwitch() {
   const [choice, choose] = useThemeChoice()
-  return <Segmented label="Theme" options={options} value={choice} onChange={choose} />
+  return <Segmented label="Theme" size="sm" options={options} value={choice} onChange={choose} />
 }

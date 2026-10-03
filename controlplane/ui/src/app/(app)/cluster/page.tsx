@@ -69,11 +69,11 @@ function AllClusters() {
               <tbody>
                 {data.clusters.map((c: ClusterInfo) => (
                   <tr key={c.cluster_name}>
-                    <td className="font-mono text-xs font-semibold">{c.cluster_name}</td>
+                    <td className="font-mono text-xs font-medium">{c.cluster_name}</td>
                     <td><StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel></td>
                     <td className="font-mono text-xs text-muted">{new Date(c.last_seen_at).toLocaleString()}</td>
                     <td>
-                      <span className={clsx('text-xs font-semibold', c.autoscaler_enabled && 'text-success')}>
+                      <span className={clsx('text-xs font-medium', c.autoscaler_enabled && 'text-success')}>
                         {c.autoscaler_enabled ? 'Enabled' : 'Off'}
                       </span>
                     </td>
@@ -116,7 +116,7 @@ function LiveCapacity() {
         )}
         {clusters.map(cluster => (
           <section key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0">
-            <h3 className="mb-1.5 font-mono text-sm font-semibold">{cluster.cluster_name}</h3>
+            <h3 className="mb-1.5 font-mono text-sm font-medium">{cluster.cluster_name}</h3>
             {!cluster.on_demand && cluster.resources && (
               <p className="mb-1.5 text-xs text-muted">
                 {cluster.resources.cpu_cores_available} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free
@@ -138,7 +138,7 @@ function LiveCapacity() {
                 <tbody>
                   {cluster.accelerators.map(a => (
                     <tr key={a.accelerator_type}>
-                      <td className="font-mono text-xs font-semibold">{a.accelerator_type}</td>
+                      <td className="font-mono text-xs font-medium">{a.accelerator_type}</td>
                       {cluster.on_demand ? (
                         <td className="text-xs">up to {unitCount(a.kind, a.total)}, {a.total - a.available} rented now</td>
                       ) : (

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Description, Field, Label } from '@headlessui/react'
 import { clsx } from 'clsx'
 import { InlineError } from '@/components/ui/status-message'
-import { Eyebrow } from '@/components/ui/text'
+import { Eyebrow, captionClass } from '@/components/ui/text'
 
 interface FormFieldProps {
   label: ReactNode
@@ -17,8 +17,8 @@ interface FormFieldProps {
 
 export function FormField({ label, hint, error, inline, className, children }: FormFieldProps) {
   return (
-    <Field className={clsx(inline ? 'flex items-center gap-2' : 'grid content-start gap-1', className)}>
-      <Label className="text-2xs font-semibold uppercase tracking-wider text-muted">{label}</Label>
+    <Field className={clsx(inline ? 'flex items-center gap-2' : 'grid content-start gap-1.5', className)}>
+      <Label className={clsx(captionClass, 'text-muted')}>{label}</Label>
       {children}
       {hint && <Description className="text-xs text-subtle">{hint}</Description>}
       {error && <InlineError>{error}</InlineError>}
@@ -29,7 +29,7 @@ export function FormField({ label, hint, error, inline, className, children }: F
 /** The caption and hint of FormField over several controls, which one label cannot name. */
 export function FieldGroup({ label, hint, className, children }: { label: ReactNode; hint?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <div role="group" aria-label={typeof label === 'string' ? label : undefined} className={clsx('grid content-start gap-1', className)}>
+    <div role="group" aria-label={typeof label === 'string' ? label : undefined} className={clsx('grid content-start gap-1.5', className)}>
       <Eyebrow>{label}</Eyebrow>
       <div>{children}</div>
       {hint && <p className="text-xs text-subtle">{hint}</p>}

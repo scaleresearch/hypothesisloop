@@ -62,7 +62,7 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
   return (
     <li className="rounded border bg-surface-inset px-3 py-2">
       <div className="flex flex-wrap items-baseline gap-x-2.5 text-xs">
-        <span className="font-semibold">Researcher {n}</span>
+        <span className="font-medium">Researcher {n}</span>
         <span className="text-muted">specialization <span className="font-mono text-foreground">{agent.flavor ?? 'generalist'}</span></span>
         <span className="text-muted">model <span className="font-mono text-foreground">{agent.model ?? 'the platform\'s default'}</span></span>
       </div>
@@ -131,7 +131,7 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
         {auto.secondsLeft !== null && (
           <Callout tone="accent" className="mb-0 flex flex-wrap items-center justify-between gap-3">
             <span>
-              <span role="timer" className="font-semibold">Starting in {auto.secondsLeft} s</span> as proposed. Touch anything here to decide yourself.
+              <span role="timer" className="font-medium">Starting in {auto.secondsLeft} s</span> as proposed. Touch anything here to decide yourself.
             </span>
             <Button size="sm" onClick={auto.stop}>Wait, let me edit</Button>
           </Callout>

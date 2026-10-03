@@ -58,7 +58,7 @@ function HypothesisText({ text }: { text: string }) {
   const long = text.length > LONG_TEXT
   return (
     <span className="min-w-0">
-      <span className={clsx('block whitespace-pre-wrap text-lg font-semibold leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
+      <span className={clsx('block whitespace-pre-wrap text-lg font-medium leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
       {long && <Button variant="link" size="sm" onClick={() => setOpen(!open)}>{open ? 'Show less' : 'Show all of it'}</Button>}
     </span>
   )
@@ -199,7 +199,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                   <InsetCard key={f.id}>
                     <div className="mb-1.5 flex items-center justify-between text-2xs">
                       <span className="flex items-center gap-2 font-mono">
-                        <span className="font-semibold"><Actor actor={f.actor} agentID={f.agent_id} /></span>
+                        <span className="font-medium"><Actor actor={f.actor} agentID={f.agent_id} /></span>
                         <TextLink href={`/jobs/${f.experiment_id}`}>{f.experiment_id.slice(0, 8)}…</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
                         {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{job.metric.value.toFixed(4)}</span>}

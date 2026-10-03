@@ -35,7 +35,7 @@ export function ObjectiveBar({ graph, pe, onAddIdea }: {
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-2">
         <div className="flex flex-wrap items-baseline gap-3">
           <Eyebrow>Objective</Eyebrow>
-          <span className="font-semibold">{pe.name}</span>
+          <span className="font-medium">{pe.name}</span>
           <span className="text-xs text-muted">
             {graph.nodes.length} hypotheses, {graph.nodes.filter(n => n.builds_on.includes(graph.root)).length} building directly on the objective
           </span>

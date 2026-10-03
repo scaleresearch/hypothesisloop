@@ -12,13 +12,13 @@ interface PageHeaderProps {
 /** The title at the top of every page, with an optional right-aligned action row. */
 export function PageHeader({ title, description, actions, back }: PageHeaderProps) {
   return (
-    <div className="mb-6 flex items-end justify-between gap-4 pb-1.5">
+    <div className="mb-8 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        {back && <Button variant="ghost" size="sm" className="-ml-2.5 mb-1 font-normal" onClick={back.onClick}>← {back.label}</Button>}
-        <h1 className="flex flex-wrap items-center gap-2.5 break-words text-2xl font-bold tracking-tight">{title}</h1>
-        {description && <div className="mt-1 text-sm text-muted">{description}</div>}
+        {back && <Button variant="ghost" size="sm" className="-ml-3 mb-2 font-normal" onClick={back.onClick}>← {back.label}</Button>}
+        <h1 className="flex flex-wrap items-center gap-3 break-words text-2xl font-normal text-foreground">{title}</h1>
+        {description && <div className="mt-2 text-sm text-muted">{description}</div>}
       </div>
-      {actions && <div className="mb-0.5 flex flex-none items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-none items-center gap-2">{actions}</div>}
     </div>
   )
 }

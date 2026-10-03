@@ -74,7 +74,7 @@ function SignIn() {
   return (
     <main className="mx-auto mt-[18vh] grid w-full max-w-sm content-start gap-4 px-5">
       <NextLink href={LANDING_PATH} className="justify-self-start rounded"><Logo /></NextLink>
-      <h1 className="text-2xl font-bold tracking-tight">{wording.title}</h1>
+      <h1 className="text-2xl font-medium tracking-tight">{wording.title}</h1>
       <p className="text-sm text-muted">{wording.lead}</p>
       {notice && <ErrorMessage>{notice}</ErrorMessage>}
       {problem && <ErrorMessage>Sign-in is not configured. {problem}</ErrorMessage>}

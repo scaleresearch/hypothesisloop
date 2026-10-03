@@ -94,8 +94,8 @@ export function ProjectSwitcher() {
 
   return (
     // wa-nav-tenant, wa-nav-create and the labels around the pickers are what the browser suite finds them by.
-    <div className="wa-nav-tenant grid gap-2 px-2.5 pt-3">
-      <label className="grid gap-1">
+    <div className="wa-nav-tenant grid gap-2 px-3 pt-3">
+      <label className="grid gap-1.5">
         <Eyebrow>Organization</Eyebrow>
         <SearchableSelect
           hideAllOption
@@ -106,7 +106,7 @@ export function ProjectSwitcher() {
         />
       </label>
       <CreateByName what="organization" create={newOrg} />
-      <label className="grid gap-1">
+      <label className="grid gap-1.5">
         <Eyebrow>Project</Eyebrow>
         <SearchableSelect
           hideAllOption

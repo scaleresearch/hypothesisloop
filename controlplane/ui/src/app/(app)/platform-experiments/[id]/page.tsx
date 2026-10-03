@@ -294,7 +294,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                 <div className="flex flex-wrap gap-2">
                   {pe.metrics.map((m, i) => (
                     <Pill key={m.key} active={i === 0}>
-                      {i === 0 && <span className="font-bold">PRIMARY</span>}
+                      {i === 0 && <span className="font-medium">PRIMARY</span>}
                       {m.key} {m.direction === 'maximize' ? '↑ maximize' : '↓ minimize'}
                     </Pill>
                   ))}
@@ -377,7 +377,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
               <div className="grid gap-4">
                 {metrics.filter(m => activeMetricKeys.has(m.key)).map(m => (
                   <div key={m.key}>
-                    <div className="mb-1 text-xs font-semibold">
+                    <div className="mb-1 text-xs font-medium">
                       {m.key} <span className="font-normal text-subtle">({m.direction})</span>
                     </div>
                     <CompetingAgentsChart
@@ -435,8 +435,8 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             </div>
 
             <p className="mt-3 text-xs text-muted">
-              <span className="font-mono font-semibold text-success">{stagesStatus.active_agents.length}</span> active
-              {' · '}<span className={clsx('font-mono font-semibold', stagesStatus.cut_agents.length > 0 && 'text-danger')}>{stagesStatus.cut_agents.length}</span> cut.
+              <span className="font-mono font-medium text-success">{stagesStatus.active_agents.length}</span> active
+              {' · '}<span className={clsx('font-mono font-medium', stagesStatus.cut_agents.length > 0 && 'text-danger')}>{stagesStatus.cut_agents.length}</span> cut.
               The scoreboard says which.
             </p>
           </CardContent>
@@ -499,7 +499,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                   {metrics.length > 0 ? metrics.map((m, i) => (
                     <th key={m.key} className="text-right">
                       {i === 0 && metrics.length > 1 && (
-                        <span title="Primary metric — used for ranking" className="mr-1 font-bold">★</span>
+                        <span title="Primary metric — used for ranking" className="mr-1 font-medium">★</span>
                       )}
                       Best {m.key} <span className="font-normal text-subtle">({m.direction === 'maximize' ? '↑' : '↓'})</span>
                     </th>
@@ -533,8 +533,8 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                         onClick={() => setExpandedAgentId(isExpanded ? null : agentId)}
                         className={clsx('cursor-pointer', isCut ? 'bg-danger-faint' : isWinner && 'bg-success-faint')}
                       >
-                        <td className="font-mono text-xs font-semibold">{rank != null ? `#${rank}` : '—'}</td>
-                        <td className="whitespace-nowrap font-mono text-xs font-semibold">
+                        <td className="font-mono text-xs font-medium">{rank != null ? `#${rank}` : '—'}</td>
+                        <td className="whitespace-nowrap font-mono text-xs font-medium">
                           <span className="inline-block w-3 text-muted">{isExpanded ? '▾' : '▸'}</span>
                           <AgentLabel id={agentId} />
                           {isCut && <Badge tone="danger" className="ml-2">Cut</Badge>}
@@ -546,7 +546,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                         {metrics.length > 0 ? metrics.map(m => {
                           const best = bestOf(m.key, agentId)
                           return (
-                            <td key={m.key} className={clsx(num, isWinner && 'font-bold')}>
+                            <td key={m.key} className={clsx(num, isWinner && 'font-medium')}>
                               {best?.experiment_id ? (
                                 <TextLink
                                   href={`/jobs/${best.experiment_id}`}

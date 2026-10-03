@@ -36,7 +36,7 @@ function Frame({ children }: { children: ReactNode }) {
   return (
     <main className="mx-auto mt-[18vh] grid w-full max-w-sm content-start gap-4 px-5">
       <Logo />
-      <h1 className="text-2xl font-bold tracking-tight">Join an organization</h1>
+      <h1 className="text-2xl font-medium tracking-tight">Join an organization</h1>
       {children}
     </main>
   )

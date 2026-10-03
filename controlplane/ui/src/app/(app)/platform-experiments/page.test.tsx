@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError, apiSend, createPlatformExperiment, fetchAgentsPage, fetchExperimentStats, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories,
   fetchOrgClusters, fetchPlatformExperimentsPage,
@@ -206,43 +206,27 @@ describe('the two ways to a new experiment', () => {
   })
 })
 
-// The box gave one fixed example in its placeholder, and nothing that followed what was typed.
-describe('suggested goals', () => {
-  const suggestions = () => screen.queryByRole('list', { name: 'Suggestions' }) ? within(screen.getByRole('list', { name: 'Suggestions' })).getAllByRole('button').map(b => b.textContent) : []
-  const box = () => screen.getByLabelText('What do you want to find out?')
+// Three suggestion pills sat under the box. The examples are now typed into the empty box itself.
+describe('the examples in the goal box', () => {
+  const ASK = 'What do you want to find out?'
+  afterEach(() => vi.useRealTimers())
 
-  it('shows three to start from in an empty box', () => {
+  it('types one after another as the placeholder, and stops on the question once the person takes the box', () => {
+    vi.useFakeTimers()
     show()
-    expect(suggestions()).toEqual(GOAL_EXAMPLES.slice(0, 3))
-  })
+    const box = screen.getByLabelText(ASK)
+    expect(box.getAttribute('placeholder')).toBe(ASK)
+    act(() => { vi.advanceTimersByTime(5_000) })
+    const typed = box.getAttribute('placeholder')!
+    expect(typed.length).toBeGreaterThan(0)
+    expect(GOAL_EXAMPLES[0].startsWith(typed)).toBe(true)
+    expect(screen.queryByRole('list')).toBeNull()
 
-  it('follows the words typed so far, a word still being typed included, three at most', async () => {
-    show()
-    await userEvent.type(box(), 'SOTA lid')
-    expect(suggestions()).toEqual(['Beat the SOTA bits-per-point on lidar point cloud compression for KITTI'])
-    await userEvent.clear(box())
-    await userEvent.type(box(), 'sota')
-    expect(suggestions()).toHaveLength(3)
-    expect(suggestions().every(s => s!.includes('SOTA'))).toBe(true)
-  })
-
-  it('shows none when nothing matches', async () => {
-    show()
-    await userEvent.type(box(), 'Why does my sourdough not rise')
-    expect(screen.queryByRole('list', { name: 'Suggestions' })).toBeNull()
-  })
-
-  it('fills the box with the one clicked, and plans it as typed', async () => {
-    vi.mocked(apiSend).mockResolvedValue(experiment('pe-draft'))
-    show()
-    await userEvent.type(box(), 'muon')
-    const muon = 'Does Muon beat AdamW at equal compute for a 125M-parameter GPT on FineWeb?'
-    await userEvent.click(screen.getByRole('button', { name: muon }))
-    expect(box()).toHaveProperty('value', muon)
-    expect(document.activeElement).toBe(box())
-    expect(screen.queryByRole('button', { name: muon })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: muon })
+    fireEvent.focus(box)
+    expect(box.getAttribute('placeholder')).toBe(ASK)
+    act(() => { vi.advanceTimersByTime(20_000) })
+    expect(box.getAttribute('placeholder')).toBe(ASK)
+    expect(box).toHaveProperty('value', '')
   })
 })
 

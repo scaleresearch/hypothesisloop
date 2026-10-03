@@ -104,7 +104,7 @@ export function OrgGitHub() {
           <tbody>
             {installations.map(installation => (
               <tr key={installation.installation_id}>
-                <td className="font-mono text-xs font-semibold">{installation.account_login}</td>
+                <td className="font-mono text-xs font-medium">{installation.account_login}</td>
                 <td className="text-xs text-muted">{installation.account_type ? KIND[installation.account_type] : ''}</td>
                 <td title={new Date(installation.connected_at).toLocaleString()}>
                   <Actor actor={installation.connected_actor} self={installation.connected_actor.kind === 'user' && installation.connected_actor.id === me.user_id} />

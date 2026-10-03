@@ -71,15 +71,22 @@ const config: Config = {
       dimmed: '0.25',
       100: '1',
     },
+    // Line heights of xs and sm are whole pixels, so a control of either holds the height of field.ts.
+    // Display sizes close up as they grow, the way a set headline does.
     fontSize: {
-      '2xs': ['11px', '1.4'],
-      xs: ['12px', '1.5'],
-      sm: ['13px', '1.5'],
-      base: ['13.5px', '1.55'],
-      lg: ['15px', '1.45'],
-      xl: ['18px', '1.35'],
-      '2xl': ['23px', '1.25'],
-      '3xl': ['40px', '1.1'],
+      '2xs': ['11.5px', { lineHeight: '16px', letterSpacing: '0.01em' }],
+      xs: ['12.5px', { lineHeight: '18px' }],
+      sm: ['13.5px', { lineHeight: '20px' }],
+      base: ['14.5px', { lineHeight: '1.55' }],
+      lg: ['16px', { lineHeight: '1.5' }],
+      xl: ['19px', { lineHeight: '1.35', letterSpacing: '-0.01em' }],
+      '2xl': ['27px', { lineHeight: '1.2', letterSpacing: '-0.02em' }],
+      '3xl': ['44px', { lineHeight: '1.08', letterSpacing: '-0.03em' }],
+    },
+    // Two weights: regular for reading and headings, medium to mark a name, a label or a choice.
+    fontWeight: {
+      normal: '400',
+      medium: '500',
     },
     borderRadius: {
       none: '0',
@@ -106,7 +113,13 @@ const config: Config = {
         },
       },
       animation: {
-        rise: 'rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both',
+        rise: 'rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both',
+      },
+      transitionDuration: {
+        DEFAULT: '200ms',
+      },
+      transitionTimingFunction: {
+        DEFAULT: 'cubic-bezier(0.4, 0, 0.2, 1)',
       },
     },
   },

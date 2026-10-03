@@ -9,7 +9,7 @@ import type { FieldSize } from '@/components/ui/field'
  */
 export function panelClass(field: 'button' | 'input') {
   return clsx(
-    'z-50 max-h-64 overflow-y-auto rounded border border-border-strong bg-surface-raised p-1 shadow-lg focus:outline-none',
+    'z-50 max-h-72 overflow-y-auto rounded border bg-surface-raised p-1.5 shadow-lg focus:outline-none',
     field === 'button' ? 'min-w-[var(--button-width)]' : 'min-w-[var(--input-width)]',
   )
 }
@@ -17,7 +17,7 @@ export function panelClass(field: 'button' | 'input') {
 /** One row of the list. Headless UI marks the row under the pointer or the arrow keys with data-focus. */
 export function optionClass(size: FieldSize = 'default', mono?: boolean) {
   return clsx(
-    'group flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-foreground',
+    'group flex cursor-default select-none items-center gap-2 rounded-sm px-2.5 py-1.5 text-foreground',
     'data-[focus]:bg-highlight data-[disabled]:cursor-not-allowed data-[disabled]:opacity-disabled',
     size === 'sm' ? 'text-xs' : 'text-sm',
     mono && 'font-mono',
@@ -28,7 +28,7 @@ export function optionClass(size: FieldSize = 'default', mono?: boolean) {
 export function OptionLabel({ children, badge }: { children: ReactNode; badge?: string }) {
   return (
     <>
-      <span className="min-w-0 flex-1 truncate group-data-[selected]:font-semibold">{children}</span>
+      <span className="min-w-0 flex-1 truncate group-data-[selected]:font-medium">{children}</span>
       {badge && <span className="flex-none rounded-full border px-1.5 font-sans text-2xs text-muted">{badge}</span>}
       <Check aria-hidden="true" size={14} strokeWidth={2.5} className="invisible flex-none text-accent group-data-[selected]:visible" />
     </>

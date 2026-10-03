@@ -171,7 +171,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               note={<>
                 Save it as an env file readable by you alone and start the agent with it. The token
                 works for this agent in this experiment and nowhere else. It never changes:{' '}
-                <span className="font-semibold">Show token</span> in the agent&apos;s row shows the same one again, as does{' '}
+                <span className="font-medium">Show token</span> in the agent&apos;s row shows the same one again, as does{' '}
                 <span className="font-mono">hl platform-experiments agents add --platform-experiment {pe.id} --agent {agent.agent_id}</span>.
                 Removing the agent is what stops it working.
               </>}
@@ -203,7 +203,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               <tbody>
                 {agents.map(agent => (
                   <tr key={agent.agent_id}>
-                    <td className="whitespace-nowrap font-mono text-xs font-semibold">
+                    <td className="whitespace-nowrap font-mono text-xs font-medium">
                       {agent.name}
                       {agent.name !== agent.agent_id && <div className="text-2xs font-normal text-muted">{agent.agent_id}</div>}
                     </td>
