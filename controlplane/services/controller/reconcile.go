@@ -38,14 +38,14 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	reportIntervalByPE := map[string]time.Duration{}
 	maxJobHoursByPE := map[string]float64{}
 	declaredMetricKeysByPE := map[string][]string{}
-	// Only the stage ladder needs these maps. Silence and quota-exhaustion checks below do
-	// not, so an unreadable platform-experiment list must not stop them from running — that
-	// turned one failing query into a pass where nothing at all was reconciled.
-	pes, err := c.stagesStore.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
-	if err != nil {
-		c.logger.Error("stages: list platform experiments; continuing without stage maps", zap.Error(err))
-		errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", err))
-		pes = nil
+	// The closed-experiment and quota-exhaustion checks below need none of these maps and run
+	// whether or not the list was read. Silence and the job-length cap judge a job by its
+	// platform experiment's own interval, cap and metrics, so a pass that could not read them
+	// judges no job: on the defaults a job with a longer interval would be evicted as silent.
+	pes, listErr := c.stagesStore.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
+	if listErr != nil {
+		c.logger.Error("stages: list platform experiments; no job is judged for silence or length this pass", zap.Error(listErr))
+		errs = append(errs, fmt.Errorf("stages: list platform experiments: %w", listErr))
 	}
 	for _, pe := range pes {
 		if pe.ReportIntervalSeconds > 0 {
@@ -118,6 +118,9 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 	}
 
+	if listErr != nil {
+		return errors.Join(errs...)
+	}
 	for _, exp := range exps {
 		if err := c.reconcileOne(ctx, exp, now, obs, reportIntervalByPE, maxJobHoursByPE, declaredMetricKeysByPE); err != nil {
 			c.logger.Error("reconcile experiment", zap.String("exp", exp.ID), zap.Error(err))
