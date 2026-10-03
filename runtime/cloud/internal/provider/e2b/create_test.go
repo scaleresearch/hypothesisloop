@@ -91,7 +91,7 @@ func TestCreateStartsASandboxOfTheTemplateAndTheCommandInside(t *testing.T) {
 	if len(uploads) != 1 || uploads[0].Query != "path=%2Fvar%2Ftmp%2F.hl-supervisor%2Flaunch" || uploads[0].AccessToken != testToken || uploads[0].APIKey != "" {
 		t.Fatalf("uploads = %+v, want the launch file, sent with the sandbox's token and without the API key", uploads)
 	}
-	if got := uploaded(t, uploads[0]); got != launchFile(agentSpec().Command, agentSpec().Env) {
+	if got := uploaded(t, uploads[0]); got != launchFile(agentSpec().Command, agentSpec().Env, 55*time.Minute) {
 		t.Errorf("launch file = %q", got)
 	}
 
@@ -119,14 +119,19 @@ func TestCreateStartsASandboxOfTheTemplateAndTheCommandInside(t *testing.T) {
 	}
 }
 
+// A lifetime the plan can give is the vendor's to keep: at its end nobody wants the instance. A
+// sandbox the plan ends sooner than was asked is still wanted then, so its supervisor ends the
+// command five minutes before the vendor ends the sandbox and says that it did.
 func TestCreateGivesTheSandboxTheSpecsLifetimeUnderThePlansLongest(t *testing.T) {
 	for name, tc := range map[string]struct {
 		lifetime time.Duration
 		want     float64
+		counted  string
 	}{
-		"shorter than the plan's": {20 * time.Minute, 1200},
-		"longer than the plan's":  {36 * time.Hour, 3600},
-		"none of its own":         {0, 3600},
+		"shorter than the plan's": {20 * time.Minute, 1200, ""},
+		"the plan's exactly":      {time.Hour, 3600, ""},
+		"longer than the plan's":  {36 * time.Hour, 3600, "(sleep 3300 && kill -USR1 $$)"},
+		"none of its own":         {0, 3600, "(sleep 3300 && kill -USR1 $$)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
@@ -140,8 +145,12 @@ func TestCreateGivesTheSandboxTheSpecsLifetimeUnderThePlansLongest(t *testing.T)
 			if got := api.sent(http.MethodPost, sandboxesPath)[0].json(t)["timeout"]; got != tc.want {
 				t.Errorf("timeout = %v, want %v", got, tc.want)
 			}
-			if file := uploaded(t, api.sent(http.MethodPost, envdFiles)[0]); strings.Contains(file, "USR1") {
+			file := uploaded(t, api.sent(http.MethodPost, envdFiles)[0])
+			if tc.counted == "" && strings.Contains(file, "USR1") {
 				t.Error("the supervisor counts a lifetime the vendor already keeps")
+			}
+			if !strings.Contains(file, tc.counted) || strings.Contains(file, "echo expired") != (tc.counted != "") {
+				t.Errorf("launch file, want it to count %q and to say expired only then:\n%s", tc.counted, file)
 			}
 		})
 	}
@@ -165,7 +174,7 @@ func TestCreateSeesTheSandboxListedBeforeAnythingOfTheSpecEntersIt(t *testing.T)
 }
 
 func TestLaunchFileRemovesItselfThenSetsTheImagesEnvironmentTheSpecsAndTheArgv(t *testing.T) {
-	file := launchFile(agentSpec().Command, agentSpec().Env)
+	file := launchFile(agentSpec().Command, agentSpec().Env, 0)
 
 	wantStart := "rm -f /var/tmp/.hl-supervisor/launch\n"
 	if !strings.HasPrefix(file, wantStart) {

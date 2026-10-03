@@ -147,15 +147,15 @@ func TestScriptKillsACommandAtTheEndOfItsLifetimeAndRunsThePartAfterIt(t *testin
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		dir := t.TempDir()
 		began := time.Now()
-		run := startFor(t, shell, dir, time.Second, supervise.Parts{After: `: > "$DIR/after"`},
+		run := startFor(t, shell, dir, time.Second, supervise.Parts{After: `echo "expired=$expired" > "$DIR/after"`},
 			"/bin/sh", "-c", `trap '' TERM; : > "$DIR/ready"; while :; do sleep 0.05 & wait $!; done`)
 		await(t, filepath.Join(dir, "ready"))
 		run.wait(t)
 		if lived := time.Since(began); lived < time.Second || lived > 5*time.Second {
 			t.Errorf("the supervisor ended after %s, want its lifetime of one second", lived.Round(10*time.Millisecond))
 		}
-		if _, err := os.Stat(filepath.Join(dir, "after")); err != nil {
-			t.Errorf("the part after the command did not run once the lifetime ended: %v", err)
+		if got := read(t, filepath.Join(dir, "after")); got != "expired=1\n" {
+			t.Errorf("the part after the command saw %q, want it run once the lifetime ended and told so", got)
 		}
 	})
 }
@@ -178,11 +178,11 @@ func TestScriptDoesNotStartTheCommandOnceItsLifetimeHasEnded(t *testing.T) {
 func TestScriptLeavesACommandThatEndsInsideItsLifetimeAlone(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		dir := t.TempDir()
-		parts := supervise.Parts{After: `echo after >> "$DIR/order"; sleep 2 & wait $!; echo held >> "$DIR/order"`}
+		parts := supervise.Parts{After: `echo "after$expired" >> "$DIR/order"; sleep 2 & wait $!; echo held >> "$DIR/order"`}
 		run := startFor(t, shell, dir, time.Second, parts, "/bin/sh", "-c", `echo ran >> "$DIR/order"`)
 		run.wait(t)
 		if got := read(t, filepath.Join(dir, "order")); got != "ran\nafter\nheld\n" {
-			t.Errorf("order = %q, want the command and the part after it run once, through the lifetime's end", got)
+			t.Errorf("order = %q, want the command and the part after it run once, through the lifetime's end, and its own ending not told as the lifetime's", got)
 		}
 	})
 }

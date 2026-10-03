@@ -36,6 +36,7 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 		"key variable unset": {func(c *Settings) { c.APIKeyEnv = "E2B_TEST_EMPTY" }, "E2B_TEST_EMPTY is not set"},
 		"no lifetime":        {func(c *Settings) { c.LifetimeSeconds = 0 }, "lifetime_seconds"},
 		"negative lifetime":  {func(c *Settings) { c.LifetimeSeconds = -1 }, "lifetime_seconds"},
+		"a lifetime no longer than the notice of its end": {func(c *Settings) { c.LifetimeSeconds = 300 }, "lifetime_seconds must be above 300"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

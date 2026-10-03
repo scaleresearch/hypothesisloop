@@ -107,7 +107,8 @@ type Spec struct {
 	// it: the command is killed, and the instance is exited, or gone where the vendor ends an
 	// instance whole. Either way it stops being billed for compute. An adapter maps it to its
 	// vendor's own lifetime where there is one and counts it inside the instance otherwise.
-	// Zero asks for no end beyond what the vendor imposes.
+	// Zero asks for no end beyond what the vendor imposes. An instance the vendor's own limit
+	// ends first is listed as exited with Instance.Expired.
 	Lifetime time.Duration
 }
 
@@ -120,6 +121,12 @@ type Instance struct {
 	Name      string
 	State     State
 	StartedAt time.Time
+	// Expired says of an exited instance that its vendor's own limit on how long it rents one
+	// ended the command, sooner than Spec.Lifetime asked: the command did nothing wrong, and a
+	// caller that still wants it rents another. Only an adapter whose vendor has such a limit
+	// sets it. A caller that does not look in time finds the instance gone instead, as the
+	// vendor removes it soon after.
+	Expired bool
 	// What the instance runs on, each as far as the vendor says and empty or zero otherwise.
 	// Host is the vendor's id of the physical machine, the same for every instance rented on
 	// it. The models are the vendor's own names for them. PricePerHour is in US dollars, for

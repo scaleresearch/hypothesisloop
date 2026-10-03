@@ -43,7 +43,8 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		SandboxID       string `json:"sandboxID"`
 		EnvdAccessToken string `json:"envdAccessToken"`
 	}
-	req := createRequest{TemplateID: template, Timeout: p.cfg.lifetimeSeconds(spec), Metadata: map[string]string{nameKey: spec.Name}}
+	sandboxSeconds, commandLifetime := p.cfg.lifetimes(spec)
+	req := createRequest{TemplateID: template, Timeout: sandboxSeconds, Metadata: map[string]string{nameKey: spec.Name}}
 	_, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created)
 	if hasStatus(err, http.StatusNotFound) {
 		return "", fmt.Errorf("e2b: template %s for image %q with %d cores and %d MiB of memory is not built; build it with `%s %s %d %d`: %w",
@@ -55,7 +56,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if created.SandboxID == "" || created.EnvdAccessToken == "" {
 		return "", fmt.Errorf("e2b: creating a sandbox for %q answered without an id or without its token", spec.Name)
 	}
-	if err := p.launch(ctx, created.SandboxID, created.EnvdAccessToken, spec, template); err != nil {
+	if err := p.launch(ctx, created.SandboxID, created.EnvdAccessToken, spec, template, commandLifetime); err != nil {
 		destroy := func(ctx context.Context) error { return p.Destroy(ctx, created.SandboxID) }
 		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
 	}
@@ -66,7 +67,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 // that the name is taken, and compares what the list says of its size with the spec. Only then
 // does anything of the spec enter the sandbox: the launch file with the command and its
 // environment, into a directory no other user can read, and the start.
-func (p *Provider) launch(ctx context.Context, id, token string, spec provider.Spec, template string) error {
+func (p *Provider) launch(ctx context.Context, id, token string, spec provider.Spec, template string, commandLifetime time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, p.window)
 	defer cancel()
 	listed, err := p.awaitListed(ctx, id, spec.Name)
@@ -82,7 +83,7 @@ func (p *Provider) launch(ctx context.Context, id, token string, spec provider.S
 	if _, err := inside.run(ctx, maxUploadAnswer, "mkdir", "-m", "700", superviseDir); err != nil {
 		return fmt.Errorf("e2b: sandbox %s was created for %q and the supervisor's directory could not be made: %w", id, spec.Name, err)
 	}
-	if err := inside.writeFile(ctx, launchPath, launchFile(spec.Command, spec.Env)); err != nil {
+	if err := inside.writeFile(ctx, launchPath, launchFile(spec.Command, spec.Env, commandLifetime)); err != nil {
 		return fmt.Errorf("e2b: sandbox %s was created for %q and its command could not be uploaded: %w", id, spec.Name, err)
 	}
 	start := startRequest{Process: processConfig{Cmd: "/bin/sh", Args: []string{launchPath}}, Tag: supervisorTag}

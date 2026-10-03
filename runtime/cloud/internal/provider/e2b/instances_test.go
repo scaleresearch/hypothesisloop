@@ -103,13 +103,15 @@ func TestListOfATeamWithNoSandboxesIsEmpty(t *testing.T) {
 
 func TestListMapsWhatTheSupervisorWrote(t *testing.T) {
 	cases := map[string]struct {
-		state http.HandlerFunc
-		want  provider.State
+		state   http.HandlerFunc
+		want    provider.State
+		expired bool
 	}{
-		"no state file yet":     {answer(404, noFileJSON), provider.StateStarting},
-		"a file made and empty": {answer(200, ""), provider.StateStarting},
-		"running":               {answer(200, "running\n"), provider.StateRunning},
-		"exited":                {answer(200, "running\nexited\n"), provider.StateExited},
+		"no state file yet":            {answer(404, noFileJSON), provider.StateStarting, false},
+		"a file made and empty":        {answer(200, ""), provider.StateStarting, false},
+		"running":                      {answer(200, "running\n"), provider.StateRunning, false},
+		"exited":                       {answer(200, "running\nexited\n"), provider.StateExited, false},
+		"ended at the plan's lifetime": {answer(200, "running\nexpired\n"), provider.StateExited, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -119,8 +121,8 @@ func TestListMapsWhatTheSupervisorWrote(t *testing.T) {
 			p := newTestProvider(t, api)
 
 			got, err := p.List(context.Background(), "hl-")
-			if err != nil || len(got) != 1 || got[0].State != tc.want {
-				t.Fatalf("List = %+v, %v, want one instance that is %s", got, err, tc.want)
+			if err != nil || len(got) != 1 || got[0].State != tc.want || got[0].Expired != tc.expired {
+				t.Fatalf("List = %+v, %v, want one instance that is %s, expired %v", got, err, tc.want, tc.expired)
 			}
 		})
 	}
@@ -195,6 +197,7 @@ func TestListKeepsEverySandboxWhateverReadingItCameTo(t *testing.T) {
 		"envd hangs":                 {answer(200, detailJSON), hung, provider.StateUnknown},
 		"a state nobody wrote":       {answer(200, detailJSON), answer(200, "exited\n"), provider.StateExited},
 		"a third state line":         {answer(200, detailJSON), answer(200, "running\nexited\nrunning\n"), provider.StateExited},
+		"expired with nothing run":   {answer(200, detailJSON), answer(200, "expired\n"), provider.StateExited},
 		"a state file without end":   {answer(200, detailJSON), answer(200, strings.Repeat("running\n", 1<<20)), provider.StateExited},
 		"a state file one byte over": {answer(200, detailJSON), answer(200, strings.Repeat("x", maxStateBytes+1)), provider.StateExited},
 	}
@@ -215,8 +218,8 @@ func TestListKeepsEverySandboxWhateverReadingItCameTo(t *testing.T) {
 			if err != nil || len(got) != 2 {
 				t.Fatalf("List = %+v, %v, want both sandboxes and no error", got, err)
 			}
-			if got[0].ID != "sb1" || got[0].Name != "hl-a" || got[0].State != tc.want {
-				t.Errorf("the sandbox that could not be read = %+v, want it listed as %s", got[0], tc.want)
+			if got[0].ID != "sb1" || got[0].Name != "hl-a" || got[0].State != tc.want || got[0].Expired {
+				t.Errorf("the sandbox that could not be read = %+v, want it listed as %s and never as expired", got[0], tc.want)
 			}
 			if got[1].ID != "sb2" || got[1].State != provider.StateExited {
 				t.Errorf("the sandbox beside it = %+v, want it read as exited", got[1])

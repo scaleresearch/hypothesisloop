@@ -3,6 +3,7 @@ package e2b
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
 )
@@ -17,6 +18,7 @@ const (
 
 	stateRunning = "running"
 	stateExited  = "exited"
+	stateExpired = "expired"
 
 	// supervisorTag is the name envd knows the supervisor's process by.
 	supervisorTag = "hl-supervisor"
@@ -32,11 +34,14 @@ const (
 // one line before the command starts and a second after it has ended. Lines are only ever
 // appended to the state file, so a reader never finds it half written.
 //
+// A lifetime above zero is the supervisor's to count: at its end it kills the command and the
+// second line says expired, where it says exited after any other ending.
+//
 // The file holds the command's environment and argv, the image's environment first and the
 // spec's over it, every value in single quotes, inside which a shell reads each byte as itself.
 // It removes itself before anything else: the values are in the supervisor's memory from then on
 // and in no file. In a template without the image's environment file the command is not run.
-func launchFile(command []string, env map[string]string) string {
+func launchFile(command []string, env map[string]string, lifetime time.Duration) string {
 	names := make([]string, 0, len(env))
 	for name := range env {
 		names = append(names, name)
@@ -52,11 +57,15 @@ func launchFile(command []string, env map[string]string) string {
 		before.WriteString(" " + quoted(arg))
 	}
 	before.WriteString("\necho " + stateRunning + " >> " + statePath + " || exit 126")
+	after := "echo " + stateExited + " >> " + statePath
+	if lifetime > 0 {
+		after = `if [ -n "$expired" ]; then echo ` + stateExpired + "; else echo " + stateExited + "; fi >> " + statePath
+	}
 	return "rm -f " + launchPath + "\n" + supervise.Script(supervise.Parts{
 		Before: before.String(),
 		Output: "> " + outputPath + " 2>&1",
-		After:  "echo " + stateExited + " >> " + statePath,
-	}, 0)
+		After:  after,
+	}, lifetime)
 }
 
 func quoted(value string) string {

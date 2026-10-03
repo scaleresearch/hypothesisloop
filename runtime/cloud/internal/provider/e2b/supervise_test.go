@@ -17,7 +17,13 @@ import (
 // sandbox moved under dir, and imageEnv as the file the template script leaves in a template.
 func startLaunched(t *testing.T, shell []string, dir, imageEnv string, env map[string]string, command ...string) *exec.Cmd {
 	t.Helper()
-	file := strings.ReplaceAll(launchFile(command, env), superviseDir, dir)
+	return startLaunchedFor(t, shell, dir, 0, imageEnv, env, command...)
+}
+
+// startLaunchedFor is startLaunched with a lifetime the supervisor counts.
+func startLaunchedFor(t *testing.T, shell []string, dir string, lifetime time.Duration, imageEnv string, env map[string]string, command ...string) *exec.Cmd {
+	t.Helper()
+	file := strings.ReplaceAll(launchFile(command, env, lifetime), superviseDir, dir)
 	file = strings.ReplaceAll(file, imageEnvPath, filepath.Join(dir, "image.env"))
 	if err := os.WriteFile(filepath.Join(dir, "launch"), []byte(file), 0o600); err != nil {
 		t.Fatal(err)
@@ -133,6 +139,30 @@ func TestSupervisorWritesRunningThenExited(t *testing.T) {
 		}
 		if got := read(t, dir, "out"); got != "final" {
 			t.Errorf("output = %q, want the last line as the command left it, without a newline", got)
+		}
+	})
+}
+
+// The vendor kills a sandbox at the plan's lifetime and it leaves the list with nothing to say
+// why. The supervisor ends the command a while before that and says so, which is the one thing
+// that tells a healthy agent whose sandbox ran out from one that died.
+func TestSupervisorWritesExpiredForACommandItEndedAtTheLifetimeAndExitedForOneThatEndedItself(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		dir := t.TempDir()
+		cmd := startLaunchedFor(t, shell, dir, time.Second, "", nil, "/bin/sh", "-c", `trap '' TERM; echo working; while :; do sleep 0.05 & wait $!; done`)
+		exitCode(t, cmd)
+		if got := read(t, dir, "state"); got != "running\nexpired\n" {
+			t.Errorf("state of a command killed at its lifetime = %q", got)
+		}
+		if got := read(t, dir, "out"); got != "working\n" {
+			t.Errorf("output = %q, want what the command wrote before it was ended", got)
+		}
+
+		dir = t.TempDir()
+		cmd = startLaunchedFor(t, shell, dir, time.Minute, "", nil, "/bin/sh", "-c", `exit 3`)
+		exitCode(t, cmd)
+		if got := read(t, dir, "state"); got != "running\nexited\n" {
+			t.Errorf("state of a command that ended inside its lifetime = %q", got)
 		}
 	})
 }

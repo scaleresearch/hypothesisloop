@@ -36,6 +36,7 @@ type Parts struct {
 // A lifetime above zero is counted inside the instance from the supervisor's start, so it runs
 // out whether or not anything outside can still reach the instance. At its end the command is
 // killed, or not started when it has not been yet, and After runs as it does after any ending.
+// $expired is set from then on, which is how After tells this ending from the command's own.
 // It needs sleep in the image. Zero is a supervisor with no end of its own.
 func Script(parts Parts, lifetime time.Duration) string {
 	script := rule
@@ -56,7 +57,9 @@ func Script(parts Parts, lifetime time.Duration) string {
 
 // expiry is what the lifetime's end does. forwarded is set with it: nothing is left to pass a
 // later SIGTERM on to.
-const expiry = `expire() {
+const expiry = `expired=
+expire() {
+  expired=1
   terminated=1
   forwarded=1
   [ -z "$child" ] || kill -KILL "$child" 2>/dev/null

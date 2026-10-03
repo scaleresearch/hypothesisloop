@@ -59,7 +59,8 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			defer reading.Done()
 			readers <- struct{}{}
 			defer func() { <-readers }()
-			listed[i] = provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: p.stateOf(ctx, found), StartedAt: found.StartedAt}
+			state, expired := p.stateOf(ctx, found)
+			listed[i] = provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt}
 		}()
 	}
 	reading.Wait()
@@ -108,57 +109,63 @@ func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox,
 //     instance.
 //   - Paused: paused, without a read. Reading a paused sandbox would resume it.
 //   - Any other state of the vendor's: unknown, without a read.
-func (p *Provider) stateOf(ctx context.Context, found sandbox) provider.State {
+//
+// expired is the supervisor's word that it ended the command at the plan's lifetime, and is set
+// with exited alone.
+func (p *Provider) stateOf(ctx context.Context, found sandbox) (state provider.State, expired bool) {
 	id, name := found.SandboxID, found.Metadata[nameKey]
 	if found.State == "paused" {
-		return provider.StatePaused
+		return provider.StatePaused, false
 	}
 	if found.State != "running" {
 		log.Printf("e2b: sandbox %s (%s) has state %q, which this adapter does not know; reporting it as unknown", id, name, found.State)
-		return provider.StateUnknown
+		return provider.StateUnknown, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.stateRead)
 	defer cancel()
 	inside, exists, err := p.inside(ctx, id)
 	if err != nil {
 		log.Printf("e2b: the token of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
-		return provider.StateUnknown
+		return provider.StateUnknown, false
 	}
 	if !exists {
 		log.Printf("e2b: sandbox %s (%s) is in the list and was not found when read; reporting it as unknown", id, name)
-		return provider.StateUnknown
+		return provider.StateUnknown, false
 	}
 	written, started, err := inside.readFile(ctx, statePath, maxStateBytes)
 	if errors.Is(err, vendorapi.ErrTooLarge) {
 		log.Printf("e2b: sandbox %s (%s): its state file is larger than the %d bytes the supervisor writes at most; reporting it as exited", id, name, maxStateBytes)
-		return provider.StateExited
+		return provider.StateExited, false
 	}
 	if err != nil {
 		log.Printf("e2b: the state of sandbox %s (%s) could not be read; reporting it as unknown: %v", id, name, err)
-		return provider.StateUnknown
+		return provider.StateUnknown, false
 	}
 	if !started {
-		return provider.StateStarting
+		return provider.StateStarting, false
 	}
-	state, err := stateWritten(written)
+	state, expired, err = stateWritten(written)
 	if err != nil {
 		log.Printf("e2b: sandbox %s (%s): %v; reporting it as exited", id, name, err)
-		return provider.StateExited
+		return provider.StateExited, false
 	}
-	return state
+	return state, expired
 }
 
-// stateWritten maps the state file: one line when the command started, a second when it ended.
-func stateWritten(written string) (provider.State, error) {
+// stateWritten maps the state file: one line when the command started, a second when it ended,
+// which says whether the supervisor ended it at the plan's lifetime.
+func stateWritten(written string) (state provider.State, expired bool, err error) {
 	switch written {
 	case "":
-		return provider.StateStarting, nil
+		return provider.StateStarting, false, nil
 	case stateRunning + "\n":
-		return provider.StateRunning, nil
+		return provider.StateRunning, false, nil
 	case stateRunning + "\n" + stateExited + "\n":
-		return provider.StateExited, nil
+		return provider.StateExited, false, nil
+	case stateRunning + "\n" + stateExpired + "\n":
+		return provider.StateExited, true, nil
 	}
-	return "", fmt.Errorf("its state file holds %q, which the supervisor does not write", written)
+	return "", false, fmt.Errorf("its state file holds %q, which the supervisor does not write", written)
 }
 
 // inside returns the envd of a sandbox, and exists false when the sandbox is gone. The token

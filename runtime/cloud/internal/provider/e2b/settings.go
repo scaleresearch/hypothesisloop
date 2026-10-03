@@ -14,27 +14,37 @@ type Settings struct {
 	// APIKeyEnv names the environment variable holding the team's API key.
 	APIKeyEnv string `yaml:"api_key_env"`
 	// LifetimeSeconds is the longest a sandbox lives before the vendor kills it. Nothing extends
-	// it: a sandbox that reaches it leaves the list and its caller creates it again. The plan
-	// caps it, and a value above the cap fails every Create with the vendor's own message.
+	// it. The plan caps it, and a value above the cap fails every Create with the vendor's own
+	// message. It is above expiryNotice.
 	LifetimeSeconds int `yaml:"lifetime_seconds"`
 }
 
-// lifetimeSeconds is what a sandbox for spec is created with: the spec's own lifetime, which the
-// vendor then keeps, under the longest this account's plan gives. The vendor rents no sandbox
-// without one.
-func (c Settings) lifetimeSeconds(spec provider.Spec) int {
-	if spec.Lifetime > 0 {
-		return min(c.LifetimeSeconds, int(spec.Lifetime/time.Second))
+// expiryNotice is how long before the vendor kills a sandbox at the plan's lifetime its
+// supervisor ends the command and writes that down. A sandbox the vendor killed is gone from the
+// list and nothing says why, so for this long it is listed as exited and expired, which is the
+// time a caller has to read that: twenty passes at the interval the launcher ships with.
+const expiryNotice = 5 * time.Minute
+
+// lifetimes is how long a sandbox for spec is rented, in the vendor's seconds, and for how long
+// its supervisor lets the command run, zero for no end of the supervisor's own.
+//
+// A spec whose own lifetime fits the plan's is rented for that and the vendor keeps it: when it
+// ends nobody wants the instance, and it leaves the list. Any other is rented for the plan's
+// longest, and its supervisor ends the command expiryNotice before the vendor ends the sandbox.
+func (c Settings) lifetimes(spec provider.Spec) (sandboxSeconds int, command time.Duration) {
+	longest := time.Duration(c.LifetimeSeconds) * time.Second
+	if spec.Lifetime > 0 && spec.Lifetime <= longest {
+		return int(spec.Lifetime / time.Second), 0
 	}
-	return c.LifetimeSeconds
+	return c.LifetimeSeconds, longest - expiryNotice
 }
 
 func (c Settings) validate() error {
 	if c.APIKeyEnv == "" {
 		return errors.New("e2b: api_key_env is required")
 	}
-	if c.LifetimeSeconds <= 0 {
-		return errors.New("e2b: lifetime_seconds must be positive")
+	if notice := int(expiryNotice / time.Second); c.LifetimeSeconds <= notice {
+		return fmt.Errorf("e2b: lifetime_seconds must be above %d: a sandbox's command is ended that long before the sandbox, so its end can be read", notice)
 	}
 	return nil
 }
