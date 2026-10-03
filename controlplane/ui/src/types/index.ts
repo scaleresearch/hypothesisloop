@@ -134,9 +134,10 @@ export interface Experiment {
   project_id: string
   cluster_name?: string
   capacity_tier?: CapacityTier
-  // The hypothesis the job tests. A baseline agent's job tests none: this is its
-  // platform_experiment_id, standing for the objective, and hypothesis is empty.
-  hypothesis_id: string
+  // The hypothesis the job tests. A baseline agent's job tests none: it has no hypothesis_id,
+  // objective is true and hypothesis is empty.
+  hypothesis_id?: string
+  objective?: boolean
   hypothesis: string
   theory?: string
   status: ExperimentStatus

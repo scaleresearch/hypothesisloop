@@ -102,7 +102,7 @@ describe('the cluster of a job', () => {
 describe('the job of a baseline agent', () => {
   it('tests no hypothesis: it is named the baseline of the objective and opens the graph, on its own branch', async () => {
     vi.mocked(fetchExperimentsPage).mockResolvedValue({
-      items: [{ ...job('base-0001', 'lab'), hypothesis_id: 'pe-1', hypothesis: '', branch: 'hl/pe-1/baseline' }, job('own-0001', 'lab')],
+      items: [{ ...job('base-0001', 'lab'), hypothesis_id: undefined, objective: true, hypothesis: '', branch: 'hl/pe-1/baseline' }, job('own-0001', 'lab')],
       total: 2,
     })
     const resolved = resolveTenant(me, '')

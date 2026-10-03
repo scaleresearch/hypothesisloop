@@ -2,13 +2,13 @@ import type { Experiment } from '@/types'
 import { TextLink } from '@/components/ui/link'
 import { graphHref } from '@/lib/hypothesis-graph'
 
-type Tested = Pick<Experiment, 'hypothesis_id' | 'hypothesis' | 'platform_experiment_id'>
+type Tested = Pick<Experiment, 'hypothesis_id' | 'objective' | 'hypothesis' | 'platform_experiment_id'>
 
 export const BASELINE_JOB = 'Baseline of the objective'
 
-/** A baseline agent's job tests no hypothesis: its hypothesis_id is its platform experiment's id, which names the objective. */
+/** A baseline agent's job tests no hypothesis: it measures the objective of its platform experiment. */
 export function measuresBaseline(job: Tested): boolean {
-  return job.hypothesis_id === job.platform_experiment_id
+  return job.objective === true
 }
 
 /** What a job tests, in a row that opens the job: its hypothesis, or the objective for the baseline's. */

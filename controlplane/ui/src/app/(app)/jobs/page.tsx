@@ -28,7 +28,7 @@ import { JobReason } from '@/components/job-reason'
 import { useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { listProject, useExperimentAccess } from '@/lib/read-only'
-import { envSettings, variedEnvByHypothesis } from '@/lib/hypothesis-progress'
+import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { Branch } from '@/components/code-ref'
 import { JobHypothesis } from '@/components/job-hypothesis'
 
@@ -305,7 +305,7 @@ function JobsPageContent() {
                       <JobHypothesis job={j} />
                       <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
                         {j.branch && <><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} />{' '}</>}
-                        {envSettings(j, variedByHypothesis.get(j.hypothesis_id) ?? [])}
+                        {variedEnvSettings(j, variedByHypothesis)}
                       </div>
                     </td>
                     <td className={quiet}>{relTime(j.created_at)}</td>

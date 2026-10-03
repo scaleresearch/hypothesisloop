@@ -52,9 +52,19 @@ export function settings(env: Record<string, string> | undefined, keys: string[]
   return keys.map(k => env?.[k] === undefined ? `${k} not set` : `${k}=${env[k]}`).join(' ')
 }
 
+// What a job is grouped with: its hypothesis, and for a baseline agent's job, which tests none,
+// the other jobs on the objective.
+function tested(job: Experiment): string {
+  return job.hypothesis_id ?? ''
+}
+
 // Per hypothesis, the settings its jobs in the list do not share: what tells those rows apart.
 export function variedEnvByHypothesis(jobs: Experiment[]): Map<string, string[]> {
   const groups = new Map<string, Experiment[]>()
-  for (const j of jobs) groups.set(j.hypothesis_id, [...(groups.get(j.hypothesis_id) ?? []), j])
+  for (const j of jobs) groups.set(tested(j), [...(groups.get(tested(j)) ?? []), j])
   return new Map(Array.from(groups, ([id, group]) => [id, variedEnvKeys(group)]))
+}
+
+export function variedEnvSettings(job: Experiment, varied: Map<string, string[]>): string {
+  return envSettings(job, varied.get(tested(job)) ?? [])
 }

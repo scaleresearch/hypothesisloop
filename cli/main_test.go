@@ -957,3 +957,30 @@ func TestAFlagErrorNamesTheFlagAsItWasTyped(t *testing.T) {
 		}
 	}
 }
+
+// A coordinator read a baseline job's hypothesis_id, then the platform experiment's id, and ran
+// hl hypothesis get on it: 404. Such a job prints that it is on the objective, and no hypothesis.
+func TestABaselineJobPrintsAsOnTheObjective(t *testing.T) {
+	recordingServer(t, func(_ int, r recorded) any {
+		job := map[string]any{"id": "job-base", "status": "COMPLETED", "platform_experiment_id": "pe-1", "objective": true}
+		if r.Path == "/experiments/job-base" {
+			return job
+		}
+		return []map[string]any{job, {"id": "job-own", "status": "COMPLETED", "hypothesis_id": "hyp-1"}}
+	})
+	for _, args := range [][]string{{"job", "list", "--platform-experiment", "pe-1"}, {"job", "status", "job-base"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("hl %v: exit %d, stderr %s", args, code, stderr.String())
+		}
+		baseline, _, _ := strings.Cut(stdout.String(), "\n")
+		if !strings.Contains(baseline, `"id":"job-base"`) || !strings.Contains(baseline, `"objective":true`) || strings.Contains(baseline, "hypothesis_id") {
+			t.Errorf("hl %v: baseline job = %s, want objective true and no hypothesis_id", args, baseline)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	run([]string{"job", "list", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if own := strings.Split(stdout.String(), "\n")[1]; !strings.Contains(own, `"hypothesis_id":"hyp-1"`) || strings.Contains(own, "objective") {
+		t.Errorf("a researcher's job = %s, want its hypothesis_id and no objective", own)
+	}
+}

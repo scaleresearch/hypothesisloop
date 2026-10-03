@@ -265,6 +265,7 @@ type jobBrief struct {
 	ParentID           string          `json:"parent_id"`
 	AgentID            string          `json:"agent_id"`
 	HypothesisID       string          `json:"hypothesis_id"`
+	Objective          bool            `json:"objective,omitempty"`
 	Status             string          `json:"status"`
 	Metrics            briefMetrics    `json:"metrics"`
 	Machine            machineTag      `json:"ran_on"`
@@ -387,7 +388,9 @@ func withJobEnv(line, env []byte) []byte {
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--needs-summary] [--limit N] [--offset N]
 
-One job per line, newest first: ids, status, metrics (one value per declared metric: on a
+One job per line, newest first: ids (hypothesis_id is the hypothesis it tests; a baseline
+agent's job tests none and prints "objective":true in its place, so there is nothing to
+hl hypothesis get), status, metrics (one value per declared metric: on a
 ranking metric the job's best in its direction, on a constraint or an attribute its last, so
 report a ranking metric as a result, never as a running timer),
 ran_on (the machine: numbers compare only between jobs that share it), reasons (for a QUEUED
@@ -452,7 +455,8 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job status", `usage: hl job status ID [ID ...]
 
-One line per job, its whole record: status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
+One line per job, its whole record: hypothesis_id, or "objective":true on a baseline agent's
+job, which tests no hypothesis; status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
 EVICTED, REJECTED or CANCELLED), metrics (one value each, as in hl job list), finished_at,
 summary, phase_detail and the spec under job, its settings as job.env.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job

@@ -43,6 +43,10 @@ func (s *filterSpyStore) NameActors(_ context.Context, actors []*domain.Actor) e
 
 func (s *filterSpyStore) DescribeJobs(context.Context, []*domain.Experiment) error { return nil }
 
+func (s *filterSpyStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
+	return &domain.PlatformExperiment{ID: id}, nil
+}
+
 func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	s.gotList = f
 	return s.items, nil
@@ -299,5 +303,25 @@ func TestExperimentStatsForwardsKnownGroupByAndRejectsOthers(t *testing.T) {
 	}
 	if code, body := get(t, r, "/experiments/stats?group_by=status"); code != 400 {
 		t.Errorf("unknown group_by: status = %d (%s), want 400", code, body)
+	}
+}
+
+// A coordinator read a baseline job's hypothesis_id, the platform experiment's id, and asked
+// for that hypothesis: 404. The list says such a job is on the objective and names no hypothesis.
+func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
+	spy := &filterSpyStore{total: 2, items: []*domain.Experiment{
+		{ID: "job-base", PlatformExperimentID: "pe-1", HypothesisID: "pe-1"},
+		{ID: "job-own", PlatformExperimentID: "pe-1", HypothesisID: "hyp-1"},
+	}}
+	code, body := get(t, schedulerRouter(t, spy), "/experiments?platform_experiment_id=pe-1")
+	var jobs []map[string]any
+	if err := json.Unmarshal([]byte(body), &jobs); code != 200 || err != nil || len(jobs) != 2 {
+		t.Fatalf("list: got = %d %s (%v), want 200 with two jobs", code, body, err)
+	}
+	if _, stated := jobs[0]["hypothesis_id"]; stated || jobs[0]["objective"] != true {
+		t.Errorf("the baseline job: got = %v, want objective true and no hypothesis_id", jobs[0])
+	}
+	if _, stated := jobs[1]["objective"]; stated || jobs[1]["hypothesis_id"] != "hyp-1" {
+		t.Errorf("the researcher's job: got = %v, want hypothesis_id hyp-1 and no objective", jobs[1])
 	}
 }

@@ -377,3 +377,33 @@ func TestAMetricsRoleDecidesTheValueAJobIsReadBy(t *testing.T) {
 		}
 	}
 }
+
+// A baseline agent's job is stored on the objective under the platform experiment's id, which
+// is no hypothesis: read as one it answers 404, so no answer hands it out as hypothesis_id.
+func TestAJobOnTheObjectiveIsAnsweredWithoutAHypothesisID(t *testing.T) {
+	answered := func(e Experiment) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal([]*Experiment{&e})
+		if err != nil {
+			t.Fatalf("Marshal: got = %v, want nil", err)
+		}
+		var out []map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("Unmarshal: got = %v, want nil", err)
+		}
+		return out[0]
+	}
+	baseline := Experiment{ID: "job-1", PlatformExperimentID: "pe-1", HypothesisID: "pe-1"}
+	if got := answered(baseline); got["objective"] != true || got["id"] != "job-1" || got["platform_experiment_id"] != "pe-1" {
+		t.Errorf("a job on the objective: got = %v, want objective true beside its other fields", got)
+	} else if _, stated := got["hypothesis_id"]; stated {
+		t.Errorf("a job on the objective: got hypothesis_id %v, want none", got["hypothesis_id"])
+	}
+	if !baseline.OnObjective() || baseline.HypothesisID != "pe-1" {
+		t.Errorf("after the answer: got = %+v, want the job still on the objective as stored", baseline)
+	}
+	tested := answered(Experiment{ID: "job-2", PlatformExperimentID: "pe-1", HypothesisID: "hyp-1"})
+	if _, stated := tested["objective"]; stated || tested["hypothesis_id"] != "hyp-1" {
+		t.Errorf("a job testing a hypothesis: got = %v, want hypothesis_id hyp-1 and no objective", tested)
+	}
+}

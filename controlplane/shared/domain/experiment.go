@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -59,9 +60,12 @@ type Experiment struct {
 	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
 	// HypothesisID is the hypothesis the job tests, registered via POST /hypotheses. The job of a
 	// baseline agent tests none and is kept on the objective, which the platform experiment's id
-	// names here as it does in a builds_on link.
-	HypothesisID string `json:"hypothesis_id" doc:"The hypothesis the job tests. On a baseline agent's job, which tests none, the platform_experiment_id, standing for the objective."`
-	Hypothesis   string `json:"hypothesis"`
+	// names here as it does in a builds_on link. That id is no hypothesis a reader can fetch, so
+	// an answer leaves it out and says Objective instead (MarshalJSON).
+	HypothesisID string `json:"hypothesis_id,omitempty" doc:"The hypothesis the job tests. Absent on a baseline agent's job, which tests none: see objective."`
+	// Objective is set in an answer only, never in memory: read OnObjective.
+	Objective  bool   `json:"objective,omitempty" doc:"True on a baseline agent's job: it measures the platform experiment's objective and tests no hypothesis, so it has no hypothesis_id. GET /experiments?hypothesis_id=<platform_experiment_id> still lists such jobs."`
+	Hypothesis string `json:"hypothesis"`
 	// Theory is the agent's specific prediction or bet they want to verify with this run.
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
 	Theory                 string           `json:"theory,omitempty"`
@@ -162,6 +166,21 @@ type Experiment struct {
 	// writes updated_at on a terminal row but the transition that ended it, a requeue aside,
 	// which makes the row non-terminal again.
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// OnObjective reports whether the job is a baseline agent's: it tests no hypothesis and is kept
+// on the objective of its platform experiment.
+func (e *Experiment) OnObjective() bool {
+	return e.HypothesisID != "" && e.HypothesisID == e.PlatformExperimentID
+}
+
+// MarshalJSON answers a job on the objective with objective and no hypothesis_id.
+func (e Experiment) MarshalJSON() ([]byte, error) {
+	type wire Experiment
+	if e.OnObjective() {
+		e.HypothesisID, e.Objective = "", true
+	}
+	return json.Marshal(wire(e))
 }
 
 // EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has

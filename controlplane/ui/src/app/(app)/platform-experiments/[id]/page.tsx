@@ -45,7 +45,7 @@ import { semantic, chart } from '@/lib/colors'
 import { formatAccH, formatDate, runClock } from '@/lib/format'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
-import { envSettings, filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedKeys } from '@/lib/hypothesis-progress'
+import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis, variedEnvSettings, variedKeys } from '@/lib/hypothesis-progress'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
@@ -670,7 +670,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                       <td className="max-w-xs truncate text-xs" title={exp.hypothesis}>
                         <JobHypothesis job={exp} />
                         <div className="mt-0.5 whitespace-normal font-mono text-2xs text-muted">
-                          {envSettings(exp, variedByHypothesis.get(exp.hypothesis_id) ?? [])}
+                          {variedEnvSettings(exp, variedByHypothesis)}
                         </div>
                       </td>
                       <td className={num}>{exp.metric?.value.toFixed(4) ?? '—'}</td>
