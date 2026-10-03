@@ -145,6 +145,7 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var notCovered *github.NotCoveredError
 	var notPermitted *github.CreationNotPermittedError
 	var failed *github.CreationFailedError
+	var notAsAsked *github.NotAsAskedError
 	switch {
 	case errors.As(err, &status):
 		return err
@@ -154,6 +155,9 @@ func refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.As(err, &notCovered):
 		logger.Error("github created a repository and did not add it to the installation", zap.String("operation", op), zap.Error(err))
 		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try, where hl repo init adds the experiment's files")
+	case errors.As(err, &notAsAsked):
+		logger.Error("github created a repository that is not the private one asked for", zap.String("operation", op), zap.Error(err))
+		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
 	case errors.Is(err, db.ErrGitHubAuthorizationUnreadable):
 		logger.Error("a kept github authorisation cannot be read: the signing secret was replaced since the account was connected", zap.String("operation", op))
 		return authorizationRequired()

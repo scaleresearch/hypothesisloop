@@ -981,8 +981,9 @@ func TestACreateOnAPersonsOwnAccountRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created, err := client.CreateRepository(ctx, 300, grant.AccessToken, "sweep", "", firstFiles); created != nil || err == nil || f.installations[300].repos[f.repos["alice/sweep"].id] {
-		t.Fatalf("with another person's token: CreateRepository = %+v, %v, want a failure and nothing covered by carol's installation", created, err)
+	var notAsAsked *NotAsAskedError
+	if created, err := client.CreateRepository(ctx, 300, grant.AccessToken, "sweep", "", firstFiles); created != nil || !errors.As(err, &notAsAsked) || notAsAsked.Repository != "alice/sweep" || f.installations[300].repos[f.repos["alice/sweep"].id] {
+		t.Fatalf("with another person's token: CreateRepository = %+v, %v, want a failure that names alice/sweep and nothing covered by carol's installation", created, err)
 	}
 }
 

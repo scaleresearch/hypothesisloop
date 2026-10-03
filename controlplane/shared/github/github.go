@@ -107,6 +107,17 @@ func (e *FirstCommitError) Error() string {
 
 func (e *FirstCommitError) Unwrap() error { return e.Cause }
 
+// NotAsAskedError reports a repository GitHub created that is not the private one asked for on
+// the installation's account: it is public, or on another account, as when the person's token is
+// not the account owner's. It is left where GitHub made it.
+type NotAsAskedError struct {
+	Repository string
+}
+
+func (e *NotAsAskedError) Error() string {
+	return "github: " + e.Repository + " was created and is not the private repository asked for"
+}
+
 // CreationNotPermittedError is GitHub refusing the installation the creation of a repository.
 // Accepted is what GitHub says it takes for the call, one permission of several, as in
 // "administration=write; repository_creation=write", and empty when it did not say.
@@ -538,8 +549,11 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, use
 		return nil, err
 	}
 	// The name is also what says the person behind userToken owns the installation's account.
-	if !out.Private || out.ID <= 0 || !strings.EqualFold(out.FullName, owner+"/"+name) {
-		return nil, fmt.Errorf("github: POST %s answered without the private repository asked for", path)
+	if out.ID <= 0 || ValidRepository(out.FullName) != nil {
+		return nil, fmt.Errorf("github: POST %s answered without the repository it created", path)
+	}
+	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
+		return nil, &NotAsAskedError{Repository: out.FullName}
 	}
 	if personal && installation.SelectedRepositories {
 		added := fmt.Sprintf("/user/installations/%d/repositories/%d", installationID, out.ID)

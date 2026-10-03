@@ -1083,6 +1083,10 @@ func TestACreateOnAPersonalAccountThatGitHubRefusesSaysWhatItsOwnerDoes(t *testi
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.installations.unreadable = true
 		}, 422, ReasonRepositoryAuthorizationRequired, []string{"connects the account again"}},
+		"github makes it on another account or public": {func(w *githubWorld) {
+			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
+			w.app.createErr = &github.NotAsAskedError{Repository: "dave/sweep"}
+		}, 502, ReasonRepositoryNotCreated, []string{"dave/sweep", "names it in repository"}},
 		"an authorisation that ran out or was revoked": {func(w *githubWorld) {
 			w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-installations", connectBody("code-carol", 0), http.StatusCreated, nil)
 			w.app.refreshErr = github.ErrUserAuthorization
