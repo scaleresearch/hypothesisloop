@@ -24,9 +24,12 @@ fix). The stage-cut test reaches its boundary the way support/stages.py describe
 """
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from conftest import make_agent
+from support.api import branch
 from support.stages import BUDGET, REPORT_INTERVAL_SECONDS, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
@@ -111,9 +114,20 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     authors = {c["agent_id"] for c in hyp.get("comments") or []}
     assert reviewer in authors, "the reviewer's comment is not readable on the hypothesis"
 
+    # The baseline is the objective's own measurement: its agent registers no hypothesis, and a
+    # job of it that names one is refused.
+    r = api.post_hypothesis(pe_id, "a claim of the baseline agent's", agent_id=baseline)
+    assert (r.status_code, r.json()["reason"]) == (403, "baseline_registers_no_hypothesis"), f"{r.status_code} {r.text}"
+    naming_one = api.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, competitors[0])
+    naming_one["metadata"] |= {"agent_id": baseline, "branch": branch(pe_id, baseline, "")}
+    r = api.post_experiment_body(naming_one)
+    assert (r.status_code, r.json()["reason"]) == (422, "baseline_tests_no_hypothesis"), f"{r.status_code} {r.text}"
+
     # The baseline and reviewer run HIGH, every competitor runs LOW: rank 1 can then only be a
     # competitor if role genuinely filters the standings.
-    baseline_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS, job_overrides={"env": _env(RUN_SECONDS, HIGH_ANCHOR)})
+    baseline_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS, hyp_id="", job_overrides={"env": _env(RUN_SECONDS, HIGH_ANCHOR)})
+    on_objective = api.experiment(baseline_job)
+    assert on_objective["objective"] is True and "hypothesis_id" not in on_objective, on_objective
     reviewer_job = api.submit_job(pe_id, reviewer, hours=JOB_HOURS, job_overrides={"env": _env(RUN_SECONDS, HIGH_ANCHOR)})
     comp_jobs = [
         api.submit_job(pe_id, a, hours=JOB_HOURS, job_overrides={"env": _env(RUN_SECONDS, LOW_ANCHOR)})
@@ -125,9 +139,9 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     for job in comp_jobs:
         api.file_finding(job)
 
-    # The summary gate applies to the baseline exactly like a competitor: its next job is held in
-    # the queue while it owes the finding for its completed job.
-    held_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS)
+    # The summary gate applies to the baseline exactly like a competitor: a job it submits after
+    # its completed one ended is held in the queue while it owes that one's finding.
+    held_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS, hyp_id="")
     eventually(
         f"the baseline's {held_job} to be held by the summary gate -- the reference run needs a finding as much as a treatment does",
         lambda: api.experiment(held_job),
@@ -243,4 +257,4 @@ def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experimen
     api.hl("platform-experiments", "agents", "add", "--platform-experiment", pe_id, "--agent", member)
 
     r = api.signup(pe_id, make_agent(api, run_id, "repeat-newcomer"))
-    assert r.status_code == 400 and "signup_closed" in r.text, f"newcomer after start: HTTP {r.status_code} {r.text}"
+    assert r.status_code == 409 and r.json()["reason"] == "signup_closed", f"newcomer after start: HTTP {r.status_code} {r.text}"

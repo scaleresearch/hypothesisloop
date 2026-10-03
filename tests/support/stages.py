@@ -45,7 +45,9 @@ def cross_first_boundary_ranked(
     job. baselines names the HYPOTHESISLOOP_BASELINE an agent's ranked job reports around."""
     assert len(agents) == ROSTER_SIZE, f"the budget is sized for {ROSTER_SIZE} agents, got {len(agents)}"
     baselines = baselines or {}
-    ranked = {a: api.submit_job(pe_id, a, hours=RANKED_JOB_HOURS, job_overrides=_job(RANKED_RUN_SECONDS, baselines.get(a))) for a in agents}
+    # An agent of role baseline registers no hypothesis and its jobs name none.
+    tests = {a: "" if api.signup_role(pe_id, a)[1] == "baseline" else None for a in agents}
+    ranked = {a: api.submit_job(pe_id, a, hours=RANKED_JOB_HOURS, hyp_id=tests[a], job_overrides=_job(RANKED_RUN_SECONDS, baselines.get(a))) for a in agents}
     for job in ranked.values():
         eventually(
             f"{job} to complete, so its agent can be ranked",
@@ -54,11 +56,11 @@ def cross_first_boundary_ranked(
             reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
             deadline=deadline,
         )
-        # The summary gate holds an agent's next job until its completed one has a finding.
+        # The summary gate holds a job its agent submits after a completed one ended with no finding.
         api.file_finding(job)
     assert api.stages(pe_id)["current_stage"] == 1, "the boundary was crossed before the second wave was submitted"
 
-    burn = {a: api.submit_job(pe_id, a, hours=BURN_JOB_HOURS, job_overrides=_job(BURN_RUN_SECONDS, None)) for a in agents}
+    burn = {a: api.submit_job(pe_id, a, hours=BURN_JOB_HOURS, hyp_id=tests[a], job_overrides=_job(BURN_RUN_SECONDS, None)) for a in agents}
     stages = eventually(
         "the first stage boundary",
         lambda: api.stages(pe_id),

@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime
 
 import pytest
 import requests
@@ -94,6 +95,16 @@ def roster(api: API, pe_id: str) -> dict[str, dict]:
     return {a["agent_id"]: a for a in api.agents(pe_id)}
 
 
+def _at(moment: str) -> datetime:
+    return datetime.fromisoformat(moment.replace("Z", "+00:00"))
+
+
+def _kept(instance: dict) -> dict:
+    """What a machine is: its name, image and environment. ends_at is no part of it, and moves
+    when the run's clock starts."""
+    return {key: value for key, value in instance.items() if key != "ends_at"}
+
+
 def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: API, run_id: str):
     project = api
     r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_hosted=True)
@@ -105,7 +116,8 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
         assert r.status_code == 201, f"hosted: {r.status_code} {r.text}"
         hosted = r.json()["agents"][0]
         assert hosted["hosted"] and hosted["launcher"], hosted
-        assert project.remove_agent(pe_id, hosted["agent_id"]).status_code == 200
+        removed = project.remove_agent(pe_id, hosted["agent_id"])
+        assert removed.status_code == 204 and not removed.content, f"remove: {removed.status_code} {removed.text}"
         assert project.agents(pe_id) == [], "the hosted agent was not removed"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
@@ -123,7 +135,7 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
         assert len(project.agents(pe_id)) == 2
 
         # Removal takes the place and leaves the agent, which joins again by its id.
-        assert project.remove_agent(pe_id, own["agent_id"]).status_code == 200
+        assert project.remove_agent(pe_id, own["agent_id"]).status_code == 204
         again = project.post_json(f"/platform-experiments/{pe_id}/agents", {"agent_id": own["agent_id"]})["agents"][0]
         assert again["agent_id"] == own["agent_id"] and again["token"] == own["token"], again
 
@@ -148,7 +160,10 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     hosted_ids = [a["agent_id"] for a in hosted]
     own_id, own_token = self_run[0]["agent_id"], self_run[0]["token"]
     assert all(a["hosted"] and a["launcher"] == LAUNCHER and "token" not in a for a in hosted), hosted
-    assert all(a["instance"] == {"state": "requested", "restarts": 0, "stopped": False} for a in hosted), hosted
+    # No machine is asked for a researcher before the start, and each says what the start waits
+    # for: here a baseline, which nobody measures yet and a person adds an agent for.
+    assert all(a["instance"] == {"state": "waiting", "restarts": 0, "stopped": False} for a in hosted), hosted
+    assert all((a["status_reason"]["reason"], a["status_reason"]["waits_for"]) == ("baseline_required", "owner") for a in hosted), hosted
     assert [a["name"] for a in hosted] == [f"hosted-{run_id}", "Researcher 1"]
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 2})
     assert r.status_code == 422, f"a request that still asks for several agents: {r.status_code} {r.text}"
@@ -182,7 +197,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     removed_token = admin.token(f"agent:{pe_id}/{removed}")
     assert api.as_caller(removed_token).signup_role(pe_id, removed) == (200, "competitor")
     r = api.remove_agent(pe_id, removed)
-    assert r.status_code == 200, f"remove before start: {r.status_code} {r.text}"
+    assert r.status_code == 204, f"remove before start: {r.status_code} {r.text}"
     assert api.signup_role(pe_id, removed) == (404, None)
     r = api.as_caller(removed_token).get(f"/platform-experiments/{pe_id}")
     assert r.status_code == 401, f"a removed agent's token: {r.status_code} {r.text}"
@@ -190,19 +205,33 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     # Its work done, the agent that measured the baseline finishes and its machine is left to end.
     up = [{"name": measurer_name, "state": "running"}]
     assert sorted(desired_for(api, pe_id, up)[0]) == [measurer]
+    waits = api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
+    assert (waits["reason"], waits["waits_for"]) == ("baseline_measuring", "platform"), waits
+    # Only the agent itself finishes: whoever else reaches it is refused.
+    r = api.post(f"/platform-experiments/{pe_id}/agents/{measurer}/finish", {"reason": "said by its owner"})
+    assert r.status_code == 403, f"an owner finishing an agent: {r.status_code} {r.text}"
     as_measurer.hl("platform-experiments", "agents", "finish", "--reason", "baseline measured")
     instances, ending = desired_for(api, pe_id, up)
     assert not instances and measurer_name in ending, f"after the baseline agent finished: {sorted(instances)}, ending {sorted(ending)}"
+    # It left no job to declare, so the baseline is to be measured again, which is a person's
+    # move where no coordinator is hosted.
+    waits = api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
+    assert (waits["reason"], waits["waits_for"]) == ("baseline_required", "owner"), waits
 
     # Started: the roster is fixed. Nobody joins, nobody is removed, and the researcher's machine is asked for.
     api.declare_baseline_and_wait_running(pe_id)
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
-    assert r.status_code == 400 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
+    assert r.status_code == 409 and r.json()["reason"] == "signup_closed", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
     assert r.status_code == 409 and r.json()["reason"] == "experiment_started", f"remove after start: {r.status_code} {r.text}"
+    # A researcher its owner runs is at work from the start, so the run's clock started there.
+    started = api.get_json(f"/platform-experiments/{pe_id}")
+    assert (started["status_reason"]["reason"], started["status_reason"]["waits_for"]) == ("running", "platform"), started["status_reason"]
+    assert started["started_at"] and started["ends_at"] and "agents_due_at" not in started, started
     instances, ending = desired_for(api, pe_id)
     assert sorted(instances) == [kept], f"once it runs the launcher is told to run {sorted(instances)}"
     instance = instances[kept]
+    assert _at(instance["ends_at"]) > _at(started["ends_at"]), f"a machine is rented to end after its run and the wind-down: {instance['ends_at']}"
     env = instance["env"]
     # A machine is handed where the platform is and its agent's token. What it runs as it
     # reads from its own signup with that token.
@@ -265,7 +294,13 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     pe_id = hosted_pe("hosted-agents-exit", 1.0, 5)
     crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
     api.declare_baseline_and_wait_running(pe_id)
+    # Every researcher is one the platform runs, so none of the run's duration counts until the
+    # first one's machine is running.
+    waiting = api.get_json(f"/platform-experiments/{pe_id}")
+    assert (waiting["status_reason"]["reason"], waiting["status_reason"]["waits_for"]) == ("agents_starting", "platform"), waiting["status_reason"]
+    assert waiting["agents_due_at"] and "started_at" not in waiting and "ends_at" not in waiting, waiting
     instances, _ = desired_for(api, pe_id)
+    assert "started_at" not in api.get_json(f"/platform-experiments/{pe_id}"), "a machine asked for and not running started the run's clock"
     steady_name = instances[steady]["name"]
     seen = set()
 
@@ -278,6 +313,11 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
         instances, ending = desired_for(api, pe_id, observed)
         assert instances[steady]["name"] == steady_name, "the agent that never exited was renamed"
         assert name not in ending and name not in {i["name"] for i in instances.values()}, "the exited machine is still wanted"
+        if exit_number == 1:
+            # The first report of a researcher's machine running started the clock.
+            clocked = api.get_json(f"/platform-experiments/{pe_id}")
+            assert clocked["status_reason"]["reason"] == "running" and "agents_due_at" not in clocked, clocked
+            assert _at(clocked["ends_at"]) > _at(clocked["started_at"]) > _at(waiting["updated_at"]), clocked
 
         recorded = roster(api, pe_id)[crashing]["instance"]
         assert recorded["exit_log"] == log and recorded["exited_at"], recorded
@@ -324,7 +364,16 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     for agent in cut:
         assert before[agent]["name"] in ending, f"cut agent {agent} is not left to end"
     for agent in survivors:
-        assert instances[agent] == before[agent], f"the survivor {agent} would be replaced by the cut"
+        assert _kept(instances[agent]) == _kept(before[agent]), f"the survivor {agent} would be replaced by the cut"
+    # That report was the first of a researcher's machine running: the clock started with it. The
+    # next answer names the same machines, each to end with the run that clock gave, which is
+    # sooner than the latest end a run still waiting for its machines could have had.
+    clocked = api.get_json(f"/platform-experiments/{pe_id}")
+    assert clocked["status_reason"]["reason"] == "running" and clocked["started_at"], clocked
+    later, _ = desired_for(api, pe_id, up)
+    for agent in survivors:
+        assert _kept(later[agent]) == _kept(before[agent]), f"the start of the clock renamed the machine of {agent}"
+        assert _at(clocked["ends_at"]) < _at(later[agent]["ends_at"]) < _at(before[agent]["ends_at"]), (later[agent], before[agent])
 
     # A survivor with nothing left to do says so. It cannot while a job of its own is in flight
     # or owes its summary; after that its machine is left to end and whoever steers the run is told.
@@ -503,6 +552,18 @@ def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_re
     assert instance["restarts"] == 1 and "no longer lists it" in instance["exit_log"] and "seen_at" not in instance, instance
     assert instance["end_reason"] == "gone" and instance["state"] == "requested", instance
 
+    # A machine its provider ended at the provider's own lifetime did nothing wrong: the agent is
+    # asked for again under a new name and no restart is spent.
+    desired_for(api, pe_id, [{"name": again, "state": "running"}])
+    lifetime = "the provider's lifetime of the sandbox ended"
+    renewed = desired_for(api, pe_id, [{"name": again, "state": "exited", "expired": True, "log": lifetime}])[0][agent_id]["name"]
+    assert renewed not in (name, again), "a machine that expired is asked for under a name it had before"
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert (instance["end_reason"], instance["exit_log"], instance["restarts"], instance["stopped"]) == ("expired", lifetime, 1, False), instance
+    assert instance["name"] == renewed and instance["state"] == "requested", instance
+    r = api.post(f"/internal/launchers/{LAUNCHER}/reconcile", api.launcher_question([{"name": renewed, "state": "running", "expired": True}]))
+    assert r.status_code == 400, f"expired of a machine that has not exited: {r.status_code} {r.text}"
+
 
 def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hosted_pe, run_id: str):
     """A machine whose marker stands still for agents.progress_limit_seconds (minutes on the local
@@ -517,6 +578,11 @@ def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hos
     desired_for(api, pe_id, [{"name": name, "state": "starting"}])
     instance = roster(api, pe_id)[agent_id]["instance"]
     assert instance["state"] == "starting" and "progress_at" not in instance, instance
+    # Listed while its provider does not say whether its command runs: of a machine never seen
+    # running that reads as starting.
+    assert desired_for(api, pe_id, [{"name": name, "state": "unknown"}])[0][agent_id]["name"] == name
+    assert roster(api, pe_id)[agent_id]["instance"]["state"] == "starting"
+    assert "activity" not in roster(api, pe_id)[agent_id], "an agent whose machine is not running says what it does"
 
     # Running with output that could not be read, then with no marker in it: no progress yet.
     for observed in ({"name": name, "state": "running"}, {"name": name, "state": "running", "progress": ""}):
@@ -531,6 +597,24 @@ def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hos
     for marker in ("1", "2"):
         assert desired_for(api, pe_id, [{"name": name, "state": "running", "progress": marker}])[0][agent_id]["name"] == name
         assert roster(api, pe_id)[agent_id]["instance"]["progress_at"] == first
+
+    # What the agent says it is doing rides on the same report: the latest sentence is kept with
+    # the time it was first read, and a report without one leaves it.
+    saying = {"name": name, "state": "running", "progress": "2"}
+    desired_for(api, pe_id, [{**saying, "activity": "running hl job submit"}])
+    activity = roster(api, pe_id)[agent_id]["activity"]
+    assert activity["text"] == "running hl job submit" and activity["at"], activity
+    for report in ({**saying, "activity": "running hl job submit"}, saying):
+        desired_for(api, pe_id, [report])
+        assert roster(api, pe_id)[agent_id]["activity"] == activity, f"after {report}"
+    desired_for(api, pe_id, [{**saying, "activity": "waiting for platform updates"}])
+    assert roster(api, pe_id)[agent_id]["activity"]["text"] == "waiting for platform updates"
+
+    # A running machine whose provider stops saying whether it runs is kept, and reads running,
+    # inside the progress limit.
+    assert desired_for(api, pe_id, [{"name": name, "state": "unknown"}])[0][agent_id]["name"] == name
+    instance = roster(api, pe_id)[agent_id]["instance"]
+    assert instance["state"] == "running" and instance["restarts"] == 0, instance
 
     r = api.post(f"/internal/launchers/{LAUNCHER}/reconcile", api.launcher_question([{"name": name, "state": "starting", "progress": "3"}]))
     assert r.status_code == 400, f"progress of a machine that is not running: {r.status_code} {r.text}"
@@ -604,11 +688,17 @@ def test_a_launcher_is_answered_while_it_is_registered_and_refused_when_its_pass
         desired = as_launcher.post_json(f"/internal/launchers/{name}/reconcile", api.launcher_question())
         assert (desired["instances"], desired["ending"]) == ([], []), desired
 
-        # Ten new machines an answer, a minute between two creates: no pass ends inside any boot
-        # limit a deployment would set, and the refusal says the arithmetic.
+        # Ten new machines an answer, an hour between two creates: no pass ends inside any boot
+        # limit a deployment would set. The answer still stands, so that what such a launcher
+        # holds is ended by it, and carries the refusal, which says the arithmetic.
         slow = {**api.launcher_question(), "create_pause_milliseconds": 3_600_000}
         r = as_launcher.post(f"/internal/launchers/{name}/reconcile", slow)
-        assert r.status_code == 409 and "boot_limit_seconds" in r.text and "create_pause" in r.text, f"{r.status_code} {r.text}"
+        assert r.status_code == 200, f"a launcher whose pass cannot fit: {r.status_code} {r.text}"
+        refused = r.json()
+        assert (refused["instances"], refused["ending"]) == ([], []), refused
+        assert refused["refusal"]["reason"] == "pass_does_not_fit", refused
+        assert "boot_limit_seconds" in refused["refusal"]["message"] and "create_pause" in refused["refusal"]["message"], refused
+        assert "refusal" not in desired, f"a launcher whose pass fits was refused: {desired}"
         unpaced = {"launch_digest": API.LAUNCH_DIGEST, "instances": []}
         r = as_launcher.post(f"/internal/launchers/{name}/reconcile", unpaced)
         assert r.status_code in (400, 422), f"a question that does not say how the launcher paces itself: {r.status_code} {r.text}"
@@ -631,11 +721,11 @@ def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role
             assert r.status_code == 201, f"a hosted reviewer below the bound: {r.status_code} {r.text}"
         for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True}):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
-            assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
+            assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
         assert r.status_code == 201, f"a hosted baseline agent on the machine kept for one: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
-        assert r.status_code == 400 and r.json()["reason"] == "max_hosted_reached", f"a second hosted baseline agent at the bound: {r.status_code} {r.text}"
+        assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"a second hosted baseline agent at the bound: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})
         assert r.status_code == 201, f"a self-run reviewer at the bound: {r.status_code} {r.text}"
         assert len([a for a in roster(with_repo, pe_id).values() if a["hosted"]]) == bound - 1
