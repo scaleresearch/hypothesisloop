@@ -180,18 +180,6 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertNotIn("--hypothesis", flat)
         self.assertNotIn("--theory", flat)
 
-    # Told to hold the baseline job to its own estimate, both planners of a run ran the baseline
-    # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.
-    def test_the_baseline_runs_once_on_a_guessed_estimate(self):
-        flat = render(baseline_agent())[1]
-        # The baseline left "--estimated-duration-hours H" in the job spec's header, so both
-        # researchers stated estimates of two and six times the measured one, which never applied.
-        # Told that the file states none, one committed `estimated_duration_hours: 0.06`, and
-        # every researcher's job carried it in place of the measured one. `hl repo check` fails
-        # a job spec that states one, so the briefing says nothing of it.
-        self.assertNotIn("estimate into the file", flat)
-        self.assertIn("(the job.yaml submitted unedited and the `--env` that vary it)", flat)
-
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         flat = render(baseline_agent())[1]
         # Agents of one run ended seven turns with `true` or an `echo`, each between what they

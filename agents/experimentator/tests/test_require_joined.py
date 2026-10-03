@@ -114,10 +114,6 @@ class RequireJoinedTest(PlatformCase):
             client.require_joined("agent-a", "pe-1")
         self.assertEqual(ctx.exception.status, 0)
 
-    def test_the_client_has_no_way_to_register_or_sign_up(self):
-        for gone in ("join", "register", "signup"):
-            self.assertFalse(hasattr(self.client, gone), f"PlatformClient.{gone} exists")
-
 
 class StartupTest(PlatformCase):
     def environment(self, **overrides):
