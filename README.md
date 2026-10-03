@@ -230,26 +230,40 @@ hl watch --platform-experiment pe-123 --all --follow       # stream the whole pl
 
 An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. What to do about an experiment that is still open is in the record itself, in `status_reason`, and nothing is written beside it. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
-## Coordinator and researcher experiments
+## Who runs a platform experiment
 
-A platform experiment doesn't run itself. It's driven by two kinds of LLM agent (Claude Code, Codex, or whatever a container image runs), each with its own job:
+A platform experiment is run by LLM agents (Claude Code or Codex in the platform's agent image,
+or whatever an image of your own runs), each in one of four roles:
 
-- **The coordinator** opens the platform experiment (budget, metrics, the baseline to beat), spawns a fleet of experimentator agents against it, and then watches: polling job status and the ranking metric, keeping the live description in sync as questions get resolved, and stepping in only when something actually blocks research, never on the agents' behalf. `agents/coordinator/setup.md` and `supervise.md` are that role written down as a runbook.
-- **Experimentators** are the fleet itself, the agents actually proposing hypotheses, submitting jobs, and filing findings. A coordinator (human or agent) spawns as many as capacity allows, each its own container, its own identity, competing for quota exactly like a human researcher using `hl` would. An agent joins when the coordinator adds it (`hl platform-experiments agents add`), run by the platform's launcher or by the coordinator with the id and token that call hands out; the harness itself registers nothing.
+- **Planner.** Plans a draft a person started from one sentence: it chooses the metric and the
+  gate, writes the brief, sizes the run and proposes the experiment. The platform creates it
+  with the draft. It runs no job.
+- **Baseline agent.** Measures the control with one real job before anyone competes. It is
+  never ranked or cut and does not count against `max_agents`.
+- **Coordinator.** Watches the run, keeps the brief true to what is learned and writes the
+  run's summary. It is no agent of the experiment: it holds no quota and runs no job. The
+  platform runs one for an accepted draft and for an experiment created with
+  `coordinator_hosted: true`. Otherwise the person who created the experiment does its part
+  with their own token, from `agents/coordinator/setup.md` and `supervise.md`.
+- **Researchers.** Propose hypotheses, submit jobs and file findings, each with its own
+  identity and its own share of the budget. They are ranked, and the API calls their role
+  `competitor`.
 
 A platform experiment begins one of two ways, and both end in the same run:
 
-- **From a sentence** (the wizard, next section): a planner proposes the experiment, a person
-  accepts it, and the platform runs the coordinator.
+- **From a sentence** (next section): a planner proposes the experiment and a person accepts
+  it. The accept creates the coordinator, the baseline agent and the researchers the person
+  stated, all run by the platform.
 - **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`): the request
-  states the experiment. With `coordinator_hosted: true` in it the platform runs the
-  coordinator, one more machine beside the agents'. Left out, the person who created it does
-  the coordinator's part with their own token.
+  states the experiment and creates no agent. Its owner adds the researchers
+  (`hl platform-experiments agents add`, `--hosted` to have the platform run each), and the
+  coordinator adds the baseline agent.
 
-Either way it is `open` after that and nothing runs. Its owner adds the researchers
-(`hl platform-experiments agents add`, `--hosted` to have the platform run each), a baseline
-agent measures the control, the coordinator declares that job as the baseline, and the
-declaration starts the run. Nobody starts it by hand. `max_agents` is how
+Either way it is `open` after that and no researcher runs. The baseline agent measures the
+control, and when it finishes the platform declares its job as the baseline and starts the run
+in the same request. Nobody starts it by hand. The run's clock starts when the first
+researcher is at work. An agent the platform does not run is started by whoever added it, with
+the id and token `agents add` printed: the harness registers nothing. `max_agents` is how
 many researchers may join over the whole run: one that finished or was cut still counts, and
 baseline agents, the planner and the coordinator never do. Lowering it below the researchers
 that joined is refused (409 `max_agents_below_researchers`). An agent is named by its role and
@@ -260,7 +274,7 @@ it added (403 `agent_not_added_by_coordinator` for any other).
 
 `agents/coordinator/experiments/` holds our own research experiments run this way, each its own directory laid out as an experiment's repository: an `experiment.md` (the objective, the baseline, the open questions), `.hypothesisloop/experiment.yaml`, the base job spec `.hypothesisloop/job.yaml` and, where it seeds the hypothesis graph, a `hypothesis.yaml`, matching the YAML files below. `example-experiment` is the one that pushed post-training to SOTA levels referenced earlier in this README.
 
-Experimentators in a fleet don't all run the same way. Each one launches with a **flavor**, a specialization it reads its instructions from — `generalist` (no fixed axis) plus one flavor per axis of ML experimentation: `hyperparameter-search`, `architecture-search`, `data-search` (dataset composition, size, and curriculum) — plus optional starting hyperparameters. A coordinator picks the flavor mix deliberately, and revisits it by research stage: broad (generalist plus one of each targeted flavor) while no promising region exists yet, narrowing toward whichever axis a confirmed finding says is winning once one does — never picked once and forgotten. See `agents/coordinator/setup.md` step 3 for how that decision is made and recorded.
+Each researcher is added with a **flavor**, the specialization it reads its instructions from: `generalist` (no fixed axis), `hyperparameter-search`, `architecture-search` or `data-search` (dataset composition, size and curriculum), and with optional starting hyperparameters. The mix is broad while no region is promising, generalists and one of each targeted flavor, and narrows toward the axis of a confirmed finding in the next run, since a roster is fixed once its run starts. `agents/coordinator/setup.md` step 3 says how the mix is decided and recorded.
 
 ### From one sentence
 
@@ -287,15 +301,18 @@ The platform pays for planning, within the time limits of the `planning` section
 No platform experiment starts without a declared baseline, whether a person accepted a draft or
 created the experiment whole. While it is `open`:
 
-1. A baseline agent joins. A hosted coordinator adds it. An owner without a hosted coordinator
-   adds it: `hl platform-experiments agents add --role baseline --hosted`.
+1. A baseline agent joins. Accepting a draft creates it. In an experiment created whole a
+   hosted coordinator adds it, and an owner without one adds it:
+   `hl platform-experiments agents add --role baseline --hosted`.
 2. The baseline agent builds the harness the brief describes, or runs the repository's job spec
    as it is when the files fit this experiment, measures the control with one real job and
    files what it measured. Its jobs are the only ones an open experiment accepts, and no
    researcher's machine is rented until the run starts.
-3. The baseline is declared: `hl platform-experiments update --baseline-job JOB`. The platform
-   writes the job, its `code_ref` and what it measured into the brief. A hosted coordinator
-   does it. An owner without one runs the same command with their own token.
+3. The baseline is declared. The platform declares the job in the request the baseline agent
+   finishes in, when the baseline agents left exactly one completed job that reports the ranked
+   metric. Left with several, the coordinator declares one:
+   `hl platform-experiments update --baseline-job JOB`. Either way the platform writes the job,
+   its `code_ref` and what it measured into the brief.
 
 The platform checks the job (completed, by a baseline agent of this experiment, with a finding,
 reporting every metric, holding every gate) and stores
@@ -308,9 +325,15 @@ quota admits.
 The declaration starts the run in the same request once a researcher has joined and
 `starts_at`, when the experiment states one, has passed; otherwise the request that adds the
 researcher starts it, or `starts_at` does. The run lasts
-`duration_hours` from `started_at`, and `ends_at` is the two added, absent until then. While it
+`duration_hours` from `started_at`, and `ends_at` is the two added, absent until then.
+`started_at` is the moment the first researcher is at work: the start itself when its owner
+runs one, and otherwise the moment the first researcher's machine is reported running. Until
+then the experiment is `running` with `status_reason` `agents_starting`, and the platform
+closes it at `agents_due_at` (`close_reason: agents_not_started`) if no machine is running by
+then. While it
 is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,
-`starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
+`baseline_measuring`, `baseline_undeclared`, `baseline_declaring`, `starts_at_ahead`,
+`no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
 with the next step of whoever reads it, the command included. Each agent of the roster that
 waits for the start, every one but a baseline agent, carries the same reason in its own
 `status_reason`, its `instance` reads `waiting`, and no machine is asked for it before the
