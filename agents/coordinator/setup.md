@@ -30,7 +30,9 @@ shown. Resolve against the live environment, never guess.
     METRICS_URL=http://localhost:8084
     STAGES=<[]domain.Stage or unset>           # unset = stages.default in the control plane config
     FINDINGS_FILE=fix-later.md
-    PLATFORM_EXPERIMENT_ID=<set in step 2>
+    PLATFORM_EXPERIMENT_ID=<set in step 2>     # `hl` reads no id from the environment: with an API
+                                               # key every command that works in the platform
+                                               # experiment states `--platform-experiment`
 
 You never act on agents' behalf (no SSH into their jobs, no hand-editing their branch/metrics) —
 capacity, environment, unblocking is your job; the research is theirs. Platform code changes
@@ -214,7 +216,8 @@ the control, and its job is declared as the baseline. The request that declares 
 run when a researcher has joined and `starts_at`, where one is stated, has passed. Nobody
 starts it by hand. `duration_hours` counts from `started_at`, the moment the first researcher
 is at work: at the start when you run one yourself, and for hosted ones when the first machine
-is reported running. While it is `open`, `hl platform-experiments get` says in `status_reason`
+is reported running. While it is `open`,
+`hl platform-experiments get --platform-experiment $PLATFORM_EXPERIMENT_ID` says in `status_reason`
 what the start waits for: `baseline_required`, `baseline_measuring`, `baseline_undeclared`,
 `baseline_declaring`, `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`. Its
 `waits_for` says whose move that is (`owner`, `coordinator`, which is you without a hosted
@@ -233,10 +236,12 @@ agents, creating the experiment and adding the researchers is all there is to do
 coordinator adds the baseline agent, the platform declares the job it leaves, and the
 coordinator keeps the
 description true to what is learned and writes its findings as the experiment's summary
-(`hl platform-experiments summary`), which `hl platform-experiments get` shows as `summary`
+(`hl platform-experiments summary`, with its own token, which names the experiment), which
+`hl platform-experiments get --platform-experiment $PLATFORM_EXPERIMENT_ID` shows as `summary`
 beside `coordinator`: its launcher, its model and `instance`, which reads as an agent's does
-(section 4). `hl platform-experiments agents session coordinator` writes out what it said and
-saw. Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
+(section 4).
+`hl platform-experiments agents session --platform-experiment $PLATFORM_EXPERIMENT_ID coordinator`
+writes out what it said and saw. Its token writes the summary until two minutes after the close and then stops working. It reads the repository and
 pushes nothing. It closes the experiment only when the run can produce nothing more, and says
 why in the summary first. It adds agents and removes only the ones it added. It cannot run a
 baseline itself, act as an agent, or change anything of the experiment but the description (the
@@ -296,15 +301,16 @@ agent, as the baseline item below says, and supervise with `supervise.md`.
   posted (see item 1 of
   `agents/coordinator/experiments/template/experiment-checklist.md`) and states the control's
   config and how to run a trial. While the experiment is `open`:
-  1. add one agent with `hl platform-experiments agents add --role baseline` (`--hosted` to have
-     the platform run it). It holds a quota at once, its jobs are the only ones an open
+  1. add one agent with `hl platform-experiments agents add --platform-experiment
+     $PLATFORM_EXPERIMENT_ID --role baseline` (`--hosted` to have the platform run it). It holds a quota at once, its jobs are the only ones an open
      experiment accepts, it does not count against `max_agents`, and it takes no share at the
      start;
   2. it runs the repository's job spec, files the job's summary and finishes;
   3. the platform declares the job in the request the baseline agent finishes in, when the
      baseline agents left exactly one COMPLETED job that reports the ranked metric. Left with
      several (`baseline_undeclared`), declare the one the run is ranked against:
-     `hl platform-experiments update --baseline-job JOB`. Either way the platform writes the
+     `hl platform-experiments update --platform-experiment $PLATFORM_EXPERIMENT_ID
+     --baseline-job JOB`. Either way the platform writes the
      job, its `code_ref` and what it measured into the description and keeps that block
      through later updates. A refusal names what does not hold: the job, a gate the baseline
      breaks, or a budget that does not cover one such trial for each of `max_agents`.
@@ -348,7 +354,7 @@ are added (step 4):
     axis that region's own finding says moved the metric, and drop or reduce `generalist` slots.
     If the leading result was a data change, the next wave is mostly `data-search` (plus a
     `hyperparameter-search` or two to harden it), not another blind spread.
-  - Re-decide at every stage boundary (`current_stage` in `hl platform-experiments get`), not just once:
+  - Re-decide at every stage boundary (`current_stage` in `hl platform-experiments get --platform-experiment $PLATFORM_EXPERIMENT_ID`), not just once:
     a stage cut is a checkpoint to read which branches of the graph are confirmed or refuted and
     adjust the *next* wave's flavor mix accordingly, the same way it decides who gets cut.
   - You cannot change a running agent's flavor (it's read once at launch) — narrowing means new
@@ -391,14 +397,16 @@ experiment carries is refused (409 `agent_name_taken`). `agents list` shows in `
 credential added each agent, and a coordinator's token removes only the ones it added (403
 `agent_not_added_by_coordinator`). `--hosted` is refused
 (`max_hosted_reached`) beyond the number of machines the platform runs for one
-platform experiment, which `hl platform-experiments get` shows as `max_hosted` and which counts
+platform experiment, which `hl platform-experiments get --platform-experiment
+$PLATFORM_EXPERIMENT_ID` shows as `max_hosted` and which counts
 hosted agents of every role and a hosted coordinator. A machine whose harness exits, that the
 provider takes away, that does not come up in time, or whose harness stops reporting progress
 while the machine still runs is started again up to three times. The new machine takes up the
 agent's model session where the last finished turn left it: the harness stores the session with
 the platform after each turn and reads it back before its first turn. Work that was not pushed
 is not carried over, so an agent pushes its branch as it goes. After the third restart the agent
-is stopped. `hl platform-experiments agents list` shows each hosted agent's `instance`:
+is stopped. `hl platform-experiments agents list --platform-experiment $PLATFORM_EXPERIMENT_ID`
+shows each hosted agent's `instance`:
 
     state        waiting (the experiment is open and no machine is asked for before the
                  start), requested (asked for, not reported by the launcher yet), starting,
@@ -417,7 +425,7 @@ is stopped. `hl platform-experiments agents list` shows each hosted agent's `ins
 Beside it, `activity` is what a hosted agent is doing now (`text`, a short sentence its harness
 writes from the tool call in flight, and `at`, since when). An old `at` beside a running
 instance is an agent that has been at the same thing since. The coordinator's is on
-`coordinator` in `hl platform-experiments get`.
+`coordinator` in `hl platform-experiments get --platform-experiment $PLATFORM_EXPERIMENT_ID`.
 
 A stopped agent keeps its place and its quota
 and takes no further turn until the platform's operators change the agent image or the
@@ -456,8 +464,9 @@ A secret is named with a bare `-e NAME`, which hands the container the value fro
 environment. `hl` in the container reads its agent and its platform experiment from the token,
 so no command of an agent names either. A lost token is printed again by
 `hl platform-experiments agents add --platform-experiment $PLATFORM_EXPERIMENT_ID --agent <agent_id>`, which changes
-nothing for an agent that already joined. `hl platform-experiments agents remove` takes an agent
-out again while the experiment is still open. A coordinator's token removes only an agent it
+nothing for an agent that already joined. `hl platform-experiments agents remove
+--platform-experiment $PLATFORM_EXPERIMENT_ID <agent_id>` takes an agent out again while the
+experiment is still open. A coordinator's token removes only an agent it
 added itself.
 
 Default: the token from `agents/coordinator/.env` (loaded in step 0). Host credential files

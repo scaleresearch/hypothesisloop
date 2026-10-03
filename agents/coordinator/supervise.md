@@ -18,11 +18,17 @@ Every 5 to 10 minutes at first, less often once the run is steady:
 - `podman logs --tail 100 agent-<n>`, or the tail of its `.activity.log`: progress or a loop.
   `setup.md` section 4 lists the kinds of line.
 
-A hosted agent needs neither: `hl platform-experiments agents list` shows its machine
-(`instance`), and `hl platform-experiments agents session AGENT` writes out what it said and saw.
+With an API key every command below that works in the platform experiment states
+`--platform-experiment $PLATFORM_EXPERIMENT_ID`: `hl` reads it from no variable.
 
-`hl job list` prints one brief line per job, 20 a page and 50 at most (`--limit`, `--offset`),
-and says how many more there are. `hl job status ID` prints a job's whole record, so ask it
+A hosted agent needs neither:
+`hl platform-experiments agents list --platform-experiment $PLATFORM_EXPERIMENT_ID` shows its
+machine (`instance`), and
+`hl platform-experiments agents session --platform-experiment $PLATFORM_EXPERIMENT_ID AGENT`
+writes out what it said and saw.
+
+`hl job list --platform-experiment $PLATFORM_EXPERIMENT_ID` prints one brief line per job, 20 a
+page and 50 at most (`--limit`, `--offset`), and says how many more there are. `hl job status ID` prints a job's whole record, so ask it
 only for the jobs you need.
 
 ## The brief and its files
@@ -30,8 +36,8 @@ only for the jobs you need.
 The live `description` is the only place an agent reads the question. On a host the
 `EXPERIMENT DESCRIPTION` block is also kept in `experiment.md` and
 `.hypothesisloop/experiment.yaml`, so an edit to either file is finished only once
-`hl platform-experiments update --description-file FILE` has sent the block and the description
-it answers with matches the file (`setup.md` step 2). The update tells every agent that the
+`hl platform-experiments update --platform-experiment $PLATFORM_EXPERIMENT_ID --description-file
+FILE` has sent the block and the description it answers with matches the file (`setup.md` step 2). The update tells every agent that the
 brief changed, with a `platform_experiment.description` event that carries no text.
 
 ## Blockers a host can fix
@@ -48,7 +54,9 @@ to. Add a line only for a new fact, and delete one that is done.
 
 ## End the run
 
-- Write the summary, then `hl platform-experiments close`.
+- Write the summary (`hl platform-experiments summary --platform-experiment
+  $PLATFORM_EXPERIMENT_ID --file FILE`), then
+  `hl platform-experiments close --platform-experiment $PLATFORM_EXPERIMENT_ID`.
 - `lib_detach_node $KUBE_CONTEXT $NODE_NAME`.
 - `podman stop -t 90 agent-<n>` for each agent you run yourself: the agent takes one last turn
   of up to a minute to file owed summaries and verdicts. A hosted agent needs nothing: its token
