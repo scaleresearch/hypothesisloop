@@ -79,7 +79,7 @@ func TestCreateDataKeySendsTheKeyAndItsPolicyEncryptedToTheAdminAPI(t *testing.T
 		}
 	}))
 	defer srv.Close()
-	client, err := New(srv.URL, "us-east-1", testBucket, "root", "root-secret")
+	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestCreateAgentDataKeyAsksForTheAgentsWriteScope(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	client, err := New(srv.URL, "us-east-1", testBucket, "root", "root-secret")
+	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestCreateDataKeyReportsAStoreRefusal(t *testing.T) {
 		io.WriteString(w, `{"Code":"XMinioIAMServiceAccountNotAllowed"}`)
 	}))
 	defer srv.Close()
-	client, err := New(srv.URL, "us-east-1", testBucket, "root", "root-secret")
+	client, err := New(srv.URL, srv.URL, "us-east-1", testBucket, "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,12 +35,16 @@ func bucketServer(t *testing.T) (*Client, map[string][]byte) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	client, err := New(srv.URL, "garage", "bucket", "key-id", "secret")
+	client, err := New(srv.URL, handedOut, "garage", "bucket", "key-id", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return client, objects
 }
+
+// handedOut is an address nothing answers at, as the one jobs are handed often is for the
+// control plane.
+const handedOut = "http://object-store.invalid:9000"
 
 func TestASessionIsKeptOutsideEveryPrefixAnAgentOrAJobKeyReads(t *testing.T) {
 	client, objects := bucketServer(t)
@@ -91,12 +95,10 @@ func TestASessionIsKeptOutsideEveryPrefixAnAgentOrAJobKeyReads(t *testing.T) {
 }
 
 // The address jobs are handed is often a tunnel. While it is down the control plane still reads
-// and writes its own store.
+// and writes its own store. A client given one address handed that one out and sent its own
+// requests there, so each is stated.
 func TestASessionIsReadWhileTheAddressHandedToJobsIsDown(t *testing.T) {
 	client, _ := bucketServer(t)
-	down := httptest.NewServer(http.NotFoundHandler())
-	down.Close()
-	client.Endpoint = down.URL
 	ctx := context.Background()
 	if err := client.PutSession(ctx, "pe-1", "ag-1", []byte("kept")); err != nil {
 		t.Fatalf("put: %v", err)
@@ -104,8 +106,13 @@ func TestASessionIsReadWhileTheAddressHandedToJobsIsDown(t *testing.T) {
 	if got, err := client.GetSession(ctx, "pe-1", "ag-1", 1<<20); err != nil || string(got) != "kept" {
 		t.Fatalf("read back %q, %v, want the bytes stored", got, err)
 	}
-	if client.Endpoint != down.URL {
+	if client.Endpoint != handedOut {
 		t.Fatalf("hands out %s, want the address it was told to", client.Endpoint)
+	}
+	for name, args := range map[string][2]string{"no address of its own": {"", handedOut}, "no address to hand out": {"http://127.0.0.1:9000", ""}} {
+		if _, err := New(args[0], args[1], "garage", "bucket", "key-id", "secret"); err == nil {
+			t.Errorf("%s: a client was made, want it refused", name)
+		}
 	}
 }
 

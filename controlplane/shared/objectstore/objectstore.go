@@ -44,27 +44,28 @@ type Client struct {
 	address         string
 }
 
-// New returns a Client that reaches the store at endpoint and hands that address out. A process
-// whose jobs reach the store by another address sets Endpoint to it. Every field is required: a
-// half-configured store has no usable behaviour, so it fails at construction rather than at the
-// first listing.
-func New(endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
-	if endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
-		return nil, fmt.Errorf("objectstore: endpoint, region, bucket, access_key_id and secret_access_key are all required")
+// New returns a Client that reaches the store at address and hands endpoint out to jobs and
+// agents, which may reach the store by another address than this process does. Every field is
+// required: a half-configured store has no usable behaviour, so it fails at construction rather
+// than at the first listing.
+func New(address, endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
+	if address == "" || endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
+		return nil, fmt.Errorf("objectstore: address, endpoint, region, bucket, access_key_id and secret_access_key are all required")
 	}
-	if _, err := url.Parse(endpoint); err != nil {
-		return nil, fmt.Errorf("objectstore: parse endpoint %q: %w", endpoint, err)
+	for _, stated := range []string{address, endpoint} {
+		if _, err := url.Parse(stated); err != nil {
+			return nil, fmt.Errorf("objectstore: parse %q: %w", stated, err)
+		}
 	}
 	// A store that is down is known within seconds, well inside the time a submit may take.
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: unreachableAfter}).DialContext
 	transport.ResponseHeaderTimeout = unreachableAfter
-	address := strings.TrimSuffix(endpoint, "/")
 	return &Client{
-		Endpoint: address, Region: region, Bucket: bucket,
+		Endpoint: strings.TrimSuffix(endpoint, "/"), Region: region, Bucket: bucket,
 		AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
 		HTTP:    &http.Client{Timeout: 20 * time.Second, Transport: transport},
-		address: address,
+		address: strings.TrimSuffix(address, "/"),
 	}, nil
 }
 

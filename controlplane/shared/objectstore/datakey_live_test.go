@@ -23,7 +23,7 @@ func liveStore(t *testing.T) *Client {
 		t.Skipf("no store at %s: %v", endpoint, err)
 	}
 	resp.Body.Close()
-	client, err := New(endpoint, "us-east-1", "hypothesisloop-data", "hypothesisloop", "hypothesisloop")
+	client, err := New(endpoint, endpoint, "us-east-1", "hypothesisloop-data", "hypothesisloop", "hypothesisloop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 	if err := root.CreateAgentDataKey(context.Background(), key, pe, "agent"); err != nil {
 		t.Fatalf("CreateAgentDataKey: %v", err)
 	}
-	agent, err := New(root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey)
+	agent, err := New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey)
 	if err != nil {
 		t.Fatal(err)
 	}

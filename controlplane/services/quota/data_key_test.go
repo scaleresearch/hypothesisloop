@@ -52,7 +52,7 @@ func dataKeyRouter(t *testing.T, keys AgentDataKeyStore, storeStatus int) (http.
 		w.WriteHeader(storeStatus)
 	}))
 	t.Cleanup(store.Close)
-	client, err := objectstore.New(store.URL, "us-east-1", "hl-data", "root", "root-secret")
+	client, err := objectstore.New(store.URL, store.URL, "us-east-1", "hl-data", "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}

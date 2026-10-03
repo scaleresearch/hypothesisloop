@@ -31,7 +31,7 @@ func TestListDataReturnsEmptyForAJobThatWroteNothing(t *testing.T) {
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`))
 	}))
 	defer srv.Close()
-	client, err := objectstore.New(srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestListDataGivesEachObjectItsS3URI(t *testing.T) {
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>pe-1/agent/job-1/ckpt.pt</Key><Size>7</Size></Contents></ListBucketResult>`))
 	}))
 	defer srv.Close()
-	client, err := objectstore.New(srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}

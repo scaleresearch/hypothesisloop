@@ -17,7 +17,7 @@ func TestAStoreThatDoesNotAnswerIsUnavailable(t *testing.T) {
 	closed.Close()
 
 	for name, endpoint := range map[string]string{"gateway error": gateway.URL, "unreachable": closed.URL} {
-		client, err := New(endpoint, "garage", "bucket", "key-id", "secret")
+		client, err := New(endpoint, endpoint, "garage", "bucket", "key-id", "secret")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +37,7 @@ func TestARefusalOfTheStoreIsNotUnavailable(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer srv.Close()
-	client, err := New(srv.URL, "garage", "bucket", "key-id", "secret")
+	client, err := New(srv.URL, srv.URL, "garage", "bucket", "key-id", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
