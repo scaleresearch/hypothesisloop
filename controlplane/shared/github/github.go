@@ -165,6 +165,10 @@ type Installation struct {
 	// Controlled says the person asked about controls that account: it is their own, or an
 	// organisation they are an admin of. Set by UserInstallations alone.
 	Controlled bool `json:"-"`
+	// MembershipHidden says GitHub did not tell whether the person is an admin of the organisation
+	// the installation is on, because the installation has not granted the App the organisation
+	// permission Members (read). Set by UserInstallations alone.
+	MembershipHidden bool `json:"-"`
 	// SelectedRepositories says the installation covers the repositories its owner selected and
 	// no other. Set by Installation alone.
 	SelectedRepositories bool `json:"-"`
@@ -263,9 +267,9 @@ func CloneURL(fullName string) string {
 }
 
 // UserInstallations returns the installations of the App that the person behind userCode
-// reaches on GitHub, each marked with whether they control the account it is on. Reaching one
-// takes no more than being a collaborator on a single repository it covers, so only Controlled
-// says who may connect it. redirectURI is the one the code was issued to. The grant is the
+// reaches on GitHub, each marked with whether they control the account it is on, or for an
+// organisation with MembershipHidden when GitHub would not say. Reaching one takes no more than
+// being a collaborator on a single repository it covers, so only Controlled says who may connect it. redirectURI is the one the code was issued to. The grant is the
 // caller's to keep by its Authorization or to end with RevokeUser. One whose installations could
 // not be read is revoked here.
 func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) (*UserGrant, error) {
@@ -335,9 +339,17 @@ func (c *Client) UserToken(ctx context.Context, authorization string) (accessTok
 const pageSize = 100
 
 func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Installation, error) {
-	controlled, err := c.controlledAccounts(ctx, userToken)
-	if err != nil {
+	var self struct {
+		ID int64 `json:"id"`
+	}
+	switch err := c.call(ctx, http.MethodGet, "/user", userToken, nil, &self); {
+	case errors.Is(err, errUnauthorized):
+		return nil, ErrCodeRejected
+	case err != nil:
 		return nil, err
+	}
+	if self.ID <= 0 {
+		return nil, fmt.Errorf("github: GET /user answered without the person's id")
 	}
 	found := []Installation{}
 	for page := 1; ; page++ {
@@ -366,7 +378,15 @@ func (c *Client) installationsOf(ctx context.Context, userToken string) ([]Insta
 			if one.AppID != c.appID || one.ID <= 0 || one.Account.Login == "" || one.Account.ID <= 0 || !accountType(one.Account.Type) {
 				return nil, fmt.Errorf("github: GET /user/installations answered an installation that is not this App's or is on no user or organisation")
 			}
-			found = append(found, Installation{ID: one.ID, AccountLogin: one.Account.Login, AccountType: one.Account.Type, Controlled: controlled[account{one.Account.Type, one.Account.ID}]})
+			installation := Installation{ID: one.ID, AccountLogin: one.Account.Login, AccountType: one.Account.Type, Controlled: one.Account.Type == AccountUser && one.Account.ID == self.ID}
+			if one.Account.Type == AccountOrganization {
+				admin, hidden, err := c.administers(ctx, userToken, one.Account.Login)
+				if err != nil {
+					return nil, err
+				}
+				installation.Controlled, installation.MembershipHidden = admin, hidden
+			}
+			found = append(found, installation)
 		}
 		if len(out.Installations) < pageSize || len(found) >= out.TotalCount {
 			return found, nil
@@ -378,51 +398,26 @@ func accountType(kind string) bool {
 	return kind == AccountUser || kind == AccountOrganization
 }
 
-// account is a GitHub account by its type, User or Organization, and its id, which unlike its
-// login is never another account's later.
-type account struct {
-	kind string
-	id   int64
-}
-
-// controlledAccounts returns the accounts the person behind userToken controls: their own, and
-// every organisation they are an active admin of. Both are what GitHub says of the token's
-// owner and need no permission of the App.
-func (c *Client) controlledAccounts(ctx context.Context, userToken string) (map[account]bool, error) {
-	var self struct {
-		ID int64 `json:"id"`
+// administers says whether the person behind userToken is an active admin of the organisation.
+// A user access token sees a membership only through an installation that granted the App the
+// organisation permission Members (read): without it GitHub answers 403 and hidden is true.
+// Not being a member at all is 404.
+func (c *Client) administers(ctx context.Context, userToken, organisation string) (admin, hidden bool, err error) {
+	var membership struct {
+		State string `json:"state"`
+		Role  string `json:"role"`
 	}
-	switch err := c.call(ctx, http.MethodGet, "/user", userToken, nil, &self); {
+	switch err := c.call(ctx, http.MethodGet, "/user/memberships/orgs/"+url.PathEscape(organisation), userToken, nil, &membership); {
+	case errors.Is(err, errNotFound):
+		return false, false, nil
+	case errors.Is(err, errForbidden):
+		return false, true, nil
 	case errors.Is(err, errUnauthorized):
-		return nil, ErrCodeRejected
+		return false, false, ErrCodeRejected
 	case err != nil:
-		return nil, err
+		return false, false, err
 	}
-	if self.ID <= 0 {
-		return nil, fmt.Errorf("github: GET /user answered without the person's id")
-	}
-	controlled := map[account]bool{{AccountUser, self.ID}: true}
-	for page := 1; ; page++ {
-		var memberships []struct {
-			State        string `json:"state"`
-			Role         string `json:"role"`
-			Organization struct {
-				ID int64 `json:"id"`
-			} `json:"organization"`
-		}
-		path := fmt.Sprintf("/user/memberships/orgs?state=active&per_page=%d&page=%d", pageSize, page)
-		if err := c.call(ctx, http.MethodGet, path, userToken, nil, &memberships); err != nil {
-			return nil, err
-		}
-		for _, one := range memberships {
-			if one.State == "active" && one.Role == "admin" && one.Organization.ID > 0 {
-				controlled[account{AccountOrganization, one.Organization.ID}] = true
-			}
-		}
-		if len(memberships) < pageSize {
-			return controlled, nil
-		}
-	}
+	return membership.State == "active" && membership.Role == "admin", false, nil
 }
 
 // Installation returns one installation of the App as GitHub states it to the App itself.

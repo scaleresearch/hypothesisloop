@@ -43,8 +43,11 @@ type fakeInstallation struct {
 	account string
 	// owner is the user whose own account the installation is on, empty for an organisation's.
 	owner string
-	// creates says the installation granted the App the creation of repositories.
+	// creates says the installation granted the App the creation of repositories, and members the
+	// organisation permission Members (read), without which GitHub shows the App no membership in
+	// the organisation.
 	creates   bool
+	members   bool
 	suspended bool
 	// all says the installation covers every repository of its account, those made later too.
 	all   bool
@@ -127,8 +130,8 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 	f := &fakeGitHub{
 		t: t, key: &key.PublicKey, now: time.Now,
 		installations: map[int64]*fakeInstallation{
-			100: {account: "Acme", creates: true, repos: map[int64]bool{1: true, 2: true}},
-			200: {account: "rival", repos: map[int64]bool{3: true}},
+			100: {account: "Acme", creates: true, members: true, repos: map[int64]bool{1: true, 2: true}},
+			200: {account: "rival", members: true, repos: map[int64]bool{3: true}},
 			300: {account: "carol", owner: "carol", creates: true, repos: map[int64]bool{}},
 		},
 		repos: map[string]*fakeRepo{
@@ -339,19 +342,27 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.answer(w, http.StatusOK, map[string]any{"id": userID(user), "login": user})
-	case r.URL.Path == "/user/memberships/orgs":
+	case len(segments) == 4 && segments[0] == "user" && segments[1] == "memberships" && segments[2] == "orgs" && r.Method == http.MethodGet:
 		user, ok := f.userTokens[bearer]
 		if !ok {
 			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
 			return
 		}
-		all := []map[string]any{}
-		for _, id := range f.reaches[user] {
-			if role := f.roles[user][id]; role != "" && f.installations[id] != nil {
-				all = append(all, map[string]any{"state": "active", "role": role, "organization": f.accountOf(id)})
+		for id, installation := range f.installations {
+			if installation.owner != "" || !strings.EqualFold(installation.account, segments[3]) {
+				continue
+			}
+			if !installation.members {
+				w.Header().Set("X-Accepted-GitHub-Permissions", "members=read")
+				f.refuse(w, http.StatusForbidden, "Resource not accessible by integration")
+				return
+			}
+			if role := f.roles[user][id]; role != "" {
+				f.answer(w, http.StatusOK, map[string]any{"state": "active", "role": role, "organization": f.accountOf(id)})
+				return
 			}
 		}
-		f.answer(w, http.StatusOK, paged(r, all))
+		f.refuse(w, http.StatusNotFound, "Not Found")
 	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodGet:
 		if !f.appAuthenticated(bearer) {
 			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
@@ -720,6 +731,37 @@ func TestUserInstallationsAreThoseThePersonReachesAndTheGrantIsTheCallersToKeepO
 	// A person who reaches none is answered with none, which is no failure.
 	if found, err := client.UserInstallations(ctx, "code-mallory", testRedirect); err != nil || len(found.Installations) != 0 || found.Installations == nil {
 		t.Fatalf("a person with no installation: %+v, %v, want an empty list", found, err)
+	}
+}
+
+// An owner who installs the App on their organisation reaches the new installation, and GitHub
+// shows a user access token their admin role there only once the installation has granted the App
+// the organisation permission Members (read). Until then the person is told so, and is not taken
+// for a collaborator who controls nothing.
+func TestAnOrganisationsOwnerControlsItsInstallationOnceTheAppMayReadItsMembers(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	f.installations[168837676] = &fakeInstallation{account: "carols-lab", repos: map[int64]bool{}}
+	f.reaches["carol"] = append(f.reaches["carol"], 168837676)
+	f.roles["carol"][168837676] = "admin"
+	lab := func() Installation {
+		t.Helper()
+		f.codes["code-carol"] = "carol"
+		grant, err := client.UserInstallations(ctx, "code-carol", testRedirect)
+		if err != nil || len(grant.Installations) != 3 || !grant.Installations[1].Controlled {
+			t.Fatalf("UserInstallations = %+v, %v, want Acme, carol's own account controlled, and her organisation", grant, err)
+		}
+		return grant.Installations[2]
+	}
+	if got := lab(); got.Controlled || !got.MembershipHidden {
+		t.Fatalf("an organisation whose installation hides its members = %+v, want its membership hidden", got)
+	}
+	f.installations[168837676].members = true
+	if got := lab(); !got.Controlled || got.MembershipHidden {
+		t.Fatalf("an organisation whose installation shows its members = %+v, want it controlled by its owner", got)
+	}
+	f.roles["carol"][168837676] = "member"
+	if got := lab(); got.Controlled || got.MembershipHidden {
+		t.Fatalf("an organisation the person is a plain member of = %+v, want it neither controlled nor hidden", got)
 	}
 }
 
