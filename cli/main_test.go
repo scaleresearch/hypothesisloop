@@ -888,6 +888,12 @@ func TestTheUsageListsOnlyTheCommandsTheCallersTokenCanRun(t *testing.T) {
 				strings.Contains(person, ofPeople), strings.Contains(agent, ofPeople), strings.Contains(coordinator, ofPeople))
 		}
 	}
+	// An agent waits for a job by ending its turn, and the listing it reads names no second way.
+	for _, listing := range []string{agent, coordinator, person} {
+		if strings.Contains(listing, "--until") || strings.Contains(listing, "sleep") || !strings.Contains(listing, "\n  watch                 your own updates, one JSON object per line\n") {
+			t.Errorf("the listing words watch as a way to wait for a job:\n%s", listing)
+		}
+	}
 	if !strings.Contains(agent, "\n  data-key ") || strings.Contains(coordinator, "\n  data-key ") {
 		t.Error("data-key acts as an agent: want it listed to an agent and not to a coordinator")
 	}

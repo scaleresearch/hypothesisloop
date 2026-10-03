@@ -319,7 +319,6 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"capacity"},
 		{"data-key"},
 		{"watch", "--wake", "experiment.status", "--no-wait"},
-		{"watch", "--experiment", "job-1", "--until", "status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED", "--timeout", "1"},
 		{"repo", "init"},
 	}
 	requireEveryListedCommandSent(t, callerAgent, sent)
