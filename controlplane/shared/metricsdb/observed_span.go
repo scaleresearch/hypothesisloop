@@ -50,6 +50,10 @@ type ObservedSpan struct {
 // It measures observed span under the gap rule, not process lifetime: time before the first
 // observation, after the last, and across gaps longer than gapCap is deliberately not counted.
 // Billing only what was actually observed is the point (important.md #18).
+//
+// A run its runtime measured from beside the command is in the store whole, as observations no
+// further apart than gapCap (clusteragentapi's status push), so it is summed here like any other
+// and the gap rule falls on sampled liveness alone.
 func ObserveSpan(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap time.Duration) (ObservedSpan, error) {
 	// An inverted window means a corrupt created_at or a caller passing the two the wrong way
 	// round. Returning an empty span would bill that as "never observed" — silently, and as a

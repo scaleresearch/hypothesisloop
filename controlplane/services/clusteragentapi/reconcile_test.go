@@ -81,7 +81,7 @@ func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileSto
 	router := chi.NewRouter()
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	doc := apidocs.New(router, "test", "1.0.0", "", caller, auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", zap.NewNop()))
+	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", zap.NewNop()))
 	w.router = router
 	return w
 }

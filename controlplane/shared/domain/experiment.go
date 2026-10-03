@@ -408,6 +408,8 @@ type Placement struct {
 	AttemptCount int
 	// Slot is the slot the job was admitted to (NodeSlotLabel), "" on a cluster without slots.
 	Slot string
+	// AdmittedAt is when the current attempt was given capacity, zero for a job that holds none.
+	AdmittedAt time.Time
 }
 
 // RanOn is where a job's workload ran, as its cluster's runtime reported it. Two jobs of one spec

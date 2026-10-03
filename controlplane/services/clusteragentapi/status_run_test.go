@@ -12,56 +12,87 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
 
-// A job that started and ended between two reports was never reported running, and is measured
-// by the two ends of its run alone.
-func TestTheRunARuntimeMeasuredIsObservedAtItsTwoEnds(t *testing.T) {
+const testCadence = 90 * time.Second
+
+// span is what metricsdb.ObserveSpan makes of observations: the gaps of at most cadence, summed.
+func span(t *testing.T, observations []metricsdb.Observation) (first, last time.Time, total time.Duration) {
+	t.Helper()
+	for i, o := range observations {
+		if o.ExperimentID != "job-1" || o.ExtraLabels["cluster_name"] != "of-a" || o.ExtraLabels["node"] != "rtx4090-0" {
+			t.Fatalf("observation %+v", o)
+		}
+		if i == 0 {
+			first = o.At
+			continue
+		}
+		gap := o.At.Sub(observations[i-1].At)
+		if gap < 0 {
+			t.Fatalf("observations out of order: %v", observations)
+		}
+		if gap <= testCadence {
+			total += gap
+		}
+	}
+	return first, observations[len(observations)-1].At, total
+}
+
+// The run seen on rented machines: 131 s of command that the vendor never showed running, so
+// the job was reported pending and then ended. Its two ends alone are further apart than the
+// gap rule joins, and the run still counts whole.
+func TestARunNeverSeenRunningCountsWhole(t *testing.T) {
 	now := time.Date(2026, 10, 6, 21, 43, 30, 0, time.UTC)
-	started, ended := now.Add(-40*time.Second), now.Add(-25*time.Second)
-	times := func(observations []metricsdb.Observation) []time.Time {
-		var at []time.Time
-		for _, o := range observations {
-			if o.ExperimentID != "job-1" || o.ExtraLabels["cluster_name"] != "of-a" || o.ExtraLabels["node"] != "rtx4090-0" {
-				t.Fatalf("observation %+v", o)
-			}
-			at = append(at, o.At)
-		}
-		return at
-	}
-	equal := func(got []time.Time, want ...time.Time) bool {
-		if len(got) != len(want) {
-			return false
-		}
-		for i := range want {
-			if !got[i].Equal(want[i]) {
-				return false
-			}
-		}
-		return true
-	}
+	admitted := now.Add(-5 * time.Minute)
+	started, ended := now.Add(-150*time.Second), now.Add(-19*time.Second)
 	rep := statusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &started, EndedAt: &ended}
 
-	if got, ahead := observationsOf(rep, "of-a", now); ahead || !equal(times(got), started, ended) {
-		t.Errorf("an ended job with its run: %v, ahead %v", got, ahead)
+	first, last, total := span(t, observationsOf(rep, admitted, "of-a", now, testCadence))
+	if !first.Equal(started) || !last.Equal(ended) || total != 131*time.Second {
+		t.Fatalf("observed %v to %v, %v in all, want the 131 s from %v to %v", first, last, total, started, ended)
 	}
+
 	rep.StartedAt, rep.EndedAt = nil, nil
-	if got, ahead := observationsOf(rep, "of-a", now); ahead || len(got) != 0 {
-		t.Errorf("an ended job from a runtime that times nothing: %v, ahead %v", got, ahead)
+	if got := observationsOf(rep, admitted, "of-a", now, testCadence); len(got) != 0 {
+		t.Errorf("an ended job from a runtime that times nothing: %v", got)
 	}
 	rep.Phase = "running"
-	if got, ahead := observationsOf(rep, "of-a", now); ahead || !equal(times(got), now) {
-		t.Errorf("a running job: %v, ahead %v", got, ahead)
+	if got := observationsOf(rep, admitted, "of-a", now, testCadence); len(got) != 1 || !got[0].At.Equal(now) {
+		t.Errorf("a running job: %v", got)
 	}
-	rep.Phase = "succeeded"
-	skewedStart, skewedEnd := now.Add(time.Hour), now.Add(time.Hour+15*time.Second)
-	rep.StartedAt, rep.EndedAt = &skewedStart, &skewedEnd
-	if got, ahead := observationsOf(rep, "of-a", now); !ahead || len(got) != 0 {
-		t.Errorf("a run that ends an hour from now: %v, ahead %v", got, ahead)
+	rep.Phase, rep.StartedAt, rep.EndedAt = "succeeded", &started, &ended
+	if got := observationsOf(rep, time.Time{}, "of-a", now, testCadence); len(got) != 0 {
+		t.Errorf("a run of a job that holds no capacity: %v", got)
+	}
+}
+
+// A rented machine's clock is nobody's to trust. How long the command ran is kept, and when is
+// moved into what the platform saw: between the admission and the report.
+func TestARunToldByAWrongClockStaysWithinWhatThePlatformSaw(t *testing.T) {
+	now := time.Date(2026, 10, 6, 21, 43, 30, 0, time.UTC)
+	admitted := now.Add(-5 * time.Minute)
+	const ran = 131 * time.Second
+	for name, tc := range map[string]struct {
+		started             time.Time
+		ran                 time.Duration
+		wantFirst, wantLast time.Time
+	}{
+		"right":                        {now.Add(-150 * time.Second), ran, now.Add(-150 * time.Second), now.Add(-19 * time.Second)},
+		"an hour ahead":                {now.Add(time.Hour), ran, now.Add(-ran), now},
+		"ahead by less than the run":   {now.Add(-time.Minute), ran, now.Add(-ran), now},
+		"an hour behind":               {now.Add(-time.Hour), ran, admitted, admitted.Add(ran)},
+		"longer than the job was held": {now.Add(-time.Hour), 30 * time.Minute, admitted, now},
+	} {
+		ended := tc.started.Add(tc.ran)
+		rep := statusReport{ExperimentID: "job-1", Phase: "succeeded", AdmittedNode: "rtx4090-0", StartedAt: &tc.started, EndedAt: &ended}
+		first, last, total := span(t, observationsOf(rep, admitted, "of-a", now, testCadence))
+		if !first.Equal(tc.wantFirst) || !last.Equal(tc.wantLast) || total != tc.wantLast.Sub(tc.wantFirst) {
+			t.Errorf("%s: observed %v to %v, %v in all, want %v to %v whole", name, first, last, total, tc.wantFirst, tc.wantLast)
+		}
 	}
 }
 
 func TestAStatusReportNamesBothEndsOfARunInOrderOrNeither(t *testing.T) {
 	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
-		return placedStore{base, map[string]domain.Placement{"job-1": {ClusterName: "of-a"}}}
+		return placedStore{base, map[string]domain.Placement{"job-1": {ClusterName: "of-a", AdmittedAt: time.Now().Add(-time.Hour)}}}
 	})
 	push := func(extra map[string]any) int {
 		t.Helper()

@@ -291,7 +291,7 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 		return map[string]domain.Placement{}, nil
 	}
 	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name, attempt_count,
-		COALESCE(resolved_job_spec -> 'node_selector' ->> $2, '')
+		COALESCE(resolved_job_spec -> 'node_selector' ->> $2, ''), submitted_at
 		FROM experiments WHERE id = ANY($1)`, ids, domain.NodeSlotLabel)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
@@ -301,8 +301,12 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 	for rows.Next() {
 		var id string
 		var p domain.Placement
-		if err := rows.Scan(&id, &p.ClusterName, &p.AttemptCount, &p.Slot); err != nil {
+		var admittedAt *time.Time
+		if err := rows.Scan(&id, &p.ClusterName, &p.AttemptCount, &p.Slot, &admittedAt); err != nil {
 			return nil, fmt.Errorf("experiments_store.PlacementByID: scan: %w", err)
+		}
+		if admittedAt != nil {
+			p.AdmittedAt = *admittedAt
 		}
 		out[id] = p
 	}
