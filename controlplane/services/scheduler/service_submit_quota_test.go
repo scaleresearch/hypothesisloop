@@ -26,6 +26,8 @@ func TestAQuotaRefusalSaysWhetherALaterStageRaisesTheShare(t *testing.T) {
 		"a stage that cuts nobody": {run(2, cutting...), "No later stage raises the agent's share"},
 		"a stage that cuts":        {run(1, cutting...), "Stage 1 of 3 ends by 2026-10-06T23:00:00Z, or sooner as the budget is spent"},
 		"a stage the row misnames": {run(0, cutting...), "No later stage raises the agent's share"},
+		// The baseline's job is sent before the start: the refusal once read "ends by 0001-01-01T00:00:00Z".
+		"before the run starts": {&domain.PlatformExperiment{ID: "pe-1", Stages: cutting, CurrentStage: 1, DurationHours: 10}, "Stage 1 of 3 ends within 3h0m0s of the run's start, and the run has not started, or sooner"},
 	} {
 		if got := shareOutlook(tc.pe); !strings.HasPrefix(got, tc.wants) {
 			t.Errorf("%s: %q, want it to begin %q", name, got, tc.wants)

@@ -58,15 +58,21 @@ func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 
 // shareOutlook tells an agent refused for quota whether waiting can raise its share. A share
 // grows at a stage boundary alone, by the hours of the agents cut there, so the boundary's latest
-// moment is all the platform knows: how much is given depends on who is cut.
+// moment is all the platform knows: how much is given depends on who is cut. Before the run starts
+// that moment is no date yet.
 func shareOutlook(pe *domain.PlatformExperiment) string {
 	stage, ok := pe.CurrentStageDef()
 	if !ok || pe.CurrentStage >= len(pe.Stages) || stage.EvictPct <= 0 {
 		return "No later stage raises the agent's share: what remains is all it has for this platform experiment."
 	}
-	boundary := pe.StartedAt.Add(time.Duration(domain.BoundaryProgress(pe.Stages, pe.CurrentStage) * float64(pe.EndsAt.Sub(pe.StartedAt))))
-	return fmt.Sprintf("Stage %d of %d ends by %s, or sooner as the budget is spent: the agents ranked lowest are cut then and their hours go to those that remain, so the share rises only for an agent that passes it.",
-		pe.CurrentStage, len(pe.Stages), boundary.UTC().Format(time.RFC3339))
+	// The run has no start and no end until it starts, so the boundary is a time into it.
+	progress := domain.BoundaryProgress(pe.Stages, pe.CurrentStage)
+	ends := fmt.Sprintf("within %s of the run's start, and the run has not started", time.Duration(progress*pe.DurationHours*float64(time.Hour)).Round(time.Second))
+	if !pe.StartedAt.IsZero() {
+		ends = "by " + pe.StartedAt.Add(time.Duration(progress*float64(pe.EndsAt.Sub(pe.StartedAt)))).UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("Stage %d of %d ends %s, or sooner as the budget is spent: the agents ranked lowest are cut then and their hours go to those that remain, so the share rises only for an agent that passes it.",
+		pe.CurrentStage, len(pe.Stages), ends)
 }
 
 // resolveImage writes the address of the image the job names into its spec (domain.ResolveJobImage),
