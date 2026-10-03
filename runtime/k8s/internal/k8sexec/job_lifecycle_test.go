@@ -125,3 +125,17 @@ func TestAJobWithNoAcceleratorsInAnyGroupTakesTheZeroPlacement(t *testing.T) {
 		t.Fatalf("placement = %+v, want the zero placement: a job requesting no accelerator must not be placed on one", placement)
 	}
 }
+
+// Whether a job wants an accelerator is read from the job as admission resolved it, the one
+// BuildJobs compiles and guards on, not from the job as it was submitted.
+func TestPlacementIsResolvedForTheJobAdmissionResolved(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: testAPIURL}
+	submitted := domain.JobSpec{Image: "example.invalid/workload", MaxRetries: intPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
+		CPU: "1", Memory: "1Gi", Storage: "1Gi"}
+	resolved := submitted
+	resolved.AcceleratorType, resolved.AcceleratorCount = "unqualified-type", 1
+	exp := &domain.Experiment{ID: "resolved-placement", AcceleratorType: "unqualified-type", Job: submitted, ResolvedJob: &resolved}
+	if _, err := c.resolvePlacementFor(context.Background(), exp); err == nil {
+		t.Fatal("a job resolved to hold an accelerator was given the empty placement without any resolution attempt")
+	}
+}
