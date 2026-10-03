@@ -77,7 +77,7 @@ func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testi
 		db.RefusedAgentFinished:     http.StatusUnprocessableEntity,
 		db.RefusedNoQuota:           http.StatusUnprocessableEntity,
 	} {
-		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 			quota: refusingQuota{err: &db.AdmitRefusal{Reason: reason, Message: "the sentence of " + reason}}}
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != reason || admissionHTTPStatus(refused.Reason) != status {
@@ -88,7 +88,7 @@ func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testi
 		}
 	}
 
-	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"), novelty: novel{},
 		quota: refusingQuota{err: errors.New("connection reset")}}
 	var refused *AdmissionError
 	if err := s.Submit(context.Background(), humanIdeaSubmission()); err == nil || errors.As(err, &refused) {

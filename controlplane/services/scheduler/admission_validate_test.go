@@ -45,9 +45,12 @@ func validSubmission() *domain.Experiment {
 	}
 }
 
+// testCaps states every limit, as the settings must, each above what a test's job asks for.
+var testCaps = domain.QuotaConfig{MaxSubmissionsPerHour: 1000, MaxAcceleratorCountPerJob: 64, MaxCPUCoresPerJob: 1024, MaxRAMGBPerJob: 4096, MaxStorageGBPerJob: 8192}
+
 func validate(t *testing.T, exp *domain.Experiment) error {
 	t.Helper()
-	return ValidateExperiment(exp, domain.QuotaConfig{})
+	return ValidateExperiment(exp, testCaps)
 }
 
 func mustReject(t *testing.T, exp *domain.Experiment, wants string) {
@@ -164,7 +167,7 @@ func TestAJobStatesItsCPUMemoryAndStorageAsQuantities(t *testing.T) {
 		exp := validSubmission()
 		tc.spoil(exp)
 		var refused *AdmissionError
-		if err := ValidateExperiment(exp, domain.QuotaConfig{}); !errors.As(err, &refused) || refused.Reason != tc.reason || !strings.Contains(refused.Message, tc.field) {
+		if err := ValidateExperiment(exp, testCaps); !errors.As(err, &refused) || refused.Reason != tc.reason || !strings.Contains(refused.Message, tc.field) {
 			t.Errorf("%s: err = %v, want %s naming the field (%s)", name, err, tc.reason, tc.field)
 		}
 	}
@@ -293,7 +296,8 @@ func TestPerJobCapsCountEveryReplicaNotOneOfThem(t *testing.T) {
 	exp.Job.Groups = []domain.JobGroup{
 		{Name: "w", Replicas: 4, AcceleratorCount: 1, AcceleratorType: h100, CPU: "8", Memory: "8Gi", Storage: "1Gi"},
 	}
-	caps := domain.QuotaConfig{MaxCPUCoresPerJob: 20} // 4 x 8 = 32 cores; one replica alone would pass
+	caps := testCaps
+	caps.MaxCPUCoresPerJob = 20 // 4 x 8 = 32 cores; one replica alone would pass
 
 	err := ValidateExperiment(exp, caps)
 	if err == nil {

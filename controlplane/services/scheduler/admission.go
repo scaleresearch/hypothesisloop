@@ -280,36 +280,30 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 
 	// The count of a job on cores is its cores, which max_cpu_cores_per_job bounds below.
-	if caps.MaxAcceleratorCountPerJob > 0 && exp.AcceleratorType.Kind() != domain.TypeKindCPU && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
+	if exp.AcceleratorType.Kind() != domain.TypeKindCPU && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := exp.Job.Nodes()
-	if caps.MaxCPUCoresPerJob > 0 {
-		total, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
-		if err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
-		}
-		if total > caps.MaxCPUCoresPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", total/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
-		}
+	cpu, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
+	if err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 	}
-	if caps.MaxRAMGBPerJob > 0 {
-		total, err := totalOverGroups(exp.Job, workload.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
-		if err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
-		}
-		if total > caps.MaxRAMGBPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", total/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
-		}
+	if cpu > caps.MaxCPUCoresPerJob {
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", cpu/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 	}
-	if caps.MaxStorageGBPerJob > 0 {
-		total, err := totalOverGroups(exp.Job, workload.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
-		if err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
-		}
-		if total > caps.MaxStorageGBPerJob {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", total/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
-		}
+	memory, err := totalOverGroups(exp.Job, workload.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
+	if err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
+	}
+	if memory > caps.MaxRAMGBPerJob {
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", memory/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
+	}
+	storage, err := totalOverGroups(exp.Job, workload.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
+	if err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
+	}
+	if storage > caps.MaxStorageGBPerJob {
+		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", storage/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
 	}
 	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string
 	// should still be rejected here rather than surfacing later as an opaque Job-creation failure.

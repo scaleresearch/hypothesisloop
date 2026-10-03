@@ -67,7 +67,7 @@ func TestABaselineJobThatStatesNoEstimateTakesTheLargestItsQuotaAdmits(t *testin
 		"nothing remains":               {0, share(0.5, 0.5), 0, 0, ReasonInsufficientCredits},
 		"no quota":                      {0, nil, 0, 0, "no_quota"},
 	} {
-		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: baselineStore{maxJobHours: tc.maxJobHours}, quota: shareQuota{quota: tc.quota}, hypotheses: oneHypothesis{}}
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: baselineStore{maxJobHours: tc.maxJobHours}, quota: shareQuota{quota: tc.quota}, hypotheses: oneHypothesis{}}
 		exp := baselineSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		err := s.Submit(context.Background(), exp)
@@ -87,7 +87,7 @@ func TestABaselineJobThatStatesNoEstimateTakesTheLargestItsQuotaAdmits(t *testin
 
 	// A researcher's job has the measured estimate or states one: the largest that fits would hold
 	// its whole share for one trial.
-	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, quota: shareQuota{quota: share(0.5, 0)}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, quota: shareQuota{quota: share(0.5, 0)}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.EstimatedDurationHours = 0
 	var refused *AdmissionError
@@ -110,7 +110,7 @@ func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) 
 		"not stated, and one was measured": {0.025, 0, "not_signed_up", 0.025},
 		"not stated, and none measured":    {0, 0, ReasonEstimateRequired, 0},
 	} {
-		s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		var admission *AdmissionError
