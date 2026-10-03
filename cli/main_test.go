@@ -763,8 +763,9 @@ func TestPlatformExperimentsGetWritesTheRecordAloneWithItsReasonFirst(t *testing
 }
 
 // Quota is granted at the start. Before it the platform refuses with what the caller does until
-// then, and hl quota prints that with no error and no second request.
-func TestQuotaBeforeTheStartPrintsThePlatformsWordAndNoError(t *testing.T) {
+// then, and hl quota prints that sentence alone, with no second request. It once exited 0 with
+// nothing on stdout, which a script read as an agent with no quota line and no refusal.
+func TestQuotaBeforeTheStartPrintsThePlatformsWordAndFails(t *testing.T) {
 	reason, requests := "quota_not_granted", 0
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -773,7 +774,7 @@ func TestQuotaBeforeTheStartPrintsThePlatformsWordAndNoError(t *testing.T) {
 	setAPIURL(t, url)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"quota", "--agent", "jane", "--platform-experiment", "pe-1"}, &stdout, &stderr)
-	if code != 0 || requests != 1 || stdout.Len() != 0 || stderr.String() != "hl: quota: agent jane holds no quota yet: prepare, then end your turn\n" {
+	if code != 1 || requests != 1 || stdout.Len() != 0 || stderr.String() != "hl: quota: agent jane holds no quota yet: prepare, then end your turn\n" {
 		t.Fatalf("open: exit %d after %d requests, stdout %q, stderr %q", code, requests, stdout.String(), stderr.String())
 	}
 	reason = "not_found"
