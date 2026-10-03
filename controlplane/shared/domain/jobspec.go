@@ -80,7 +80,9 @@ type JobSpec struct {
 	AcceleratorTolerations []string `json:"accelerator_tolerations,omitempty" yaml:"accelerator_tolerations,omitempty"`
 
 	// AcceleratorPodResources are extra per-node resource requests an accelerator needs
-	// alongside the device itself (e.g. {"hugepages-1Gi": "4Gi"}).
+	// alongside the device itself (e.g. {"hugepages-1Gi": "4Gi"}). What a type always needs is
+	// the catalog's (AcceleratorType.PodResources) and admission writes it into ResolvedJob, so a
+	// job states only what is its own.
 	AcceleratorPodResources map[string]string `json:"accelerator_pod_resources,omitempty" yaml:"accelerator_pod_resources,omitempty"`
 
 	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of

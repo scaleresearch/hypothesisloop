@@ -7,10 +7,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
-// AcceleratorTypeConfig defines one priced type: its identity and its exchange rate.
+// AcceleratorTypeConfig defines one priced type: its identity, its exchange rate and what every
+// node of a job on it needs beside the device.
 type AcceleratorTypeConfig struct {
 	Name     string  `yaml:"name"`
 	AccHRate float64 `yaml:"acch_rate"`
+	// PodResources are resource requests every node of a job on this type gets, by the name the
+	// runtime knows them (hugepages-1Gi: 4Gi). No job states them.
+	PodResources map[string]string `yaml:"pod_resources"`
 }
 
 // AcceleratorTypeNames returns every accelerator type the catalog prices — the driver-published
@@ -380,5 +384,6 @@ type Config struct {
 	Git              GitConfig               `yaml:"git"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
-	RateByName map[string]float64 // accelerator name → AccH rate
+	RateByName         map[string]float64           // accelerator name → AccH rate
+	PodResourcesByName map[string]map[string]string // accelerator name → pod_resources, where it has any
 }

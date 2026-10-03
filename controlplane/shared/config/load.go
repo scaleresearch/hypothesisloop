@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
@@ -153,6 +154,7 @@ func (c *Config) build() error {
 	}
 	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)
 	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
+	c.PodResourcesByName = map[string]map[string]string{}
 
 	seenNames := map[string]bool{}
 	for _, g := range c.AcceleratorTypes {
@@ -167,6 +169,14 @@ func (c *Config) build() error {
 		}
 		seenNames[g.Name] = true
 		c.RateByName[g.Name] = g.AccHRate
+		for name, quantity := range g.PodResources {
+			if q, err := resource.ParseQuantity(quantity); name == "" || err != nil || q.Sign() <= 0 {
+				return fmt.Errorf("accelerator_type %q pod_resources[%q] must be a positive quantity, got %q", g.Name, name, quantity)
+			}
+		}
+		if len(g.PodResources) > 0 {
+			c.PodResourcesByName[g.Name] = g.PodResources
+		}
 	}
 	if c.Quota.BurstFraction <= 0 {
 		return fmt.Errorf("quota burst_fraction must be positive")

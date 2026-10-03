@@ -272,6 +272,12 @@ data_store:
 # CPU core-hours: 4 cores for an hour cost 4. It is not listed below, and a file that lists it is
 # refused at load.
 #
+# pod_resources is what every node of a job on the type needs beside the device, by the name the
+# runtime knows it. The platform adds it to every job admitted on the type, so no job spec states
+# it: a Tenstorrent chip's driver maps 1 GiB hugepages, and a job without them dies opening the
+# device. On Kubernetes it is a resource request of the pod; a bare node mounts the host's
+# hugetlbfs of that size into the container.
+#
 # Accelerators are the resource dimension admitted/preempted on. RAM/storage are hard
 # physical-fit-checked at admission instead of hours-quota-tracked. Agents declare accelerator
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
@@ -307,6 +313,8 @@ accelerator_types:
 
   - name:      tenstorrent.com/chipArch=blackhole
     acch_rate: 0.5
+    pod_resources:
+      hugepages-1Gi: 4Gi
 
 # Quota & scheduling constants
 

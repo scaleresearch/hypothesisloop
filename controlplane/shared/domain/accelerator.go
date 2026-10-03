@@ -142,6 +142,43 @@ func SetAcceleratorRates(rates map[string]float64) {
 	acceleratorRateRegistry = next
 }
 
+// acceleratorPodResources is what every node of a job on a type needs beside the device, such as
+// the hugepages a Tenstorrent chip's driver maps. Populated by SetAcceleratorPodResources at
+// startup from hypothesisloop.yaml and keyed by foldKey.
+var acceleratorPodResources = map[string]map[string]string{}
+
+// SetAcceleratorPodResources registers each type's pod resources loaded from config. Call once at
+// startup.
+func SetAcceleratorPodResources(byType map[string]map[string]string) {
+	next := make(map[string]map[string]string, len(byType))
+	for name, resources := range byType {
+		next[foldKey(name)] = resources
+	}
+	acceleratorPodResources = next
+}
+
+// PodResources is what the catalog says every node of a job on this type needs beside the device.
+func (g AcceleratorType) PodResources() map[string]string {
+	return acceleratorPodResources[foldKey(string(g))]
+}
+
+// WithPodResources is a job's accelerator_pod_resources as it runs on this type: what the job
+// stated, and over it what the type always needs, so a job states none of that itself.
+func (g AcceleratorType) WithPodResources(stated map[string]string) map[string]string {
+	always := g.PodResources()
+	if len(always) == 0 {
+		return stated
+	}
+	out := make(map[string]string, len(stated)+len(always))
+	for name, quantity := range stated {
+		out[name] = quantity
+	}
+	for name, quantity := range always {
+		out[name] = quantity
+	}
+	return out
+}
+
 // CPUType is the one type whose unit is a CPU core. Every runtime offers its nodes' whole cores
 // as units of it, and a job that asks for cores and no accelerator holds that many units (see
 // scheduler.ValidateExperiment). The catalog prices it like any other type.

@@ -477,3 +477,28 @@ func TestLoadRejectsMissingPlatformExperimentSettings(t *testing.T) {
 		}
 	}
 }
+
+// What a type always needs beside the device is the catalog's to say, so no job spec has to: the
+// committed settings give every Blackhole job its 1 GiB hugepages.
+func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.PodResourcesByName["tenstorrent.com/chipArch=blackhole"]["hugepages-1Gi"]; got != "4Gi" {
+		t.Errorf("pod_resources of a Blackhole chip: hugepages-1Gi = %q, want 4Gi", got)
+	}
+	if _, declared := cfg.PodResourcesByName["nvidia.com/gpu.product=NVIDIA-L40"]; declared {
+		t.Error("a type that declares none is listed with pod resources")
+	}
+	for _, quantity := range []string{"lots", "0", "-4Gi"} {
+		text := strings.Replace(productionConfig(t), "hugepages-1Gi: 4Gi", "hugepages-1Gi: "+quantity, 1)
+		if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "pod_resources") {
+			t.Errorf("pod_resources of %q: err = %v, want it refused", quantity, err)
+		}
+	}
+}
