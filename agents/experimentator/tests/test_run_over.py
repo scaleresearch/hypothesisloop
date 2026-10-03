@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from hypothesisloop_agent import api_client, core
+from hypothesisloop_agent import api_client, core, outage
 
 REFUSED = api_client.APIError("GET", "http://api/x", 401, '{"error":"unauthenticated: agent ag-1 finished in platform experiment pe-1"}')
 DOWN = api_client.APIError("GET", "http://api/x", 0, "connection refused")
@@ -24,10 +24,14 @@ def setup(answer):
 
 # A stop check that could not ask the platform logged "continuing" and went on: with its token
 # refused after the wind-down, or the platform gone, a machine nothing outside could stop ran on.
+def no_outage():
+    outage._since, outage._over, outage._suspected = None, None, False
+
+
 class RunOverTest(unittest.TestCase):
     def setUp(self):
-        core._unanswered_since = None
-        self.addCleanup(setattr, core, "_unanswered_since", None)
+        no_outage()
+        self.addCleanup(no_outage)
 
     def test_a_refused_token_is_a_run_that_is_over(self):
         reason = core.run_over(setup(lambda: REFUSED))
@@ -42,13 +46,18 @@ class RunOverTest(unittest.TestCase):
             self.assertIsNone(core.run_over(agent))
             self.assertIsNone(core.run_over(agent))
         self.assertEqual(len(logged.records), 1)
+        self.assertTrue(outage.under_way())
+        self.assertEqual(outage.over(), [])
         self.assertIsNone(core.run_over(agent))
-        self.assertIsNone(core._unanswered_since)
+        self.assertFalse(outage.under_way())
+        # The read that counts toward the exit is the one that tells the agent the outage ended.
+        self.assertEqual([e["kind"] for e in outage.over()], ["platform.reachable"])
+        self.assertEqual(outage.over(), [])
         with self.assertLogs("llm_agent", "WARNING"):
             self.assertIsNone(core.run_over(agent))
 
     def test_a_platform_unanswered_for_the_limit_ends_the_run(self):
-        core._unanswered_since = time.monotonic() - core.UNANSWERED_LIMIT_S
+        outage._since = time.time() - core.UNANSWERED_LIMIT_S
         reason = core.run_over(setup(lambda: DOWN))
         self.assertTrue(reason.startswith("the platform has not said for 1800s whether the run goes on ("), reason)
         self.assertTrue(core.lost_platform(reason))
@@ -62,7 +71,7 @@ class RunOverTest(unittest.TestCase):
 
 class RunUntilLostTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        core._unanswered_since = None
+        no_outage()
 
     async def test_a_lost_platform_ends_the_process_whatever_is_in_flight(self):
         dropped = []

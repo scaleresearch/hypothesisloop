@@ -6,11 +6,10 @@ import logging
 import os
 import signal
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from hypothesisloop_agent import api_client, config
+from hypothesisloop_agent import api_client, config, outage
 
 log = logging.getLogger("llm_agent")
 
@@ -238,30 +237,25 @@ def stop_cause(setup: RunSetup) -> str | None:
 UNANSWERED_LIMIT_S = 1800
 _RUN_CHECK_INTERVAL_S = 30
 
-# When the check first went unanswered in the outage under way. It is no clock of updates.py: that
-# one follows hl watch, whose exit code does not tell a refused token from a platform that is down.
-_unanswered_since: float | None = None
-
 
 def run_over(setup: RunSetup) -> str | None:
     """Why this process has no run on the platform to work in, None while it has one: the one
-    place the harness asks. The platform ended the run, it refuses the token, which it does once
-    the wind-down after the end has passed, or it has not answered for UNANSWERED_LIMIT_S. An
-    outage shorter than that is waited out."""
-    global _unanswered_since
+    place the harness asks, and so what starts and ends the outage clock (outage.py). The
+    platform ended the run, it refuses the token, which it does once the wind-down after the end
+    has passed, or it has not answered for UNANSWERED_LIMIT_S. An outage shorter than that is
+    waited out."""
     try:
         # A planner's run ends with its answer and a revision starts it again with its session.
         ended = run_ended(setup)
     except api_client.APIError as e:
         if e.status == 401:
             return f"the platform refuses this token, so its run is over ({e.body.strip()[:200]})"
-        if _unanswered_since is None:
-            _unanswered_since = time.monotonic()
+        if not outage.under_way():
             log.warning("the platform did not say whether the run goes on (%s): ending after %ds of this", e, UNANSWERED_LIMIT_S)
-        if time.monotonic() - _unanswered_since >= UNANSWERED_LIMIT_S:
+        if outage.unanswered() >= UNANSWERED_LIMIT_S:
             return f"the platform has not said for {UNANSWERED_LIMIT_S}s whether the run goes on ({e})"
         return None
-    _unanswered_since = None
+    outage.answered()
     return _ENDED + ended if ended else None
 
 
@@ -282,7 +276,7 @@ async def until_lost(setup: RunSetup) -> str:
         reason = await asyncio.to_thread(run_over, setup)
         if lost_platform(reason):
             return reason
-        await asyncio.sleep(_RUN_CHECK_INTERVAL_S)
+        await outage.next_read(_RUN_CHECK_INTERVAL_S)
 
 
 async def run_until_lost(setup: RunSetup, work) -> None:

@@ -7,7 +7,7 @@ import time
 import unittest
 from datetime import datetime, timezone
 
-from hypothesisloop_agent import updates
+from hypothesisloop_agent import outage, updates
 from hypothesisloop_agent.claude import activity
 
 COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","position":5,"cursor":5}'
@@ -21,7 +21,7 @@ def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", rea
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
     `hl job status`, `hl job stats` and `hl quota` print status, stats and quota, record their
     arguments and exit read_exit. A new one has had no outage."""
-    updates._unreachable_since = None
+    outage._since, outage._over, outage._suspected = None, None, False
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
     for name, text in (("status", status), ("stats", stats), ("quota", quota)):
@@ -95,39 +95,49 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     # open one waited without the wake for a failed job and nothing said so.
     async def test_a_wait_that_cannot_be_set_up_is_a_poll_that_failed(self):
         coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
-        refused, counter = fake_hl('[ "$1" = platform-experiments ] && { [ -e "$0.args" ] || exit 1; echo \'{"status": "open"}\'; exit 0; }\n'
-                                   'echo "$*" >> "$0.args"\nexit 0\n')
+        refused, counter = fake_hl('[ "$1" = platform-experiments ] && { [ -e "$0.asked" ] || { touch "$0.asked"; exit 1; }; echo \'{"status": "open"}\'; exit 0; }\n'
+                                   f'echo "$*" >> "$0.args"\necho \'{COMMENT}\'\n')
         events = await updates.next_batch(coordinator, lambda: False, 10, command=refused, retry_s=0.1)
-        self.assertEqual([e["kind"] for e in events], ["platform.reachable"])
+        self.assertEqual([e["kind"] for e in events], ["comment.new"])
+        with open(counter.replace(".runs", ".args")) as f:
+            self.assertEqual(f.read().splitlines(), ["watch --wake " + ",".join(updates.WAKES["coordinator"] + updates.OPEN_WAKES)])
+
+    # hl exits 1 for a refusal as for a platform that is down, so a failed watch starts no outage:
+    # it is retried, and the read that keeps the outage clock is asked for at once.
+    async def test_a_failed_watch_is_retried_and_asks_whether_the_platform_answers(self):
+        command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
+        self.assertEqual([e.get("subject") for e in events], ["exp-1"])
+        self.assertEqual(runs(counter), 2)
+        self.assertFalse(outage.under_way())
+        await asyncio.wait_for(outage.next_read(60), timeout=1)
+
+    # In an outage researchers with no job in flight retried in sleep loops: one that ended its
+    # turn would have heard nothing until the idle nudge, half an hour later. Told of its end by
+    # hl's exit code while the harness's own read still counted toward its exit, one was told
+    # the platform was back by one clock and ended by the other.
+    async def test_an_outage_is_waited_out_without_a_poll_and_its_end_wakes_with_what_waits(self):
+        command, counter = fake_hl(f'echo "$*" >> "$0.args"\necho \'{COMMENT}\'\n')
+        outage.unanswered()
+        asyncio.get_running_loop().call_later(0.2, outage.answered)
+        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.05)
+        self.assertRegex(updates.message(events, "agent-a"), r"^Platform updates:\ncomment\.new hyp-1 agent by agent-b\n"
+                         r"platform\.reachable again: it could not be reached "
+                         r"from \d\d:\d\d:\d\d to \d\d:\d\d:\d\d UTC\. Retry what was refused then\.$")
+        self.assertEqual(outage._clock(3725.0), "01:02:05")
         with open(counter.replace(".runs", ".args")) as f:
             self.assertEqual(f.read().splitlines(), ["watch --no-wait --timeout 5"])
 
-    async def test_a_failed_watch_is_retried(self):
-        command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
-        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
-        self.assertEqual([e.get("subject") for e in events], ["exp-1", None])
-        self.assertEqual(runs(counter), 2)
-
-    # In an outage researchers with no job in flight retried in sleep loops: one that ended its
-    # turn would have heard nothing until the idle nudge, half an hour later.
-    async def test_the_first_poll_answered_after_a_failed_one_wakes_with_the_outage(self):
-        command, counter = fake_hl('echo "$*" >> "$0.args"\n[ $RUNS -le 2 ] && { echo unreachable >&2; exit 1; }\nexit 0\n')
-        events = await updates.next_batch(ENV, lambda: False, 10, command=command, retry_s=0.1)
-        self.assertRegex(updates.message(events, "agent-a"), r"^Platform updates:\nplatform\.reachable again: it could not be reached "
-                         r"from \d\d:\d\d:\d\d to \d\d:\d\d:\d\d UTC\. Retry what was refused then\.$")
-        self.assertEqual(updates._clock(3725.0), "01:02:05")
-        with open(counter.replace(".runs", ".args")) as f:
-            asked = f.read().splitlines()
-        # While it fails the poll waits for no event, so the first answer ends the wait.
-        self.assertEqual([line.split()[1] for line in asked], ["--wake", "--no-wait", "--no-wait"])
-        self.assertEqual(await updates.next_batch(ENV, lambda: False, 0.2, command=command), [])
-
-    # The poll after the refused tool call fails too, and the agent then ends its turn.
-    async def test_an_outage_seen_by_a_drain_is_ended_by_the_wait_that_follows(self):
+    # The poll after the refused tool call fails too. An agent that works on is told of the
+    # outage's end by the drain after its next tool call.
+    async def test_a_failed_drain_asks_whether_the_platform_answers_and_a_later_one_says_the_outage_ended(self):
         command, _ = fake_hl("[ $RUNS -eq 1 ] && exit 1\nexit 0\n")
         self.assertEqual(await updates.drain(ENV, command=command), [])
-        events = await updates.next_batch(ENV, lambda: False, 10, command=command)
-        self.assertEqual([e["kind"] for e in events], ["platform.reachable"])
+        self.assertFalse(outage.under_way())
+        await asyncio.wait_for(outage.next_read(60), timeout=1)
+        outage.unanswered()
+        outage.answered()
+        self.assertEqual([e["kind"] for e in await updates.drain(ENV, command=command)], ["platform.reachable"])
         self.assertEqual(await updates.drain(ENV, command=command), [])
 
     async def test_stopping_ends_a_watch_in_progress(self):
@@ -215,9 +225,12 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         command, _ = fake_hl("echo refused >&2; exit 2\n")
         self.assertEqual(await updates.drain(ENV, command=command), [])
 
-    async def test_an_outage_is_logged_by_the_first_failed_drain_only(self):
+    async def test_a_drain_that_fails_in_an_outage_is_not_logged(self):
         command, _ = fake_hl("echo never connected >&2; exit 1\n")
         with self.assertLogs("llm_agent", "WARNING") as logged:
+            await updates.drain(ENV, command=command)
+            outage.unanswered()
+            self.addCleanup(setattr, outage, "_since", None)
             for _ in range(3):
                 await updates.drain(ENV, command=command)
         self.assertEqual(len(logged.records), 1)

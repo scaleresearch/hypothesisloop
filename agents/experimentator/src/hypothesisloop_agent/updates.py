@@ -17,7 +17,7 @@ import os
 import time
 from collections.abc import Callable
 
-from hypothesisloop_agent import config
+from hypothesisloop_agent import config, outage
 
 log = logging.getLogger("llm_agent")
 
@@ -174,41 +174,15 @@ def _next_stage(quota: dict) -> str:
             f"by {quota['next_stage_starts_at']}")
 
 
-# When the first poll of an outage failed. An agent refused by a platform that could not be
-# reached ended its turn and, with no job in flight, heard nothing until the idle nudge.
-_unreachable_since: float | None = None
-
-
-def _clock(at: float) -> str:
-    return time.strftime("%H:%M:%S", time.gmtime(at))
-
-
-def _polled(code: int | None) -> list[dict]:
-    """Notes how a poll of the platform ended, and for the first one answered after one that
-    failed returns the event that says so."""
-    global _unreachable_since
-    if code is None:
-        return []
-    if code != 0:
-        _unreachable_since = _unreachable_since or time.time()
-        return []
-    since, _unreachable_since = _unreachable_since, None
-    if since is None:
-        return []
-    return [{"kind": "platform.reachable", "value": f"again: it could not be reached from {_clock(since)} to "
-                                                     f"{_clock(time.time())} UTC. Retry what was refused then."}]
-
-
-def _drain_command(command: list[str]) -> list[str]:
-    return [*command, "--no-wait", "--timeout", str(_DRAIN_S)]
-
-
 async def drain(env: dict[str, str], command: list[str] | None = None) -> list[dict]:
-    """The events already waiting on the cursor, without waiting for more. A drain runs after
-    every tool call, so an outage is logged by the first that fails."""
+    """The events already waiting on the cursor, without waiting for more, and that an outage
+    has ended. A drain runs after every tool call, so one that fails in an outage is not logged."""
     command = command or watch_command(env)
-    code, stdout = await _run_hl(_drain_command(command), env, lambda: False, warn=_unreachable_since is None)
-    return await _with_job_state([*_events(stdout), *_polled(code)], env, command[0])
+    code, stdout = await _run_hl([*command, "--no-wait", "--timeout", str(_DRAIN_S)], env, lambda: False,
+                                 warn=not outage.under_way())
+    if code != 0:
+        outage.suspect()
+    return await _with_job_state([*_events(stdout), *outage.over()], env, command[0])
 
 
 async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
@@ -223,10 +197,8 @@ async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
 
 
 async def _poll(env: dict[str, str], command: list[str], stopped: Callable[[], bool]) -> tuple[int | None, str]:
-    """One poll of the platform: the wait for an event that wakes, or in an outage only what
-    waits. A wait that could not be set up is a poll that failed."""
-    if _unreachable_since is not None:
-        return await _run_hl(_drain_command(command), env, stopped)
+    """One poll of the platform: the wait for an event that wakes. A wait that could not be set
+    up is a poll that failed."""
     wakes = await _wakes(env, command[0])
     if wakes is None:
         return 1, ""
@@ -237,16 +209,22 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
                      command: list[str] | None = None, retry_s: float = _RETRY_S) -> list[dict]:
     """Runs hl watch until an event that wakes this role arrives, and returns it with what waited
     before it. Once idle_s passes without one, returns what waits, which may be nothing. Returns
-    [] as soon as stopped() is true. A failed hl watch is retried after retry_s, without waiting
-    for an event, so the first one answered ends the wait with the platform reachable again."""
+    [] as soon as stopped() is true. A failed hl watch is retried after retry_s. In an outage
+    nothing is polled, and its end ends the wait with what waits and the platform reachable again."""
     command = command or watch_command(env)
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
+        if outage.under_way():
+            await asyncio.sleep(min(1.0, retry_s))
+            continue
+        if again := outage.over():
+            return [*await drain(env, command), *again]
         code, stdout = await _poll(env, command, stopped)
-        events = [*_events(stdout), *_polled(code)]
+        events = _events(stdout)
         if events:
             return await _with_job_state(events, env, command[0])
         if code not in (0, None):
+            outage.suspect()
             deadline = min(give_up, time.monotonic() + retry_s)
             while not stopped() and time.monotonic() < deadline:
                 await asyncio.sleep(min(1.0, retry_s))
