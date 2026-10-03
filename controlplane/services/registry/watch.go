@@ -163,7 +163,7 @@ func (h *hub) dropAll() {
 // WatchHandler serves GET /watch. It is registered on the chi router directly rather than through
 // apidocs/Huma: a WebSocket upgrade needs the raw connection, and Huma owns the response for
 // every operation registered with it. The honest place for it is therefore beside the router, and
-// the contract agents actually read for it is the system prompt's hl watch section.
+// the contract a caller reads for it is GET /watch/kinds (RegisterWatchHuma) and hl watch --help.
 type WatchHandler struct {
 	source EventSource
 	// experiments resolves the platform experiment a job belongs to, so a caller that knows
@@ -581,7 +581,7 @@ func RegisterWatchHuma(doc *apidocs.Doc) {
 			"told the filter in force, or `{\"kinds\": \"a,b\"}` to change it (`{\"kinds\": \"\"}` restores the " +
 			"default). The answer is a `{\"subscription\": {...}}` frame. Widening replays the added kinds from where " +
 			"you last saw them; narrowing stops delivery. Nothing else may be sent up the socket.\n\n" +
-			"`hl watch` holds the socket for you: with your identity in the environment it watches your own resources, " +
+			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
 			"resumes from the cursor it saved last time, and returns with the first batch of events.",
 	}, func(context.Context, *struct{}) (*struct{ Body []db.EventKindDoc }, error) {
 		return &struct{ Body []db.EventKindDoc }{Body: db.EventKinds}, nil

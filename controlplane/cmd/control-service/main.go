@@ -245,8 +245,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}
 	// /watch is a WebSocket upgrade, so it is mounted on the router rather than registered on
 	// the Huma doc below: Huma owns the response for every operation registered with it, and an
-	// upgrade needs the raw connection. Agents learn it from `hl watch`, documented in the
-	// experimentator's system prompt.
+	// upgrade needs the raw connection. Its vocabulary is GET /watch/kinds, registered below, and
+	// `hl watch` is its client, which the experimentator harness runs for an agent between turns.
 	r.Get("/watch", watchHandler.ServeHTTP)
 
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
