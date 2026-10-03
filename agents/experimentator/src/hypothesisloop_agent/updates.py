@@ -98,8 +98,12 @@ async def _run_hl(command: list[str], env: dict[str, str], stopped: Callable[[],
             await proc.wait()
     said = stderr.decode(errors="replace").strip()
     if proc.returncode != 0 and warn:
-        log.warning("%s exited %s: %s", " ".join(command[:3]), proc.returncode, said[-500:])
+        _warn(command, proc.returncode, said)
     return proc.returncode, stdout.decode(errors="replace"), said
+
+
+def _warn(command: list[str], code: int, said: str) -> None:
+    log.warning("%s exited %s: %s", " ".join(command[:3]), code, said[-500:])
 
 
 def _events(stdout: str) -> list[dict]:
@@ -108,9 +112,10 @@ def _events(stdout: str) -> list[dict]:
 
 _UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
 _ENDED = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
-# The reason `hl quota` is refused for while the platform experiment is open: quota is granted
-# at the start, so there is none to read and nothing failed.
-_NO_QUOTA_YET = "quota_not_granted"
+# What `hl quota` says on stderr, before the platform's message, when it is refused with the
+# reason quota_not_granted while the platform experiment is open: quota is granted at the start,
+# so there is none to read and nothing failed.
+_NO_QUOTA_YET = "hl: quota: quota_not_granted: "
 
 
 def _machine(job: dict) -> str:
@@ -144,10 +149,11 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     not_read = []
 
     async def read(what: str, *command: str) -> list[dict]:
-        code, stdout, said = await _run_hl([hl, *command], env, lambda: False)
+        code, stdout, said = await _run_hl([hl, *command], env, lambda: False, warn=False)
         if code == 0:
             return _events(stdout)
-        if _NO_QUOTA_YET not in said:
+        if not said.startswith(_NO_QUOTA_YET):
+            _warn([hl, *command], code, said)
             not_read.append({"kind": "not_read", "value": f"{what}: `{' '.join(['hl', *command])}` reads it"})
         return []
 

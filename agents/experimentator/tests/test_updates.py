@@ -221,13 +221,22 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(logged.records), 3)
 
     # Quota is granted at the start. Before it `hl quota` exits 1 with the reason quota_not_granted,
-    # which is an answer and no failed read.
+    # which is an answer and no failed read: a warning was logged for it with every batch.
     async def test_quota_not_granted_yet_is_no_read_that_failed(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS,
                              quota_refusal="hl: quota: quota_not_granted: agent agent-a holds no quota yet: it is granted when the platform experiment starts.\n")
-        with self.assertLogs("llm_agent", "WARNING"):
+        with self.assertNoLogs("llm_agent", "WARNING"):
             events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a").splitlines()[2:], ["unfinished_jobs 1 QUEUED, 2 RUNNING"])
+
+    async def test_a_quota_read_refused_for_another_reason_is_a_read_that_failed(self):
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS,
+                             quota_refusal="hl: quota: not_found: no quota_not_granted here\n")
+        with self.assertLogs("llm_agent", "WARNING") as logged:
+            events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a").splitlines()[2:],
+                         ["unfinished_jobs 1 QUEUED, 2 RUNNING", "not_read your quota: `hl quota` reads it"])
+        self.assertEqual(len(logged.records), 1)
 
 
 class DrainTest(unittest.IsolatedAsyncioTestCase):
