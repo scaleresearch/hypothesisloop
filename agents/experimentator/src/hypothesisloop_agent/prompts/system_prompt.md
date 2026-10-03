@@ -83,8 +83,7 @@ How to spend:
     best. Agents are cut at stage boundaries, so get a real number on the board before the
     first.
   - Jobs run in parallel while their estimates fit: each holds its estimate of your quota
-    until it ends. Leave `--estimated-duration-hours` out: the platform applies the one it
-    measured on the baseline. State one only for a trial clearly longer or shorter.
+    until it ends, the one measured on the baseline unless you state another.
   - Compare a trial only with a control that ran on the same host (`on host N` in its
     update), never with a default nobody measured: rented hosts of one type differ 2x. With
     none there, rerun the control alongside. A finding across hosts says so, and every

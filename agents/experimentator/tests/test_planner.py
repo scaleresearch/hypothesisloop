@@ -121,7 +121,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 4_200)
+        self.assertLess(len(prompt.encode()), 4_150)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -171,7 +171,7 @@ class BaselinePromptTest(unittest.TestCase):
         # Told that the file states none, one committed `estimated_duration_hours: 0.06`, and
         # every researcher's job carried it in place of the measured one: no submit refuses it.
         self.assertIn("Write no estimate into the file, or every researcher's job carries it", flat)
-        self.assertIn("the `--env` that vary it, and no estimate: theirs is measured on your job", flat)
+        self.assertIn("(the job.yaml submitted unedited and the `--env` that vary it)", flat)
 
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
         flat = render(baseline_agent())[1]

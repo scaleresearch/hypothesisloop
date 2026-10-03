@@ -33,14 +33,16 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 7_900)
+            self.assertLess(len(prompt.encode()), 7_790)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
 
+    # A submit answers with the estimate it applied, so the briefing names no flag for it.
     def test_a_trial_leaves_its_estimate_to_the_one_measured_on_the_baseline(self):
-        self.assertIn("Leave `--estimated-duration-hours` out: the platform applies the one it measured on the baseline. "
-                      "State one only for a trial clearly longer or shorter.", " ".join(self.render("generalist").split()))
+        prompt = " ".join(self.render("generalist").split())
+        self.assertIn("each holds its estimate of your quota until it ends, the one measured on the baseline unless you state another.", prompt)
+        self.assertNotIn("--estimated-duration-hours", prompt)
 
     # One config differed up to 2.3x between rented hosts, and researchers who compared across
     # them found fp16 slower than fp32.

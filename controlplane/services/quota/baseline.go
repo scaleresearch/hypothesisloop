@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -20,8 +21,6 @@ type Baseline struct {
 	Finding bool
 	// Reported is the last value the job reported for each metric key.
 	Reported map[string]float64
-	// AcceleratorHours is what the job cost.
-	AcceleratorHours float64
 	// ObservedHours is how long the job ran, as it was billed. A job too short to be observed
 	// alive has none.
 	ObservedHours float64
@@ -68,7 +67,7 @@ func (s *PlatformExperimentsService) readBaseline(ctx context.Context, pe *domai
 		return nil, err
 	}
 	if cost != nil {
-		out.AcceleratorHours, out.ObservedHours = cost.AcceleratorHours, cost.ObservedHours
+		out.ObservedHours = cost.ObservedHours
 	}
 	return out, nil
 }
@@ -115,8 +114,25 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 		sort.Strings(missing)
 		return refusedBaseline("baseline_missing_metric", "baseline job %s reported no %s: every metric of the platform experiment must be one the harness really reports", baseline.Job.ID, strings.Join(missing, ", "))
 	}
-	if floor := baseline.AcceleratorHours * float64(pe.MaxAgents); pe.BudgetAcceleratorHours < floor {
-		return refusedBaseline("budget_below_baseline", "the baseline cost %.3f accelerator-hours, so %d researchers each repeating it once need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", baseline.AcceleratorHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
+	return nil
+}
+
+// budgetCoversTrials refuses a budget that cannot hold one trial for each researcher. A trial is
+// the baseline's job submitted again with no estimate stated, sized as the submit sizes it, so
+// the floor is what the first job of each researcher will hold. A baseline too short to be
+// observed leaves no estimate and no floor.
+func budgetCoversTrials(pe *domain.PlatformExperiment, baseline *domain.Experiment) error {
+	trial := *baseline
+	trial.EstimatedDurationHours = 0
+	if !trial.TakeEstimate(pe) {
+		return nil
+	}
+	held, err := trial.EstimateHeld()
+	if err != nil {
+		return fmt.Errorf("platform_experiments.Update: size a trial of the baseline: %w", err)
+	}
+	if floor := held * float64(pe.MaxAgents); pe.BudgetAcceleratorHours < floor {
+		return refusedBaseline("budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), so %d researchers each running one need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", held, trial.EstimatedDurationHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
 	}
 	return nil
 }

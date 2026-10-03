@@ -248,6 +248,17 @@ func (e *Experiment) RetriesUsed() int {
 	return e.AttemptCount - e.InfraRequeueCount
 }
 
+// TakeEstimate gives a job that states no estimated_duration_hours the one its platform
+// experiment measured on its baseline job, and reports whether the job has one now. A stated one
+// is never replaced. With EstimateHeld it is the one answer to what a job holds: the submit sizes
+// the job with them, and a baseline's declaration the trial every researcher submits.
+func (e *Experiment) TakeEstimate(pe *PlatformExperiment) bool {
+	if e.EstimatedDurationHours == 0 {
+		e.EstimatedDurationHours = pe.JobEstimatedDurationHours
+	}
+	return e.EstimatedDurationHours != 0
+}
+
 // EstimateHeld is the accelerator-hours a job holds of its agent's quota until it ends: the rate
 // of its type times its units times its estimated hours. The submit, a flavor substitution and
 // the stored row all take the figure from here, so a refusal states the hold the job would have.

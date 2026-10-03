@@ -33,9 +33,11 @@ func openExperiment() *domain.PlatformExperiment {
 }
 
 func measuredBaseline() *Baseline {
+	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
 	return &Baseline{
-		Job:       &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted, CodeRef: "git://seed@abc"},
-		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, AcceleratorHours: 0.2, ObservedHours: 0.2,
+		Job: &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Status: domain.StatusCompleted, CodeRef: "git://seed@abc",
+			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5},
+		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
 	}
 }
 
@@ -108,7 +110,9 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		"a brief without the commit":      {map[string]any{"description": "BASELINE measured: job-1", "baseline_job_id": "job-1"}, nil, "brief_without_baseline"},
 		"a metric the job never reported": {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
 		"a gate the baseline fails":       {declaration, func(b *Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
-		"a budget below one run apiece":   {declaration, func(_ *Baseline, pe *domain.PlatformExperiment) { pe.BudgetAcceleratorHours = 0.3 }, "budget_below_baseline"},
+		// The baseline cost 0.4 and a trial holds 0.6, its estimate: a budget of 1 covered the
+		// cost twice and neither researcher's first job.
+		"a budget below one trial apiece": {declaration, func(_ *Baseline, pe *domain.PlatformExperiment) { pe.BudgetAcceleratorHours = 1 }, "budget_below_baseline"},
 	} {
 		pe, baseline := openExperiment(), measuredBaseline()
 		if c.change != nil {

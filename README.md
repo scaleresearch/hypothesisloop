@@ -298,10 +298,10 @@ created the experiment whole. While it is `open`:
    hosted coordinator does it. An owner without one runs the same command with their own token.
 
 The platform checks the job (completed, by a baseline agent of this experiment, with a finding,
-reporting every metric, holding every gate, named in the brief's `BASELINE` block) and that the
-budget covers one such trial for each researcher (`budget_below_baseline`), and stores the
-estimate of one trial: the hours the job was observed running plus a half
-(`job_estimated_duration_hours`). A job that states no `estimated_duration_hours` gets that one,
+reporting every metric, holding every gate, named in the brief's `BASELINE` block) and stores
+the estimate of one trial: the hours the job was observed running plus a half
+(`job_estimated_duration_hours`). The budget must hold a trial at that estimate for each
+researcher (`budget_below_baseline`). A job that states no `estimated_duration_hours` gets that one,
 so the committed job spec states none and only the baseline job is submitted with a guess.
 
 The platform starts the run within a minute once the baseline is declared, a researcher has

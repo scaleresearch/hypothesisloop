@@ -763,7 +763,8 @@ a minute of a valid one and never without. It reads JOB itself and refuses with 
 of role baseline here), baseline_not_completed, baseline_without_finding (its summary is not
 filed), brief_without_baseline, baseline_missing_metric (a declared metric JOB never reported),
 baseline_breaks_constraint (JOB's value breaks a gate), budget_below_baseline (the budget does
-not cover JOB's cost once per researcher). The last two are the owner's to change.
+not hold one trial per researcher: JOB again at the estimate measured on it). The last two are
+the owner's to change.
 
 FIELDS.yaml, for the rest, is a YAML mapping of the fields that change, such as
 budget_accelerator_hours, max_agents, duration_hours, metrics, report_interval_seconds. While the

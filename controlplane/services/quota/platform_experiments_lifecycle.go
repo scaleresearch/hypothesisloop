@@ -270,6 +270,9 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 			return nil, err
 		}
 		patched.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
+		if err := budgetCoversTrials(&patched, baseline.Job); err != nil {
+			return nil, err
+		}
 	}
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {

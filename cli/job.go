@@ -40,12 +40,13 @@ func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis, env, estimate and
 tier, with nothing to edit and nothing to commit. Prints the accepted job's id, status,
-code_ref, branch, capacity_tier and estimated_cost_acch; hl job status ID has the rest.
+code_ref, branch, capacity_tier and its estimate as applied: estimated_duration_hours, and
+estimated_cost_acch, what those hours hold of your quota; hl job status ID has the rest.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
 was billed (hl job cost ID). A job that states no estimate, in FILE or with
 --estimated-duration-hours, gets the one the platform measured on its platform experiment's
 baseline job when it was declared: what that job ran plus a half, job_estimated_duration_hours
-of the experiment. The baseline job itself has none measured and states one. hl job status ID shows the estimate applied. A submit refused for quota fits once a job of
+of the experiment. The baseline job itself has none measured and states one. A submit refused for quota fits once a job of
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
@@ -160,13 +161,14 @@ $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, std
 	body["metadata"] = metadata
 	// The reply repeats the submitted spec; only what the platform decided is printed.
 	var out struct {
-		ID            string  `json:"id"`
-		Status        string  `json:"status,omitempty"`
-		CodeRef       string  `json:"code_ref,omitempty"`
-		Branch        string  `json:"branch,omitempty"`
-		CapacityTier  string  `json:"capacity_tier,omitempty"`
-		EstimatedCost float64 `json:"estimated_cost_acch,omitempty"`
-		Reason        string  `json:"not_admitted_reason,omitempty"`
+		ID             string  `json:"id"`
+		Status         string  `json:"status,omitempty"`
+		CodeRef        string  `json:"code_ref,omitempty"`
+		Branch         string  `json:"branch,omitempty"`
+		CapacityTier   string  `json:"capacity_tier,omitempty"`
+		EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
+		EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
+		Reason         string  `json:"not_admitted_reason,omitempty"`
 	}
 	if err := c.Do("POST", "/experiments", body, &out); err != nil {
 		return fail(stderr, err)

@@ -42,8 +42,7 @@ and the experiment is closed if not running by its `baseline_due_at`.
      `hl job logs ID`: fix it, commit and submit again, as often as you know a fix.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took and what it cost (`hl job cost`), and how a
-     researcher runs a trial (the job.yaml submitted unedited, the `--env` that vary it, and
-     no estimate: theirs is measured on your job).
+     researcher runs a trial (the job.yaml submitted unedited and the `--env` that vary it).
   5. `hl platform-experiments agents finish --reason "baseline measured by job ID"`.
 
 You finish at 5, or once you can say why no baseline is possible: one failure came back three

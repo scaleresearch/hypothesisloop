@@ -253,17 +253,12 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	}
 
-	// The estimate is the one the submit states, and nothing replaces a stated one. A submit that
-	// states none takes what the platform measured on the experiment's baseline job, and with
-	// neither there is nothing to hold of the agent's quota.
-	if exp.EstimatedDurationHours == 0 {
-		if pe.JobEstimatedDurationHours == 0 {
-			return &AdmissionError{
-				Reason:  ReasonEstimateRequired,
-				Message: fmt.Sprintf("the job states no estimated_duration_hours and platform experiment %s has no measured one (its job_estimated_duration_hours, read from its baseline job): state the hours it is expected to run with hl job submit --estimated-duration-hours H", pe.ID),
-			}
+	// With no estimate stated and none measured there is nothing to hold of the agent's quota.
+	if !exp.TakeEstimate(pe) {
+		return &AdmissionError{
+			Reason:  ReasonEstimateRequired,
+			Message: fmt.Sprintf("the job states no estimated_duration_hours and platform experiment %s has no measured one (its job_estimated_duration_hours, read from its baseline job): state the hours it is expected to run with hl job submit --estimated-duration-hours H", pe.ID),
 		}
-		exp.EstimatedDurationHours = pe.JobEstimatedDurationHours
 	}
 
 	// The baseline is the objective's own measurement and no claim: its job tests no hypothesis
