@@ -284,7 +284,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         }
       />
 
-      <PhaseStrip pe={pe} jobs={jobRows} />
+      <PhaseStrip pe={pe} jobs={jobRows} readOnly={readOnly} />
       <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       <Baseline pe={pe} />
 

@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api'
@@ -14,6 +15,9 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams('project=prj_1'),
 }))
 vi.mock('@/lib/api', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/components/platform-experiment-form', () => ({
+  PlatformExperimentDialog: ({ initial }: { initial: Draft }) => <div role="dialog">Edit experiment {initial.name}, budget {initial.budget_accelerator_hours}</div>,
+}))
 
 const at = '2026-10-05T12:30:00Z'
 
@@ -98,6 +102,60 @@ describe('the phase strip', () => {
   it('says until when the researchers work once the run\'s clock started', () => {
     show(experiment('running', 'running', { started_at: at, ends_at: at }))
     expect(sentence()).toBe(`The researchers are at work until ${formatDate(at)}.`)
+  })
+})
+
+// What an experiment waited for was a sentence in the agents card, the same whether the person
+// reading it had to act or only to wait.
+describe('whose move it is', () => {
+  const waits = (reason: string, actor: StatusReason['actor'], more: Partial<Draft> = {}) =>
+    experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { actor, message: `It waits: ${reason}.` })
+  const strip = () => within(screen.getByRole('region', { name: 'Where this experiment stands' }))
+
+  it('says so prominently when it is the owner\'s, in the API\'s words, with the way to add a researcher', () => {
+    show(waits('no_researchers', 'owner'))
+    expect(strip().getByText('Your move')).toBeTruthy()
+    expect(sentence()).toBe('It waits: no_researchers.')
+    expect(strip().getByRole('link', { name: 'Add a researcher' }).getAttribute('href')).toBe('#agents')
+    expect(strip().queryByText(/Nothing is needed from you/)).toBeNull()
+  })
+
+  it('offers the budget to edit when the budget is what an open experiment waits for', async () => {
+    show(waits('budget_spent', 'owner', { budget_accelerator_hours: 2 }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(strip().getByRole('button', { name: 'Edit budget' }))
+    expect(screen.getByRole('dialog').textContent).toBe('Edit experiment Cosine or constant, budget 2')
+  })
+
+  it('points at Settings when GitHub is what it waits for', () => {
+    show(waits('repository_authorization_required', 'owner'))
+    expect(strip().getByRole('link', { name: 'Reconnect GitHub in Settings' }).getAttribute('href')).toBe('/settings?project=prj_1#github')
+  })
+
+  it('says the owner\'s move without a control where the page has none for it', () => {
+    show(experiment('draft', 'proposed', { proposal_expires_at: at }, { actor: 'owner' }))
+    expect(strip().getByText('Your move')).toBeTruthy()
+    expect(strip().queryByRole('button')).toBeNull()
+    expect(strip().queryByRole('link')).toBeNull()
+  })
+
+  it.each([
+    ['coordinator', 'Nothing is needed from you: its coordinator acts next.'],
+    ['platform', 'Nothing is needed from you: the platform acts next.'],
+  ] as const)('says plainly that nothing is needed when the move is the %s\'s', (actor, plainly) => {
+    show(waits('baseline_required', actor))
+    expect(strip().getByText(plainly)).toBeTruthy()
+    expect(strip().queryByText('Your move')).toBeNull()
+  })
+
+  it('tells a reader of a shared experiment neither, and a closed one needs nobody', () => {
+    const shared = render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={waits('no_researchers', 'owner')} readOnly /></SWRConfig>)
+    expect(sentence()).toBe('It waits: no_researchers.')
+    expect(strip().queryByText('Your move')).toBeNull()
+    expect(strip().queryByRole('link')).toBeNull()
+    shared.unmount()
+    show(experiment('closed', 'end_time_reached'))
+    expect(strip().queryByText(/Your move|Nothing is needed/)).toBeNull()
   })
 })
 

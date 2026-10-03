@@ -93,7 +93,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         title={draft.name}
         description={<span className="text-xs text-subtle">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</span>}
       />
-      <PhaseStrip pe={draft} />
+      <PhaseStrip pe={draft} readOnly={readOnly} />
       <Card>
         <CardHeader>What you asked</CardHeader>
         <CardContent className="grid gap-2">
