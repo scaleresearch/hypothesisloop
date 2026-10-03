@@ -75,6 +75,26 @@ func TestTheHelpOfJobSummarySaysItCannotBeReplaced(t *testing.T) {
 	}
 }
 
+// The gate was said as "your queued jobs wait", which it stopped doing: it holds the jobs
+// submitted after an unsummarised job ended. Every help of hl that states it says that.
+func TestTheSummaryGateIsStatedAsHoldingWhatWasSubmittedAfterTheJobEnded(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"job", "summary", "--help"}, "a job you submit after it ended is accepted and held\n(summary_gate) until it has one; a job already queued when it ended is not held."},
+		{[]string{"job", "list", "--help"}, "the set that holds back the jobs submitted after they ended"},
+		{[]string{"job", "status", "--help"}, "summary_gate for a summary on each of your jobs that was\nCOMPLETED before this one was submitted"},
+		{[]string{"watch", "--help"}, "at once when it was submitted\nafter a COMPLETED job of yours ended that has no summary (summary_gate)"},
+	} {
+		var help bytes.Buffer
+		run(tc.args, &help, &help)
+		if !strings.Contains(help.String(), tc.want) || strings.Contains(help.String(), "your queued jobs wait") {
+			t.Errorf("hl %s: want %q in\n%s", strings.Join(tc.args, " "), tc.want, help.String())
+		}
+	}
+}
+
 // A job a submit created is QUEUED in its answer. Any other status is the job an identical submit
 // created before: hl says nothing was submitted, and fails when that job has ended, since no
 // result will arrive for the agent to wait on.

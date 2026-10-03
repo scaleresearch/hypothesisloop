@@ -370,7 +370,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
-		Description: "Required after every COMPLETED job, before your next submission. Body: {\"summary\": \"...\"}. " +
+		Description: "Owed for every COMPLETED job: a job its agent submits after it ended is accepted and held (not_admitted_reason summary_gate) until it has one, and a job already queued when it ended is not held. Body: {\"summary\": \"...\"}. " +
+			"Filed once: 409 summary_exists for a job that has one, which is not replaced. " +
 			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
 			"The job of an agent of role baseline tests no hypothesis: its finding is kept on the objective and the answer names neither. " +
 			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",

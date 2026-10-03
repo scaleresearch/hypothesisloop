@@ -428,7 +428,7 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
-	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds your queued jobs back")
+	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds back the jobs submitted after they ended")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
 	offset := fs.Int("offset", 0, "jobs to skip")
 	if err := fs.Parse(args); err != nil {
@@ -492,8 +492,9 @@ Two jobs of one spec on different machines are not the same measurement.
 A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
 in no standing: not_rankable_reason names the constraint it broke or did not report.
 While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
-the scheduler's first look at it, summary_gate for a summary on each of your COMPLETED jobs (hl
-job list --needs-summary), capacity_unavailable for room on a cluster. not_admitted_message is
+the scheduler's first look at it, summary_gate for a summary on each of your jobs that was
+COMPLETED before this one was submitted (hl job list --needs-summary), capacity_unavailable for
+room on a cluster. not_admitted_message is
 its sentence: for capacity_unavailable the cluster, what it is short of and how many jobs hold
 that, of your platform experiment and of others.`, stderr)
 	ids, err := parseOperands(fs, args, "id", "experiment")
@@ -590,7 +591,8 @@ Files the write-up of a finished job: what changed, what the metric did, what it
 the job's finding on its hypothesis, shown there and announced as finding.new, so it needs no
 comment that repeats it. It is filed once and cannot be replaced (409 summary_exists): others
 read it the moment it is announced, so a correction is a comment on the hypothesis.
-While a COMPLETED job of yours has none, your queued jobs wait.`, stderr)
+While a COMPLETED job of yours has none, a job you submit after it ended is accepted and held
+(summary_gate) until it has one; a job already queued when it ended is not held.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")

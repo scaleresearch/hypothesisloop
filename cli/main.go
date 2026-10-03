@@ -1209,8 +1209,8 @@ or --all, the agent's own resources, resuming from where its last watch stopped.
 occurred_at is when the change was made, in UTC, the same on an event that happens while you
 watch and on one replayed from before the watch. A change from before the platform kept the
 time is replayed without it.
-A job that waits is told as experiment.blocked and as job.held: at once when a summary you owe
-holds it (summary_gate), and for any other reason once, when it has waited longer than its
+A job that waits is told as experiment.blocked and as job.held: at once when it was submitted
+after a COMPLETED job of yours ended that has no summary (summary_gate), and for any other reason once, when it has waited longer than its
 estimate. value is the code of what it waits for (not_admitted_reason), detail the sentence
 (not_admitted_message).`, stderr)
 	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
