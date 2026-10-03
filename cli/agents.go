@@ -65,7 +65,7 @@ command lines and shell history; write it to an env file the container reads.`, 
 	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
 	hosted := fs.Bool("hosted", false, "the platform runs the agent")
 	flavor := fs.String("flavor", "", "the specialization the agent runs")
-	hyperparameters := fs.String("hyperparameters", "", "a JSON object of knobs the agent reads back")
+	hyperparameters := fs.String("hyperparameters", "", "the direction you give the agent, a JSON object of any keys: the approach it explores")
 	model := fs.String("model", "", "the model the agent runs on; omitted, the platform's default")
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")

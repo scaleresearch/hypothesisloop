@@ -881,8 +881,9 @@ is no YAML the line and what is wrong there, which is all the checking the file 
 the image what a job submit would refuse it for (unknown_job_image, no_cluster_for_image), as
 for a cpu, memory or storage that is no quantity (invalid_resources). A
 refused proposal changes nothing, so fix the file and run propose again. One that passes is
-stored at once, replaces the one before, releases your machine and is what the person is asked
-to accept: send only the finished proposal, never one written to try the checks.`, stderr)
+stored at once, replaces the one before and is what the person is asked to accept: send only
+the finished proposal, never one written to try the checks. Your machine is kept for some
+minutes after it, and a revision the person asks for in that time arrives as your next update.`, stderr)
 	pe := experimentFlag(fs)
 	operands, err := parseArgs(fs, args)
 	if err != nil {
