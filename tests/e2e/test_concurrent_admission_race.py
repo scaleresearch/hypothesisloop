@@ -56,7 +56,7 @@ def test_concurrent_accelerator_requests_never_exceed_node_capacity(api, run_id,
     pe_id = api.create_platform_experiment(f"concurrent-race-{run_id}", 50.0, len(agents))
     # An autonomous agent defaults to the burst_only tier; this scenario submits tier="guaranteed"
     # jobs and needs the reserved quota that tier draws from, so signup explicitly overrides to
-    # quota_tier="guaranteed" (see test_max_resource_sentinel.py for the same override).
+    # quota_tier="guaranteed" (see test_stated_resources.py for the same override).
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")
     api.declare_baseline_and_wait_running(pe_id)

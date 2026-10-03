@@ -91,7 +91,8 @@ silently improvise.
    **That repository is a separate repo, and no live mirror of this one** — after editing any
    of those files here, push them to the repository's default branch too, and diff-check before
    spawning agents. `.hypothesisloop/job.yaml` is the one job spec agents submit: it states
-   `storage` as a quantity, since a submit without one is refused with 422 `storage_required`.
+   `cpu`, `memory` and `storage` as quantities, since a submit without one is refused with 422
+   `cpu_required`, `memory_required` or `storage_required`.
    `.hypothesisloop/experiment.yaml` states the name, the description and the metrics step 2
    creates the experiment with. `hl repo init` in a clone adds the files it lacks, `metrics.py`
    (the `post_metric` a Python job reports with) and a `.gitignore` among them, and overwrites

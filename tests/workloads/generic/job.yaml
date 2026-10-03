@@ -36,15 +36,14 @@ job:
   # The e2e harness replaces this with the local registry's address (tests/support/api.py).
   image: localhost/hypothesisloop-workload:latest
 
-  # Sized for the local single-node dev cluster (podman VM, 8GiB total) — a real cluster would
-  # leave these unset for operator-set defaults. cpu is kept well above steady-state usage
-  # because a too-tight limit starves the container during its startup handshake (a burst of
-  # forks/execs), failing it outright rather than just slowing it down — see
-  # node-agent-daemonset.yaml's resources comment for the full mechanism.
+  # Sized for the local single-node dev cluster (podman VM, 8GiB total). cpu is kept well above
+  # steady-state usage because a too-tight limit starves the container during its startup
+  # handshake (a burst of forks/execs), failing it outright rather than just slowing it down —
+  # see node-agent-daemonset.yaml's resources comment for the full mechanism.
+  # cpu, memory and storage are always stated quantities: a submit that leaves one out, or asks
+  # for "max", is refused with 422 cpu_required, memory_required or storage_required.
   cpu: "250m"
   memory: "128Mi"
-  # storage is always a stated quantity: a submit that leaves it out, or asks for "max", is
-  # refused with 422 storage_required.
   storage: "512Mi"
   max_retries: 3
 

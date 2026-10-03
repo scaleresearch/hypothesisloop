@@ -51,7 +51,8 @@ on idle capacity and can be evicted for a guaranteed job; it draws on the same q
 no extra hours (hl quota).
 A submit is refused with a reason: unknown_job_image for an image that is neither, as below;
 no_cluster_for_image when no cluster could run the job with its image, or with none;
-storage_required for a job that leaves job.storage out or states it as max;
+cpu_required, memory_required or storage_required for a job that leaves job.cpu, job.memory
+or job.storage out;
 exceeds_cluster_capacity for one that asks for more than every cluster that runs it has when
 idle, with what it asks for and what each cluster has;
 experiment_not_started before the platform starts the run, when only a baseline agent's job is
@@ -82,16 +83,18 @@ Minimal shape:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
     image: python                 # a job_image name from 'hl capacity', or a full address, host first
-    accelerator_type: ...         # a job on CPU states its cores in place of these two: cpu: 4
+    accelerator_type: ...         # a job on CPU leaves these two out and holds its cpu, whole cores
     accelerator_count: 1
+    cpu: 2                        # the cores one node of the job uses
+    memory: 8Gi                   # the memory one node of the job uses
     storage: 4Gi                  # the scratch space one node of the job writes
     ...
 
-Only hypothesis_id, theory and, in job, an image, a command, storage and accelerator_type with
-accelerator_count, or cpu, are needed, and estimated_duration_hours where the platform measured
-none. Any other image is refused. A job adds a package with uv pip install or pip install.
-storage is always stated, as a quantity. cpu and memory left out are the job's share of the
-node; max_retries left out is 0.
+Only hypothesis_id, theory and, in job, an image, a command, cpu, memory, storage and, for a
+job on an accelerator, accelerator_type with accelerator_count are needed, and
+estimated_duration_hours where the platform measured none. Any other image is refused. A job adds a package with uv pip install or pip install.
+cpu, memory and storage are always stated, as quantities, in each group of a job with groups:
+a job holds what it states. max_retries left out is 0.
 
 The full DSL reference is experiment-submission.yaml: in an agent's image under
 $WORKLOAD_SAMPLES, in the repository under controlplane/settings/examples.`, stderr)

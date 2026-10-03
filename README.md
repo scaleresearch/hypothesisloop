@@ -374,11 +374,13 @@ metadata:
 ```
 
 Every job holds units of a type the platform prices (`GET /resource-catalog/capacity`,
-`hl capacity`): an accelerator, or CPU cores. A job that needs no accelerator states only its cores:
+`hl capacity`): an accelerator, or CPU cores. A job that needs no accelerator names none and
+holds its cores:
 
 ```yaml
 job:
   cpu: 4        # 4 cores, no accelerator_type and no accelerator_count
+  memory: 8Gi
   storage: 4Gi
 ```
 
@@ -386,16 +388,18 @@ Submission reads that as 4 units of the one built-in type `hypothesisloop.dev/cp
 the type with `accelerator_count: 4` means the same. Cores are whole: `500m` or `1.5` is refused
 with 400, and so is a job with neither an accelerator nor cores.
 
-A job states little else. `cpu` and `memory` left out are the job's share of the node it
-lands on (`"max"`), one part per accelerator or per core, and `max_retries` left out is 0.
-`storage` is always stated as a quantity (`storage: 4Gi`), the scratch space one node of the job
-writes: left out, or `"max"`, the submit is refused with 422 `storage_required`. A job that asks
+Every job states `cpu`, `memory` and `storage` as quantities (`cpu: 2`, `memory: 8Gi`,
+`storage: 4Gi`): the cores and the memory one node of the job uses and the scratch space it
+writes, in each group of a job with groups. One left out, or `"max"`, is refused with 422
+`cpu_required`, `memory_required` or `storage_required`. A job holds what it states and nothing
+is sized from the node it lands on. `max_retries` left out is 0. A job that asks
 for more than every cluster that runs it has when idle is refused with 422
 `exceeds_cluster_capacity`, which states what it asks for and what each cluster has. The
 least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
 once the experiment's baseline is declared, 422 `estimate_required` for the baseline job
 itself), and in `job` a
-`command`, an `image`, `storage` and `accelerator_type` with `accelerator_count`, or `cpu`. `code_ref` is the
+`command`, an `image`, `cpu`, `memory`, `storage` and, on an accelerator, `accelerator_type` with
+`accelerator_count`. `code_ref` is the
 experiment's repository at a commit and `branch` the branch it is on, both filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap
 and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
 hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels

@@ -131,20 +131,9 @@ def test_a_job_on_cores_states_whole_cores_and_one_count_and_no_accelerator(api,
 
 
 
-def test_unset_required_resource_is_rejected_not_defaulted(api, mixed_pe, deadline):
+def test_unset_required_resource_is_rejected_not_defaulted(api, mixed_pe):
     pe_id, agent = mixed_pe
-    code, job_id = api.submit_job_expect(
-        pe_id, agent, hours=PROBE_JOB_HOURS,
-        job_overrides={"cpu": None, "accelerator_count": 1, "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
-    )
-    if code >= 400:
-        return  # rejected at submission time -- also correct
-    final = eventually(
-        f"{job_id} to settle",
-        lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("RUNNING", "REJECTED", "FAILED"),
-        deadline=deadline,
-    )
-    assert final["status"] == "REJECTED", (
-        f"submission with unset cpu request was accepted (HTTP {code}, status={final['status']}) instead of rejected"
-    )
+    body = api.submission_body_for_id(api._job_id(), pe_id, agent, hours=PROBE_JOB_HOURS)
+    del body["job"]["cpu"]
+    r = api.post_experiment_body(body)
+    assert r.status_code == 422 and r.json()["reason"] == "cpu_required", f"a job that states no cpu: {r.status_code} {r.text}"

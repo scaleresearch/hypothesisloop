@@ -5,7 +5,7 @@ victims by tier and progress, so this is the one pass that terminates a running 
 never asked to stop, which is why the scenario also checks that the eviction explains itself.
 
 Admission refuses an explicit request above the per-accelerator share (exceeds_accelerator_share,
-see test_max_resource_sentinel.py), so a job only becomes disbalanced when its node's shape
+see test_stated_resources.py), so a job only becomes disbalanced when its node's shape
 changes after it was admitted. The scenario does exactly that: the node advertises one accelerator
 while the hog is admitted, then all of them, the way a node does whose devices come up late. The
 admitted hog is then above resource_disbalance_tolerance times its share and the pass evicts it.

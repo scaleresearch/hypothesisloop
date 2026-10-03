@@ -11,11 +11,11 @@
 #               ...) that have nothing to do with how the job executes.
 #
 # Most of this file is optional. The least a request states is metadata.hypothesis_id,
-# metadata.theory and metadata.estimated_duration_hours, and in job a command with either
-# accelerator_type and accelerator_count or cpu:
+# metadata.theory and metadata.estimated_duration_hours, and in job an image, a command, cpu,
+# memory and storage, with accelerator_type and accelerator_count for a job on an accelerator:
 #
 #   metadata: {hypothesis_id: ..., theory: "...", estimated_duration_hours: 0.5}
-#   job: {command: ["python", "train.py"], cpu: "4"}
+#   job: {image: python, command: ["python", "train.py"], cpu: "4", memory: "8Gi", storage: "4Gi"}
 #
 # hl job submit fills in the rest of metadata: the agent and the platform experiment from its
 # environment, and code_ref from the git repository it is run in.
@@ -41,11 +41,10 @@ job:
   # $NAME from the caller's environment, so no value is committed or put on a command line.
 
   # --- Resources ---------------------------------------------------------------------
-  # cpu/memory: plain quantity strings, or "max". One left out is "max": the job's share of the
-  # node it lands on, one part per accelerator (or per core for a job on CPU).
-  # storage: the scratch space one node of the job writes, always stated as a quantity. Left
-  # out, or "max", the submit is refused with 422 storage_required.
-  # In a grouped job a group that holds no accelerator states all three.
+  # cpu/memory/storage: the cores and the memory one node of the job uses and the scratch space
+  # it writes, each always stated as a plain quantity string. One left out, or "max", is refused
+  # with 422 cpu_required, memory_required or storage_required. A job holds what it states and
+  # nothing is sized from the node it lands on. In a grouped job every group states all three.
   cpu: "4"
   memory: "16Gi"
   storage: "10Gi"
@@ -57,9 +56,9 @@ job:
   # quota.max_accelerator_count_per_job etc) — exceeding a cap is rejected at admission, before
   # any quota is touched.
   #
-  # A job that needs no accelerator leaves both out and states only its cores, a whole number:
+  # A job that needs no accelerator leaves both out and holds its cores, a whole number:
   # cpu: "4" holds 4 CPU cores (4 units of the type hypothesisloop.dev/cpu=core, 4 core-hours an
-  # hour), and memory left out is its cores' share of the node. It states its storage too.
+  # hour).
   accelerator_count: 1
   # accelerator_type names the hardware the way its own driver publishes it, as a fully-qualified
   # "key=value" — NVIDIA's GPU Feature Discovery writes the node label

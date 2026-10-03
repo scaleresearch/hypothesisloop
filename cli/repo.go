@@ -89,8 +89,9 @@ fails nothing, and so does the estimate line of a job spec that states one.
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
               them ranked
-  job-spec    .hypothesisloop/job.yaml states a job and its storage as a quantity, in each
-              group of a grouped job, with no REPLACE-WITH left and no secret_env
+  job-spec    .hypothesisloop/job.yaml states a job and its cpu, memory and storage as
+              quantities, in each group of a grouped job, with no REPLACE-WITH left and no
+              secret_env
   metrics     whether metrics.py, the Python helper hl repo init supplies, is there, and
               without it the request a job reports a metric with: a repository needs no
               helper to report
@@ -262,24 +263,31 @@ func jobSpecGap(data []byte) string {
 	}
 	groups, _ := file.Job["groups"].([]any)
 	if len(groups) == 0 {
-		return storageGap("job.storage", file.Job["storage"])
+		return quantitiesGap("job", file.Job)
 	}
 	for i, group := range groups {
 		fields, _ := group.(map[string]any)
-		if gap := storageGap(fmt.Sprintf("job.groups[%d].storage", i), fields["storage"]); gap != "" {
+		if gap := quantitiesGap(fmt.Sprintf("job.groups[%d]", i), fields); gap != "" {
 			return gap
 		}
 	}
 	return ""
 }
 
-// storageGap is the submit's rule for storage: stated, and as a quantity.
-func storageGap(field string, storage any) string {
-	switch storage {
-	case nil, "":
-		return "states no " + field + ": state the scratch space one node of the job writes, as in storage: 4Gi"
-	case "max":
-		return "states " + field + " as max: storage is a quantity, as in storage: 4Gi, and never a share of the node"
+// quantitiesGap is the submit's rule for cpu, memory and storage: each stated, and as a quantity.
+func quantitiesGap(owner string, fields map[string]any) string {
+	for _, quantity := range []struct{ name, meaning, example string }{
+		{"cpu", "the cores one node of the job uses", "cpu: 2"},
+		{"memory", "the memory one node of the job uses", "memory: 8Gi"},
+		{"storage", "the scratch space one node of the job writes", "storage: 4Gi"},
+	} {
+		field := owner + "." + quantity.name
+		switch fields[quantity.name] {
+		case nil, "":
+			return "states no " + field + ": state " + quantity.meaning + ", as in " + quantity.example
+		case "max":
+			return "states " + field + " as max: " + quantity.name + " is a quantity, as in " + quantity.example + ", and never a share of the node"
+		}
 	}
 	return ""
 }

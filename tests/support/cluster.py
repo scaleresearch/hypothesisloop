@@ -301,8 +301,7 @@ def _millicores(cpu: str) -> int:
 
 
 def single_eligible_node_cpu_fair_share(accel_type: str) -> tuple[str, int, int] | None:
-    """Ground truth for domain.FairShare's denominator/numerator on a single-node cluster,
-    ported from max-resource-sentinel.sh's inline Python. Returns (node_name,
+    """Ground truth for domain.FairShare's denominator/numerator on a single-node cluster. Returns (node_name,
     installed_accelerators, expected_fair_share_millicores), or None if the live cluster does not
     have EXACTLY one node currently reporting live capacity for `accel_type` -- a second eligible
     node makes "the minimum across eligible nodes" and "this node's own share" diverge, and which
