@@ -844,8 +844,8 @@ type installed struct {
 // type the job accepts. A cluster that scales up may yet hold it. A cluster that reports nothing
 // is away or not whole: it is named and not judged, and with none judged the job waits.
 //
-// The cause is the job's image choice where a cluster that choice rules out holds the job when
-// idle, and its size otherwise. Both say what each cluster judged has.
+// The cause is the job's image where a cluster that runs another holds the job when idle, and its
+// size otherwise. Both say what each cluster judged has.
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	runs, others := byImageChoice(in.registered, exp)
 	if len(runs) == 0 {
@@ -873,12 +873,8 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	var holding []string
 	for _, c := range others {
 		total, reported := in.totals[c.Name]
-		switch {
-		case !reported || (spansNodes && !in.multiNode[c.Name]) || !fitsWhenIdle(total, in.nodeTotals[c.Name], exp):
-		case c.JobImage != "":
+		if reported && (!spansNodes || in.multiNode[c.Name]) && fitsWhenIdle(total, in.nodeTotals[c.Name], exp) {
 			holding = append(holding, c.Name+" runs every job in "+c.JobImage)
-		default:
-			holding = append(holding, c.Name)
 		}
 	}
 	asks := describeFootprint(exp.Footprint())
@@ -886,33 +882,29 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		asks += fmt.Sprintf(" over %d nodes", exp.Job.Nodes())
 	}
 	has := strings.Join(judged, "; ")
-	switch {
-	case len(holding) == 0:
+	if len(holding) == 0 {
 		return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
 			domain.NotAdmittedExceedsClusterCapacity, asks, has)
-	case exp.Job.Image == "":
-		return fmt.Sprintf("%s: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, %s, when idle: %s. A cluster that runs the image a job names has it (%s): set job.image (hl capacity lists the images offered)",
-			domain.NotAdmittedNoClusterForImage, asks, has, strings.Join(holding, ", "))
 	}
-	return fmt.Sprintf("%s: the job names image %s, and no connected cluster that runs it has what the job asks for, %s, when idle: %s. A cluster with one job image has it (%s): leave job.image out to run there",
-		domain.NotAdmittedNoClusterForImage, exp.Job.Image, asks, has, strings.Join(holding, "; "))
+	return fmt.Sprintf("%s: the job names image %s, and no connected cluster that runs it has what the job asks for, %s, when idle: %s. A cluster with one job image has it (%s): %s",
+		domain.NotAdmittedNoClusterForImage, exp.Job.Image, asks, has, strings.Join(holding, "; "), nameThatImage)
 }
 
-// noClusterRunsImageReason is the reason of a job whose image choice no cluster of its org runs,
-// with which choice runs where. "" when the org has no cluster on the other side of the choice
-// either, which is the org's matter and none of the job's.
+// nameThatImage is how a job gets onto a cluster that runs one image: every job names its image.
+const nameThatImage = "state that image as job.image to run there"
+
+// noClusterRunsImageReason is the reason of a job whose image no cluster of its org runs, with
+// which image runs where. "" when the org has no cluster with another image either, which is the
+// org's matter and none of the job's.
 func noClusterRunsImageReason(others []domain.Cluster, exp *domain.Experiment) string {
-	switch {
-	case len(others) == 0:
+	if len(others) == 0 {
 		return ""
-	case exp.Job.Image == "":
-		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)"
 	}
 	serving := make([]string, len(others))
 	for i, c := range others {
 		serving[i] = c.Name + " runs every job in " + c.JobImage
 	}
-	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(serving, "; ") + ": leave job.image out to run there"
+	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(serving, "; ") + ": " + nameThatImage
 }
 
 // describeOffer says what a cluster has installed of what exp asks for, and the most one node of

@@ -59,8 +59,6 @@ func (capExceeded) ConcurrencyCapExceeded() bool { return true }
 func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	exp := holdJob("job", domain.CapacityGuaranteed, h100, 1, "1")
 	exp.RanOnAcceleratorType = h100
-	unnamed := holdJob("job", domain.CapacityGuaranteed, h100, 1, "1")
-	unnamed.Job.Image = ""
 	imageChoice := map[string]domain.Cluster{"rented": {Name: "rented", JobImage: "registry.test/only:1"}, "metal": {Name: "metal"}}
 	short := domain.NewFootprint()
 	short.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, 1<<30)
@@ -86,13 +84,13 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 		domain.NotAdmittedClustersDisabled:        {clustersDisabledReason()},
 		domain.NotAdmittedNoClusterForImage:       {
 			noClusterRunsImageReason([]domain.Cluster{{Name: "rented", JobImage: "registry.test/only:1"}}, exp),
-			installed{registered: imageChoice, totals: map[string]domain.Footprint{"rented": {}, "metal": domain.CapacityFootprint(8, map[string]int64{h100: 1}, 64<<30, 64<<30)}}.neverFitsReason(unnamed),
+			installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}, "rented": domain.CapacityFootprint(8, map[string]int64{h100: 1}, 64<<30, 64<<30)}}.neverFitsReason(exp),
 		},
 		domain.NotAdmittedWaitingForScaleUp:       {waitingForScaleUpReason("cluster-a")},
 		domain.NotAdmittedNoScalableCapacity:      {noScalableCapacityReason()},
 		domain.NotAdmittedConcurrencyCap:          {concurrencyCapReason(), notAdmittedReasonForSubmitError(capExceeded{errors.New("cap")})},
 		domain.NotAdmittedExceedsAcceleratorShare: {shareMisfit("cpu", "9", "2", 1, "cluster-a")},
-		domain.NotAdmittedExceedsClusterCapacity:  {installed{registered: imageChoice, totals: map[string]domain.Footprint{"rented": {}}}.neverFitsReason(unnamed)},
+		domain.NotAdmittedExceedsClusterCapacity:  {installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}}}.neverFitsReason(exp)},
 	}
 	for code, name := range notAdmittedCodes(t) {
 		if len(produced[code]) == 0 {

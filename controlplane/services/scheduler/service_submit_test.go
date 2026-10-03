@@ -623,10 +623,25 @@ func (c installedCapacity) GetMultiNodeCapability(context.Context) (map[string]b
 	return nil, nil
 }
 
-// A job that names no image runs only on a cluster with one job image. Where that cluster has no
-// cores to hold and another has, the job once queued as asking for more than any cluster has
-// installed. It is refused at submit with what keeps it out: its image choice.
-func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
+// The server queued a job that named no image where a cluster with one job image could run it,
+// and only hl refused it. Every job names its image, and the submit is what says so.
+func TestAJobThatNamesNoImageIsRefusedAtSubmit(t *testing.T) {
+	s := &Service{clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	exp := humanIdeaSubmission()
+	exp.Job.Image = ""
+	var refused *AdmissionError
+	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonImageRequired || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+		t.Fatalf("a job with no image: got = %v, want a 422 %s", err, ReasonImageRequired)
+	}
+	if !strings.Contains(refused.Message, "job.image is required") || !strings.Contains(refused.Message, "hl capacity") {
+		t.Errorf("the refusal does not name the field and where its values are listed: %s", refused.Message)
+	}
+}
+
+// A cluster with one job image runs the jobs that name it. Where the cluster that runs a job's
+// image has no cores to hold and one with another image has, the job once queued as asking for
+// more than any cluster has installed. It is refused at submit with what keeps it out: its image.
+func TestAJobItsImageKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 	domain.SetAcceleratorRates(map[string]float64{h100: 1.0, string(domain.CPUType): 1.0})
 	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{h100: 1.0}) })
 	const fixed = "registry.test/platform/job-pytorch:7"
@@ -653,13 +668,14 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 		errors.As(err, &refused)
 		return refused, err
 	}
-	installed := map[string]domain.Footprint{"rented": noCores, "metal": cores(16)}
+	const mine = "registry.test/mine:1"
+	installed := map[string]domain.Footprint{"rented": cores(16), "metal": noCores}
 
-	refused, err := submit(installed, nil, registered, "")
+	refused, err := submit(installed, nil, registered, mine)
 	if refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage {
-		t.Fatalf("no image, and the one cluster with a job image has no cores: got = %v, want %s", err, domain.NotAdmittedNoClusterForImage)
+		t.Fatalf("an image named, and only the cluster with another one has cores: got = %v, want %s", err, domain.NotAdmittedNoClusterForImage)
 	}
-	for _, said := range []string{"names no image", "rented has 0 x ", "has it (metal)", "set job.image"} {
+	for _, said := range []string{"names image " + mine, "metal has 0 x ", "has it (rented runs every job in " + fixed + ")", "state that image as job.image"} {
 		if !strings.Contains(refused.Message, said) {
 			t.Errorf("the refusal does not say %q: %s", said, refused.Message)
 		}
@@ -668,49 +684,46 @@ func TestAJobItsImageChoiceKeepsOffEveryClusterIsRefusedAtSubmit(t *testing.T) {
 		t.Errorf("the refusal names another org's cluster or repeats its reason: %s", refused.Message)
 	}
 
-	// A second cluster with a job image that is away holds nothing open: it once let the job
-	// through to queue as one asking for more than any cluster has.
-	withAway := map[string]domain.Cluster{"away": {Name: "away", OrgID: "org-a", JobImage: fixed}}
+	// A second cluster that runs the job's image and is away holds nothing open: it once let the
+	// job through to queue as one asking for more than any cluster has.
+	withAway := map[string]domain.Cluster{"away": {Name: "away", OrgID: "org-a"}}
 	for name, c := range registered {
 		withAway[name] = c
 	}
-	if refused, err := submit(installed, nil, withAway, ""); refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage || !strings.Contains(refused.Message, "away reports nothing now") {
-		t.Errorf("no image, and a cluster with a job image is away: got = %v, want %s naming it", err, domain.NotAdmittedNoClusterForImage)
+	if refused, err := submit(installed, nil, withAway, mine); refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage || !strings.Contains(refused.Message, "away reports nothing now") {
+		t.Errorf("a cluster that runs the job's image is away: got = %v, want %s naming it", err, domain.NotAdmittedNoClusterForImage)
 	}
 
-	if _, err := submit(installed, nil, registered, "registry.test/mine:1"); !errors.Is(err, errReachedScoring) {
-		t.Errorf("an image named, which the cluster with cores runs: got = %v, want it accepted", err)
-	}
-	if refused, err := submit(map[string]domain.Footprint{"rented": cores(16), "metal": noCores}, nil, registered, "registry.test/mine:1"); refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage || !strings.Contains(refused.Message, "leave job.image out") {
-		t.Errorf("an image named, and only the cluster with another fixed one has cores: got = %v, want %s", err, domain.NotAdmittedNoClusterForImage)
+	if _, err := submit(installed, nil, registered, fixed); !errors.Is(err, errReachedScoring) {
+		t.Errorf("the image of the cluster with cores named: got = %v, want it accepted", err)
 	}
 	for name, c := range map[string]struct {
 		installed map[string]domain.Footprint
 		scales    map[string]bool
 	}{
-		"the cluster with a job image has cores": {map[string]domain.Footprint{"rented": cores(4), "metal": cores(16)}, nil},
-		"it scales up":                           {installed, map[string]bool{"rented": true}},
-		"its installed capacity was not read":    {map[string]domain.Footprint{"metal": cores(16)}, nil},
+		"the cluster that runs it has cores":  {map[string]domain.Footprint{"rented": cores(16), "metal": cores(4)}, nil},
+		"it scales up":                        {installed, map[string]bool{"metal": true}},
+		"its installed capacity was not read": {map[string]domain.Footprint{"rented": cores(16)}, nil},
 	} {
-		if _, err := submit(c.installed, c.scales, registered, ""); !errors.Is(err, errReachedScoring) {
-			t.Errorf("no image, and %s: got = %v, want it accepted and left to the queue", name, err)
+		if _, err := submit(c.installed, c.scales, registered, mine); !errors.Is(err, errReachedScoring) {
+			t.Errorf("an image named, and %s: got = %v, want it accepted and left to the queue", name, err)
 		}
 	}
-	// Where no image choice would help, the job is refused for its size.
+	// Where no image would help, the job is refused for its size.
 	for name, installed := range map[string]map[string]domain.Footprint{
 		"no cluster has cores, whatever the image":  {"rented": noCores, "metal": noCores},
-		"the other cluster's capacity was not read": {"rented": noCores},
+		"the other cluster's capacity was not read": {"metal": noCores},
 	} {
-		if refused, err := submit(installed, nil, registered, ""); refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity {
-			t.Errorf("no image, and %s: got = %v, want %s", name, err, domain.NotAdmittedExceedsClusterCapacity)
+		if refused, err := submit(installed, nil, registered, mine); refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity {
+			t.Errorf("an image named, and %s: got = %v, want %s", name, err, domain.NotAdmittedExceedsClusterCapacity)
 		}
 	}
 
-	onlyMetal := map[string]domain.Cluster{"metal": registered["metal"], "theirs": {Name: "theirs", OrgID: "org-b", JobImage: fixed}}
-	if refused, err := submit(nil, nil, onlyMetal, ""); refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage || !strings.Contains(refused.Message, "set job.image") {
-		t.Errorf("no image, and no cluster of the org with a job image: got = %v, want %s", err, domain.NotAdmittedNoClusterForImage)
+	onlyRented := map[string]domain.Cluster{"rented": registered["rented"], "theirs": registered["theirs"]}
+	if refused, err := submit(nil, nil, onlyRented, mine); refused == nil || refused.Reason != domain.NotAdmittedNoClusterForImage || !strings.Contains(refused.Message, "state that image as job.image") {
+		t.Errorf("an image named, and the org's one cluster runs another: got = %v, want %s", err, domain.NotAdmittedNoClusterForImage)
 	}
-	if _, err := submit(nil, nil, map[string]domain.Cluster{"theirs": registered["theirs"]}, ""); !errors.Is(err, errReachedScoring) {
+	if _, err := submit(nil, nil, map[string]domain.Cluster{"theirs": registered["theirs"]}, mine); !errors.Is(err, errReachedScoring) {
 		t.Errorf("an org without a cluster: got = %v, want the job queued, where it reads no_cluster_for_org", err)
 	}
 }

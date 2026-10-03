@@ -75,11 +75,15 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 		pe.CurrentStage, len(pe.Stages), ends)
 }
 
+// ReasonImageRequired refuses a job that names no image.
+const ReasonImageRequired = "image_required"
+
 // resolveImage writes the address of the image the job names into its spec (domain.ResolveJobImage),
-// so that everything after admission reads one form. A job that names none is left as it is.
+// so that everything after admission reads one form. Every job names its image: a cluster with one
+// image runs the jobs that name it, so no job is placed by what it leaves out.
 func (s *Service) resolveImage(job *domain.JobSpec) error {
 	if job.Image == "" {
-		return nil
+		return &AdmissionError{Reason: ReasonImageRequired, Message: "job.image is required: state the image the job runs in, a job_image of hl capacity or the whole address of another, registry host first"}
 	}
 	address, ok := domain.ResolveJobImage(s.jobImages, job.Image)
 	if !ok {
@@ -89,7 +93,7 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 	return nil
 }
 
-// runsAsStated refuses a job that no wait admits as it is stated, for its image choice or its
+// runsAsStated refuses a job that no wait admits as it is stated, for its image or its
 // size, with the reason the admission loop would give it for as long as it queued
 // (installed.neverFitsReason).
 func (s *Service) runsAsStated(ctx context.Context, exp *domain.Experiment) error {

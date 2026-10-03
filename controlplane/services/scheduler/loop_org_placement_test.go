@@ -685,9 +685,9 @@ func TestTickPreemptsNothingOnAClusterTheJobsOrgTurnedOff(t *testing.T) {
 	}
 }
 
-// A cluster that boots one image of its own runs the jobs that name none or exactly it, and
-// every other cluster runs a job in the image the job names. A job is offered only the clusters
-// that run it, and when none does the reason says which image runs where.
+// A cluster that boots one image of its own runs the jobs that name exactly it, and every other
+// cluster runs a job in the image the job names. A job is offered only the clusters that run it,
+// and when none does the reason says which image runs where.
 func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
 	const platformImage = "registry.test/platform-job:7"
 	registered := map[string]domain.Cluster{
@@ -704,7 +704,6 @@ func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
 		image string
 		want  []string
 	}{
-		"no image goes where one is fixed":            {"", []string{"rented"}},
 		"its own image goes where jobs bring theirs":  {"registry.test/mine:1", []string{"k8s"}},
 		"the fixed image named runs on both clusters": {platformImage, []string{"k8s", "rented"}},
 	} {
@@ -721,25 +720,20 @@ func TestAJobIsOfferedOnlyTheClustersThatRunItsImage(t *testing.T) {
 
 	onlyRented := map[string]domain.Cluster{"rented": registered["rented"]}
 	candidates, ineligible := eligibleClusters(avail(), map[string]bool{}, onlyRented, job("registry.test/mine:1"))
-	want := "no_cluster_for_image: the job names image registry.test/mine:1, and rented runs every job in " + platformImage + ": leave job.image out to run there"
+	want := "no_cluster_for_image: the job names image registry.test/mine:1, and rented runs every job in " + platformImage + ": state that image as job.image to run there"
 	if len(candidates) != 0 || ineligible != want {
 		t.Errorf("an image no cluster runs: offered %v, reason %q\nwant %q", candidates, ineligible, want)
 	}
-	onlyK8s := map[string]domain.Cluster{"k8s": registered["k8s"]}
-	candidates, ineligible = eligibleClusters(avail(), map[string]bool{}, onlyK8s, job(""))
-	if len(candidates) != 0 || ineligible != "no_cluster_for_image: the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)" {
-		t.Errorf("no image and no cluster with one: offered %v, reason %q", candidates, ineligible)
-	}
 	// A cluster the org turned off is no place the reason sends the job to.
-	off := map[string]domain.Cluster{"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage, DisabledOrgs: []string{"org-a"}}, "k8s": registered["k8s"]}
-	if _, ineligible = eligibleClusters(avail(), map[string]bool{}, off, job("")); strings.Contains(ineligible, "rented") {
+	off := map[string]domain.Cluster{"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage, DisabledOrgs: []string{"org-a"}}}
+	if _, ineligible = eligibleClusters(avail(), map[string]bool{}, off, job("registry.test/mine:1")); strings.Contains(ineligible, "rented") {
 		t.Errorf("the reason names a cluster the org turned off: %q", ineligible)
 	}
 }
 
-// A queued job that exceeds what every cluster running its image choice has installed is told
-// its size is the cause only where no other image choice would be served.
-func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
+// A queued job that exceeds what every cluster running its image has installed is told its size
+// is the cause only where no other image would be served.
+func TestAJobHeldByItsImageIsNotToldItAsksForTooMuch(t *testing.T) {
 	const platformImage = "registry.test/platform-job:7"
 	registered := map[string]domain.Cluster{
 		"rented": {Name: "rented", OrgID: "org-a", JobImage: platformImage},
@@ -747,53 +741,53 @@ func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
 	}
 	small := domain.CapacityFootprint(2, nil, 8<<30, 100<<30)
 	large := domain.CapacityFootprint(16, nil, 64<<30, 500<<30)
-	exp := &domain.Experiment{OrgID: "org-a", Job: domain.JobSpec{CPU: "8", Memory: "1Gi", Storage: "1Gi"}}
+	exp := &domain.Experiment{OrgID: "org-a", Job: domain.JobSpec{Image: "registry.test/mine:1", CPU: "8", Memory: "1Gi", Storage: "1Gi"}}
 
 	whenIdle := func(totals map[string]domain.Footprint) installed {
 		return installed{registered: registered, totals: totals}
 	}
 
-	got := whenIdle(map[string]domain.Footprint{"rented": small, "metal": large}).neverFitsReason(exp)
-	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, " +
-		"8 cores, 1 GiB memory, 1 GiB storage, when idle: rented has 2 cores, 8 GiB memory, 100 GiB storage. " +
-		"A cluster that runs the image a job names has it (metal): set job.image (hl capacity lists the images offered)"
+	got := whenIdle(map[string]domain.Footprint{"rented": large, "metal": small}).neverFitsReason(exp)
+	want := "no_cluster_for_image: the job names image registry.test/mine:1, and no connected cluster that runs it has what the job asks for, " +
+		"8 cores, 1 GiB memory, 1 GiB storage, when idle: metal has 2 cores, 8 GiB memory, 100 GiB storage. " +
+		"A cluster with one job image has it (rented runs every job in " + platformImage + "): state that image as job.image to run there"
 	if got != want {
-		t.Errorf("a cluster the image choice rules out has it installed:\n got %q\nwant %q", got, want)
+		t.Errorf("a cluster that runs another image has it installed:\n got %q\nwant %q", got, want)
 	}
 	got = whenIdle(map[string]domain.Footprint{"rented": small, "metal": small}).neverFitsReason(exp)
 	want = "exceeds_cluster_capacity: the job asks for 8 cores, 1 GiB memory, 1 GiB storage, more than any connected cluster that runs it has when idle: " +
-		"rented has 2 cores, 8 GiB memory, 100 GiB storage. Ask for less (hl capacity lists what each cluster has)"
+		"metal has 2 cores, 8 GiB memory, 100 GiB storage. Ask for less (hl capacity lists what each cluster has)"
 	if got != want {
 		t.Errorf("no cluster has it installed:\n got %q\nwant %q", got, want)
 	}
 }
 
-// A job of one chip that named no image was told it asked for more than any cluster has, and its
-// agent shrank it three times: the rented cluster that runs such a job has no chip, a second
-// cluster with one job image was registered and away, and the cluster with the chip runs the
-// image a job names. A cluster that reports nothing is not judged and holds nothing open, so the
-// reason is the image choice, in the queue and at submit alike.
-func TestAClusterThatIsAwayDoesNotHideThatTheImageChoiceKeepsAJobOut(t *testing.T) {
+// A job of one chip was told it asked for more than any cluster has, and its agent shrank it
+// three times: the rented cluster that runs its image has no chip, a second cluster with that
+// image was registered and away, and the cluster with the chip runs another image. A cluster that
+// reports nothing is not judged and holds nothing open, so the reason is the image, in the queue
+// and at submit alike.
+func TestAClusterThatIsAwayDoesNotHideThatTheImageKeepsAJobOut(t *testing.T) {
 	const chip = "tenstorrent.com/chipArch=blackhole"
 	registered := map[string]domain.Cluster{
 		"rented": {Name: "rented", Shared: true, JobImage: "registry.test/platform-job:7"},
-		"box":    {Name: "box", Shared: true, JobImage: "registry.test/tenstorrent:7"},
-		"small":  {Name: "small", Shared: true},
+		"box":    {Name: "box", Shared: true, JobImage: "registry.test/platform-job:7"},
+		"small":  {Name: "small", Shared: true, JobImage: "registry.test/tenstorrent:7"},
 	}
 	totals := map[string]domain.Footprint{
 		"rented": domain.CapacityFootprint(64, map[string]int64{h100: 4}, 256<<30, 1<<40),
 		"small":  domain.CapacityFootprint(32, map[string]int64{chip: 1}, 128<<30, 1<<40),
 	}
 	exp := &domain.Experiment{OrgID: "org-a", AcceleratorType: chip, AcceleratorCount: 1,
-		Job: domain.JobSpec{CPU: "1", Memory: "512Mi", Storage: "512Mi", AcceleratorType: chip, AcceleratorCount: 1}}
+		Job: domain.JobSpec{Image: "registry.test/platform-job:7", CPU: "1", Memory: "512Mi", Storage: "512Mi", AcceleratorType: chip, AcceleratorCount: 1}}
 
 	got := installed{registered: registered, totals: totals}.neverFitsReason(exp)
-	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, " +
+	want := "no_cluster_for_image: the job names image registry.test/platform-job:7, and no connected cluster that runs it has what the job asks for, " +
 		"1 x tenstorrent.com/chiparch=blackhole, 1 core, 512 MiB memory, 512 MiB storage, when idle: " +
 		"box reports nothing now; rented has 0 x tenstorrent.com/chiparch=blackhole, 64 cores, 256 GiB memory, 1 TiB storage. " +
-		"A cluster that runs the image a job names has it (small): set job.image (hl capacity lists the images offered)"
+		"A cluster with one job image has it (small runs every job in registry.test/tenstorrent:7): state that image as job.image to run there"
 	if got != want {
-		t.Errorf("a cluster of the job's image choice is away:\n got %q\nwant %q", got, want)
+		t.Errorf("a cluster of the job's image is away:\n got %q\nwant %q", got, want)
 	}
 
 	named := *exp
@@ -811,7 +805,7 @@ func TestAClusterThatIsAwayDoesNotHideThatTheImageChoiceKeepsAJobOut(t *testing.
 	}
 	// A job over several nodes is judged on the clusters that run one.
 	gang := *exp
-	gang.Job.Image, gang.Job.NumNodes = "registry.test/mine:1", 2
+	gang.Job.Image, gang.Job.NumNodes = "registry.test/tenstorrent:7", 2
 	if got := (installed{registered: registered, totals: totals}).neverFitsReason(&gang); got != "" {
 		t.Errorf("a job over two nodes where no cluster runs one: got %q, want no reason here, the queue names the missing capability", got)
 	}

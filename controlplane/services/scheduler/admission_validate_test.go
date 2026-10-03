@@ -361,13 +361,3 @@ func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
 		t.Fatalf("a job with a secret_env of its own names: got = %v, want accepted", err)
 	}
 }
-
-// Which image a job runs in is the cluster's to say where the cluster has one, so a job that
-// names none is a whole submission. Where it can run is placement's question.
-func TestAJobThatNamesNoImageIsAccepted(t *testing.T) {
-	exp := validSubmission()
-	exp.Job.Image = ""
-	if err := validate(t, exp); err != nil {
-		t.Fatalf("a job with no image: got = %v, want accepted", err)
-	}
-}

@@ -13,8 +13,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 )
 
-// A job spec with no image names the one its experiment was proposed with, in hl repo check and
-// before a submit pushes or sends anything.
+// A job spec with no image names the one its experiment was proposed with in hl repo check. A
+// submit of it is the platform's to refuse (image_required).
 func TestAJobThatNamesNoImageIsToldTheImageOfItsExperiment(t *testing.T) {
 	clone := cloneOf(t, proposed)
 	repo(t, "init")
@@ -22,10 +22,6 @@ func TestAJobThatNamesNoImageIsToldTheImageOfItsExperiment(t *testing.T) {
 	want := "states no job.image: every job names the image it runs in, and platform experiment pe-1 was proposed with image: torch"
 	if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, "job-spec: "+repotemplate.JobSpec+" "+want) {
 		t.Fatalf("hl repo check = %d, want %q in\n%s", code, want, out)
-	}
-	code, _, stderr := hl(t, "job", "submit", "--agent", "ag-1", repotemplate.JobSpec)
-	if code != 1 || strings.TrimSpace(stderr) != "hl: job submit: "+repotemplate.JobSpec+" "+want {
-		t.Fatalf("hl job submit = %d\n%s", code, stderr)
 	}
 }
 

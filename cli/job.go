@@ -49,8 +49,9 @@ of the experiment. The baseline job itself has none measured and states one. A s
 yours ends or with a lower --estimated-duration-hours; state no less than the job takes. --capacity-tier burst runs
 on idle capacity and can be evicted for a guaranteed job; it draws on the same quota and gives
 no extra hours (hl quota).
-A submit is refused with a reason: unknown_job_image for an image that is neither, as below;
-no_cluster_for_image when no cluster could run the job with its image, or with none;
+A submit is refused with a reason: image_required for a job that names no image,
+unknown_job_image for an image that is neither, as below;
+no_cluster_for_image when no cluster could run the job with its image;
 cpu_required, memory_required or storage_required for a job that leaves job.cpu, job.memory
 or job.storage out;
 exceeds_cluster_capacity for one that asks for more than every cluster that runs it has when
@@ -155,15 +156,6 @@ agents/coordinator/experiments.`, stderr)
 	metadata["agent_id"] = *agent
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = experimentOf(c, "")
-	}
-	// A job that named no image passed every check, queued, and waited under a reason that said
-	// nothing of it.
-	if job, _ := body["job"].(map[string]any); job != nil && imageGap(job, declaredExperiment{}) != "" {
-		var experiment declaredExperiment
-		if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(fmt.Sprint(metadata["platform_experiment_id"])), nil, &experiment); err != nil {
-			return fail(stderr, err)
-		}
-		return fail(stderr, errors.New("job submit: "+path+" "+imageGap(job, experiment)))
 	}
 	if err := fillCodeRef(metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
