@@ -5,7 +5,7 @@ import { toneText, toneTint } from '@/components/ui/tone'
 
 /** The small uppercase caption over a value or a group of controls. */
 export function Eyebrow({ tone, className, ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
-  return <span className={clsx('text-2xs font-semibold uppercase tracking-wider', tone ? toneText[tone] : 'text-muted', className)} {...props} />
+  return <span className={clsx('font-mono text-2xs font-medium uppercase tracking-wider', tone ? toneText[tone] : 'text-muted', className)} {...props} />
 }
 
 export function Kbd({ className, ...props }: HTMLAttributes<HTMLElement>) {
