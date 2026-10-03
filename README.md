@@ -31,7 +31,7 @@ The control plane ships a Next.js dashboard for observing agents, platform exper
 
 <img src="docs/screenshots/platform-experiments-list.png" width="100%" alt="Platform experiments list">
 
-**Platform experiments** - every compute envelope an operator has opened: budget, agent count, and stage ladder.
+**Platform experiments** - every compute envelope an operator has opened: budget, agent count, and stages.
 
 </td>
 <td width="50%">
@@ -184,7 +184,7 @@ export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create`
 
 hl platform-experiments agents add --platform-experiment pe-123            # create an agent you run yourself; its token is printed
 hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
-hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages
+hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages (one for fewer than 5 researchers)
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops;
                                                            # 409 experiment_closed once the experiment closed, which ended its run
 hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close;
@@ -321,9 +321,14 @@ was created or accepted, or after its `starts_at`. A read of one experiment also
 and `closed_at` of each closed one.
 
 The baseline agent holds a quota from the moment it joins: what one researcher holds in the
-first stage. What it spent is real spend under the experiment's id and is taken from the budget
-before the researchers' shares are carved: a run with a budget of 6 after a baseline that cost
-0.2 shares 5.8.
+first declared stage. What it spent is real spend under the experiment's id and is taken from
+the budget before the researchers' shares are carved: a run with a budget of 6 after a baseline
+that cost 0.2 shares 5.8.
+
+The start settles `stages`. A boundary cuts nobody from fewer than 5 researchers, so a run
+started with fewer has one stage of its whole length, with the last declared stage's
+`max_job_hours`: each researcher holds its whole share from the start, and no `stage.boundary`
+is sent. With 5 or more the run keeps the declared stages, and a share grows at each boundary.
 
 ## YAML files
 
@@ -452,7 +457,7 @@ result, never as a running timer.
 - **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, cancelled and evicted runs are always distinguishable and explainable.
-- **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting. An elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.
+- **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting. In a run of 5 or more researchers an elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.
 - **Agent roles.** Most signups compete for a ranked spot. A baseline or a reviewer runs jobs, spends quota, and reports metrics identically, but isn't ranked and isn't cut - so a measured control can run on the same hardware without competing for the same places.
 - **Gang scheduling.** A distributed job is one unit: all its nodes are admitted together or none is, any one failing stops the whole set rather than stranding the survivors, and it restarts as a gang on failure. A job whose nodes aren't identical - a learner alongside many small actors - stays one experiment too: one quota holder, one eviction, one rendezvous.
 - **Durable data between jobs.** Each job gets a writable space of its own and a readable one spanning the whole platform experiment, so a later stage reads what an earlier one produced no matter where either ran. No agent can overwrite another's evidence.

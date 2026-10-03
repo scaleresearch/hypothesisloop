@@ -944,7 +944,9 @@ func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stder
 	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
 
 The platform experiment: its status, description, metrics, stages and current_stage, and in
-consumed_accelerator_hours what it spent of its budget. One moment says when the platform
+consumed_accelerator_hours what it spent of its budget. While it is open, stages are the ones
+declared. From the start they are the ones the run has: a single stage of its whole length
+where fewer than 5 researchers joined, since a boundary cuts nobody from so few. One moment says when the platform
 closes it if nobody does: planning_ends_at on a draft being planned, proposal_expires_at once
 its planner answered, baseline_due_at while it is open, and ends_at, which is started_at plus
 duration_hours, once it runs. status_reason says where a draft stands (planning, revising,

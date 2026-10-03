@@ -56,7 +56,7 @@ func TestQuotaPrintsWhenTheNextStageStartsAndWhatTheShareBecomes(t *testing.T) {
 	}
 	stderr.Reset()
 	run([]string{"quota", "--help"}, &stdout, &stderr)
-	for _, want := range []string{"A share grows at each stage boundary", "next_stage_starts_at", "next_stage_share_accelerator_hours", "finish is final"} {
+	for _, want := range []string{"fewer than 5 researchers has one stage", "a share grows at each stage boundary", "next_stage_starts_at", "next_stage_share_accelerator_hours", "finish is final"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("hl quota --help lacks %q", want)
 		}
