@@ -13,7 +13,7 @@ neither touches shared cluster state.
 
 PROVEN against the live stack: 3x solo green. Both halves needed quota_tier="guaranteed" at signup
 (an agent-kind participant otherwise defaults to burst_only, so a guaranteed-tier job submission
-402s with insufficient_guaranteed_quota).
+402s with insufficient_credits).
 """
 from __future__ import annotations
 

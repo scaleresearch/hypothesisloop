@@ -89,7 +89,7 @@ def test_single_node_burst_job_preempted_and_readmitted(api, run_id, deadline):
     pe_id = api.create_platform_experiment(f"preemption-{run_id}", 50.0, len(agents))
     # quota_tier="guaranteed" explicitly: the default agent kind resolves to burst_only quota
     # (domain.ResolveQuotaTier), which would leave the third agent's guaranteed pool at 0 and its
-    # capacity_tier="guaranteed" preemptor submission refused with insufficient_guaranteed_quota --
+    # capacity_tier="guaranteed" preemptor submission refused with insufficient_credits --
     # mirrors test_concurrent_admission_race.py's same override for the same reason.
     for a in agents:
         api.signup_ok(pe_id, a, quota_tier="guaranteed")

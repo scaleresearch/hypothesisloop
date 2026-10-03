@@ -152,6 +152,7 @@ def test_concurrent_same_agent_requests_race_one_quota_boundary(api, run_id, dea
         f"same-agent quota race produced accepted={len(accepted)} rejected={len(rejected)}; expected 1/1 "
         f"(results={results})"
     )
+    assert rejected[0][0] == 402, f"the loser of a quota race is refused for its quota (402 insufficient_credits), got {rejected[0][0]}"
 
     winner_job = accepted[0][1]
     used = api.quota_field(pe_id, agent, "used_guaranteed_acch")

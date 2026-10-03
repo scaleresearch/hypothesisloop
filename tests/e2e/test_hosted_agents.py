@@ -396,8 +396,8 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     instances, ending = desired_for(api, pe_id, up)
     assert done not in instances and before[done]["name"] in ending, f"the finished agent is not left to end: {sorted(instances)}"
     assert set(instances) == survivors - {done}
-    code, _ = as_done.submit_job_expect(pe_id, done, hours=BURN_JOB_HOURS)
-    assert code == 422, f"a finished agent's submission: {code}"
+    late = as_done.post_experiment_body(as_done.submission_body_for_id(as_done._job_id(), pe_id, done, hours=BURN_JOB_HOURS))
+    assert (late.status_code, late.json()["reason"]) == (422, "agent_finished"), f"a finished agent's submission: {late.status_code} {late.text}"
     seen = api.as_caller(admin.token(f"coordinator:{pe_id}")).hl_expect(
         "watch", "--platform-experiment", pe_id, "--kinds", "agent.finished", "--since", "1", "--timeout", "5", timeout=20)
     assert seen.returncode == 0, f"the coordinator's watch: {seen.stderr}"

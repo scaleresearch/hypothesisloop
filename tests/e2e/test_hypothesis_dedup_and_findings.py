@@ -15,7 +15,7 @@ API-only, parallel-safe (its own platform experiment).
 
 PROVEN against the live stack: 3x solo green. The job-submitting tests needed
 quota_tier="guaranteed" at signup (an agent-kind participant otherwise defaults to burst_only, so a
-guaranteed-tier job submission 402s with insufficient_guaranteed_quota).
+guaranteed-tier job submission 402s with insufficient_credits).
 """
 from __future__ import annotations
 
@@ -184,7 +184,7 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     (judged,) = api.get_json(f"/platform-experiments/{pe_id}/findings")
     assert (judged["id"], judged["status"], judged["finding"]["summary"]) == (human["id"], "confirmed", human_finding), judged
     metric = api.experiment(human_job).get("metric")
-    assert judged.get("best_job") == ({"id": human_job, "metric": metric, "summary": human_finding} if metric else None), judged
+    assert judged.get("best_job") == ({"id": human_job, "metric": metric, "summary": human_finding, "summary_due": False} if metric else None), judged
     stats = api.get_json(f"/hypotheses/stats?platform_experiment_id={pe_id}")
     assert stats["by_status"]["confirmed"] == 1 and stats["total"] == len(api.hypotheses(pe_id)), stats
 

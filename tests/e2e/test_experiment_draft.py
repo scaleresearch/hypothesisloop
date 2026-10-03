@@ -169,7 +169,8 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert (unstarted["status"], unstarted["status_reason"]["reason"], unstarted["status_reason"]["waits_for"]) == ("open", "baseline_measuring", "platform"), unstarted
         assert unstarted["baseline_due_at"] and "ends_at" not in unstarted and "started_at" not in unstarted, unstarted
         too_early = api.post_experiment_body(api.submission_body_for_id(f"job-{pe_id[-8:]}-r", pe_id, researchers[0]["agent_id"]))
-        assert too_early.status_code >= 400 and "experiment_not_started" in too_early.text, too_early.text
+        assert (too_early.status_code, too_early.json()["reason"]) == (422, "experiment_not_started"), too_early.text
+        assert "baseline_measuring" in too_early.json()["message"], f"the refusal does not say what the start waits for: {too_early.text}"
 
         # What the coordinator has done: an agent of role baseline measures the control, and the
         # baseline is declared with the brief that names it. The platform starts the run itself.
