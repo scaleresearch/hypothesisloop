@@ -182,6 +182,25 @@ describe('the machines the platform runs', () => {
     expect(screen.queryByText('finished')).toBeNull()
   })
 
+  // The card said that a machine ran and when it last made progress, and nothing of what the
+  // agent on it was doing.
+  it('shows beside each machine what its agent says it is doing and how long ago, and nothing for one that has not said', async () => {
+    const running = { state: 'running', restarts: 0, stopped: false } as const
+    roster = [
+      { ...signup('ag-busy', true), instance: running, activity: { text: 'Comparing warmup lengths on the short run.', at: new Date(Date.now() - 95_000).toISOString() } },
+      { ...signup('ag-quiet', true), instance: running },
+      { ...signup('ag-own', false), activity: { text: 'Reading the brief.', at: new Date(Date.now() - 5_000).toISOString() } },
+    ]
+    show(PlatformExperimentStatus.RUNNING)
+    const row = (id: string) => screen.getByRole('cell', { name: id }).closest('tr')!
+    const said = await screen.findByText('Comparing warmup lengths on the short run.')
+    expect(said.closest('tr')).toBe(row('ag-busy'))
+    expect(said.parentElement!.textContent).toBe('Comparing warmup lengths on the short run. 2m ago')
+    expect(within(row('ag-busy')).getByText('running')).toBeTruthy()
+    expect(row('ag-quiet').querySelector('time')).toBeNull()
+    expect(within(row('ag-own')).getByText('Reading the brief.').parentElement!.textContent).toMatch(/^Reading the brief\. \ds ago$/)
+  })
+
   it('says which agent finished and why it gave', async () => {
     roster = [{ ...signup('ag-done', true), finished_at: new Date().toISOString(), finished_reason: 'quota spent' }, signup('ag-busy', true)]
     show(PlatformExperimentStatus.RUNNING)

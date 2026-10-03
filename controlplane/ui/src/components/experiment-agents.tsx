@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
 import { Eyebrow } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
+import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
 import { clearRunFailure, runFailure } from '@/lib/run-experiment'
 import { relTime } from '@/lib/format'
@@ -196,7 +197,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {agents && agents.length > 0 && (
             <Table>
               <thead>
-                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine</th><th>Specialization</th><th>Model</th><th>Joined</th><th /></tr>
+                <tr><th>Agent</th><th>Role</th><th>Run by</th><th>Machine · doing now</th><th>Specialization</th><th>Model</th><th>Joined</th><th /></tr>
               </thead>
               <tbody>
                 {agents.map(agent => (
@@ -216,6 +217,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                       {agent.instance
                         ? <InstanceHealth instance={agent.instance} />
                         : <span className="text-xs text-subtle">{agent.hosted ? 'not reported yet' : 'not the platform\'s'}</span>}
+                      {agent.activity && <Activity activity={agent.activity} className="mt-1 max-w-[420px]" />}
                       {agent.status_reason && agent.instance && (
                         <p className="mt-1 max-w-[420px] text-xs text-subtle">{agent.status_reason.message}</p>
                       )}
