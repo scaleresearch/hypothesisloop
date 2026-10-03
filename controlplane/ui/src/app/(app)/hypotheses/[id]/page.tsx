@@ -202,7 +202,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                         <span className="font-semibold"><Actor actor={f.actor} agentID={f.agent_id} /></span>
                         <TextLink href={`/jobs/${f.experiment_id}`}>{f.experiment_id.slice(0, 8)}…</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span title={`This job's best ${job.metric.name}`}>{job.metric.value.toFixed(4)}</span>}
+                        {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{job.metric.value.toFixed(4)}</span>}
                       </span>
                       <span className="font-mono text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
@@ -256,7 +256,7 @@ export default function HypothesisDetailPage({ params }: { params: { id: string 
                 <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
                 <th className="text-right">Est. cost</th>
-                <th className="text-right">Best {metricName ?? 'metric'}</th>
+                <th className="text-right">Last {metricName ?? 'metric'}</th>
                 <th>Submitted</th>
               </tr>
             </thead>

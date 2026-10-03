@@ -173,6 +173,24 @@ describe('the page of an experiment that has not started', () => {
   })
 })
 
+// The baseline's job tests no hypothesis, and its row read as an agent with no best job.
+describe('the scoreboard row of the baseline agent', () => {
+  it('says its best job measured the objective, in place of a hypothesis', async () => {
+    vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
+    vi.mocked(api.fetchPlatformExperimentQuotas).mockResolvedValue([{ agent_id: 'ag-base' }, { agent_id: 'ag-other' }] as never)
+    vi.mocked(api.fetchPlatformExperimentResults).mockResolvedValue({
+      metrics: [{ metric: 'val_loss', direction: 'minimize', standings: [{ rank: 1, agent_id: 'ag-base', best: 1.8, experiment_id: 'job-base', objective: true }] }],
+      bests: [],
+    })
+    show('project=prj_1', { status: PlatformExperimentStatus.RUNNING, ends_at: at, metrics: [{ key: 'val_loss', direction: 'minimize' }] })
+    const said = await screen.findByText('The baseline: it measures the objective and tests no hypothesis')
+    const scoreboard = said.closest('table')!
+    expect(said.closest('tr')!.textContent).toMatch(/^#1/)
+    expect(scoreboard.querySelectorAll('tbody tr')).toHaveLength(2)
+    expect(scoreboard.querySelectorAll('tbody tr')[1].textContent).not.toContain('The baseline')
+  })
+})
+
 describe('a shared platform experiment of the caller\'s own org', () => {
   it('is theirs to change, marked shared, with no read-only note, and puts its project in the URL', async () => {
     show('', { project_id: 'prj_1' })

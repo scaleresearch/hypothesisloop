@@ -230,7 +230,7 @@ function JobsPageContent() {
                 {!peFilter && <th>Experiment</th>}
                 <SortableTh className="w-[140px]" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
                 <th className="w-[130px]">Accelerator</th>
-                <th className="w-[120px] text-right">Best metric</th>
+                <th className="w-[120px] text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
                 <th className="w-[92px] text-right">Est. cost</th>
                 <th title="Under each hypothesis: the branch the job ran on, and the settings that differ between this page's jobs of it">Hypothesis · branch · varied settings</th>
                 <SortableTh className="w-[104px]" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>

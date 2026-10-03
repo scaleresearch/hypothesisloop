@@ -639,7 +639,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
                   <th>Agent</th>
                   <th>Status</th>
                   <th title="Under each hypothesis: the settings that differ between these jobs of it">Hypothesis · varied settings</th>
-                  <th className="text-right">Best {primaryStandings?.metric ?? 'Metric'}</th>
+                  <th className="text-right" title="The last value the job reported, which it is ranked by">Last {primaryStandings?.metric ?? 'Metric'}</th>
                   <th className="text-right">Est. Cost</th>
                   <th>Submitted</th>
                 </tr>
