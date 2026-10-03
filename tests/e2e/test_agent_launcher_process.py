@@ -111,7 +111,7 @@ def test_a_launcher_process_follows_its_agents_from_joining_to_the_end_of_their_
         assert launcher.said("destroyed ") == 0, launcher.lines()
 
         # Removed before the start: its machine goes on the next pass.
-        assert api.remove_agent(pe_id, measurer).status_code == 200
+        assert api.remove_agent(pe_id, measurer).status_code == 204
         eventually("the removed agent's instance going",
                    lambda: launcher.said(f"destroyed {launcher.prefix}{measurer_name} (no longer desired)"),
                    accept=lambda count: count == 1, deadline=deadline)

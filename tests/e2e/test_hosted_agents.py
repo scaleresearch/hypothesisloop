@@ -405,7 +405,14 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
     assert [(e["kind"], e["subject"], e["detail"]) for e in finished] == [("agent.finished", done, "quota spent")], finished
     survivors -= {done}
 
+    # An agent's own signup always says why its run is over, and the empty string while it goes on.
+    def ended(agent: str) -> str:
+        return api.get_json(f"/platform-experiments/{pe_id}/signups/{agent}")["ended"]
+    still = sorted(survivors)[0]
+    assert (ended(still), ended(done), {ended(agent) for agent in cut}) == ("", "finished", {"cut"})
+
     api.close_platform_experiment(pe_id)
+    assert ended(still) == "closed"
     instances, ending = desired_for(api, pe_id, up)
     assert not instances
     for agent in survivors:
@@ -474,7 +481,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "the final summary")
         assert as_coordinator.get_json(f"/platform-experiments/{pe_id}")["summary"] == "the final summary"
         late = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
-        assert late.status_code in (403, 409, 400), f"a description update after the close: {late.status_code} {late.text}"
+        assert late.status_code in (403, 409), f"a description update after the close: {late.status_code} {late.text}"
     finally:
         with_repo.close_platform_experiment(pe_id)
 

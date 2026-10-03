@@ -100,10 +100,11 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     org.created_platform_experiments.append(pe_id)
     assert created.json()["repository_url"].endswith(os.environ["HL_E2E_GITHUB_REPO"] + ".git")
     researchers = [org.add_agents(pe_id, hosted=True, flavor=flavor)[0]["agent_id"] for flavor in ("hyperparameter-search", "architecture-search")]
-    # Its start time is now, and the platform starts it once its coordinator has had the baseline
-    # measured by an agent it added and has declared it: no researcher's machine is rented before.
+    # Its start time is now. Its coordinator adds an agent of role baseline, and when that agent
+    # finishes with one completed job the platform declares it and starts the run: no researcher's
+    # machine is rented before, and the run's clock starts with the first of them running.
     org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
-    eventually("the coordinator to declare a baseline and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
+    eventually("the baseline to be measured and declared and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
                accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",
                deadline=deadline, interval=10)
     everyone: list[str | None] = [None, *researchers]
