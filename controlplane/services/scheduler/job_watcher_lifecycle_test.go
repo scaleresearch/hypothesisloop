@@ -78,16 +78,32 @@ func (s *lifecycleStore) RequeueForRetry(_ context.Context, _ string, maxAttempt
 	return true, nil
 }
 
-func TestTerminalObservationRequiresMetricsBeforeLifecycleTransition(t *testing.T) {
+// A job on a rented machine was listed SUBMITTED while it already carried final metrics, and
+// ended without ever being RUNNING: the vendor's state said the machine was loading until the
+// command was over. A process that ended ran, so the report of its end moves the job through
+// RUNNING first, whatever was observed of it in between.
+func TestAJobThatEndedWhileSubmittedPassesThroughRunning(t *testing.T) {
+	for _, status := range []domain.ExperimentStatus{domain.StatusCompleted, domain.StatusFailed} {
+		store := &lifecycleStore{}
+		w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+		exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}
+
+		if err := w.onFinished(context.Background(), exp, status, ""); err != nil {
+			t.Fatalf("%s: onFinished = %v", status, err)
+		}
+		if store.started != 1 || exp.Status != domain.StatusRunning {
+			t.Errorf("%s: marked running %d times and seen as %s, want it RUNNING once before its end", status, store.started, exp.Status)
+		}
+		if len(store.finished) != 1 || store.finished[0] != string(status)+" " {
+			t.Errorf("%s: finished as %v", status, store.finished)
+		}
+	}
+
+	// A job that was RUNNING already is not started twice.
 	store := &lifecycleStore{}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
-	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted}
-
-	if err := w.onFinished(context.Background(), exp, domain.StatusCompleted, ""); err == nil {
-		t.Fatal("onFinished accepted a terminal observation without authoritative metrics")
-	}
-	if store.transitioned {
-		t.Fatal("onFinished changed PostgreSQL desired state after metrics resolution failed")
+	if err := w.onFinished(context.Background(), &domain.Experiment{ID: "exp-1", Status: domain.StatusRunning}, domain.StatusCompleted, ""); err != nil || store.started != 0 {
+		t.Errorf("a RUNNING job that ended: err %v, marked running %d times", err, store.started)
 	}
 }
 

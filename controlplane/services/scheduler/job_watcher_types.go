@@ -103,12 +103,6 @@ type JobWatcher struct {
 	// startTimeout bounds how long a placed job the runtime reports as pending may take to start.
 	startTimeout time.Duration
 
-	// metricsDBURL and observedGapCap configure onFinished's observed-elapsed query
-	// (metricsdb.ObservedElapsedHours) — the same source of truth every other termination path
-	// uses. GreptimeDB is a required dependency: no fallback if unset or unreachable.
-	metricsDBURL   string
-	observedGapCap time.Duration
-
 	// scaleUpTimeout is the global default deadline (scheduler.scale_up_timeout_seconds) for an
 	// incomplete gang (scheduled_nodes < Nodes()) on an autoscaler-enabled cluster with no
 	// per-cluster override in the cluster's settings. Zero (WithScaleUpTimeout never called) disables
@@ -148,16 +142,6 @@ func (w *JobWatcher) WithStuckPendingTimeout(d time.Duration) *JobWatcher {
 // its container, before job_watcher evicts it as stuck_pending.
 func (w *JobWatcher) WithStartTimeout(d time.Duration) *JobWatcher {
 	w.startTimeout = d
-	return w
-}
-
-// WithObservedTimeConfig wires the GreptimeDB URL and gap-cap/step parameters onFinished uses to
-// compute observed-elapsed time — see metricsdb.ObservedElapsedHours. Pass the same values the
-// Controller in this deployment uses, so every termination path (automatic eviction, natural
-// completion, user cancel) agrees on what "how long did this run" means.
-func (w *JobWatcher) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *JobWatcher {
-	w.metricsDBURL = metricsDBURL
-	w.observedGapCap = gapCap
 	return w
 }
 

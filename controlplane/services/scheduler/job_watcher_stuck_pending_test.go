@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -272,9 +271,7 @@ func TestAnUnreadableTimeoutEvictsNothing(t *testing.T) {
 }
 
 // A job that has finished is read as finished whatever the state of the settings: no
-// stuck-pending decision is pending for it, so nothing is read on its behalf. The terminal
-// transition of a job never observed RUNNING needs the metrics store, which this test does not
-// have, so reaching that requirement is the proof the settings did not stand in the way.
+// stuck-pending decision is pending for it, so nothing is read on its behalf.
 func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 	unreadable := errors.New("unavailable")
 	for name, tc := range map[string]struct {
@@ -292,15 +289,8 @@ func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 			exp := scaleUpExperiment(1, time.Minute)
 			exp.Status = tc.status
 
-			err := w.reconcileOne(context.Background(), exp, nil, nil)
-			if tc.status == domain.StatusRunning {
-				if err != nil || !store.transitioned {
-					t.Fatalf("err = %v, transitioned = %v", err, store.transitioned)
-				}
-				return
-			}
-			if err == nil || errors.Is(err, unreadable) || !strings.Contains(err.Error(), "metrics DB URL") {
-				t.Fatalf("err = %v, want the job to have reached its terminal transition", err)
+			if err := w.reconcileOne(context.Background(), exp, nil, nil); err != nil || !store.transitioned {
+				t.Fatalf("err = %v, transitioned = %v", err, store.transitioned)
 			}
 		})
 	}

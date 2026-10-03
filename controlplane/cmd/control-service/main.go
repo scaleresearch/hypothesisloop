@@ -322,10 +322,9 @@ func newSchedulerParts(runCtx context.Context, gate apiGate, gitHost githost.Pro
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
 	watcher := scheduler.NewJobWatcher(store, jwc, settler, logger).
-		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds)*time.Second).
-		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds)*time.Second).
-		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap).
+		WithPollInterval(time.Duration(pcfg.Scheduler.JobPollIntervalSeconds) * time.Second).
+		WithStuckPendingTimeout(time.Duration(pcfg.Scheduler.StuckPendingTimeoutSeconds) * time.Second).
+		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds) * time.Second).
 		WithScaleUpTimeout(time.Duration(pcfg.Scheduler.ScaleUpTimeoutSeconds) * time.Second)
 
 	grace := domain.GraceLimits{

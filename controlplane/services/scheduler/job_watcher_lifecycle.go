@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
@@ -381,35 +380,6 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	return admittedType, runningMarked
 }
 
-// backfillStartedFromObservations handles a terminal report for an experiment this watcher never
-// itself saw reach RUNNING (the poll cadence can miss a job that starts and finishes between two
-// ticks — see onFinished). Before treating that as "never ran," check the metrics store for any
-// observation tied to this experiment; if one exists, move state through RUNNING first.
-func (w *JobWatcher) backfillStartedFromObservations(ctx context.Context, exp *domain.Experiment) (bool, error) {
-	if w.metricsDBURL == "" {
-		return false, fmt.Errorf("job_watcher: metrics DB URL is required to resolve terminal lifecycle")
-	}
-	_, observed, err := metricsdb.FirstObserved(ctx, w.metricsDBURL, exp.ID, exp.CreatedAt, time.Now().UTC(), w.observedGapCap)
-	if err != nil {
-		return false, fmt.Errorf("job_watcher: check observations for terminal job %s: %w", exp.ID, err)
-	}
-	if !observed {
-		return false, nil
-	}
-	started, err := w.store.MarkStarted(ctx, exp.ID)
-	if err != nil {
-		w.logger.Error("job_watcher: backfill running state", zap.String("id", exp.ID), zap.Error(err))
-		return false, fmt.Errorf("job_watcher: backfill running state for %s: %w", exp.ID, err)
-	}
-	if !started {
-		// Already left SUBMITTED by some other path — nothing to backfill.
-		return false, nil
-	}
-	w.logger.Info("job_watcher: backfilling lifecycle state, metrics show it ran", zap.String("id", exp.ID))
-	exp.Status = domain.StatusRunning
-	return true, nil
-}
-
 // onFinished handles the RUNNING → COMPLETED/FAILED transition and settles quota. reason is what
 // the runtime said of a failed job's process, and is written with the status.
 func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, status domain.ExperimentStatus, reason string) error {
@@ -419,9 +389,18 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 		zap.String("reason", reason),
 	)
 
+	// A process that ended ran. The poll cadence misses the RUNNING of a job that starts and
+	// ends between two reports, and a runtime that reads its machines' state from a vendor may
+	// never see one, so a terminal report for a job still SUBMITTED moves it through RUNNING
+	// first: no job is COMPLETED or FAILED without having been RUNNING, and the type it ran on
+	// is recorded (MarkStarted). A job that left SUBMITTED some other way is left as it is.
 	if exp.Status != domain.StatusRunning {
-		if _, err := w.backfillStartedFromObservations(ctx, exp); err != nil {
-			return err
+		started, err := w.store.MarkStarted(ctx, exp.ID)
+		if err != nil {
+			return fmt.Errorf("job_watcher: mark %s running before its end: %w", exp.ID, err)
+		}
+		if started {
+			exp.Status = domain.StatusRunning
 		}
 	}
 
