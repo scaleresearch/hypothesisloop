@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,33 @@ func TestCapacityCarriesEachTypesAccHRate(t *testing.T) {
 	want := AcceleratorCapacity{AcceleratorType: "gpu.product=L40", Kind: domain.TypeKindAccelerator, Available: 3, Total: 8, AccHPerHour: 0.25}
 	if len(clusters) != 1 || len(clusters[0].Accelerators) != 1 || !reflect.DeepEqual(clusters[0].Accelerators[0], want) {
 		t.Fatalf("capacity = %+v, want one cluster with %+v", clusters, want)
+	}
+}
+
+// A Blackhole chip's driver maps hugepages, which the platform adds to every job on the type. The
+// capacity read says so on that type, so nobody states them in a job or wonders where they came from.
+func TestCapacityCarriesWhatThePlatformAddsToAJobOnAType(t *testing.T) {
+	const blackhole, l40 = "tenstorrent.com/chipArch=blackhole", "gpu.product=L40"
+	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0, blackhole: 0.5, l40: 0.25})
+	domain.SetAcceleratorPodResources(map[string]map[string]string{blackhole: {"hugepages-1Gi": "4Gi"}})
+	t.Cleanup(func() {
+		domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
+		domain.SetAcceleratorPodResources(nil)
+	})
+
+	clusters := buildClusterCapacity(
+		map[string]map[string]int64{"local": {blackhole: 1, l40: 3}},
+		map[string]map[string]int64{"local": {blackhole: 2, l40: 8}})
+	if len(clusters) != 1 || len(clusters[0].Accelerators) != 2 {
+		t.Fatalf("capacity = %+v, want one cluster with two types", clusters)
+	}
+	chips, gpus := clusters[0].Accelerators[1], clusters[0].Accelerators[0]
+	if chips.AcceleratorType != blackhole || !reflect.DeepEqual(chips.PodResources, map[string]string{"hugepages-1Gi": "4Gi"}) {
+		t.Errorf("the Blackhole type: got = %+v, want pod_resources hugepages-1Gi 4Gi", chips)
+	}
+	raw, err := json.Marshal(gpus)
+	if err != nil || gpus.PodResources != nil || strings.Contains(string(raw), "pod_resources") {
+		t.Errorf("a type the catalog adds nothing to: got = %s (%v), want no pod_resources", raw, err)
 	}
 }
 

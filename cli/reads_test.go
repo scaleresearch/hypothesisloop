@@ -114,6 +114,27 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	}
 }
 
+func TestCapacityPrintsWhatThePlatformAddsToAJobOnAType(t *testing.T) {
+	recordingServer(t, func(int, recorded) any {
+		return map[string]any{"clusters": []any{map[string]any{"cluster_name": "chips", "accelerators": []any{
+			map[string]any{"accelerator_type": "tenstorrent.com/chipArch=blackhole", "kind": "accelerator", "available": 1, "total": 2, "pod_resources": map[string]any{"hugepages-1Gi": "4Gi"}},
+		}}}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"capacity"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"cluster":"chips","accelerator_type":"tenstorrent.com/chipArch=blackhole","available":1,"kind":"accelerator","pod_resources":{"hugepages-1Gi":"4Gi"},"total":2}`
+	if got := lines(stdout.String()); len(got) != 1 || got[0] != want {
+		t.Fatalf("stdout = %q, want %s", stdout.String(), want)
+	}
+	stderr.Reset()
+	run([]string{"capacity", "--help"}, &stdout, &stderr)
+	if !strings.Contains(stderr.String(), "pod_resources") {
+		t.Errorf("hl capacity --help does not say what pod_resources is:\n%s", stderr.String())
+	}
+}
+
 // The CPU type counts cores, and its line says so. The line of an accelerator is as it was.
 func TestCapacitySaysCoresForTheCPUType(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {

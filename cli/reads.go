@@ -129,7 +129,9 @@ func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) i
 Live capacity per cluster. First one line of its cores and memory, in total and not asked for
 by running jobs, summed over its nodes: what a job with no accelerator needs to know. Then
 its priced types, one line per type. For an accelerator: available, total and acch_per_hour,
-what an hour on one of them costs in accelerator hours. For CPU cores (kind cpu, the one type
+what an hour on one of them costs in accelerator hours, and pod_resources where the platform
+adds something to every job on the type (the hugepages of a Tenstorrent Blackhole chip): a job
+states none of it. For CPU cores (kind cpu, the one type
 hypothesisloop.dev/cpu=core): cores_available, cores_total and acch_per_core_hour, which is 1, so
 a budget spent on cores reads as CPU core-hours. A job that needs no accelerator states cpu, a
 whole number, and no accelerator_type, and holds that many cores. accelerator_type is the exact
