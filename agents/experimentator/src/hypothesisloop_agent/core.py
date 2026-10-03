@@ -65,11 +65,11 @@ def system_prompt(cfg: config.Config, rules: str, commands: str, repository_url:
         template, sections = "planner.md", ()
         values.update(agent_id=cfg.agent_id)
     elif config.measures_baseline(cfg):
-        template, sections = "baseline.md", ("workspace", "code_submit", "code_access")
+        template, sections = "baseline.md", ("workspace",)
         values.update(agent_id=cfg.agent_id)
         values.update(start=code["start_baseline"].format(**values))
     elif not config.coordinates(cfg):
-        template, sections = "system_prompt.md", ("workspace", "code_submit", "code_access")
+        template, sections = "system_prompt.md", ("workspace",)
         values.update(agent_id=cfg.agent_id, flavor=cfg.flavor, hyperparameters=json.dumps(cfg.hyperparameters),
                       flavor_brief=(_PROMPTS_DIR / "flavors" / f"{cfg.flavor}.md").read_text().strip())
         values.update(start=code["start_researcher"].format(**values))

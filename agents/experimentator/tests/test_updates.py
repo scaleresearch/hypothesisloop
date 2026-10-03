@@ -163,6 +163,15 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a").splitlines()[-1], "unfinished_jobs none")
 
+    async def test_a_share_that_a_later_stage_raises_says_to_what_and_when(self):
+        quota = self.QUOTA.replace('"used_burst_acch":0', '"used_burst_acch":0,"next_stage_starts_at":"2026-10-06T21:43:44Z",'
+                                                          '"next_stage_share_accelerator_hours":2.829331')
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS, quota)
+        events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a").splitlines()[-1],
+                         "quota_used 0.113 of 2 AccH, room for a job of 1.85 guaranteed or 1.85 burst, "
+                         "and the share rises to 2.83 AccH by 2026-10-06T21:43:44Z")
+
     async def test_a_batch_without_an_ended_job_reads_no_job(self):
         command, counter = fake_hl(f"echo '{COMMENT}'\n", self.JOBS, self.STATS)
         events = await updates.drain(ENV, command=command)

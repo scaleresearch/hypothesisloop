@@ -84,32 +84,28 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 9_000)
+        self.assertLess(len(prompt.encode()), 7_760)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
-    # that only its own baseline agent could bring.
-    def test_its_first_act_on_an_open_experiment_is_the_baseline_agent(self):
+    # that only its own baseline agent could bring. The `status_reason` of an open experiment
+    # now names the baseline agent to add and the declaration, each with its command.
+    def test_its_next_step_on_an_open_experiment_is_read_from_status_reason(self):
         flat = " ".join(self.render().split())
-        self.assertIn("3. If `status` is `open` and the roster holds no agent of role `baseline`, add one now, before anything else: "
-                      "`hl platform-experiments agents add --hosted --role baseline`", flat)
-        self.assertIn("An `open` experiment has not started and waits for nothing but this", flat)
-        self.assertIn("The platform starts the run within a minute of a valid baseline being declared. "
-                      "Nobody starts it by hand, and its duration counts from that start", flat)
-        self.assertIn("An experiment still `open` at its `baseline_due_at` is closed", flat)
+        self.assertIn("`status_reason` (while `open`, your next step and its command)", flat)
+        self.assertIn("The run's duration counts from the start the platform gives it once a valid baseline is declared, "
+                      "and an experiment still `open` at its `baseline_due_at` is closed", flat)
         # One wrote "proceeding" of a declared baseline whose run had no researcher to start for.
-        self.assertIn("Once declared, `status_reason` in `get` reads `starting` or what the start waits for: "
-                      "a researcher it lacks you add, and what is the owner's goes first in the summary", flat)
+        self.assertIn("Once declared, `status_reason` reads `starting` or what the start waits for: a researcher it lacks you add", flat)
         self.assertNotIn("starts_at", flat)
-        self.assertIn("`status_reason` (while `open`, your next step)", flat)
 
     # One removed the owner's researcher to "match max_agents" and cancelled the baseline
-    # agent's queued job itself.
+    # agent's queued job itself. Both are refused now, each with whose it is.
     def test_it_changes_nothing_of_the_owners_and_nothing_of_an_agents(self):
         flat = " ".join(self.render().split())
-        self.assertIn("You remove only an agent you added. One the owner added stays, whatever the mix or the count", flat)
-        self.assertIn("`max_agents` counts researchers alone: baseline agents and you never count, and a researcher that finished still does", flat)
-        self.assertIn("An agent's jobs, hypotheses and branches are the agent's. You cancel and submit none", flat)
-        self.assertNotIn("agents remove", flat)
+        self.assertIn("What the run may spend, how long it lasts and its gate are the owner's", flat)
+        self.assertIn("An agent's jobs, hypotheses and branches are the agent's: what is wrong with a job you say in the brief", flat)
+        for said_there in ("agents remove", "--help", "refuses", "--role baseline", "baseline_breaks_constraint"):
+            self.assertNotIn(said_there, flat)
 
     # Three baseline jobs failed for what the brief said of the image before a coordinator
     # looked at one.
@@ -118,7 +114,7 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("and while it is `open` when a job ends", flat)
         self.assertIn("A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: "
                       "if the cause is in the brief (an image, a type, a config that cannot run), fix the brief", flat)
-        self.assertIn("an `image` is a job image name of `hl capacity` or a full address", flat)
+        self.assertIn("State in it only what you read on the platform", flat)
 
     # A run closed under a summary that said it was "waiting for the competitor agent", one
     # still open was written up as "proceeding". Told to end its turn by replying in one line
@@ -135,17 +131,11 @@ class BriefingTest(unittest.TestCase):
             self.assertNotIn(form, flat)
         self.assertEqual(updates.message([{"kind": "comment.new", "subject": "hyp-1"}], ""), "Platform updates:\ncomment.new hyp-1")
 
-    # One looked for comments with a relationship it made up, which matched no row, and for a
-    # job's summary with the command that files one.
-    def test_it_is_told_where_comments_and_a_jobs_summary_are_read(self):
-        flat = " ".join(self.render().split())
-        self.assertIn("One hypothesis with its findings and comments: `hl hypothesis get ID`, short unless `--full`. A job's summary is in `hl job status ID`", flat)
-
     # Every graph of the audited runs was three root hypotheses with nothing below them, two
     # of them varying the same knobs, and no summary said how the best result was reached.
     def test_it_checks_the_shape_of_the_graph_and_its_last_summary_names_the_path_to_the_best_finding(self):
         flat = " ".join(self.render().split())
-        self.assertIn("the objective's children are distinct approaches, each one claim, a refinement or a combination "
+        self.assertIn("The objective's children are distinct approaches, each one claim, a refinement or a combination "
                       "sits under what it refines, and the best result is a node", flat)
         self.assertIn("Roots that overlap, or stay flat while one holds a whole sweep, you comment on: "
                       "`hl hypothesis comment ID --text T`", flat)

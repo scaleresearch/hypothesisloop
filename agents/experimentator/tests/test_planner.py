@@ -43,7 +43,7 @@ class PlannerPromptTest(unittest.TestCase):
         # A draft's max_agents is the most a proposal may ask for, which one read as the number.
         self.assertIn("2 unless plainly more, never above the draft's `max_agents`, a ceiling", flat)
         self.assertNotIn("Every agent competes", flat)
-        for word in ("One ranked metric that is the goal itself", "role `constraint`", "BASELINE block",
+        for word in ("One ranked metric that is the goal itself", "role `constraint`",
                      "With revisions, the last one is what the person wants now"):
             self.assertIn(word, flat)
         self.assertNotIn("{", flat)
@@ -53,7 +53,7 @@ class PlannerPromptTest(unittest.TestCase):
     # nothing, so its briefing is half of what it was and lists no command that runs something.
     def test_the_planner_defines_the_experiment_and_runs_nothing(self):
         prompt, flat = render(planner())
-        self.assertIn("You define the experiment and run nothing: no trial, no measurement, no install, no job, no hypothesis", flat)
+        self.assertIn("You define the experiment and run nothing: you read, then send one `propose` or `decline`", flat)
         # One measured scikit-learn on its own machine for 17 minutes, through three command
         # timeouts, to learn whether the person's gate could be reached, and declined on that.
         self.assertIn("Whether a gate can be reached is its to measure: state a doubt in `risks` and plan what the person asked", flat)
@@ -65,7 +65,7 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 5_500)
+        self.assertLess(len(prompt.encode()), 4_700)
         self.assertEqual(listed(planner()), [[], ["platform-experiments", "propose"], ["platform-experiments", "decline"]])
 
     # Told not to clone, a planner invented override flags and a gate for a harness the
@@ -78,39 +78,35 @@ class PlannerPromptTest(unittest.TestCase):
                       "and invent none", flat)
         self.assertIn("Budget = the trial length the repository states, else one you assume, x", flat)
 
-    # Nothing has run when a planner proposes, so what it states of the baseline and of the cost
-    # is what is not known yet, said as such.
-    def test_the_proposal_states_an_unmeasured_baseline_and_an_estimated_size(self):
+    # Nothing has run when a planner proposes, so what it states of the cost is what is not
+    # known yet, said as such.
+    def test_the_proposal_states_an_estimated_size(self):
         flat = render(planner())[1]
-        self.assertIn("`config:` the exact control configuration, and `measured: not yet established`", flat)
-        self.assertIn("`sizing_reason`, worded as the estimate it is: nothing has run; the trial length is read or assumed", flat)
+        self.assertIn("`sizing_reason`: nothing has run; the trial length is read or assumed", flat)
         self.assertIn("the budget is a cap", flat)
         self.assertIn("the run does not start if the budget cannot cover one trial for each researcher", flat)
-        self.assertIn("`accelerator_type`: one line of `hl capacity` with available > 0, copied verbatim", flat)
+        self.assertIn("`accelerator_type`: a line of `hl capacity` with available > 0", flat)
 
     # A gate whose bound the control fails disqualifies everyone, and no baseline exists to
     # check a proposed bound against.
-    def test_a_gate_holds_for_the_control_by_construction_or_is_a_question(self):
+    def test_a_gate_whose_bound_nobody_measured_is_a_question(self):
         flat = render(planner())[1]
-        self.assertIn("Its `bound` must hold for the unchanged control by construction", flat)
         self.assertIn("A bound that depends on a number nobody has measured is no gate yet: leave it out and put it in `questions`", flat)
-
-    # A planner whose proposal was not valid YAML believed a refused propose was costly, tried
-    # to validate the file with tools its machine does not have, and sent it blind. The next one
-    # spent six commands installing a parser for a file hl had already refused.
-    def test_a_refused_propose_is_fixed_and_sent_again(self):
-        flat = render(planner())[1]
-        self.assertIn("`hl` checks the YAML and names the line: install no parser", flat)
-        self.assertIn("A refused propose stores nothing: fix what it names and send it again", flat)
-        # A list item that opened with a quoted phrase was refused: `did not find expected '-'`.
-        self.assertIn("Every free-text value is a `|` block, a list item too (`- |`): unquoted text breaks on a colon or a leading quote", flat)
 
     # A goal the planner could not plan left a draft that closed with nothing said. And work for
     # a CPU has a budget that reads as CPU core-hours.
     def test_the_planner_declines_with_a_reason_and_sizes_cpu_work_in_cores(self):
         flat = render(planner())[1]
-        self.assertIn('Decline with `hl platform-experiments decline --reason "..."`', flat)
-        self.assertIn("takes the type whose `kind` is cpu; its budget is CPU core-hours", flat)
+        self.assertIn("decline with `hl platform-experiments decline`", flat)
+        self.assertIn("The budget of the type whose `kind` is cpu is CPU core-hours", flat)
+
+    # The help of propose and of decline, listed in the briefing, gives the shape of the file,
+    # how a free-text value is written, that a refusal names the line and stores nothing, and
+    # what a reason says.
+    def test_the_briefing_leaves_to_the_help_of_propose_what_it_says(self):
+        flat = render(planner())[1]
+        for said_there in ("--help", "parser", "`|` block", "A refused propose", "measured: not yet established", "out_of_scope"):
+            self.assertNotIn(said_there, flat)
 
 
 class BaselinePromptTest(unittest.TestCase):
@@ -125,17 +121,15 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 5_500)
+        self.assertLess(len(prompt.encode()), 4_250)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
     def test_its_code_goes_to_the_experiments_repository(self):
         flat = render(baseline_agent())[1]
         self.assertIn("Where it is kept: run `git clone https://github.com/acme/model.git .` in /agent/workspace, the directory you start in", flat)
-        self.assertIn("Work on branch `hl/pe-1/baseline`: run exactly `git checkout -b hl/pe-1/baseline` once", flat)
-        self.assertIn("Submit only when `hl repo check` passes: the submit pushes the branch", flat)
+        self.assertIn("Work on branch `hl/pe-1/baseline` (`git checkout -b` it once): `hl job submit` pushes it", flat)
         self.assertNotIn("push and submit", flat)
-        self.assertIn("submit from your clone with `code_ref` left empty: hl pins the pushed HEAD", flat)
         # What a researcher is told of the others' branches is not true of the agent that
         # starts the code.
         for absent in ("{", "====", "hl hypothesis checkout", "ag-baseline`"):
@@ -147,28 +141,24 @@ class BaselinePromptTest(unittest.TestCase):
     # A repository that is ready and fits runs as it is.
     def test_it_makes_the_repository_ready_from_the_template_or_runs_one_that_is(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("never commit to the default branch", flat)
         self.assertIn("Run `hl repo init` in the clone before you write anything", flat)
         self.assertIn("keeps every file it holds", flat)
-        self.assertIn("The job.yaml is the shape of a job spec and the one you fill in and submit: write no other, and read no sample", flat)
-        self.assertIn("Submit only when `hl repo check` passes", flat)
+        self.assertIn("The job.yaml it gives is the one you fill in and submit, once `hl repo check` passes", flat)
         self.assertIn("Only a harness that already measures these metrics on this config runs unchanged: go to 3", flat)
         # `hl repo check` passed a repository whose files described a compression benchmark,
         # straight after `hl repo init` had kept all three.
         self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
-                      "make all three match this experiment's definition before the baseline job", flat)
-        self.assertIn("`hl job submit .hypothesisloop/job.yaml` with `--estimated-duration-hours` your guess", flat)
+                      "make all of them match this experiment's definition before the baseline job", flat)
+        self.assertIn("`hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H a generous guess", flat)
         # The repository template supplies the helper, so no briefing sends an agent to the samples.
         self.assertNotIn("$WORKLOAD_SAMPLES", flat)
-        self.assertIn("`.hypothesisloop/job.yaml`, `metrics.py` and `.gitignore` where missing", flat)
-        self.assertIn("once more at the end with the `post_metric` of the repository's `metrics.py`: write no other", flat)
+        self.assertIn("once more at the end with the `post_metric` of the repository's `metrics.py`", flat)
 
     # The control was a root hypothesis that stayed open to the end, and in one run the parent
-    # of every other: the baseline is the objective's own.
+    # of every other: the baseline is the objective's own, and a submit that names one is
+    # refused with that.
     def test_the_baseline_takes_no_hypothesis(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("The baseline is the objective's own and takes no hypothesis and no theory: "
-                      "naming or registering one is refused", flat)
         self.assertNotIn("--hypothesis", flat)
         self.assertNotIn("--theory", flat)
 
@@ -176,14 +166,12 @@ class BaselinePromptTest(unittest.TestCase):
     # a second time only to carry a corrected one: 2 to 4 of their 16 to 18 minutes.
     def test_the_baseline_runs_once_on_a_guessed_estimate(self):
         flat = render(baseline_agent())[1]
-        self.assertIn("`--estimated-duration-hours` your guess, the committed file unedited", flat)
         # The baseline left "--estimated-duration-hours H" in the job spec's header, so both
         # researchers stated estimates of two and six times the measured one, which never applied.
         # Told that the file states none, one committed `estimated_duration_hours: 0.06`, and
-        # every researcher's job carried it in place of the measured one.
-        self.assertIn("Write no estimate into the file, or every researcher's job carries it: nothing is measured yet, so guess generously", flat)
+        # every researcher's job carried it in place of the measured one: no submit refuses it.
+        self.assertIn("Write no estimate into the file, or every researcher's job carries it", flat)
         self.assertIn("the `--env` that vary it, and no estimate: theirs is measured on your job", flat)
-        self.assertIn("Never run a good baseline a second time", flat)
 
     # Six agents once blocked in `hl watch` for a whole job, and none had a session to resume.
     def test_waiting_for_the_baseline_is_ending_the_turn(self):
@@ -202,16 +190,12 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("has its cause in `hl job logs ID`: fix it, commit and submit again, as often as you know a fix", flat)
         self.assertIn("once you can say why no baseline is possible: one failure came back three times through your fixes, "
                       "or a job stays queued with `capacity_unavailable` or `no_cluster_for_image`", flat)
-        self.assertIn("the coordinator is sent it and acts on it. Never finish with a fix not yet run", flat)
+        self.assertIn("the coordinator is sent it and acts on it", flat)
         self.assertNotIn("three jobs failed", flat)
 
-    # `pip install` went to a site the agent's python3 did not read, and an image went by a
-    # word no cluster knew: one way each is said.
-    def test_it_is_told_how_to_install_on_its_machine_and_in_a_job(self):
-        flat = render(baseline_agent())[1]
-        self.assertIn("On this machine `pip install X` and `uv pip install X` install where `python3` reads", flat)
-        self.assertIn("What the image does not carry it installs with `uv pip install X`", flat)
-        self.assertIn("`image` a job image name of `hl capacity` or a full address: any other word is refused", flat)
+    def test_it_is_told_how_a_job_gets_its_code_and_what_the_image_lacks(self):
+        self.assertIn("Its `command` runs the commit you submit from, `dir=$(hl-clone) && cd \"$dir\" && ...`, and installs what "
+                      "the image does not carry with `uv pip install X`", render(baseline_agent())[1])
 
     # One spent twelve minutes proving a GPU harness on its own machine: a three-minute timeout,
     # four slow reruns on CPU and two failed installs of torch.
@@ -221,9 +205,8 @@ class BaselinePromptTest(unittest.TestCase):
 
     # A baseline agent stopped at the close answered its last turn with a finish, which the
     # platform refuses: the close had ended its run.
-    def test_a_refusal_for_a_closed_experiment_ends_the_turn(self):
+    def test_a_refusal_for_a_closed_experiment_ends_the_last_turn(self):
         from hypothesisloop_agent.claude import run
-        self.assertIn("`experiment_closed` is final: end your turn", render(baseline_agent())[1])
         self.assertIn("A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing", run._SHUTDOWN_PROMPT)
 
     # hl once said an agent's next step on stderr beside the record. The record's
@@ -233,12 +216,14 @@ class BaselinePromptTest(unittest.TestCase):
         for cfg in (planner(), baseline_agent()):
             self.assertNotIn("2>&1", render(cfg)[0])
 
-    # A chip job that left its storage out was given a share of the node's disk and waited to
-    # the run's end for room the disk never had, and one that left out cpu and memory held a
-    # whole node. A submit without any of the three is now refused.
-    def test_every_job_states_its_cpu_memory_and_storage_and_takes_no_whole_node(self):
-        self.assertIn("Every job states `cpu`, `memory` and `storage` for what it needs, small enough that other jobs fit beside it, "
-                      "never a whole node: one left out is refused", render(baseline_agent())[1])
+    # A chip job that left out cpu and memory held a whole node. A submit without one of the
+    # three, or with a share of the node for one, is refused with the field: how much to state
+    # is the agent's to judge.
+    def test_the_job_spec_is_sized_to_what_the_job_uses(self):
+        flat = render(baseline_agent())[1]
+        self.assertIn("`cpu`, `memory` and `storage` sized to what the job uses, so that other jobs fit beside it", flat)
+        for said_there in ("--help", "is refused", "experiment_closed", "pip install X` and", "default branch"):
+            self.assertNotIn(said_there, flat)
 
 
 class RunEndedTest(unittest.TestCase):

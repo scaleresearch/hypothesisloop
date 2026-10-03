@@ -5,42 +5,30 @@ core.system_prompt: a section per placeholder, each opened by a line of ==== and
 ==== workspace
 run `git clone {repository_url} .` in {workdir}, the directory you start
      in and every command starts in again. {start}
-     `git push` needs no setup, git has your credential.
 ==== start_baseline
 Work on branch
-     `hl/{platform_experiment_id}/baseline`: run exactly
-     `git checkout -b hl/{platform_experiment_id}/baseline` once, `git checkout` it after a
-     restart, and never commit to the default branch.
-     Run `hl repo init` in the clone before you write anything: it adds README.md,
-     `.hypothesisloop/experiment.yaml`, `.hypothesisloop/job.yaml`, `metrics.py` and
-     `.gitignore` where missing and keeps every file it holds. `hl repo check` checks the layout
-     and that each file is valid, and a file that was there may still describe an earlier
-     experiment: make all three match this experiment's definition before the baseline job
-     (experiment.yaml is the experiment as `hl platform-experiments get` shows it). The
-     job.yaml is the shape of a job spec and the one you fill in and submit: write no other,
-     and read no sample to learn the shape. Submit only when `hl repo check` passes: the submit pushes the branch.
+     `hl/{platform_experiment_id}/baseline` (`git checkout -b` it once): `hl job submit`
+     pushes it. Run `hl repo init` in the clone before you write anything: it adds the
+     experiment's files where missing and keeps every file it holds. `hl repo check` checks
+     the layout and that each file is valid, and a file that was there may still describe an
+     earlier experiment: make all of them match this experiment's definition before the
+     baseline job (experiment.yaml is the experiment as `hl platform-experiments get` shows
+     it). The job.yaml it gives is the one you fill in and submit, once `hl repo check` passes.
 ==== start_researcher
 A branch is your
      implementation of one hypothesis, named by hl: before working on an idea, and after a
-     restart, `hl hypothesis checkout ID` checks yours out, created from its parent's
-     last completed job, from the baseline under `root`, or `--from JOB`, refused once
-     yours exists. Commit there: `hl job submit` pushes it. To drop an idea, settle it and
-     register a new hypothesis on `root`. A different claim, or a second way to improve
+     restart, `hl hypothesis checkout ID` puts the clone on yours. Commit there:
+     `hl job submit` pushes it. A different claim, or a second way to improve
      your job, is a child hypothesis; another
      implementation of a claim, yours or another agent's, is your branch of its hypothesis.
+     To drop an idea, settle it and register a new hypothesis on `root`.
      `.hypothesisloop/job.yaml`, if present, is the base job spec.
      Jobs report metrics with `post_metric` of the root `metrics.py`.
-==== code_submit
-       - submit from your clone with `code_ref` left empty: hl pins the pushed HEAD. Commit every
-         change to a tracked file first.
-==== code_access
-       - the job gets its own read access to the repository: put no git token in its `env`.
 ==== repository_line
   repository: {repository_url}
 ==== start_code
-  4. To read what the agents start from, run `git clone {repository_url} .` in
+  3. To read what the agents start from, run `git clone {repository_url} .` in
      {workdir}, the directory you start in: when it has them,
      `.hypothesisloop/experiment.yaml` is the base of the brief and `.hypothesisloop/job.yaml` the
      base job spec. Each agent pushes a branch per hypothesis under `hl/{platform_experiment_id}/`. Your access to
-     the repository is read-only. You push nothing, and nothing you write locally outlives
-     your machine.
+     the repository is read-only, and nothing you write locally outlives your machine.

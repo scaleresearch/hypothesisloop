@@ -153,8 +153,17 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
             f"room for a job of {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
-            f"or {q['remaining_burst_accelerator_hours']:.3g} burst")})
+            f"or {q['remaining_burst_accelerator_hours']:.3g} burst" + _next_stage(q))})
     return events
+
+
+def _next_stage(quota: dict) -> str:
+    """What a later stage raises the share to, and when: a researcher finished with its share
+    spent three minutes before the next stage more than doubled it."""
+    if "next_stage_starts_at" not in quota:
+        return ""
+    return (f", and the share rises to {quota['next_stage_share_accelerator_hours']:.3g} AccH "
+            f"by {quota['next_stage_starts_at']}")
 
 
 # When the first poll of an outage failed. An agent refused by a platform that could not be
