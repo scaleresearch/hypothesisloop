@@ -318,6 +318,9 @@ const (
 	// compute waits for. Neither ends it.
 	PhaseReasonWaitingForOffer  = "waiting_for_offer"
 	PhaseReasonInstanceStarting = "instance_starting"
+	// PhaseReasonInstanceUnknown: the job's rented machine is listed and its provider does not
+	// say whether the job runs on it, as when the host is unreachable. It ends nothing.
+	PhaseReasonInstanceUnknown = "instance_unknown"
 )
 
 // ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: hl-clone ends with
