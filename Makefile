@@ -376,7 +376,7 @@ chart-push: check-tag
 # signs people in (controlplane/build/Dockerfile.ui), so all three are required here and have no
 # default. All three are public values. The helm chart's UI Deployment runs this image.
 # Usage: make ui-image REGISTRY=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS
 check-ui-build-args:
 	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make ui-image: $(arg) is required (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
 

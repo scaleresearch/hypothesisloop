@@ -5,16 +5,18 @@ WORKDIR /ui
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
-# Next.js compiles NEXT_PUBLIC_* into the browser bundle, so the API address the browser calls
-# and the Supabase project that signs people in are fixed here and cannot be changed when the
-# container starts. None has a default: an image built without one answers with an error that
-# names it.
+# Next.js compiles NEXT_PUBLIC_* into the browser bundle, so the API address the browser calls,
+# the Supabase project that signs people in and the sign-in providers the login page offers are
+# fixed here and cannot be changed when the container starts. None has a default: an image built
+# without one answers with an error that names it.
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_SIGN_IN_PROVIDERS
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
-    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+    NEXT_PUBLIC_SIGN_IN_PROVIDERS=$NEXT_PUBLIC_SIGN_IN_PROVIDERS
 RUN npm run build
 
 # What the image runs with: the production packages, of which Next.js's compiler is a binary per
