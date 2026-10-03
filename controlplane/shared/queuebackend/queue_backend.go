@@ -60,9 +60,21 @@ var _ workload.Backend = (*Backend)(nil)
 func (b *Backend) CreateWorkload(_ context.Context, _ *domain.Experiment) error { return nil }
 
 // PollJobPhase reads the latest fresh phase metric pushed by the cluster agent. found=false means
-// the cluster has no status snapshot inside the liveness window.
+// the cluster has no status snapshot inside the liveness window, or none since exp was admitted.
+//
+// A snapshot taken before submitted_at is of the admission before this one: a job requeued and
+// claimed again between two snapshots was read as ended by the report that requeued it. A stored
+// phase names no attempt, and one could not tell the two apart anyway, since a preempted job
+// keeps its attempt. The window is cut to whole seconds, so it never reaches back past the claim.
 func (b *Backend) PollJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
-	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, b.connectedWithin)
+	if exp.SubmittedAt == nil {
+		return workload.JobPhasePending, false, fmt.Errorf("queuebackend: experiment %s has no submission time to read its phase against", exp.ID)
+	}
+	window := min(b.connectedWithin, time.Since(*exp.SubmittedAt).Truncate(time.Second))
+	if window <= 0 {
+		return workload.JobPhasePending, false, nil
+	}
+	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, window)
 }
 
 // PollPhaseDetail reads the runtime's latest reported explanation for why exp's container

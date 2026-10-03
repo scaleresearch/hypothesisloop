@@ -3,6 +3,8 @@ package queuebackend
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +127,36 @@ func TestANodesFreeAcceleratorsAreKeyedInLowerCase(t *testing.T) {
 	}
 	if free := got["cluster-a"]["node-b"]; len(free) != 1 || free["tenstorrent.com/chiparch=blackhole"] != 3 {
 		t.Errorf("node-b = %v, want both reports counted as one type", free)
+	}
+}
+
+// A job preempted and claimed again between two status snapshots was read as ended by the
+// snapshot that held the end of the admission before: the watcher marked the new one RUNNING and
+// then FAILED. A phase is read only from a snapshot taken since the job was claimed.
+func TestAJobsPhaseIsReadOnlyFromSnapshotsSinceItWasClaimed(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("sql"))
+		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[20,3,20]]}}]}`))
+	}))
+	defer server.Close()
+	b := &Backend{metricsDBURL: server.URL, connectedWithin: time.Minute}
+	claimed := func(ago time.Duration) *domain.Experiment {
+		at := time.Now().Add(-ago)
+		return &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a", SubmittedAt: &at}
+	}
+
+	if _, found, err := b.PollJobPhase(context.Background(), claimed(500*time.Millisecond)); err != nil || found || len(queries) != 0 {
+		t.Fatalf("claimed half a second ago: found %v, err %v, %d queries, want no phase and no read of an older snapshot", found, err, len(queries))
+	}
+	if _, found, err := b.PollJobPhase(context.Background(), claimed(5500*time.Millisecond)); err != nil || !found || !strings.Contains(queries[0], "INTERVAL '5 seconds'") {
+		t.Fatalf("claimed 5.5s ago: found %v, err %v, query %q, want the snapshots of the last 5 seconds", found, err, queries)
+	}
+	if _, found, err := b.PollJobPhase(context.Background(), claimed(time.Hour)); err != nil || !found || !strings.Contains(queries[1], "INTERVAL '60 seconds'") {
+		t.Fatalf("claimed an hour ago: found %v, err %v, query %q, want the liveness window", found, err, queries)
+	}
+	if _, _, err := b.PollJobPhase(context.Background(), &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a"}); err == nil {
+		t.Fatal("a job with no submission time was given a phase")
 	}
 }
 
