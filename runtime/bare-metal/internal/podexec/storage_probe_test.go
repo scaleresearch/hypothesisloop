@@ -17,7 +17,7 @@ import (
 // probedEngine creates containers unless told to refuse a size or every create, and keeps count
 // of what it holds.
 type probedEngine struct {
-	refusesSize, refusesAll bool
+	refusesSize, refusesAll, keepsImages bool
 	// containerdStore is Docker with the containerd image store, whose containers have no graph driver.
 	containerdStore    bool
 	images, containers map[string]bool
@@ -30,6 +30,9 @@ func (e *probedEngine) ImageImport(_ context.Context, _ client.ImageImportSource
 }
 
 func (e *probedEngine) ImageRemove(_ context.Context, ref string, _ client.ImageRemoveOptions) (client.ImageRemoveResult, error) {
+	if e.keepsImages {
+		return client.ImageRemoveResult{}, errors.New("image is being used")
+	}
 	delete(e.images, ref)
 	return client.ImageRemoveResult{}, nil
 }
@@ -96,6 +99,16 @@ func TestStorageIsEnforcedOnlyWhenTheEngineTakesAContainerWithASize(t *testing.T
 		if !tc.fails && (len(engine.sizes) != 2 || engine.sizes[0] != "" || engine.sizes[1] != probeSize) {
 			t.Errorf("%s: containers were created with sizes %q, want one without and one with a size", name, engine.sizes)
 		}
+	}
+}
+
+// The probe runs at every start of the agent. An image it could not remove was left with
+// nothing said, one more each time.
+func TestAProbeImageTheEngineKeepsFailsTheProbeAndIsNamed(t *testing.T) {
+	engine := probedEngine{keepsImages: true, images: map[string]bool{}, containers: map[string]bool{}}
+	enforced, _, err := probeStorageQuota(context.Background(), &engine)
+	if err == nil || enforced || !strings.Contains(err.Error(), "hypothesisloop-storage-probe:") || !strings.Contains(err.Error(), "image is being used") {
+		t.Fatalf("enforced = %v, err = %v, want the image left behind named with what the engine said", enforced, err)
 	}
 }
 

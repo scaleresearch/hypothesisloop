@@ -62,7 +62,12 @@ func probeStorageQuota(ctx context.Context, engine storageProber) (enforced bool
 			return false, "", fmt.Errorf("podexec: storage probe: import an empty image: %s", said.Error)
 		}
 	}
-	defer engine.ImageRemove(ctx, image, client.ImageRemoveOptions{Force: true})
+	// An image that stays is one more on the node with every start of the agent.
+	defer func() {
+		if _, removeErr := engine.ImageRemove(ctx, image, client.ImageRemoveOptions{Force: true}); removeErr != nil && err == nil {
+			enforced, why, err = false, "", fmt.Errorf("podexec: storage probe: remove the probe image %s: %w", image, removeErr)
+		}
+	}()
 
 	create := func(storageOpt map[string]string) (made container.InspectResponse, refusal, err error) {
 		created, err := engine.ContainerCreate(ctx, client.ContainerCreateOptions{
