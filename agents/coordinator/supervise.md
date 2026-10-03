@@ -62,13 +62,10 @@ and restart clean — but log why in `$FINDINGS_FILE` first. Keep in mind these 
 The `BASELINE` block in the live description (`setup.md` step 2, `experiment-checklist.md` item 1)
 is the thing to watch, not a number you hold in your head.
 
-- Still `not yet established` once the first jobs have completed is a blocker, not a note: queue
-  the baseline run now, concurrently, not once things are quiet. Check for an in-flight or
-  completed one first so you don't duplicate it.
-- When a baseline job completes, fill the block in the same turn — `metric:` with the value it
-  reported, `measured:` with that experiment's id, `code_ref:` with the commit it actually ran —
-  then `PUT` the refreshed description and diff it back, exactly as below. A baseline sitting
-  measured-but-unpublished is worth nothing to the agents being ranked against it.
+- When the baseline job completes, declare it in the same turn:
+  `hl platform-experiments update --baseline-job JOB`. The platform writes the job, its
+  `code_ref` and what it measured into the description, and the answer says whether the run
+  started. A baseline sitting measured and undeclared starts nothing.
 - If a later run makes the block wrong (the pin moved, the config changed), that is a description
   edit like any other and follows the same same-turn sync rule.
 

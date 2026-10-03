@@ -190,7 +190,7 @@ hl platform-experiments agents finish --reason "..."       # an agent with nothi
 hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close;
                                                            # `coordinator` or `planner` in place of the id for theirs
 hl platform-experiments list                               # yours and the ones the platform shares with every account, one line each
-hl platform-experiments update --description-file brief.md --baseline-job job-1  # declare the baseline; the platform then starts the run
+hl platform-experiments update --baseline-job job-1  # declare the baseline: the platform writes it into the brief and starts the run
 hl quota                                                   # your share of the budget and what a job submitted now may still hold of it;
                                                            # 404 quota_not_granted before the start, with what to do next
 hl results                                                 # standings on the declared metrics
@@ -248,8 +248,8 @@ A platform experiment begins one of two ways, and both end in the same run:
 
 Either way it is `open` after that and nothing runs. Its owner adds the researchers
 (`hl platform-experiments agents add`, `--hosted` to have the platform run each), a baseline
-agent measures the control, the coordinator declares that job as the baseline, and the platform
-starts the run within a minute of the declaration. Nobody starts it by hand. `max_agents` is how
+agent measures the control, the coordinator declares that job as the baseline, and the
+declaration starts the run. Nobody starts it by hand. `max_agents` is how
 many researchers may join over the whole run: one that finished or was cut still counts, and
 baseline agents, the planner and the coordinator never do. Lowering it below the researchers
 that joined is refused (409 `max_agents_below_researchers`). An agent is named by its role and
@@ -293,19 +293,21 @@ created the experiment whole. While it is `open`:
    as it is when the files fit this experiment, measures the control with one real job and
    files what it measured. Its jobs are the only ones an open experiment accepts, and no
    researcher's machine is rented until the run starts.
-3. The baseline is declared: `hl platform-experiments update --description-file FILE
-   --baseline-job JOB`, where the brief's `BASELINE` block names the job and its `code_ref`. A
-   hosted coordinator does it. An owner without one runs the same command with their own token.
+3. The baseline is declared: `hl platform-experiments update --baseline-job JOB`. The platform
+   writes the job, its `code_ref` and what it measured into the brief. A hosted coordinator
+   does it. An owner without one runs the same command with their own token.
 
 The platform checks the job (completed, by a baseline agent of this experiment, with a finding,
-reporting every metric, holding every gate, named in the brief's `BASELINE` block) and stores
+reporting every metric, holding every gate) and stores
 the estimate of one trial: the hours the job was observed running plus a half
 (`job_estimated_duration_hours`). The budget must hold a trial at that estimate for each
 researcher (`budget_below_baseline`). A job that states no `estimated_duration_hours` gets that one,
-so the committed job spec states none and only the baseline job is submitted with a guess.
+so the committed job spec states none, and the baseline job is given the largest its agent's
+quota admits.
 
-The platform starts the run within a minute once the baseline is declared, a researcher has
-joined and `starts_at`, when the experiment states one, has passed. The run lasts
+The declaration starts the run in the same request once a researcher has joined and
+`starts_at`, when the experiment states one, has passed; otherwise the request that adds the
+researcher starts it, or `starts_at` does. The run lasts
 `duration_hours` from `started_at`, and `ends_at` is the two added, absent until then. While it
 is `open` the experiment says in `status_reason` what the start waits for (`baseline_required`,
 `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
@@ -444,9 +446,7 @@ queued, and its owner decides whether to wait, cancel it or ask for less. Every 
 `occurred_at`, when its change was made.
 
 A job is read by one value per declared metric (`metrics` in `hl job list` and
-`hl job status`): a ranking metric counts at its best value in its direction across what the job
-reported, a constraint and an attribute at their last. So a ranking metric is reported as a
-result, never as a running timer.
+`hl job status`), the last it reported: a job's final report on a metric is its result.
 
 `job` is the platform's own resource DSL, never a raw cluster manifest. `metadata` is the research bookkeeping (which hypothesis this tests, the reproducibility pointers, billing tier) that has nothing to do with how the job executes.
 

@@ -80,11 +80,11 @@ declared, and an experiment still `open` at its `baseline_due_at` is closed. Whi
 
   - A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: if the
     cause is in the brief (an image, a type, a config that cannot run), fix the brief.
-  - `agent.finished` after a COMPLETED job: fill the brief's `BASELINE` block from the job
-    (`hl job list --agent ID`, `hl job status ID`) with `code_ref:`, `metric:` key = value,
-    `measured:` the job id, and how to run a trial from its summary, and declare it.
-  - Once declared, `status_reason` reads `starting` or what the start waits for: a
-    researcher it lacks you add.
+  - `agent.finished` after a COMPLETED job (`hl job list --agent ID`): declare it,
+    `hl platform-experiments update --baseline-job JOB`. The platform writes it into the
+    brief and answers whether the run started.
+  - Not started, `status_reason` says what the start waits for: a researcher it lacks you
+    add. `agents_starting` is a started run whose machines boot: wait.
   - `agent.finished` with the reason no baseline is possible: repair what the brief can and
     add another baseline agent. What only the owner can repair, or a job that stays queued
     as under Jobs above, goes first in the summary, and you close.

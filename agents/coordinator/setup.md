@@ -241,9 +241,8 @@ agent and declare its job, as the baseline item below says, and supervise with `
   different reference), the job must set a non-`"raw"` `metric_basis` on that value — never
   leave it as `"raw"` and rely on someone noticing the number looks off. A wrongly-"raw" value is
   how a rescaled metric quietly wins a ranking it actually lost.
-- A job is read by one value per metric: a ranking metric counts at its best value in its
-  direction across what the job reported, a constraint and an attribute at their last. So the
-  harness reports a ranking metric as a result, never as a running timer.
+- A job is read by one value per metric, the last it reported: a job's final report on a
+  metric is its result.
 - `report_interval_seconds` = the cadence the harness actually reports at.
 - `stages` (optional; omit = the control plane config's `stages.default`, 40%/75%-cut then 60%/0%): `length_pct` sums
   to 100, last stage's `evict_pct` = 0, `max_job_hours` caps a stage's job length (0/absent =
@@ -277,20 +276,22 @@ agent and declare its job, as the baseline item below says, and supervise with `
 - **The baseline is measured and declared before the experiment starts, and the platform holds
   you to it.** The `BASELINE` block lives inside the `EXPERIMENT DESCRIPTION` block you just
   posted (see item 1 of
-  `agents/coordinator/experiments/template/experiment-checklist.md` for its four
-  lines) and says
-  `measured: not yet established` at the create. While the experiment is `open`:
+  `agents/coordinator/experiments/template/experiment-checklist.md`) and states the control's
+  config and how to run a trial. While the experiment is `open`:
   1. add one agent with `hl platform-experiments agents add --role baseline` (`--hosted` to have
      the platform run it). It holds a quota at once, its jobs are the only ones an open
      experiment accepts, it does not count against `max_agents`, and it takes no share at the
      start;
   2. it runs the repository's job spec, files the job's summary and finishes;
-  3. fill the block (`code_ref:`, `metric:`, `measured:` the job's id) and declare it:
-     `hl platform-experiments update --description-file FILE --baseline-job JOB`. A refusal
-     names what does not hold: the job, the brief, a gate the baseline breaks, or a budget that
-     does not cover one such trial for each of `max_agents`.
-  A hosted coordinator does steps 1 and 3 itself. Without one you do them. The platform starts
-  the run within a minute of a valid declaration, and an experiment not running by its
+  3. declare the job: `hl platform-experiments update --baseline-job JOB`. The platform writes
+     the job, its `code_ref` and what it measured into the description and keeps that block
+     through later updates. A refusal names what does not hold: the job, a gate the baseline
+     breaks, or a budget that does not cover one such trial for each of `max_agents`.
+  A hosted coordinator does steps 1 and 3 itself. Without one you do them. The declaration
+  starts the run in that request when a researcher has joined, and its answer says whether it
+  did: `status_reason` names what an open one still waits for, and reads `agents_starting`
+  (status `running`, no `started_at` yet, `agents_due_at` given) while the researchers'
+  machines come up, a state to wait through. An experiment not running by its
   `baseline_due_at` (`planning.baseline_limit_minutes`, 90, after it was created or after its
   `starts_at`) is closed (`baseline_limit_reached`).
 - Add every researcher (step 4) before the baseline is declared. Agents join only while the

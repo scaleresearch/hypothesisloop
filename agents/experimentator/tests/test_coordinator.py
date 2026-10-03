@@ -84,7 +84,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 7_480)
+        self.assertLess(len(prompt.encode()), 7_476)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
     # that only its own baseline agent could bring. The `status_reason` of an open experiment
@@ -95,7 +95,14 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("The run's duration counts from the start the platform gives it once a valid baseline is declared, "
                       "and an experiment still `open` at its `baseline_due_at` is closed", flat)
         # One wrote "proceeding" of a declared baseline whose run had no researcher to start for.
-        self.assertIn("Once declared, `status_reason` reads `starting` or what the start waits for: a researcher it lacks you add", flat)
+        self.assertIn("Not started, `status_reason` says what the start waits for: a researcher it lacks you add", flat)
+        # One copied the job's code_ref into the brief by hand, got it wrong and waited. The
+        # declaration is the job alone, and a started run whose machines are coming up is waited through.
+        self.assertIn("declare it, `hl platform-experiments update --baseline-job JOB`. The platform writes it into the brief "
+                      "and answers whether the run started", flat)
+        self.assertIn("`agents_starting` is a started run whose machines boot: wait", flat)
+        for filled_by_no_coordinator in ("`code_ref:`", "`measured:`", "`BASELINE` block"):
+            self.assertNotIn(filled_by_no_coordinator, flat)
         self.assertNotIn("starts_at", flat)
 
     # One removed the owner's researcher to "match max_agents" and cancelled the baseline
