@@ -40,9 +40,42 @@ type summaryReply struct {
 
 // submitRequest is the wire shape for POST /experiments.
 type submitRequest struct {
-	ID       string         `json:"id"`
+	ID       string         `json:"id,omitempty" required:"false" doc:"Left out: the platform issues the job's id and answers it."`
 	Metadata submitMeta     `json:"metadata"`
 	Job      domain.JobSpec `json:"job"`
+}
+
+// jobIDPrefix starts the id of every job the platform issues (docs/api-conventions.md).
+const jobIDPrefix = "job"
+
+// newJob is the job a request states, under the id the platform issues for it.
+func newJob(req submitRequest, meta submitMeta, actor domain.Actor) (*domain.Experiment, error) {
+	id := req.ID
+	if id == "" {
+		var err error
+		if id, err = domain.NewID(jobIDPrefix); err != nil {
+			return nil, err
+		}
+	}
+	return &domain.Experiment{
+		ID:                     id,
+		ParentID:               meta.ParentID,
+		AgentID:                meta.AgentID,
+		Actor:                  actor,
+		PlatformExperimentID:   meta.PlatformExperimentID,
+		CodeRef:                meta.CodeRef,
+		Branch:                 meta.Branch,
+		ConfigHash:             meta.ConfigHash,
+		DataRef:                meta.DataRef,
+		Job:                    req.Job,
+		HypothesisID:           meta.HypothesisID,
+		Hypothesis:             meta.Hypothesis,
+		Theory:                 meta.Theory,
+		AcceleratorType:        primaryAcceleratorType(req.Job),
+		AcceleratorCount:       req.Job.TotalAccelerators(),
+		EstimatedDurationHours: meta.EstimatedDurationHours,
+		CapacityTier:           meta.CapacityTier,
+	}, nil
 }
 
 // submitMeta is the metadata of a job as a request states it. The two ids an agent's token
@@ -62,7 +95,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
-		Description: "Submit {id, metadata, job}. AcceleratorType/count are derived from the job spec. " +
+		Description: "Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. " +
 			"metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. " +
 			"An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. " +
 			"metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 estimate_required where it measured none. " +
@@ -81,9 +114,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"and, when it was submitted after a COMPLETED job of yours ended, while that job has no summary (not_admitted_reason summary_gate, with the jobs owed and the command that files one in not_admitted_message, and a job.held event at once). A job already queued when another of yours completes is not held by it: jobs submitted together run in parallel. Every not_admitted_reason comes with its sentence in not_admitted_message.",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 		req := in.Body
-		if req.ID == "" {
-			return nil, huma.Error400BadRequest("experiment id is required")
-		}
 		meta := req.Metadata
 		var err error
 		if meta.PlatformExperimentID, meta.AgentID, err = access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
@@ -93,36 +123,21 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if !ok {
 			return nil, auth.Internal(h.svc.logger, "submit experiment", errNoCaller)
 		}
-		exp := domain.Experiment{
-			ID:                     req.ID,
-			ParentID:               meta.ParentID,
-			AgentID:                meta.AgentID,
-			Actor:                  caller.Actor(),
-			PlatformExperimentID:   meta.PlatformExperimentID,
-			CodeRef:                meta.CodeRef,
-			Branch:                 meta.Branch,
-			ConfigHash:             meta.ConfigHash,
-			DataRef:                meta.DataRef,
-			Job:                    req.Job,
-			HypothesisID:           meta.HypothesisID,
-			Hypothesis:             meta.Hypothesis,
-			Theory:                 meta.Theory,
-			AcceleratorType:        primaryAcceleratorType(req.Job),
-			AcceleratorCount:       req.Job.TotalAccelerators(),
-			EstimatedDurationHours: meta.EstimatedDurationHours,
-			CapacityTier:           meta.CapacityTier,
+		exp, err := newJob(req, meta, caller.Actor())
+		if err != nil {
+			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
-		if err := h.svc.Submit(ctx, &exp); err != nil {
+		if err := h.svc.Submit(ctx, exp); err != nil {
 			var admErr *AdmissionError
 			if errors.As(err, &admErr) {
 				return nil, api.Refuse(admissionHTTPStatus(admErr.Reason), admErr.Reason, admErr.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
-		if err := h.svc.NameJobs(ctx, &exp); err != nil {
+		if err := h.svc.NameJobs(ctx, exp); err != nil {
 			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
-		return &struct{ Body *domain.Experiment }{Body: &exp}, nil
+		return &struct{ Body *domain.Experiment }{Body: exp}, nil
 	})
 
 	// Every GET /experiments page is bounded the same way the agent, hypothesis and

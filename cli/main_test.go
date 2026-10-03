@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -191,8 +190,9 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	if !ok || metadata["agent_id"] != "jane" || metadata["platform_experiment_id"] != "pe-env" {
 		t.Fatalf("agent_id and platform_experiment_id not stamped onto metadata: %+v", gotBody)
 	}
-	if id, _ := gotBody["id"].(string); !regexp.MustCompile(`^job-[0-9a-f]{12}$`).MatchString(id) {
-		t.Fatalf("empty id not generated: got %q", gotBody["id"])
+	// The platform issues the id, and hl prints the one in the answer.
+	if id, sent := gotBody["id"]; sent {
+		t.Fatalf("hl sent an id of its own: %q", id)
 	}
 }
 
@@ -284,29 +284,6 @@ func TestJobSubmitHeldForSummariesStaysOneAcceptedLineWhenTheLookupFails(t *test
 	want := "hl: job submit: accepted; it starts once each of your COMPLETED jobs has a summary: hl job list --needs-summary --agent jane lists them\n"
 	if code != 0 || stderr.String() != want {
 		t.Fatalf("exit %d, stderr = %q, want exit 0 and %q", code, stderr.String(), want)
-	}
-}
-
-func TestJobSubmitKeepsExplicitID(t *testing.T) {
-	var gotBody map[string]any
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "mine"})
-	})
-	setAPIURL(t, url)
-	dir := t.TempDir()
-	t.Chdir(dir)
-	jobFile := dir + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("id: mine\nmetadata:\n  code_ref: repo@abc\njob:\n  image: foo:latest\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if gotBody["id"] != "mine" {
-		t.Fatalf("explicit id replaced: got %q", gotBody["id"])
 	}
 }
 

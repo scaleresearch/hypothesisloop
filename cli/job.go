@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
@@ -37,9 +35,10 @@ var jobCommands = []subcommand{
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...]
 
-FILE is a YAML job spec: id, metadata, job. The flags override it for this one submission, so
+FILE is a YAML job spec: metadata, job. The flags override it for this one submission, so
 one committed base spec serves every job that differs only in its hypothesis, env, estimate and
-tier, with nothing to edit and nothing to commit. Prints the accepted job's id, status,
+tier, with nothing to edit and nothing to commit. Prints the accepted job's id, which the
+platform issues, status,
 code_ref, branch, capacity_tier and its estimate as applied: estimated_duration_hours, and
 estimated_cost_acch, what those hours hold of your quota; hl job status ID has the rest.
 A job holds its estimated_cost_acch of your quota from submit until it ends, then only what it
@@ -59,7 +58,7 @@ idle, with what it asks for and what each cluster has;
 experiment_not_started before the platform starts the run, when only a baseline agent's job is
 taken (status_reason of hl platform-experiments get says what the start waits for and what you
 do until then); experiment_closed after the experiment's end.
-An empty id is generated. metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
+metadata.hypothesis_id is REQUIRED (from the file or --hypothesis):
 every job tests a registered hypothesis (see 'hl hypothesis submit'), yours or anyone's: a
 hypothesis and a branch are two things, and any agent may run its own implementation of any.
 metadata.theory is REQUIRED (from the file or --theory): what you predict this job will show.
@@ -134,9 +133,6 @@ agents/coordinator/experiments.`, stderr)
 	metadata, _ := body["metadata"].(map[string]any)
 	if metadata == nil {
 		metadata = map[string]any{}
-	}
-	if v := body["id"]; v == nil || v == "" {
-		body["id"] = "job-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	}
 	for key, value := range overrides {
 		if *value != "" {
