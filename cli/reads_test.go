@@ -18,8 +18,7 @@ func TestQuota(t *testing.T) {
 		}
 		return row
 	})
-	t.Setenv("AGENT_ID", "a")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/a"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -43,8 +42,7 @@ func TestQuotaPrintsWhenTheNextStageStartsAndWhatTheShareBecomes(t *testing.T) {
 		return map[string]any{"id": "q", "agent_id": "a", "platform_experiment_id": "pe-1", "share_accelerator_hours": 0.4,
 			"remaining_guaranteed_accelerator_hours": 0, "next_stage_starts_at": "2026-10-06T22:00:00Z", "next_stage_share_accelerator_hours": 1.2}
 	})
-	t.Setenv("AGENT_ID", "a")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/a"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -68,7 +66,7 @@ func TestResultsFlattensStandings(t *testing.T) {
 		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",
 			"standings": []any{map[string]any{"rank": 1, "agent_id": "a", "best": 0.9, "env": map[string]any{"LR": "0.3"}}, map[string]any{"rank": 2, "agent_id": "b", "best": 0.8}}}}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"results"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -87,7 +85,7 @@ func TestResultsWithNoStandingYetIsAnAnswer(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"status": "running", "metrics": []any{map[string]any{"metric": "images_per_sec", "direction": "maximize", "standings": []any{}}}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"results"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.String() != "hl: no results yet on images_per_sec\n" {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
@@ -215,7 +213,7 @@ func TestJobStatsAndListDefaultToThePlatformExperiment(t *testing.T) {
 		}
 		return map[string]any{"total": 3, "by_status": map[string]any{"COMPLETED": 3}, "evictions_by_reason": map[string]any{}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"job", "stats", "--agent", "a"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -269,7 +267,7 @@ func TestEveryCommandThatPrintsAJobHasItsEnvUnderJob(t *testing.T) {
 		return map[string]any{"metrics": []any{map[string]any{"metric": "acc", "direction": "maximize",
 			"standings": []any{map[string]any{"rank": 1, "experiment_id": "job-1", "env": map[string]any{"LR": "0.3"}}}}}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
 	for _, command := range [][]string{{"job", "status", "job-1"}, {"job", "list"}, {"results"}, {"hypothesis", "get", "hyp-1"}, {"hypothesis", "get", "hyp-1", "--full"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(command, &stdout, &stderr); code != 0 {

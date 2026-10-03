@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/base64"
 	"errors"
-	"os"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -48,30 +47,24 @@ func kindOf(token string) callerKind {
 }
 
 // experimentOf is the platform experiment a command works in: the one its flag names, else the
-// one an agent's or a coordinator's token is bound to, else $PLATFORM_EXPERIMENT_ID.
+// one an agent's or a coordinator's token is bound to. Nothing else names one: a variable left in
+// an environment once named another's.
 func experimentOf(c *apiclient.Client, flagValue string) string {
 	if flagValue != "" {
 		return flagValue
 	}
-	if _, pe, _ := scopeOf(c.Token); pe != "" {
-		return pe
-	}
-	return os.Getenv(platformExperimentEnv)
+	_, pe, _ := scopeOf(c.Token)
+	return pe
 }
 
 // agentOf is the agent a command is about: the one its flag names, else the agent an agent's
-// token is, else $AGENT_ID. A coordinator is no agent, so $AGENT_ID is not read for it.
+// token is, else none.
 func agentOf(c *apiclient.Client, flagValue string) string {
-	kind, _, agent := scopeOf(c.Token)
-	switch {
-	case flagValue != "":
+	if flagValue != "" {
 		return flagValue
-	case kind == callerAgent:
-		return agent
-	case kind == callerCoordinator:
-		return ""
 	}
-	return os.Getenv(agentEnv)
+	_, _, agent := scopeOf(c.Token)
+	return agent
 }
 
 // callers says whose token runs a command. Every command's is stated in the table that lists it
@@ -124,7 +117,7 @@ var errCoordinatorActsAsNoAgent = errors.New("this acts as an agent, and HL_TOKE
 	"A hypothesis, a link or a comment it writes as itself, without --agent")
 
 // recordOwner is the agent whose hypothesis, link, comment or verdict a command writes: the one
-// --agent names, else the agent an agent's token is, else $AGENT_ID, else none. With none the
+// --agent names, else the agent an agent's token is, else none. With none the
 // record is the caller's own and no agent's. A coordinator writes as itself only: it acts for no
 // agent, so naming one is refused.
 func recordOwner(c *apiclient.Client, flagValue string) (string, error) {

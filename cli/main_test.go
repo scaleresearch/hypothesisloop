@@ -173,10 +173,8 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n  image: foo:latest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
-
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"job", "submit", "--agent", "jane", jobFile}, &stdout, &stderr)
+	code := run([]string{"job", "submit", "--agent", "jane", "--platform-experiment", "pe-env", jobFile}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -276,7 +274,6 @@ func TestJobSubmitBadYAML(t *testing.T) {
 
 func TestIDIsPositionalOrFlag(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "x", "status": "QUEUED"} })
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	for _, tc := range []struct {
 		args []string
 		path string
@@ -291,7 +288,6 @@ func TestIDIsPositionalOrFlag(t *testing.T) {
 		{[]string{"hypothesis", "comment", "--agent", "a", "--id", "h-1", "--text", "t"}, "/hypotheses/h-1/comments"},
 		{[]string{"hypothesis", "link", "h-1", "--agent", "a", "--type", "related", "--to", "h-2"}, "/hypotheses/h-1/links"},
 		{[]string{"platform-experiments", "get", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1"},
-		{[]string{"platform-experiments", "get"}, "/platform-experiments/pe-env"},
 		{[]string{"platform-experiments", "close", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/close"},
 		{[]string{"results", "--platform-experiment", "pe-1"}, "/platform-experiments/pe-1/results"},
 	} {
@@ -608,71 +604,29 @@ func TestThereIsNoStartCommand(t *testing.T) {
 	}
 }
 
-func TestIdentityFlagsDefaultToEnv(t *testing.T) {
-	got := recordingServer(t, func(_ int, r recorded) any {
-		if r.Method == "GET" {
-			return []any{}
-		}
-		return map[string]any{"id": "x"}
-	})
+// AGENT_ID and PLATFORM_EXPERIMENT_ID once stood in for the flags. A token that names neither
+// leaves both to the flags, whatever an environment still holds.
+func TestATokenThatNamesNoAgentOrExperimentLeavesBothToTheFlags(t *testing.T) {
+	got := recordingServer(t, func(int, recorded) any { return nil })
 	t.Setenv("AGENT_ID", "agent-env")
 	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	dir := t.TempDir()
 	t.Chdir(dir)
-	jobFile := dir + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n  image: foo\n"), 0o644); err != nil {
+	if err := os.WriteFile(dir+"/job.yaml", []byte("metadata:\n  code_ref: repo@abc\n  hypothesis_id: hyp-1\njob:\n  image: foo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	for _, tc := range []struct {
-		args      []string
-		path      string
-		agent, pe string
-	}{
-		{[]string{"hypothesis", "submit", "--text", "t", "--builds-on", "root"}, "/hypotheses", "agent-env", "pe-env"},
-		{[]string{"hypothesis", "submit", "--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "root"}, "/hypotheses", "jane", "pe-1"},
-		{[]string{"hypothesis", "link", "--from", "h-2", "--type", "related", "--to", "h-1"}, "/hypotheses/h-2/links", "agent-env", ""},
-		{[]string{"hypothesis", "comment", "--text", "t", "h-1"}, "/hypotheses/h-1/comments", "agent-env", ""},
-		{[]string{"hypothesis", "status", "--status", "refuted", "h-1"}, "/hypotheses/h-1/status", "agent-env", ""},
-	} {
-		*got = nil
-		var stdout, stderr bytes.Buffer
-		if code := run(tc.args, &stdout, &stderr); code != 0 {
-			t.Fatalf("%v: exit %d, stderr %s", tc.args, code, stderr.String())
-		}
-		body := (*got)[0].Body
-		if (*got)[0].Path != tc.path || body["agent_id"] != tc.agent || (tc.pe != "" && body["platform_experiment_id"] != tc.pe) {
-			t.Fatalf("%v: request = %+v", tc.args, (*got)[0])
-		}
-	}
-
-	*got = nil
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"job", "submit", jobFile}, &stdout, &stderr); code != 0 {
-		t.Fatalf("job submit: exit %d, stderr %s", code, stderr.String())
-	}
-	if metadata, _ := (*got)[0].Body["metadata"].(map[string]any); metadata["agent_id"] != "agent-env" {
-		t.Fatalf("job submit body = %+v", (*got)[0].Body)
-	}
-
-	*got = nil
-	if code := run([]string{"hypothesis", "list"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("hypothesis list: exit %d, stderr %s", code, stderr.String())
-	}
-	if (*got)[0].Query != "platform_experiment_id=pe-env" {
-		t.Fatalf("hypothesis list query = %q", (*got)[0].Query)
-	}
-}
-
-func TestIdentityFlagsRequiredWithoutEnv(t *testing.T) {
-	got := recordingServer(t, func(int, recorded) any { return nil })
-	t.Setenv("AGENT_ID", "")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
 		{"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
-		{"hypothesis", "comment", "h-1"},
 		{"hypothesis", "list"},
+		{"hypothesis", "query", "RETURN 1"},
 		{"job", "submit", "job.yaml"},
+		{"quota"},
+		{"quota", "--agent", "jane"},
+		{"results"},
+		{"data-key"},
+		{"platform-experiments", "get"},
+		{"platform-experiments", "agents", "list"},
+		{"platform-experiments", "agents", "finish", "--reason", "r", "--platform-experiment", "pe-1"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
@@ -684,16 +638,18 @@ func TestIdentityFlagsRequiredWithoutEnv(t *testing.T) {
 	}
 }
 
-func TestWatchScopeDefaultsToEnvOnlyWithoutExperiment(t *testing.T) {
+// A watch is of what the token says unless a flag says otherwise. The job id a job's container
+// holds was once read as --experiment, which turned an agent's own updates into one job's.
+func TestWatchScopeDefaultsToTheTokenOnlyWithoutExperiment(t *testing.T) {
 	var queries []string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		queries = append(queries, r.URL.RawQuery)
 		http.Error(w, `{"error":"refused"}`, http.StatusBadRequest)
 	})
 	setAPIURL(t, url)
-	t.Setenv("HYPOTHESISLOOP_EXPERIMENT_ID", "")
-	t.Setenv("AGENT_ID", "agent-env")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/agent-env"))
+	t.Setenv("HL_STATE_DIR", t.TempDir())
+	t.Setenv("HYPOTHESISLOOP_EXPERIMENT_ID", "job-stale")
 
 	for _, tc := range []struct {
 		args []string
@@ -791,7 +747,6 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 		}
 		return []any{}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
 	for _, tc := range []struct {
 		args []string
 		code int
@@ -801,7 +756,7 @@ func TestGuessedFormsPointToTheCommand(t *testing.T) {
 		{[]string{"hypothesis", "query", "RETURN 1", "--params", `{"pe":"pe-1"}`}, 2, "--param k=v"},
 		{[]string{"hypothesis", "links", "--help"}, 2, "hl hypothesis link"},
 		{[]string{"job", "summary", "job-1"}, 2, "hl job status job-1 prints it as summary"},
-		{[]string{"results"}, 0, "no results yet on val_accuracy"},
+		{[]string{"results", "--platform-experiment", "pe-1"}, 0, "no results yet on val_accuracy"},
 		{[]string{"capacity", "--platform-experiment", "pe-1"}, 2, "hl: capacity: takes no --platform-experiment"},
 		{[]string{"hypothesis", "get", "h-1", "--platform-experiment", "pe-1"}, 2, "hl: hypothesis get: takes no --platform-experiment"},
 		{[]string{"job", "metrics", "job-1", "--points"}, 0, "no metric reported yet"},
@@ -828,8 +783,7 @@ func TestDataKeyPrintsTheJobVariablesAsExportLines(t *testing.T) {
 		})
 	})
 	setAPIURL(t, url)
-	t.Setenv("AGENT_ID", "bot-1")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/bot-1"))
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"data-key"}, &stdout, &stderr); code != 0 {
@@ -852,8 +806,7 @@ export HYPOTHESISLOOP_DATA_SHARED='s3://hl-data/pe-1/'
 }
 
 func TestDataKeyNeedsAnAgentAndAPlatformExperiment(t *testing.T) {
-	t.Setenv("AGENT_ID", "")
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
+	t.Setenv("HL_TOKEN", "hlk_x")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"data-key"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "usage: hl data-key") {
 		t.Fatalf("exit %d, stderr %q, want 2 and the usage", code, stderr.String())
@@ -862,8 +815,7 @@ func TestDataKeyNeedsAnAgentAndAPlatformExperiment(t *testing.T) {
 
 func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return []any{map[string]any{"kind": "agent.finished"}} })
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-	t.Setenv("AGENT_ID", "agent-a")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/agent-a"))
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"watch", "--wake", "agent.finished,agent.finnished"}, &stdout, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), `"agent.finnished" is no event kind`) || len(*got) != 1 || (*got)[0].Path != "/watch/kinds" {

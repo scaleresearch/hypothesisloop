@@ -388,7 +388,6 @@ func TestHypothesisQuery(t *testing.T) {
 	})
 	cypher := "MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id}) RETURN c.id AS id, c.text AS text, 3 AS n"
 	var stdout, stderr bytes.Buffer
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	code := run([]string{"hypothesis", "query", cypher, "--param", "id=hyp-0", "--param", "q=a=b", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -410,9 +409,8 @@ func TestHypothesisQueryTruncatedWarnsOnStderr(t *testing.T) {
 	recordingServer(t, func(int, recorded) any {
 		return map[string]any{"columns": []string{"id"}, "rows": [][]any{{"a"}, {"b"}}, "truncated": true}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id AS id"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"hypothesis", "query", "MATCH (h:Hypothesis) RETURN h.id AS id", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	if len(lines(stdout.String())) != 2 || !strings.Contains(stderr.String(), "truncated at 2 rows") {
@@ -434,7 +432,7 @@ func TestHypothesisQueryFromStdin(t *testing.T) {
 	_, _ = w.WriteString("MATCH (n) RETURN count(n)\n")
 	w.Close()
 
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"hypothesis", "query", "--param", "x=1", "-"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -446,7 +444,6 @@ func TestHypothesisQueryFromStdin(t *testing.T) {
 
 func TestHypothesisQueryUsageErrors(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
 		{},
 		{"MATCH (n) RETURN n"},

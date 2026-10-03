@@ -35,9 +35,8 @@ func TestAgentsAddSendsOnlyWhatWasAsked(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
 		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "token": "hls_x"}}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "agents", "add"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-env"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	request := (*got)[0]
@@ -74,7 +73,6 @@ func TestAgentsAddJoinsARegisteredAgent(t *testing.T) {
 
 func TestAgentsAddRefusesWhatTheServerWouldBeforeSending(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return nil })
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "")
 	for _, args := range [][]string{
 		{"pe-1", "--quota-tier", "vip"},
 		{"pe-1", "--hyperparameters", "not json"},
@@ -104,7 +102,6 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		}
 		return map[string]any{"agents": []map[string]any{}}
 	})
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"platform-experiments", "agents", "remove", "--platform-experiment", "pe-1", "ag-1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("remove: exit %d, stderr %s", code, stderr.String())
@@ -118,9 +115,9 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		}
 	}
 
-	*got = nil
+	// An agent's token says who finishes and where; a person names both.
 	stderr.Reset()
-	t.Setenv("AGENT_ID", "ag-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	*got = nil
 	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("finish: exit %d, stderr %s", code, stderr.String())
@@ -131,8 +128,13 @@ func TestAgentsRemoveAndList(t *testing.T) {
 	if code := run([]string{"platform-experiments", "agents", "finish"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
 		t.Errorf("finish without a reason: exit %d with %d requests, want 2 and no further one", code, len(*got))
 	}
+	t.Setenv("HL_TOKEN", "test-token")
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent"}, &stdout, &stderr); code != 2 || len(*got) != 1 {
+		t.Errorf("finish by a person naming no agent: exit %d with %d requests, want 2 and no further one", code, len(*got))
+	}
 	*got = nil
-	if code := run([]string{"platform-experiments", "agents", "list"}, &stdout, &stderr); code != 0 {
+	stderr.Reset()
+	if code := run([]string{"platform-experiments", "agents", "list", "--platform-experiment", "pe-env"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("list: exit %d, stderr %s", code, stderr.String())
 	}
 	if r := (*got)[0]; r.Method != "GET" || r.Path != "/platform-experiments/pe-env/agents" {

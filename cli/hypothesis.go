@@ -57,8 +57,8 @@ mean a combination. While your text reads close to hypotheses it does not build 
 --builds-on target is refuted, nothing is registered and the reply lists them: test the one you meant under its id, or
 resubmit naming each with --contradicts or --distinct-from.
 
-Who registered it is whoever HL_TOKEN is, and nothing you write names them. --agent (default
-$AGENT_ID) says whose hypothesis it is: an agent's token registers its own, and a person or an
+Who registered it is whoever HL_TOKEN is, and nothing you write names them. --agent says whose
+hypothesis it is: an agent's token registers its own, and a person or an
 API key names an agent to register for it, or names none for a hypothesis no agent owns.
 
 FILE shape:
@@ -97,8 +97,8 @@ func cmdHypothesis(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 
 func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("hypothesis submit", submitUsage, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis it is (default the token's agent or $AGENT_ID, else the caller's own)")
-	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	agent := fs.String("agent", "", "agent whose hypothesis it is (default the token's agent, else the caller's own)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	text := fs.String("text", "", "hypothesis text")
 	file := fs.String("file", "", "YAML file of one hypothesis, or a hypotheses: list of them (see --help)")
 	var buildsOn, contradicts, related, distinctFrom idList
@@ -408,7 +408,7 @@ func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer
 Adds one link from your own hypothesis ID (--from ID works too), or from one no agent owns.
 Links are append-only. Prints the updated outgoing links. A person or an API key linking from
 an agent's hypothesis names that agent with --agent, and is kept as who made the link.`, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent or $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent, else the caller's own)")
 	typ := fs.String("type", "", "builds_on, contradicts or related")
 	to := fs.String("to", "", "hypothesis id the link points at")
 	from, err := parseOne(fs, args, "ID", "", "id", "from")
@@ -445,7 +445,7 @@ func hypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Wri
 A note on any hypothesis with no job behind it: a verified fact, a dead end, a revision. It is
 written by whoever HL_TOKEN is. An agent's token writes its own agent's note; a person or an
 API key writes their own, or an agent's with --agent.`, stderr)
-	agent := fs.String("agent", "", "agent whose note it is (default the token's agent or $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose note it is (default the token's agent, else the caller's own)")
 	text := fs.String("text", "", "the note")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {
@@ -484,7 +484,7 @@ the same job without your change), and the hypothesis has two completed jobs of 
 it. One run with no measured control is inconclusive. When the record cannot show what you know
 (a failure that needs no repeat, a control measured outside this experiment), --despite takes a
 sentence of why the verdict holds anyway. What a verdict rests on is kept as a comment.`, stderr)
-	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent or $AGENT_ID, else the caller's own)")
+	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent, else the caller's own)")
 	status := fs.String("status", "", "")
 	against := fs.String("against", "", "the control job a confirmed or refuted verdict compares with")
 	despite := fs.String("despite", "", "why a confirmed or refuted verdict holds without a repeated run and a control")
@@ -529,7 +529,7 @@ func hypothesisList(c *apiclient.Client, args []string, stdout, stderr io.Writer
 Most recent first, one JSON object per line with builds_on, child_count, finding_count and
 comment_count. For structure or text search use 'hl hypothesis query'. The branches a
 hypothesis was run on are in hl hypothesis get ID, as implementations.`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
 	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")
@@ -684,7 +684,7 @@ func hypothesisQuery(c *apiclient.Client, args []string, stdout, stderr io.Write
    or: hl hypothesis query - [--param k=v ...]   (query read from stdin)
 
 Read-only Cypher over one platform experiment's hypothesis graph (default
-$PLATFORM_EXPERIMENT_ID), bound as $pe; writes are discarded: use submit/link. Prints a
+the token's), bound as $pe; writes are discarded: use submit/link. Prints a
 JSON object per row keyed by column, 200 rows max.
 
 A query reads that platform experiment and nothing else: the platform ties every node,
@@ -739,7 +739,7 @@ Examples:
   by job count, untested first:
   hl hypothesis query 'MATCH (h:Hypothesis)
     RETURN h.id, h.text, coalesce($evidence[h.id].jobs, 0) AS n ORDER BY n'`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment whose graph is read, bound as $pe (default the token's)")
 	var params stringList
 	fs.Var(&params, "param", "k=v, bound as $k (string value; repeatable)")
 	paramsJSON := fs.String("params", "", "")
@@ -766,7 +766,7 @@ Examples:
 	}
 	*pe = experimentOf(c, *pe)
 	if *pe == "" {
-		return parseExit(misuse(fs, "--platform-experiment is required (or set PLATFORM_EXPERIMENT_ID)"))
+		return parseExit(misuse(fs, "--platform-experiment is required: HL_TOKEN names none"))
 	}
 	bound := map[string]any{}
 	for _, p := range params {
@@ -881,7 +881,7 @@ register one that builds on it.
 Prints one JSON object: branch, and base, the commit a branch it created starts from. Refused
 with the reason when there is nothing to start from (no baseline is declared yet), and when
 --from is given for a branch that exists. hl job submit pushes the branch.`, stderr)
-	agent := fs.String("agent", "", "whose branch it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
+	agent := fs.String("agent", "", "whose branch it is, for a person or an API key; an agent's token says it")
 	from := fs.String("from", "", "create the branch from the commit this `job` ran")
 	id, err := parseOne(fs, args, "ID", "", "id")
 	if err != nil {

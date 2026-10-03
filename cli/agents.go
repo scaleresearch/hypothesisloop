@@ -150,7 +150,7 @@ completed job without its summary (work_unfinished). Once the platform experimen
 answer is experiment_closed: your run is over already and nothing is left to finish, so end
 your turn. It cannot be taken back.`, stderr)
 	named := experimentFlag(fs)
-	agent := fs.String("agent", "", "agent id (default the token's, else $AGENT_ID)")
+	agent := fs.String("agent", "", "the agent that finishes, for a person or an API key; an agent's token says it")
 	reason := fs.String("reason", "", "why nothing is left to do")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
@@ -159,7 +159,7 @@ your turn. It cannot be taken back.`, stderr)
 		return parseExit(misuse(fs, "want --reason"))
 	}
 	if *agent = agentOf(c, *agent); *agent == "" {
-		return parseExit(misuse(fs, "want --agent: HL_TOKEN names none and $"+agentEnv+" is not set"))
+		return parseExit(misuse(fs, "want --agent: HL_TOKEN is no agent's token, so say which agent finishes"))
 	}
 	pe, err := namedExperiment(fs, c, *named)
 	if err != nil {

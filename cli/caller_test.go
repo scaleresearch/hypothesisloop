@@ -69,14 +69,12 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	for name, args := range graphWrites {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
 		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-		t.Setenv("AGENT_ID", "left-over")
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
 			t.Fatalf("%s as itself: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
 		}
 		if _, named := (*got)[0].Body["agent_id"]; named {
-			t.Errorf("%s as itself: body = %v, want no agent named, the one left in the environment included", name, (*got)[0].Body)
+			t.Errorf("%s as itself: body = %v, want no agent named", name, (*got)[0].Body)
 		}
 	}
 	commands := map[string][]string{}
@@ -87,8 +85,6 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 		for _, named := range [][]string{nil, {"--agent", "ag-7"}} {
 			got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
 			t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-			t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-			t.Setenv("AGENT_ID", "left-over")
 			var stdout, stderr bytes.Buffer
 			if code := run(append(append([]string{}, args...), named...), &stdout, &stderr); code != 1 || len(*got) != 0 {
 				t.Errorf("%s %v: exit %d with %d requests, want 1 and none. stderr: %s", name, named, code, len(*got), stderr.String())
@@ -101,7 +97,6 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 	for name, args := range graphWrites {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
 		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-		t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
 		var stdout, stderr bytes.Buffer
 		if code := run(append(append([]string{}, args...), "--agent", "ag-7"), &stdout, &stderr); code != 1 || len(*got) != 0 {
 			t.Errorf("%s for an agent: exit %d with %d requests, want 1 and none. stderr: %s", name, code, len(*got), stderr.String())
@@ -113,7 +108,8 @@ func TestACoordinatorIsRefusedEveryCommandThatActsAsAnAgent(t *testing.T) {
 }
 
 // With no agent named, a write to the hypothesis graph is the caller's own: the agent an agent's
-// token is, whatever its environment says, and for a person or a key with none there no agent.
+// token is, and for a person or a key no agent. Nothing in the environment names either: AGENT_ID
+// and PLATFORM_EXPERIMENT_ID were read once, and one left over from another run named its agent.
 func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
 	commands := map[string][]string{
 		"hypothesis submit":  {"hypothesis", "submit", "--text", "t", "--builds-on", "root"},
@@ -121,12 +117,15 @@ func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
 		"hypothesis comment": {"hypothesis", "comment", "hyp-1", "--text", "t"},
 		"hypothesis status":  {"hypothesis", "status", "hyp-1", "inconclusive"},
 	}
-	for token, env := range map[string][2]string{derivedToken("agent:pe-1/ag-1"): {"pe-stale", "ag-stale"}, "hlk_an-api-key": {"pe-1", ""}} {
+	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-stale")
+	t.Setenv("AGENT_ID", "ag-stale")
+	for _, token := range []string{derivedToken("agent:pe-1/ag-1"), "hlk_an-api-key"} {
 		for name, args := range commands {
 			got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-9"} })
 			t.Setenv("HL_TOKEN", token)
-			t.Setenv("PLATFORM_EXPERIMENT_ID", env[0])
-			t.Setenv("AGENT_ID", env[1])
+			if token == "hlk_an-api-key" && name == "hypothesis submit" {
+				args = append(append([]string{}, args...), "--platform-experiment", "pe-1")
+			}
 			var stdout, stderr bytes.Buffer
 			if code := run(args, &stdout, &stderr); code != 0 || len(*got) != 1 {
 				t.Fatalf("%s: exit %d with %d requests, want 0 and one. stderr: %s", name, code, len(*got), stderr.String())
@@ -148,26 +147,9 @@ func TestAGraphWriteNamingNoAgentIsTheCallersOwn(t *testing.T) {
 	}
 }
 
-func TestAnAgentAndAPersonStillWriteAsTheAgentInTheEnvironment(t *testing.T) {
-	for _, token := range []string{derivedToken("agent:pe-1/ag-1"), "hlk_an-api-key"} {
-		got := recordingServer(t, func(int, recorded) any { return map[string]any{} })
-		t.Setenv("HL_TOKEN", token)
-		t.Setenv("AGENT_ID", "ag-1")
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"hypothesis", "comment", "hyp-1", "--text", "t"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("exit %d, stderr %s", code, stderr.String())
-		}
-		if body := (*got)[0].Body; body["agent_id"] != "ag-1" {
-			t.Fatalf("body = %v", body)
-		}
-	}
-}
-
 func TestACoordinatorReadsTheWholeExperimentWhereAnAgentReadsItsOwn(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return []any{} })
 	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
-	t.Setenv("AGENT_ID", "")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"quota"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
@@ -183,9 +165,6 @@ func TestACoordinatorReadsTheWholeExperimentWhereAnAgentReadsItsOwn(t *testing.T
 func TestCloseAndSummaryAreWhatACoordinatorEndsARunWith(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "ok"} })
 	t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
-	// The token says which experiment it coordinates, whatever the environment holds.
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-stale")
-	t.Setenv("AGENT_ID", "")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"platform-experiments", "summary", "--text", "what was found"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("summary: exit %d, stderr %s", code, stderr.String())
@@ -279,9 +258,7 @@ func TestARequestRefusedForItsShapeIsOneLineNamingTheFields(t *testing.T) {
 
 func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
-	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1:ag-1"))
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-env")
-	t.Setenv("AGENT_ID", "ag-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	var stdout, stderr bytes.Buffer
 	file := writeFile(t, "experiment:\n  name: n\n  metrics:\n    - {key: val_loss, direction: minimize}\nbudget_accelerator_hours: 6\nagents:\n  - flavor: generalist\n  - {}\nmetric_reason: r\n")
 	if code := run([]string{"platform-experiments", "propose", file}, &stdout, &stderr); code != 0 {
@@ -313,7 +290,6 @@ func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 // A coordinator that declared a baseline polled for a minute to learn whether the run had
 // started. The declaration starts the run or says what it still waits for, and hl prints which.
 func TestDeclaringABaselineSaysWhetherTheRunStarted(t *testing.T) {
-	t.Setenv("PLATFORM_EXPERIMENT_ID", "pe-1")
 	for want, answer := range map[string]map[string]any{
 		"hl: platform-experiments update: the baseline is declared and the run started (agents_starting): no researcher's machine is running yet\n": {
 			"id": "pe-1", "status": "running", "status_reason": map[string]any{"reason": "agents_starting", "message": "no researcher's machine is running yet"}},
@@ -321,6 +297,7 @@ func TestDeclaringABaselineSaysWhetherTheRunStarted(t *testing.T) {
 			"id": "pe-1", "status": "open", "status_reason": map[string]any{"reason": "no_researchers", "message": "add a researcher"}},
 	} {
 		recordingServer(t, func(int, recorded) any { return answer })
+		t.Setenv("HL_TOKEN", derivedToken("coordinator:pe-1"))
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{"platform-experiments", "update", "--baseline-job", "job-1"}, &stdout, &stderr); code != 0 || stderr.String() != want || !strings.Contains(stdout.String(), `"pe-1"`) {
 			t.Errorf("exit %d, stdout %q, stderr %q\nwant stderr %q", code, stdout.String(), stderr.String(), want)

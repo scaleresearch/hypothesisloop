@@ -22,9 +22,6 @@
 // elsewhere. Its --hypothesis and --env flags override, for one submission, the fields that change
 // per job. YAML rather than JSON because a human is meant to write and edit this file by hand.
 //
-// --agent and --platform-experiment default to $AGENT_ID and $PLATFORM_EXPERIMENT_ID, which the
-// experimentator harness sets in an agent's container.
-//
 //	hl platform-experiments agents add --platform-experiment pe-123 --hosted --flavor generalist
 //	hl platform-experiments agents add --platform-experiment pe-123 --agent jane --quota-tier guaranteed
 //	hl hypothesis submit --agent jane --platform-experiment pe-123 --text "..." --builds-on root
@@ -138,9 +135,9 @@ An ID is positional; --id ID works too. The platform experiment is never an oper
 given the ID of a job or a hypothesis takes no --platform-experiment, since an ID is unique on
 the platform; every other command that works in a platform experiment takes it. --agent and
 --platform-experiment default to what the token names, an agent's its agent and platform
-experiment and a coordinator's its platform experiment, so neither writes them, and for
-another token to $AGENT_ID and $PLATFORM_EXPERIMENT_ID. Where --agent filters a list it
-has no default: write the id out.`
+experiment and a coordinator's its platform experiment, so neither writes them. A person or
+an API key writes both out: no environment variable names either. Where --agent filters a
+list it has no default: write the id out.`
 
 const usageOfPeople = ` --org defaults to $HL_ORG and
 then to the one org the token reaches, --project to $HL_PROJECT. hl job --help, hl hypothesis
@@ -218,10 +215,8 @@ func runGroup(group string, subs []subcommand, c *apiclient.Client, args []strin
 }
 
 const (
-	agentEnv              = "AGENT_ID"
-	platformExperimentEnv = "PLATFORM_EXPERIMENT_ID"
-	orgEnv                = "HL_ORG"
-	projectEnv            = "HL_PROJECT"
+	orgEnv     = "HL_ORG"
+	projectEnv = "HL_PROJECT"
 )
 
 // orEnv is a flag's value, or the named environment variable when the flag was omitted.
@@ -454,7 +449,7 @@ func parseOne(fs *flagSet, argv []string, what, def string, aliases ...string) (
 // experimentFlag registers --platform-experiment, the one way a command names its platform
 // experiment. It is never an operand and has no shorter spelling.
 func experimentFlag(fs *flagSet) *string {
-	return fs.String("platform-experiment", "", "the platform experiment (default the token's, else $"+platformExperimentEnv+")")
+	return fs.String("platform-experiment", "", "the platform experiment (default the token's)")
 }
 
 // namedExperiment is the platform experiment a command works in (see experimentOf), or a misuse
@@ -463,7 +458,7 @@ func namedExperiment(fs *flagSet, c *apiclient.Client, flagValue string) (string
 	if id := experimentOf(c, flagValue); id != "" {
 		return id, nil
 	}
-	return "", misuse(fs, "want --platform-experiment: HL_TOKEN names none and $"+platformExperimentEnv+" is not set")
+	return "", misuse(fs, "want --platform-experiment: HL_TOKEN names none")
 }
 
 // parseExit is the exit code for a parse error: 0 for an explicit -h or --help, else 2.
@@ -591,8 +586,8 @@ Your own S3 key to the platform experiment's data, as export lines: eval "$(hl d
 It reads everything under $HYPOTHESISLOOP_DATA_SHARED and writes under $HYPOTHESISLOOP_DATA_URI,
 where your jobs write. The same key every time; it does not expire. Any S3 client works:
   uvx --from awscli aws s3 ls "$HYPOTHESISLOOP_DATA_SHARED"`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment id (default $PLATFORM_EXPERIMENT_ID)")
-	agent := fs.String("agent", "", "agent id (default $AGENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
+	agent := fs.String("agent", "", "whose key it is, for a person or an API key; an agent's token says it")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -1204,7 +1199,7 @@ func cmdWatch(client *apiclient.Client, args []string, stdout, stderr io.Writer)
 	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
-Prints events, one JSON object per line. With an agent's token or $AGENT_ID and no --experiment
+Prints events, one JSON object per line. With an agent's token or --agent and no --experiment
 or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.
 occurred_at is when the change was made, in UTC, the same on an event that happens while you
 watch and on one replayed from before the watch. A change from before the platform kept the
@@ -1213,9 +1208,9 @@ A job that waits is told as experiment.blocked and as job.held: at once when it 
 after a COMPLETED job of yours ended that has no summary (summary_gate), and for any other reason once, when it has waited longer than its
 estimate. value is the code of what it waits for (not_admitted_reason), detail the sentence
 (not_admitted_message).`, stderr)
-	experiment := fs.String("experiment", os.Getenv("HYPOTHESISLOOP_EXPERIMENT_ID"), "watch every event of one job (domain.Experiment id)")
-	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default $PLATFORM_EXPERIMENT_ID unless --experiment is set)")
-	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default $AGENT_ID unless --experiment or --all is set)")
+	experiment := fs.String("experiment", "", "watch every event of one job (domain.Experiment id)")
+	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default the token's unless --experiment is set)")
+	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, and others' comments, findings and links on its hypotheses (default the token's agent unless --experiment or --all is set)")
 	all := fs.Bool("all", false, "watch the whole platform experiment instead of one agent's resources")
 	decisions := fs.Bool("decisions", false, "with --all, leave out what needs no decision: a job being queued, admitted or started, and a queue reason that waiting clears")
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")

@@ -108,11 +108,11 @@ reference, and whole jobs to read before writing one: each sample's seed/ is a w
 reports its metrics and its .hypothesisloop/job.yaml the spec that runs it. In the repository
 the reference is under controlplane/settings/examples and the samples under
 agents/coordinator/experiments.`, stderr)
-	agent := fs.String("agent", "", "whose job it is, for a person or an API key (default $AGENT_ID); an agent's token says it")
+	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),
 		"theory":                 fs.String("theory", "", "sets metadata.theory"),
-		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's or $PLATFORM_EXPERIMENT_ID)"),
+		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's)"),
 		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
 	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
@@ -426,7 +426,7 @@ alone). A job's env is under job.env in everything hl prints of a job, as in the
 API: here, in hl job status, hl hypothesis get and hl results. hl job status ID
 prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	agent := fs.String("agent", "", "only this agent's jobs; omit to see every agent's")
-	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	status := fs.String("status", "", "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
 	needsSummary := fs.Bool("needs-summary", false, "only COMPLETED jobs still missing a summary, the set that holds back the jobs submitted after they ended")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
@@ -680,7 +680,7 @@ func jobStats(c *apiclient.Client, args []string, stdout, stderr io.Writer) int 
 
 Counts over every matching job: by status, capacity tier, eviction reason and eviction class
 (workload is yours, infrastructure the environment's, policy the platform's own decision).`, stderr)
-	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	agent := fs.String("agent", "", "only this agent's jobs")
 	hypothesis := fs.String("hypothesis", "", "only jobs testing this hypothesis")
 	if err := fs.Parse(args); err != nil {

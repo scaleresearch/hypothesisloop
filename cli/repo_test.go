@@ -50,7 +50,7 @@ func cloneOf(t *testing.T, experiment string) string {
 		}
 		_, _ = io.WriteString(w, experiment)
 	}))
-	t.Setenv(platformExperimentEnv, "pe-1")
+	t.Setenv("HL_TOKEN", derivedToken("agent:pe-1/ag-1"))
 	clone := t.TempDir()
 	mustGit(t, clone, "init", "-q")
 	t.Chdir(clone)

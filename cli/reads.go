@@ -35,9 +35,9 @@ data_quota_exceeded until some is deleted.
 Quota is granted when the platform experiment starts. Before that an agent that holds none
 is answered 404 quota_not_granted: hl prints the platform's word for what the start waits for
 and what you do until then, the same as status_reason of hl platform-experiments get, and exits 1.`, stderr)
-	agent := fs.String("agent", "", "agent (default the token's agent, else $AGENT_ID)")
+	agent := fs.String("agent", "", "agent (default the token's agent)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
-	pe := fs.String("platform-experiment", "", "platform experiment (default the token's, else $PLATFORM_EXPERIMENT_ID)")
+	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
