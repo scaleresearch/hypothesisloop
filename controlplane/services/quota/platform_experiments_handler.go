@@ -171,8 +171,9 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 	return placeableBy(orgID, registered, clusters), nil
 }
 
-// reachableTypes are the accelerator types jobs of the org of projectID can be placed on now.
-func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, projectID string) (map[string]bool, error) {
+// reachableTypes are the accelerator types jobs of the org of projectID can be placed on now,
+// each with the clusters that have it and the one image such a cluster runs, if it runs one only.
+func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, projectID string) (map[string][]domain.Cluster, error) {
 	orgID, err := h.clusters.ProjectOrg(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -181,11 +182,11 @@ func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	reachable := map[string]bool{}
+	reachable := map[string][]domain.Cluster{}
 	for _, cluster := range clusters {
 		for _, accelerator := range cluster.Accelerators {
 			if accelerator.Total > 0 {
-				reachable[accelerator.AcceleratorType] = true
+				reachable[accelerator.AcceleratorType] = append(reachable[accelerator.AcceleratorType], domain.Cluster{Name: cluster.ClusterName, JobImage: cluster.JobImage})
 			}
 		}
 	}

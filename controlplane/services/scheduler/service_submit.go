@@ -69,10 +69,6 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 		pe.CurrentStage, len(pe.Stages), boundary.UTC().Format(time.RFC3339))
 }
 
-// ReasonUnknownJobImage refuses a job whose image is neither a job image the platform offers
-// nor a whole registry address.
-const ReasonUnknownJobImage = "unknown_job_image"
-
 // resolveImage writes the address of the image the job names into its spec (domain.ResolveJobImage),
 // so that everything after admission reads one form. A job that names none is left as it is.
 func (s *Service) resolveImage(job *domain.JobSpec) error {
@@ -81,13 +77,7 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 	}
 	address, ok := domain.ResolveJobImage(s.jobImages, job.Image)
 	if !ok {
-		names := make([]string, len(s.jobImages))
-		for i, image := range s.jobImages {
-			names[i] = image.Name
-		}
-		return &AdmissionError{Reason: ReasonUnknownJobImage, Message: fmt.Sprintf(
-			"job.image %q is no job image of this platform and no whole registry address: name one of the platform's job images (%s; hl capacity says what each carries and which accelerator types it suits), or state the whole address of another image, registry host first, as in registry.example.com/team/image:tag",
-			job.Image, strings.Join(names, ", "))}
+		return &AdmissionError{Reason: domain.ReasonUnknownJobImage, Message: domain.UnknownJobImage(s.jobImages, "job.image", job.Image)}
 	}
 	job.Image = address
 	return nil

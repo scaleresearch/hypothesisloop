@@ -60,12 +60,14 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("A bound the person stated stays as stated", flat)
         self.assertIn("A gate you doubt is a risk and no ground to decline", flat)
         # Its brief named the image by a word of its own and a `uv pip install` that failed in
-        # the job: three baseline jobs went to those two lines.
-        self.assertIn("a name the type's line in `hl capacity` lists in `job_images`, spelled as there", flat)
+        # the job: three baseline jobs went to those two lines. A proposal now states its image
+        # and is refused for one no job could be submitted with.
+        self.assertIn("the accelerator type, the count or cores per job, and the `image` you propose", flat)
+        self.assertNotIn("job_images", flat)
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 4_660)
+        self.assertLess(len(prompt.encode()), 4_530)
         self.assertEqual(listed(planner()), [[], ["platform-experiments", "propose"], ["platform-experiments", "decline"]])
 
     # Told not to clone, a planner invented override flags and a gate for a harness the

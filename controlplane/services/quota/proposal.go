@@ -36,6 +36,7 @@ type Proposal struct {
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type" doc:"The type the run's jobs are sized for, as GET /resource-catalog/capacity lists it for a cluster this org's jobs can be placed on: an accelerator, or the CPU type for work that needs none, whose budget is then CPU core-hours."`
+	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
 
 	MetricReason string   `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string   `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
@@ -88,7 +89,11 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 	if p.Experiment, err = withTexts(p.Experiment, experiment); err != nil {
 		return experiment, refusedProposal("invalid_experiment", "experiment: %s", err)
 	}
-	if err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType); err != nil {
+	clusters, err := h.svc.requireReachable(ctx, projectID, &p.AcceleratorType)
+	if err != nil {
+		return experiment, err
+	}
+	if err := requireImage(h.jobImages, clusters, p.Image); err != nil {
 		return experiment, err
 	}
 	for i, agent := range p.Agents {
@@ -201,7 +206,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"The platform hosts its coordinator and each researcher, and starts_at is now. Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
 			"no researcher's machine is started before, and the platform starts the run once the baseline is declared. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
-			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; " +
+			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
 			"503 launcher_not_registered when nothing could run it. A draft's own planner cannot accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
@@ -225,7 +230,8 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 			"and the baseline is measured once a person accepted, before any researcher starts (PATCH /platform-experiments/{id}, baseline_job_id). " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), missing_explanation, too_long, " +
-			"and accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now. Stored, it replaces the one before, marks the draft proposed " +
+			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, and for image the two refusals a job submit gives: " +
+			"unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed " +
 			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the draft waits for a person to accept it.",
 	}, func(ctx context.Context, in *struct {
 		ID   string `path:"id"`

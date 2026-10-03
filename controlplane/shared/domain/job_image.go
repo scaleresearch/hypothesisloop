@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // JobImage is an image the deployment offers a job to run in, so that an agent need not build
 // a framework into a bare one. A job names one by Name or states the whole address of another
@@ -34,6 +37,20 @@ func ResolveJobImage(offered []JobImage, image string) (string, bool) {
 		}
 	}
 	return image, isRegistryAddress(image)
+}
+
+// ReasonUnknownJobImage refuses an image that is neither a job image the platform offers nor a
+// whole registry address: on a job at its submit, and in a proposal when it is made.
+const ReasonUnknownJobImage = "unknown_job_image"
+
+// UnknownJobImage is the sentence of that refusal for the field that states image.
+func UnknownJobImage(offered []JobImage, field, image string) string {
+	names := make([]string, len(offered))
+	for i, o := range offered {
+		names[i] = o.Name
+	}
+	return field + " " + strconv.Quote(image) + " is no job image of this platform and no whole registry address: name one of the platform's job images (" +
+		strings.Join(names, ", ") + "; hl capacity says what each carries and which accelerator types it suits), or state the whole address of another image, registry host first, as in registry.example.com/team/image:tag"
 }
 
 // isRegistryAddress reports whether ref starts with the host of a registry, the way a container

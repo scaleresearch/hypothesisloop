@@ -48,10 +48,9 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
       - what the harness measures and how: the pinned dataset and model revisions, the data
         the researchers' code never trains or tunes on, the seeds, the repeats where one run
         is noisy, the gate and its reference;
-      - the accelerator type, the count or cores per job, and the `image`: a name the type's
-        line in `hl capacity` lists in `job_images`, spelled as there (on a cluster that shows
-        `only_job_image`, that one). Say what the code needs that the image does not carry
-        and prescribe no install command: you have run none;
+      - the accelerator type, the count or cores per job, and the `image` you propose. Say
+        what the code needs that the image does not carry and prescribe no install command:
+        you have run none;
       - the levers to vary, and what is a black box to leave alone;
       - when to stop: the target reached, no gain after several honest tries, or the quota.
   - The size: a budget, duration or count the goal states, as stated; else the smallest plan

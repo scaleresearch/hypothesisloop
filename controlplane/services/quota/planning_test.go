@@ -39,9 +39,10 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	doc := apidocs.New(router, "test", "1.0.0", "", authtest.As(caller), auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	handler := NewPlatformExperimentsHandler(svc, planningRepositories, testPlanning, zap.NewNop()).
-		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted})
+		WithAgentLaunch(AgentLaunch{Launcher: "main", DefaultModel: "platform-model-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 	if drafts, ok := store.(*draftStore); ok {
-		svc.reachable = func(context.Context, string) (map[string]bool, error) { return drafts.reachable, nil }
+		svc.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil }
 	}
 	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
@@ -285,8 +286,9 @@ type draftStore struct {
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 
-	// reachable are the accelerator types the org's jobs can be placed on.
-	reachable map[string]bool
+	// reachable are the accelerator types the org's jobs can be placed on, each with the
+	// clusters that have it.
+	reachable map[string][]domain.Cluster
 
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
@@ -340,6 +342,7 @@ func aProposal(more map[string]any) map[string]any {
 		},
 		"budget_accelerator_hours": 6, "duration_hours": 4, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
 		"accelerator_type": "rtx-4090",
+		"image":            "torch",
 		"metric_reason":    "Validation loss on held-out text is the goal itself.",
 		"measurement":      "bench.py trains for a fixed number of steps and scores a split the training never reads.",
 		"sizing_reason":    "An estimate, nothing has run: a trial of about 6 minutes at 1 an hour is 0.1, and 2 researchers with 30 trials each need 6 and 4 hours.",
@@ -361,7 +364,7 @@ func draftWithPlanner() *draftStore {
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
 		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, Flavor: domain.PlannerFlavor, Hosted: true}},
-		reachable: map[string]bool{"rtx-4090": true},
+		reachable: map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}},
 	}
 }
 
@@ -424,6 +427,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"a measurement that is a paper":          {map[string]any{"measurement": strings.Repeat("x", maxProposalTextBytes+1)}, "too_long"},
 		"a type nobody has now":                  {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
 		"no type":                                {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
+		"an image by a word of its own":          {map[string]any{"image": "pytorch"}, "unknown_job_image"},
+		"no image":                               {map[string]any{"image": ""}, "unknown_job_image"},
 	} {
 		store := draftWithPlanner()
 		_, call := planningAPI(t, store, thePlanner)
@@ -442,6 +447,19 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusForbidden || store.created[0].ProposedAt != nil {
 			t.Errorf("%s: got = %d %v, want 403", name, code, out)
 		}
+	}
+
+	// A brief named an image the one cluster of its type did not run, and three baseline jobs
+	// were refused for it after a person had accepted.
+	ownImage := draftWithPlanner()
+	ownImage.reachable = map[string][]domain.Cluster{"rtx-4090": {{Name: "box", JobImage: "registry.example.com/hl/box:1"}}}
+	_, call = planningAPI(t, ownImage, thePlanner)
+	code, out = call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
+	if message, _ := out["message"].(string); code != http.StatusUnprocessableEntity || out["reason"] != "no_cluster_for_image" || !strings.Contains(message, "box runs every job in registry.example.com/hl/box:1") || ownImage.created[0].ProposedAt != nil {
+		t.Errorf("an image no cluster of the type runs: got = %d %v, want 422 no_cluster_for_image naming the cluster's image and nothing stored", code, out)
+	}
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"image": "registry.example.com/hl/box:1"})); code != http.StatusOK {
+		t.Errorf("the image the cluster runs: got = %d %v, want 200", code, out)
 	}
 
 	accepted := draftWithPlanner()
@@ -613,7 +631,7 @@ func TestAProposalNamesNoBaselineJobAndStatesTheTypeItsJobsAreSizedFor(t *testin
 		}
 	}
 	cpu := draftWithPlanner()
-	cpu.reachable = map[string]bool{string(domain.CPUType): true}
+	cpu.reachable = map[string][]domain.Cluster{string(domain.CPUType): {{Name: "k3s"}}}
 	_, call := planningAPI(t, cpu, thePlanner)
 	code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"accelerator_type": string(domain.CPUType)}))
 	if proposal, _ := out["proposal"].(map[string]any); code != http.StatusOK || proposal["accelerator_type"] != string(domain.CPUType) || out["baseline_job_id"] != nil {

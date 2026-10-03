@@ -855,6 +855,8 @@ a leading quote.
         role: constraint
         bound: 1                       # a value the unchanged control holds by construction
   accelerator_type: ...                # copied verbatim from 'hl capacity', the CPU type for work on cores
+  image: ...                           # the job image the brief names, from the same line of 'hl capacity':
+                                       # one of its job_images, or its only_job_image where it shows one
   budget_accelerator_hours: 6          # proposed; the person states the real ones at accept
   duration_hours: 4
   agents:                              # one entry per researcher
@@ -881,7 +883,8 @@ a leading quote.
       what the goal left open and you decided
 
 The proposal is checked before it is stored, and a refusal names what to fix: for a file that
-is no YAML the line and what is wrong there, which is all the checking the file needs. A
+is no YAML the line and what is wrong there, which is all the checking the file needs, and for
+the image what a job submit would refuse it for (unknown_job_image, no_cluster_for_image). A
 refused proposal changes nothing, so fix the file and run propose again. One that passes is
 stored at once, replaces the one before, releases your machine and is what the person is asked
 to accept: send only the finished proposal, never one written to try the checks.`, stderr)

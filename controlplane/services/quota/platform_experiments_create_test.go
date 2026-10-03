@@ -27,11 +27,11 @@ var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.
 
 // reaching has the org of every project reach the given accelerator types and no other.
 func reaching(svc *PlatformExperimentsService, types ...domain.AcceleratorType) *PlatformExperimentsService {
-	reachable := map[string]bool{}
+	reachable := map[string][]domain.Cluster{}
 	for _, t := range types {
-		reachable[string(t)] = true
+		reachable[string(t)] = []domain.Cluster{{Name: "k3s"}}
 	}
-	svc.reachable = func(context.Context, string) (map[string]bool, error) { return reachable, nil }
+	svc.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) { return reachable, nil }
 	return svc
 }
 
@@ -112,7 +112,7 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 		"a type stated while no cluster reports": {nil, &rtx, true},
 	} {
 		svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), c.reachable...)
-		err := svc.requireReachable(context.Background(), "prj-a", c.sizedFor)
+		_, err := svc.requireReachable(context.Background(), "prj-a", c.sizedFor)
 		var refused *api.Refusal
 		if got := errors.As(err, &refused) && refused.GetStatus() == 422 && refused.Reason == "accelerator_unreachable"; got != c.refused || (!c.refused && err != nil) {
 			t.Errorf("%s: got %v, refused wanted: %v", name, err, c.refused)

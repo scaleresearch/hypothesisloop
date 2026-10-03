@@ -578,8 +578,8 @@ func TestAJobImageIsStoredAsAnAddressAndABareNameIsRefused(t *testing.T) {
 		exp := humanIdeaSubmission()
 		exp.Job.Image = stated
 		var refused *AdmissionError
-		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonUnknownJobImage || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
-			t.Fatalf("job.image %q: got = %v, want a 422 %s", stated, err, ReasonUnknownJobImage)
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != domain.ReasonUnknownJobImage || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+			t.Fatalf("job.image %q: got = %v, want a 422 %s", stated, err, domain.ReasonUnknownJobImage)
 		}
 		if !strings.Contains(refused.Message, "python, pytorch-cuda") {
 			t.Errorf("job.image %q: the refusal names no valid image: %s", stated, refused.Message)

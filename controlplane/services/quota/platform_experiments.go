@@ -115,9 +115,10 @@ type PlatformExperimentsService struct {
 	maxDataBytesPerAgent int64
 	// baseline reads what a declared baseline job did; readBaseline unless a test sets another.
 	baseline baselineReader
-	// reachable reads the accelerator types jobs of a project's org can be placed on now. The
-	// handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
-	reachable func(ctx context.Context, projectID string) (map[string]bool, error)
+	// reachable reads the accelerator types jobs of a project's org can be placed on now, each
+	// with the clusters that have it. The handler's WithLiveCapacity sets it, and until then it
+	// answers ErrLiveCapacityUnconfigured.
+	reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
@@ -144,7 +145,9 @@ func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.Qu
 		observedGapCap: observedGapCap,
 	}
 	s.baseline = s.readBaseline
-	s.reachable = func(context.Context, string) (map[string]bool, error) { return nil, ErrLiveCapacityUnconfigured }
+	s.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) {
+		return nil, ErrLiveCapacityUnconfigured
+	}
 	return s
 }
 

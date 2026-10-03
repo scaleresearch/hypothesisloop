@@ -113,19 +113,43 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 // a create in an org whose jobs no cluster takes now, and a proposal or an accept sized for a
 // type none of them has. sizedFor is nil for a create, which states no type. One that exists is
 // never held to it, since a cluster that reports nothing for a moment must not stop a
-// coordinator declaring its baseline or an owner renaming a run.
-func (s *PlatformExperimentsService) requireReachable(ctx context.Context, projectID string, sizedFor *domain.AcceleratorType) error {
+// coordinator declaring its baseline or an owner renaming a run. It answers the clusters that
+// have the type it was sized for.
+func (s *PlatformExperimentsService) requireReachable(ctx context.Context, projectID string, sizedFor *domain.AcceleratorType) ([]domain.Cluster, error) {
 	reachable, err := s.reachable(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("platform_experiments.requireReachable: %w", err)
+		return nil, fmt.Errorf("platform_experiments.requireReachable: %w", err)
 	}
-	if sizedFor == nil && len(reachable) == 0 {
-		return refuseUpdate(422, "accelerator_unreachable", "no cluster this org's jobs can be placed on reports capacity now, so nothing of it could run: register a cluster or turn a shared one on (`hl capacity` lists what is reachable)")
+	if sizedFor == nil {
+		if len(reachable) == 0 {
+			return nil, refuseUpdate(422, "accelerator_unreachable", "no cluster this org's jobs can be placed on reports capacity now, so nothing of it could run: register a cluster or turn a shared one on (`hl capacity` lists what is reachable)")
+		}
+		return nil, nil
 	}
-	if sizedFor != nil && !reachable[string(*sizedFor)] {
-		return refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *sizedFor)
+	clusters := reachable[string(*sizedFor)]
+	if len(clusters) == 0 {
+		return nil, refuseUpdate(422, "accelerator_unreachable", "accelerator_type %q is on no cluster this org's jobs can be placed on now: state a type `hl capacity` lists, copied verbatim", *sizedFor)
 	}
-	return nil
+	return clusters, nil
+}
+
+// requireImage refuses a proposal whose image no job on clusters, the ones that have its type,
+// could be submitted with, by the two refusals a submit gives a job for its image: one that is
+// no image, and one none of them runs. The baseline job is the first to name it, after a person
+// accepted.
+func requireImage(offered []domain.JobImage, clusters []domain.Cluster, image string) error {
+	address, ok := domain.ResolveJobImage(offered, image)
+	if !ok {
+		return refuseUpdate(422, domain.ReasonUnknownJobImage, "%s", domain.UnknownJobImage(offered, "image", image))
+	}
+	runEveryJobIn := make([]string, 0, len(clusters))
+	for _, cluster := range clusters {
+		if cluster.Runs(address) {
+			return nil
+		}
+		runEveryJobIn = append(runEveryJobIn, cluster.Name+" runs every job in "+cluster.JobImage)
+	}
+	return refuseUpdate(422, domain.NotAdmittedNoClusterForImage, "image %q runs on no cluster that has the accelerator_type: %s. State that image, as `hl capacity` shows it for the cluster", image, strings.Join(runEveryJobIn, "; "))
 }
 
 // Create creates a new platform experiment in open status (accepting signups immediately).
@@ -135,7 +159,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
+	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
 		return nil, err
 	}
 	if req.CoordinatorHosted != (req.coordinator != nil) {
