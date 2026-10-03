@@ -269,8 +269,8 @@ func TestEveryCreateAndDestroyIsLoggedWithTheInstanceIDAndTheReason(t *testing.T
 	}
 
 	for _, line := range []string{
-		"cloudexec: created instance hl-job-t1-exp-deleted-a2-h100-0 (fake-0001): attempt 2 of experiment exp-deleted is desired in slot h100-0",
-		"cloudexec: created instance hl-job-t1-exp-finished-a0-cpu-0 (fake-0002): attempt 0 of experiment exp-finished is desired in slot cpu-0",
+		"cloudexec: created instance hl-job-t1-exp-deleted-a2-h100-0 (fake-0001): attempt 2 of experiment exp-deleted is desired in slot h100-0; it ends itself at " + testEndsAt.Format(time.RFC3339),
+		"cloudexec: created instance hl-job-t1-exp-finished-a0-cpu-0 (fake-0002): attempt 0 of experiment exp-finished is desired in slot cpu-0; it ends itself at " + testEndsAt.Format(time.RFC3339),
 		"cloudexec: destroyed instance hl-job-t1-exp-deleted-a2-h100-0 (fake-0001): the workload of its experiment was deleted while it was running",
 		"cloudexec: destroyed instance hl-job-t1-exp-finished-a0-cpu-0 (fake-0002): it exited and is not the workload of a desired experiment",
 		"cloudexec: destroyed instance hl-job-t1-exp-twice-a0-h100-1 (fake-0004): it is a second instance of its name",

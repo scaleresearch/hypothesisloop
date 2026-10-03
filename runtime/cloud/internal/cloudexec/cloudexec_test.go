@@ -64,6 +64,9 @@ func readGolden(t *testing.T) goldenAnswer {
 	return golden
 }
 
+// testEndsAt is the moment every instance of these tests must be gone by.
+var testEndsAt = time.Now().Add(36 * time.Hour).UTC().Truncate(time.Second)
+
 // job is the shared reconcile answer's experiment under another id and attempt, with the command
 // a rented instance needs, admitted to the first slot of the shape it asks for: h100-0 with
 // accelerators, cpu-0 without.
@@ -71,6 +74,8 @@ func job(t *testing.T, id string, attempt, accelerators int) *domain.Experiment 
 	t.Helper()
 	exp := readGolden(t).Experiment
 	exp.ID, exp.AttemptCount = id, attempt
+	endsAt := testEndsAt
+	exp.EndsAt = &endsAt
 	resolved := *exp.ResolvedJob
 	resolved.Command, resolved.Args = []string{"python", "train.py"}, []string{"--epochs", "3"}
 	resolved.Image = testImage
@@ -160,6 +165,34 @@ func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheWrapper(t *testing.T)
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	if names := p.Names(); len(names) != 1 {
 		t.Fatalf("a second pass rented again: %v", names)
+	}
+}
+
+// The control plane names the moment after which no instance of a job may run. The instance is
+// rented with the time left until then as its lifetime, so one this runtime can no longer reach
+// ends by itself. A job without that moment, or past it, is not rented at all.
+func TestAnInstanceIsRentedWithTheTimeLeftUntilItsJobsEndAndNeverWithoutOne(t *testing.T) {
+	e, p := newTestExecutor(t)
+	mustCreate(t, e, asHanded(t, job(t, "exp-1", 0, 1)))
+	lifetime := p.Spec("hl-job-t1-exp-1-a0-h100-0").Lifetime
+	if left := time.Until(testEndsAt); lifetime > left || lifetime < left-time.Minute || lifetime%time.Second != 0 {
+		t.Fatalf("lifetime = %s, want the whole seconds left until %s", lifetime, testEndsAt)
+	}
+
+	endless := on(job(t, "exp-endless", 0, 1), "h100-1")
+	endless.EndsAt = nil
+	late := on(job(t, "exp-late", 0, 1), "h100-1")
+	passed := time.Now().Add(-time.Minute)
+	late.EndsAt = &passed
+	for want, exp := range map[string]*domain.Experiment{"no ends_at": endless, "has passed": late} {
+		err := e.CreateWorkload(context.Background(), exp)
+		var unrunnable *agentexec.Unrunnable
+		if err == nil || !strings.Contains(err.Error(), want) || errors.As(err, &unrunnable) {
+			t.Errorf("%s: err = %v, want an error saying %q that does not end the job", exp.ID, err, want)
+		}
+	}
+	if p.Calls("Create") != 1 {
+		t.Fatalf("%d creates, want the one job that has an end", p.Calls("Create"))
 	}
 }
 

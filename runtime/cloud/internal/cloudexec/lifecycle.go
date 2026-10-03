@@ -73,6 +73,15 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 	if err := provider.ValidateName(spec.Name); err != nil {
 		return fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
+	// The instance ends by itself at the moment the control plane names, whether or not this
+	// runtime can still reach it then.
+	if exp.EndsAt == nil {
+		return fmt.Errorf("cloudexec: experiment %s has no ends_at in desired state", exp.ID)
+	}
+	spec.Lifetime = exp.EndsAt.Sub(e.now()).Truncate(time.Second)
+	if spec.Lifetime <= 0 {
+		return fmt.Errorf("cloudexec: experiment %s: its ends_at %s has passed", exp.ID, exp.EndsAt.UTC().Format(time.RFC3339))
+	}
 	id, err := e.provider.Create(ctx, spec)
 	if errors.Is(err, provider.ErrNoOffer) {
 		return e.withoutOffer(exp, shape)
@@ -80,7 +89,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 	if err != nil {
 		return fmt.Errorf("cloudexec: create instance %s: %w", spec.Name, err)
 	}
-	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
+	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s; it ends itself at %s", spec.Name, id, exp.AttemptCount, exp.ID, name, exp.EndsAt.UTC().Format(time.RFC3339))
 	v.add(instance{
 		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
