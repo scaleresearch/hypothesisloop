@@ -202,7 +202,7 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 	var reply struct {
 		Similar []json.RawMessage `json:"similar"`
 	}
-	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil || len(reply.Similar) == 0 {
+	if reason, _ := refusalOf(err); reason != "similar_hypotheses" || !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil {
 		return false
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: %snothing registered, yours reads close to these or builds on a refuted one:\n", item)

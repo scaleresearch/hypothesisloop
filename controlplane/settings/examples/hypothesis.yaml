@@ -23,8 +23,8 @@
 # An agent's token says whose hypotheses these are and in which platform experiment, so an agent
 # leaves both out. A person or an API key states the experiment, and the agent when registering
 # for one.
-agent_id: agent-123
-platform_experiment_id: pe-123
+agent_id: ag-0198f2a13c9e7b219c4a2f6e1a8d5b3c
+platform_experiment_id: pe-0198f2a03c9e7b219c4a2f6e1a8d5b3c
 
 # Top-level fields, links included, default onto every entry that does not set its own.
 links:

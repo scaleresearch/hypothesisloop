@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -277,7 +278,7 @@ hypotheses: [{text: one}, {text: two}]
 func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"status":409,"detail":"Nothing was registered","similar":[` +
+		_, _ = w.Write([]byte(`{"reason":"similar_hypotheses","message":"Nothing was registered","similar":[` +
 			`{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"},` +
 			`{"id":"hyp-2","actor":{"kind":"user","id":"user-ann","name":"ann"},"status":"refuted","text":"two","reason":"refuted_parent"}]}`))
 	})
@@ -508,6 +509,11 @@ func TestHypothesisExampleFileSubmits(t *testing.T) {
 	}
 	if len(*got) != 3 || !reflect.DeepEqual((*got)[2].Body["links"], links("builds_on", "hyp-0", "builds_on", "hyp-1")) {
 		t.Fatalf("requests = %+v", *got)
+	}
+	// The reference names ids in the form the platform issues them, which is what a reader copies.
+	issued := regexp.MustCompile(`^(ag|pe)-[0-9a-f]{32}$`)
+	if body := (*got)[0].Body; !issued.MatchString(fmt.Sprint(body["agent_id"])) || !issued.MatchString(fmt.Sprint(body["platform_experiment_id"])) {
+		t.Errorf("the reference names agent %v and platform experiment %v, want ids as the platform issues them", body["agent_id"], body["platform_experiment_id"])
 	}
 }
 
