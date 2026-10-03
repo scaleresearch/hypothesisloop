@@ -465,9 +465,6 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
 				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " names an admitted_machine and no admitted_node")
 			}
-			if rep.EndedAt != nil && h.observationCadence < time.Millisecond {
-				return nil, auth.Internal(h.logger, "cluster push status", errors.New("no observation cadence is configured to record a measured run by"), zap.String("cluster", clusterName))
-			}
 			if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
 				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " needs started_at and ended_at together, in that order")
 			}
