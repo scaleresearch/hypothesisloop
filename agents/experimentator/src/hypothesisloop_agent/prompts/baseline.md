@@ -27,9 +27,8 @@ and the experiment is closed if not running by its `baseline_due_at`.
      pinned dataset and model revisions, every input fetched by the job itself, the metrics
      reported as the run goes and once more at the end with the `post_metric` of the
      repository's `metrics.py`. Researchers copy and change this code, so keep the part they
-     vary apart from the part that measures, and say which is which. This machine has no
-     accelerator and no framework: check syntax and a tiny dry path only. The baseline job is
-     the test.
+     vary apart from the part that measures, and say which is which. Check syntax only here:
+     the image's packages and the accelerator are in the job, which is the test.
   2. The job spec, `.hypothesisloop/job.yaml`: `accelerator_type` and `image` as the brief
      states them, and `cpu`, `memory` and `storage` sized to what the job uses, so that other
      jobs fit beside it. Size it to finish in minutes: every trial runs it.

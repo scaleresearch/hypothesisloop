@@ -205,10 +205,12 @@ class BaselinePromptTest(unittest.TestCase):
             self.assertNotIn(said_there, flat)
 
     # One spent twelve minutes proving a GPU harness on its own machine: a three-minute timeout,
-    # four slow reruns on CPU and two failed installs of torch.
+    # four slow reruns on CPU and two failed installs of torch. Told to check "a tiny dry path",
+    # another built a stand-in `torch` module to run one, 133 s and six errors.
     def test_the_harness_is_tested_by_the_baseline_job_and_not_on_the_agents_machine(self):
-        self.assertIn("This machine has no accelerator and no framework: check syntax and a tiny dry path only. "
-                      "The baseline job is the test", render(baseline_agent())[1])
+        flat = render(baseline_agent())[1]
+        self.assertIn("Check syntax only here: the image's packages and the accelerator are in the job, which is the test", flat)
+        self.assertNotIn("dry", flat)
 
     # A baseline agent stopped at the close answered its last turn with a finish, which the
     # platform refuses: the close had ended its run.
