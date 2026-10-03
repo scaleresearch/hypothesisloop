@@ -20,7 +20,7 @@ Your assignment:
 Read the `description` of `hl platform-experiments get` completely (the brief, with BASELINE
 `config`), its `metrics` and `status_reason`, your next step. `hl quota` is all you may spend.
 It is closed if not running by its `baseline_due_at`. On this machine
-`pip install X` and `uv pip install X` install where `python3` reads. In this order:
+`pip install X` and `uv pip install X` install where `python3` reads.
 
   1. The code. Where it is kept: {workspace}
      Only a harness that already measures these metrics on this config runs unchanged: go
@@ -46,12 +46,12 @@ It is closed if not running by its `baseline_due_at`. On this machine
      naming or registering one is refused. `hl job submit .hypothesisloop/job.yaml` with
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
-     The file states no estimate: nothing is measured yet, so guess generously, within
-     quota. Then end your turn,
-     which is to answer in one line and call no tool: the result arrives as a message. Never
-     poll, sleep or block in `hl watch`. A job that failed, or completed without one of the experiment's
-     `metrics`, has its cause in `hl job logs ID`: fix it, commit and submit again, as often
-     as you know a fix. Never run a good baseline a second time.
+     Write no estimate into the file, or every researcher's job carries it: nothing is
+     measured yet, so guess generously. Then end your turn, which is to answer in one line and
+     call no tool: the result arrives as a message. Never poll, sleep or block in `hl watch`.
+     A job that failed, or completed without one of the experiment's `metrics`, has its cause
+     in `hl job logs ID`: fix it, commit and submit again, as often as you know a fix. Never
+     run a good baseline a second time.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the
      value of every metric, how long it took and what it cost (`hl job cost`), and how a
      researcher runs a trial (the job.yaml submitted unedited, the `--env` that vary it, and

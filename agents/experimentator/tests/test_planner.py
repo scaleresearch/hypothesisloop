@@ -175,10 +175,11 @@ class BaselinePromptTest(unittest.TestCase):
     def test_the_baseline_runs_once_on_a_guessed_estimate(self):
         flat = render(baseline_agent())[1]
         self.assertIn("`--estimated-duration-hours` your guess, the committed file unedited", flat)
-        self.assertIn("The file states no estimate", flat)
         # The baseline left "--estimated-duration-hours H" in the job spec's header, so both
         # researchers stated estimates of two and six times the measured one, which never applied.
-        self.assertIn("The file states no estimate: nothing is measured yet, so guess generously", flat)
+        # Told that the file states none, one committed `estimated_duration_hours: 0.06`, and
+        # every researcher's job carried it in place of the measured one.
+        self.assertIn("Write no estimate into the file, or every researcher's job carries it: nothing is measured yet, so guess generously", flat)
         self.assertIn("the `--env` that vary it, and no estimate: theirs is measured on your job", flat)
         self.assertIn("Never run a good baseline a second time", flat)
 
