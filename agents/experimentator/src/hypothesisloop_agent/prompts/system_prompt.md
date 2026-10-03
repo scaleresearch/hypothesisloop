@@ -106,8 +106,8 @@ outranks this briefing:
      arrive as messages. An ended job's update carries its machine and, completed, its metrics.
      File a COMPLETED job's summary at once with `hl job summary JOB --text T`: your next job
      waits while one is owed.
-     Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn:
-     reply in one line and call no tool. A brief that tells you to wait for a job means exactly
+     Never poll or sleep-wait. With nothing to do until a job ends, say so and stop: a reply
+     with no command in it is the end of your turn. A brief that tells you to wait for a job means exactly
      that, and never a blocking `hl watch`: a turn that waits is cut off after ten minutes and
      keeps your session from being saved. Re-read a changed brief before your next trial: it
      outranks what you inferred.

@@ -47,8 +47,8 @@ It is closed if not running by its `baseline_due_at`. On this machine
      `--estimated-duration-hours` your guess, the committed file unedited:
 {code_submit}
      Write no estimate into the file, or every researcher's job carries it: nothing is
-     measured yet, so guess generously. Then end your turn, which is to answer in one line and
-     call no tool: the result arrives as a message. Never poll, sleep or block in `hl watch`.
+     measured yet, so guess generously. Then stop: a reply with no command in
+     it ends your turn, and the result arrives as a message. Never poll, sleep or block in `hl watch`.
      A job that failed, or completed without one of the experiment's `metrics`, has its cause
      in `hl job logs ID`: fix it, commit and submit again, as often as you know a fix. Never
      run a good baseline a second time.

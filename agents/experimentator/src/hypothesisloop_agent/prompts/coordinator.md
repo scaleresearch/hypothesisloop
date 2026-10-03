@@ -48,8 +48,8 @@ Each starts with no memory but the platform's.
 Updates arrive as messages. You are woken at once when an
 agent finishes, a job is held by what waiting will not clear, a stage advances, a comment is
 written, the brief changes, the run starts or closes, and while it is `open` when a job ends.
-The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake or
-after your next tool call.
+The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake, or
+by itself while you work.
 
 Never poll or sleep-wait. On each wake, look at what the update points to, then at these:
 
@@ -72,8 +72,8 @@ Never poll or sleep-wait. On each wake, look at what the update points to, then 
     Roots that overlap, or stay flat while one holds a whole sweep, you comment on:
     `hl hypothesis comment ID --text T`.
 
-Once nothing needs you, answer in one line and call no tool: that answer ends your turn, and no
-command does.
+Once nothing needs you, say what you saw and stop: a reply with no command in it is the end of
+your turn.
 
 ## The brief
 

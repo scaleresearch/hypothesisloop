@@ -121,19 +121,19 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("an `image` is a job image name of `hl capacity` or a full address", flat)
 
     # A run closed under a summary that said it was "waiting for the competitor agent", one
-    # still open was written up as "proceeding", and three turns ended on `echo waiting`. Told
-    # that an `echo` does nothing, a coordinator ended six more on `echo ok`: each time it had
-    # checked what an update pointed to, long after the rule, so the update now closes with it.
-    def test_the_last_summary_is_written_before_the_close_and_a_turn_ends_without_a_command(self):
+    # still open was written up as "proceeding". Told to end its turn by replying in one line
+    # with no tool call, a coordinator wrote what it saw, ran `echo ok` and then wrote the one
+    # line, six times in a run: the briefing asked for a closing reply of a set form, and only
+    # a command separates two replies. What it writes last is the end, in whatever words.
+    def test_the_last_summary_is_written_before_the_close_and_a_turn_ends_with_the_last_reply(self):
         flat = " ".join(self.render().split())
         self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
                       "with nothing in it still waiting or under way", flat)
         self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
-        self.assertIn("Once nothing needs you, answer in one line and call no tool: that answer ends your turn, and no command does", flat)
-        self.assertNotIn("echo", flat)
-        self.assertTrue(updates.wake([{"kind": "comment.new", "subject": "hyp-1"}], "").endswith(
-            "comment.new hyp-1\n\nOnce nothing above needs you, answer in one line and call no tool: "
-            "that answer ends your turn, and no command does."))
+        self.assertIn("Once nothing needs you, say what you saw and stop: a reply with no command in it is the end of your turn", flat)
+        for form in ("one line", "call no tool", "echo"):
+            self.assertNotIn(form, flat)
+        self.assertEqual(updates.message([{"kind": "comment.new", "subject": "hyp-1"}], ""), "Platform updates:\ncomment.new hyp-1")
 
     # One looked for comments with a relationship it made up, which matched no row, and for a
     # job's summary with the command that files one.

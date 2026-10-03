@@ -579,7 +579,7 @@ async def _run_one_session(setup: core.RunSetup, model: str, resume_id: str | No
             if events:
                 for line in activity.event_lines(events, cfg.agent_id):
                     print(line, flush=True)
-                await client.query(updates.wake(events, cfg.agent_id))
+                await client.query(updates.message(events, cfg.agent_id))
                 continue
             reason = core.stop_reason(setup, started_at, stop_flag)
             if reason:

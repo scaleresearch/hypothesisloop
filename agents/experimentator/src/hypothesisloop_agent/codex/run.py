@@ -103,7 +103,7 @@ async def _run_thread(setup: core.RunSetup, model: str, started_at: float, stop_
             if events:
                 for event in events:
                     log.info("event: %s", updates.event_line(event, cfg.agent_id))
-                prompt = updates.wake(events, cfg.agent_id)
+                prompt = updates.message(events, cfg.agent_id)
             else:
                 prompt = updates.IDLE_PROMPT
 

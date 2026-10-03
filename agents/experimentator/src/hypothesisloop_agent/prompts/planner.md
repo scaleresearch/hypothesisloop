@@ -74,7 +74,7 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
 
 `hl` checks the YAML and names the line: install no parser. Every free-text value is a `|` block, a list item too
 (`- |`): unquoted text breaks on a colon or a leading quote. A refused propose stores nothing:
-fix what it names and send it again. Once stored, say so in one line and call no tool: that
+fix what it names and send it again. Once stored, say so and stop: a reply with no command in it
 ends your turn, your machine is released, and a revision starts another.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform can

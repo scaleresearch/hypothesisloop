@@ -47,10 +47,7 @@ OPEN_WAKES = ("experiment.status",)
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
 IDLE_NUDGE_S = 1800
-IDLE_PROMPT = (
-    "No platform updates for 30 minutes. Continue with the most useful work available, or end your "
-    "turn to keep waiting for updates: reply in one line and call no tool."
-)
+IDLE_PROMPT = "No platform updates for 30 minutes. Continue with the most useful work available, if there is any."
 
 
 def watch_env(api_url: str, token: str, statedir: str) -> dict[str, str]:
@@ -244,12 +241,3 @@ def event_line(event: dict, agent_id: str) -> str:
 
 def message(events: list[dict], agent_id: str) -> str:
     return "Platform updates:\n" + "\n".join(dict.fromkeys(event_line(e, agent_id) for e in events))
-
-
-# Closes the updates that wake whoever ended its turn: the briefing's rule alone, far before the
-# wake, left a coordinator ending six turns through `echo ok`.
-WAKE_NOTE = "Once nothing above needs you, answer in one line and call no tool: that answer ends your turn, and no command does."
-
-
-def wake(events: list[dict], agent_id: str) -> str:
-    return message(events, agent_id) + "\n\n" + WAKE_NOTE

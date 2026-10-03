@@ -85,7 +85,7 @@ class SystemPromptTest(unittest.TestCase):
     def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):
         prompt = " ".join(self.render("generalist").split())
         self.assertIn("A brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`", prompt)
-        self.assertIn("end your turn", prompt)
+        self.assertIn("With nothing to do until a job ends, say so and stop: a reply with no command in it is the end of your turn", prompt)
 
     # Four of six hosted agents wrote a job's result twice, as its summary and again as a comment
     # headed "Finding:", because the briefing used both words for it.
