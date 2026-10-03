@@ -51,9 +51,7 @@ written, the brief changes, the run starts or closes, and while it is `open` whe
 The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake or
 after your next tool call.
 
-Never poll or sleep-wait. When nothing needs you, end your turn: reply in one line and call no
-tool. Ending a turn takes no command, and an `echo` before it does nothing. On each wake, look
-at what the update points to, then at these:
+Never poll or sleep-wait. On each wake, look at what the update points to, then at these:
 
   - Standings: `hl results`. A job that has run long with no new point is likely dead:
     `hl job status ID` and `hl job logs ID` say which.
@@ -73,6 +71,9 @@ at what the update points to, then at these:
     refinement or a combination sits under what it refines, and the best result is a node.
     Roots that overlap, or stay flat while one holds a whole sweep, you comment on:
     `hl hypothesis comment ID --text T`.
+
+Once nothing needs you, answer in one line and call no tool: that answer ends your turn, and no
+command does.
 
 ## The brief
 

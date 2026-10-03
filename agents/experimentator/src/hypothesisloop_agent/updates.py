@@ -244,3 +244,12 @@ def event_line(event: dict, agent_id: str) -> str:
 
 def message(events: list[dict], agent_id: str) -> str:
     return "Platform updates:\n" + "\n".join(dict.fromkeys(event_line(e, agent_id) for e in events))
+
+
+# Closes the updates that wake whoever ended its turn: the briefing's rule alone, far before the
+# wake, left a coordinator ending six turns through `echo ok`.
+WAKE_NOTE = "Once nothing above needs you, answer in one line and call no tool: that answer ends your turn, and no command does."
+
+
+def wake(events: list[dict], agent_id: str) -> str:
+    return message(events, agent_id) + "\n\n" + WAKE_NOTE

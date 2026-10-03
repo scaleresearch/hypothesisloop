@@ -119,13 +119,19 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("an `image` is a job image name of `hl capacity` or a full address", flat)
 
     # A run closed under a summary that said it was "waiting for the competitor agent", one
-    # still open was written up as "proceeding", and three turns ended on `echo waiting`.
+    # still open was written up as "proceeding", and three turns ended on `echo waiting`. Told
+    # that an `echo` does nothing, a coordinator ended six more on `echo ok`: each time it had
+    # checked what an update pointed to, long after the rule, so the update now closes with it.
     def test_the_last_summary_is_written_before_the_close_and_a_turn_ends_without_a_command(self):
         flat = " ".join(self.render().split())
         self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
                       "with nothing in it still waiting or under way", flat)
         self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
-        self.assertIn("Ending a turn takes no command, and an `echo` before it does nothing", flat)
+        self.assertIn("Once nothing needs you, answer in one line and call no tool: that answer ends your turn, and no command does", flat)
+        self.assertNotIn("echo", flat)
+        self.assertTrue(updates.wake([{"kind": "comment.new", "subject": "hyp-1"}], "").endswith(
+            "comment.new hyp-1\n\nOnce nothing above needs you, answer in one line and call no tool: "
+            "that answer ends your turn, and no command does."))
 
     # One looked for comments with a relationship it made up, which matched no row, and for a
     # job's summary with the command that files one.
