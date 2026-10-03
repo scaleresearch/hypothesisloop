@@ -76,12 +76,14 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 		}
 	}
 
+	// A container that ended in failure comes before one that waits: in a gang one rank can crash
+	// while another still pulls its image, and the wait says nothing of why the job failed.
 	switch {
-	case firstWaiting != nil:
-		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
 	case firstTerminated != nil:
 		r, m, rc := terminatedPhaseDetail(firstTerminated, maxRestarts)
 		return r, m, rc, scheduledNodes, schedulingReason, nil
+	case firstWaiting != nil:
+		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
 	default:
 		return "", "", maxRestarts, scheduledNodes, schedulingReason, nil
 	}

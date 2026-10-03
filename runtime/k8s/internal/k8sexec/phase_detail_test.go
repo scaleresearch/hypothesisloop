@@ -125,6 +125,32 @@ func TestPollPhaseDetailCountsEveryPodWhenAttemptIsUnknown(t *testing.T) {
 	}
 }
 
+// One rank of a gang crashed while another still waits for its image. The wait was reported and
+// the crash hidden, so the job failed with the words of a pull that was going fine.
+func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
+	waiting := schedulingPod("gang-exp-0", true, "")
+	waiting.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating", Message: "pulling image"}},
+	}}
+	crashed := schedulingPod("gang-exp-1", true, "")
+	crashed.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
+	}}
+	c := phaseDetailTestClient()
+	c.kube = fake.NewClientset(waiting, crashed)
+
+	reason, message, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
+	if err != nil || reason != domain.PhaseReasonOOMKilled || message != "container exited with code 137 (OOMKilled)" || scheduledNodes != 2 {
+		t.Fatalf("reason %q, message %q, scheduled %d, %v, want the crash", reason, message, scheduledNodes, err)
+	}
+
+	// With no crash the wait is what there is to say.
+	c.kube = fake.NewClientset(waiting)
+	if reason, message, _, _, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0); err != nil || reason != "" || message != "pulling image" {
+		t.Fatalf("a waiting rank alone: reason %q, message %q, %v", reason, message, err)
+	}
+}
+
 // The kube-system namespace UID is the runtime's stable cluster fingerprint (autoscaler.md's
 // "Cluster identity") — it must come back verbatim, not derived or reformatted.
 func TestGetClusterIDReturnsTheKubeSystemNamespaceUID(t *testing.T) {
