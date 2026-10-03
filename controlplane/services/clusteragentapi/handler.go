@@ -458,6 +458,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
 				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " names an admitted_machine and no admitted_node")
 			}
+			if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
+				return nil, huma.Error400BadRequest("status report for " + rep.ExperimentID + " needs started_at and ended_at together, in that order")
+			}
 			ids = append(ids, rep.ExperimentID)
 		}
 		placementByID, err := h.store.PlacementByID(ctx, ids)
@@ -481,15 +484,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
 				AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: rep.AdmittedMachine, At: now,
 			})
-			if rep.Phase == metricsdb.PhaseRunning {
-				labels := map[string]string{"cluster_name": clusterName}
-				if rep.AdmittedNode != "" {
-					labels["node"] = rep.AdmittedNode
-				}
-				observations = append(observations, metricsdb.Observation{
-					ExperimentID: rep.ExperimentID, At: now, ExtraLabels: labels,
-				})
+			alive, runAhead := observationsOf(rep, clusterName, now)
+			if runAhead {
+				h.logger.Error("dropping the run a status report measured: it ends in the future", zap.String("experiment", rep.ExperimentID),
+					zap.String("cluster", clusterName), zap.Time("ended_at", *rep.EndedAt))
 			}
+			observations = append(observations, alive...)
 			// LogTail is optional per report (nil when the executor has nothing new)
 			// -- only write when the agent actually sent one, so a
 			// job with no fresh output this tick doesn't wipe out its last-known tail.
@@ -508,13 +508,15 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 				}
 			}
 		}
-		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
-			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
-		}
+		// Observations first: the job watcher settles a job as soon as it reads the phase that
+		// ended it, from whatever was observed of it by then.
 		if len(observations) > 0 {
 			if err := metricsdb.RecordObservations(ctx, h.metricsDBURL, observations); err != nil {
 				return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 			}
+		}
+		if err := metricsdb.RecordJobStatuses(ctx, h.metricsDBURL, clusterName, now, statusSamples); err != nil {
+			return nil, auth.Internal(h.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
 		resp := &struct {
 			Body struct {
@@ -662,6 +664,41 @@ type statusReport struct {
 	// workload it created). A pointer because absent and zero are different answers — see
 	// reportedAttempt.
 	Attempt *int `json:"attempt,omitempty"`
+	// StartedAt and EndedAt are when the job's command started and ended, from a runtime whose
+	// own look at the workload cannot time it: one that rents machines sees them through a
+	// vendor, and reads the times the wrapper beside the command measured. Sent together, once
+	// the command has ended.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+}
+
+// maxRunClockSkew is how far ahead of this clock a reported run may end, the bound a node-agent's
+// push is held to as well.
+const maxRunClockSkew = 5 * time.Minute
+
+// observationsOf is when rep shows its job alive: now for a job reported running, and the two
+// ends of the run a runtime measured. Those count under the same gap rule as every other
+// observation. They are told by the machine's own clock, and a run that ends more than
+// maxRunClockSkew ahead of now is kept out of the series the job is billed from, which runAhead
+// says.
+func observationsOf(rep statusReport, clusterName string, now time.Time) (observations []metricsdb.Observation, runAhead bool) {
+	labels := map[string]string{"cluster_name": clusterName}
+	if rep.AdmittedNode != "" {
+		labels["node"] = rep.AdmittedNode
+	}
+	at := func(t time.Time) metricsdb.Observation {
+		return metricsdb.Observation{ExperimentID: rep.ExperimentID, At: t.UTC(), ExtraLabels: labels}
+	}
+	if rep.Phase == metricsdb.PhaseRunning {
+		observations = append(observations, at(now))
+	}
+	if rep.EndedAt == nil {
+		return observations, false
+	}
+	if rep.EndedAt.After(now.Add(maxRunClockSkew)) {
+		return observations, true
+	}
+	return append(observations, at(*rep.StartedAt), at(*rep.EndedAt)), false
 }
 
 // rejectReport decides whether one status report describes the workload the control plane is
