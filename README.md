@@ -94,7 +94,7 @@ The control plane ships a Next.js dashboard for observing agents, platform exper
 
 ```bash
 cd controlplane/ui && npm install
-cp .env.example .env.local                         # then fill in the three values
+cp .env.example .env.local                         # then fill in the four values
 npm run dev                                        # → http://localhost:3000
 ```
 
@@ -102,14 +102,15 @@ npm run dev                                        # → http://localhost:3000
 
 People sign in through a [Supabase](https://supabase.com) project of your own, and the UI sends
 the session's access token with every API request. `controlplane/ui/.env.local` names the
-project. All three values are public and compiled into the browser bundle, so an image takes
-them as build arguments of `controlplane/build/Dockerfile.ui`:
+project. All four values are public and compiled into the browser bundle. An image takes the
+first three as build arguments of `controlplane/build/Dockerfile.ui`:
 
 | Variable | Value |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | the control plane's API as the browser reaches it, e.g. `http://localhost:8081` |
 | `NEXT_PUBLIC_SUPABASE_URL` | the project URL, `https://<project-ref>.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the project's publishable key, `sb_publishable_...` |
+| `NEXT_PUBLIC_SIGN_IN_PROVIDERS` | the sign-in providers the login page offers, in order, e.g. `github` |
 
 In the Supabase project (Authentication settings):
 
@@ -169,8 +170,9 @@ Code lives in git only, and every deployment's settings name its git host (`git.
 `github`, the App above, or `plain`, any host serving repositories under one root, where a
 repository is created beforehand and named at create. `make dev` with no App runs a `plain` host.
 
-Another sign-in method is an entry in `SIGN_IN_METHODS` (`controlplane/ui/src/lib/auth.ts`) and
-the provider switched on in Supabase.
+The login page offers the providers `NEXT_PUBLIC_SIGN_IN_PROVIDERS` lists, out of the ones
+`PROVIDER_NAMES` knows (`controlplane/ui/src/lib/auth.ts`: `github`, `google`, `apple`). Another
+sign-in method is its name in that list and the provider switched on in Supabase.
 
 ## CLI
 
@@ -182,53 +184,53 @@ export API_URL=http://localhost:8081
 export HL_TOKEN="$(make -s staff-token)"   # every request carries a token; an API key or user token works the same
 export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create` puts what it makes
 
-hl platform-experiments agents add --platform-experiment pe-123            # create an agent you run yourself; its token is printed
-hl platform-experiments agents add --platform-experiment pe-123 --hosted   # or have the platform create and run one agent; once per agent
-hl platform-experiments get --platform-experiment pe-123   # status, description, metrics, stages (one for fewer than 5 researchers)
+hl platform-experiments agents add --platform-experiment PE            # create an agent you run yourself; its token is printed
+hl platform-experiments agents add --platform-experiment PE --hosted   # or have the platform create and run one agent; once per agent
+hl platform-experiments get --platform-experiment PE       # status, description, metrics, stages (one for fewer than 5 researchers)
 hl platform-experiments agents finish --reason "..."       # an agent with nothing left to do; its machine stops;
                                                            # 409 experiment_closed once the experiment closed, which ended its run
-hl platform-experiments agents session ag-1 | tar -xzf -   # what an agent said and saw, for its org, also after the close;
+hl platform-experiments agents session AGENT | tar -xzf -  # what an agent said and saw, for its org, also after the close;
                                                            # `coordinator` or `planner` in place of the id for theirs
 hl platform-experiments list                               # yours and the ones the platform shares with every account, one line each
-hl platform-experiments update --baseline-job job-1  # declare the baseline: the platform writes it into the brief and starts the run
+hl platform-experiments update --baseline-job JOB          # declare the baseline: the platform writes it into the brief and starts the run
 hl quota                                                   # your share of the budget and what a job submitted now may still hold of it;
                                                            # 404 quota_not_granted before the start, with what to do next
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators and CPU cores per cluster
 hl hypothesis submit --builds-on root --text "..."
 hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective {id: $pe}) RETURN h.id, h.text'
-hl hypothesis get h-1                                      # links, jobs, findings, comments, implementations and base_ref
-hl hypothesis checkout h-1                                 # in a clone: your branch for the hypothesis; --from JOB starts it from that job's commit
-hl hypothesis link h-2 --type contradicts --to h-1
-hl hypothesis comment h-1 --text "..."
-hl hypothesis status h-1 confirmed --against JOB            # the control it was compared with; needs two completed jobs of its own
+hl hypothesis get HYP                                      # links, jobs, findings, comments, implementations and base_ref
+hl hypothesis checkout HYP                                 # in a clone: your branch for the hypothesis; --from JOB starts it from that job's commit
+hl hypothesis link HYP2 --type contradicts --to HYP
+hl hypothesis comment HYP --text "..."
+hl hypothesis status HYP confirmed --against JOB           # the control it was compared with; needs two completed jobs of its own
 hl repo init                                               # in a clone: write .hypothesisloop/experiment.yaml from the platform experiment and add README.md, .hypothesisloop/job.yaml, metrics.py and .gitignore; a file that is there is kept unless it is the unfilled template or another experiment's
 hl repo check                                              # in a clone: check that the files are there and valid, and that the experiment file, the job spec and the metrics the code names fit the platform experiment; its helper line fails nothing
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --env LR=0.1  # submit the base job spec against a hypothesis, overriding it
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --secret-env HF_TOKEN  # hand the job $HF_TOKEN from your environment; no read of the job shows it
-hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
-hl job status job-1 job-2                                  # one line per job
-hl job metrics job-1                                       # last, min and max per metric; --points for every point, as JSON lines
-hl job summary job-1 --text "..."
-hl job logs job-1 | data job-1 | cost job-1 | cancel job-1
+hl job list --agent AGENT                                  # one agent's jobs; without --agent, everyone's
+hl job status JOB JOB2                                     # one line per job
+hl job metrics JOB                                         # last, min and max per metric; --points for every point, as JSON lines
+hl job summary JOB --text "..."
+hl job logs JOB | data JOB | cost JOB | cancel JOB
 hl job stats                                               # counts by status and eviction reason
 hl org list | rename "New name"                            # the orgs this token reaches
-hl org invites create --role member | list | revoke inv-1  # prints the invite's token once; hand it over yourself
+hl org invites create --role member | list | revoke INVITE # prints the invite's token once; hand it over yourself
 hl org invites accept hli_...                              # join that org, with your own sign-in as HL_TOKEN
 hl org members list | set-role USER owner | remove USER    # an org keeps at least one owner; remove yourself to leave
-hl project list | create vision | rename --project prj-1 language
-hl api-key create ci --project prj-1                       # prints the token once; list | revoke ID
+hl project list | create vision | rename --project PROJECT language
+hl api-key create ci --project PROJECT                     # prints the token once; list | revoke ID
 hl cluster add my-cluster | list                           # register a cluster, print the command that starts its agent
 hl cluster token my-cluster | forget-identity my-cluster | remove my-cluster
 hl cluster order my-cluster other-cluster                  # the order the org's jobs are placed on its own clusters
 hl cluster settings my-cluster --stuck-pending-timeout 900 # a cluster's own value in place of a scheduler default; 0 clears it
 hl cluster disable my-cluster | enable my-cluster          # turn a cluster off or on for the org's jobs; running ones finish
 hl watch                                                   # next batch of news on your own jobs and hypotheses
-hl watch --experiment exp-1 --until 'status in COMPLETED,FAILED,EVICTED'
-hl watch --platform-experiment pe-123 --all --follow       # stream the whole platform experiment
+hl watch --experiment JOB --until 'status in COMPLETED,FAILED,EVICTED'
+hl watch --platform-experiment PE --all --follow           # stream the whole platform experiment
 ```
 
-An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. What to do about an experiment that is still open is in the record itself, in `status_reason`, and nothing is written beside it. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
+`PE`, `AGENT`, `JOB`, `HYP`, `PROJECT` and `INVITE` stand for ids, which the platform issues: a platform experiment's, an agent's and a job's are `pe-`, `ag-` and `job-` with 32 hex digits (`pe-0198f2a13c9e7b219c4a2f6e1a8d5b3c`), an invite's `inv-` with the same, a hypothesis's a UUID, and a project's `prj_` with a UUID. An ID is a positional argument; `--id ID` works too. A command given the ID of a job or a hypothesis (`hl job status ID`, `hl hypothesis get ID`) takes no `--platform-experiment`, since an ID is unique on the platform; every other command that works in a platform experiment takes it. `--agent` and `--platform-experiment` default to what an agent's token says, and for a person or an API key to `$AGENT_ID` and `$PLATFORM_EXPERIMENT_ID`, except where `--agent` filters a list (`hl job list`, `hl hypothesis list`). `--org` defaults to `$HL_ORG` and then to the one org the token reaches; `--project` defaults to `$HL_PROJECT`. An org has two roles. An owner changes everything in it: members, invites, API keys of the whole org, clusters, the GitHub accounts connected to it, org and project settings. A member reads everything, creates and runs platform experiments and what goes on in them, and creates API keys bound to one project. People join by an invite token (`POST /orgs/{id}/invites`, accepted with `POST /invites/accept`), since the platform stores no email and sends none, and the API keys a person created stop working when they leave. One account creates a bounded amount: a person owns at most `accounts.max_orgs_per_user` orgs (3, their first one included) and an org holds at most `accounts.max_projects_per_org` projects (10, its default one included), both set in `controlplane/settings/hypothesisloop.yaml`. A create past either answers 409 with reason `max_orgs_reached` or `max_projects_reached`, `GET /me` states both under `limits`, and staff are held to neither. Every list prints one compact JSON object per line and no enclosing array, so parse it line by line; `hl platform-experiments get` and the writes of `hl platform-experiments` print their one record indented. What to do about an experiment that is still open is in the record itself, in `status_reason`, and nothing is written beside it. `hl hypothesis query --help` has ready queries: text search, the approaches under the root, one branch, and hypotheses by how many jobs tested them (`$evidence`).
 
 ## Who runs a platform experiment
 
@@ -377,8 +379,8 @@ metrics:
 **Hypothesis** (`hl hypothesis submit --file hypothesis.yaml`)
 
 ```yaml
-agent_id: agent-123
-platform_experiment_id: pe-123
+agent_id: ag-0198f2a27d4c7e10b3a55c1f9e2d6a47       # an agent's token says both ids, so its file states neither
+platform_experiment_id: pe-0198f2a13c9e7b219c4a2f6e1a8d5b3c
 text: "the hypothesis this agent is testing, in one falsifiable sentence"
 links: [{type: builds_on, to: root}]   # the objective, or ids of the hypotheses it refines
 ```
@@ -450,15 +452,38 @@ or the full registry address of an image of your own, host first
 (`docker.io/library/python:3.13-slim`). Anything else, a bare `python:3.13` included, is refused
 at submit with 422 `unknown_job_image`. Every job names one, on CPU, GPU and chip clusters
 alike; where `hl capacity` shows a cluster with `only_job_image`, that cluster runs that image
-and no other, so a job meant for it names that one. A job that no cluster could run with the
-image it names, or with none, is refused at submit with 422 `no_cluster_for_image`, and a
+and no other, so a job meant for it names that one. A job that names no image is
+refused at submit with 422 `image_required`, one that no cluster could run with the
+image it names with 422 `no_cluster_for_image`, and a
 submit after the experiment's end with `experiment_closed`. In each of the platform's job images a job installs with
 `uv pip install PACKAGE` or `pip install PACKAGE`, into the Python its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment,
 which suits the `python` image and hides the framework a framework image carries.
 
 An accepted job stays QUEUED until a cluster has room for all of it, and says why it waits:
-`not_admitted_reason` is a code to branch on (`awaiting_admission`, `capacity_unavailable`,
-`outranked`, `summary_gate`) and `not_admitted_message` the sentence beside it, which for
+`not_admitted_reason` is a code to branch on and `not_admitted_message` the sentence beside it.
+The codes (`controlplane/shared/domain/constants.go`):
+
+| Code | The job waits because |
+|---|---|
+| `awaiting_admission` | the scheduler has not looked at it since it was queued |
+| `capacity_unavailable` | no cluster has room for all of it now |
+| `outranked` | jobs ahead of it take the room |
+| `waiting-for-scale-up` | a cluster is already adding a node for a job like it |
+| `no_scalable_capacity` | every cluster that scales up was tried and failed it recently |
+| `concurrency_cap` | its platform experiment holds `max_concurrent_accelerators` in flight |
+| `summary_gate` | its agent owes the summary of a COMPLETED job |
+| `insufficient_quota` | its agent's quota no longer covers what it holds |
+| `stage_cut` | its agent was cut at a stage boundary |
+| `job_too_long` | its estimate is over the current stage's `max_job_hours` |
+| `no_cluster_for_org` | no connected cluster is its org's or shared |
+| `clusters_disabled` | its org turned off every cluster it could use |
+| `no_cluster_for_image` | its image keeps it off every cluster that takes its org's jobs |
+| `no_multi_node_cluster` | it spans several nodes and no connected cluster runs such a job |
+| `exceeds_accelerator_share` | its cpu, memory or storage is above the share its accelerators get on a node |
+| `exceeds_cluster_capacity` | it asks for more than any cluster that can run it has |
+| `workload_creation_failed` | the platform could not hand it to its cluster, and tries again within seconds |
+
+The message for
 `capacity_unavailable` names the cluster, what it is short of and how many jobs hold that, and
 for `summary_gate` the COMPLETED jobs whose summary is owed and the command that files one. A
 job held by the summary gate is announced at once to its agent and its coordinator as a
@@ -478,7 +503,7 @@ A job is read by one value per declared metric (`metrics` in `hl job list` and
 ## More about capabilities
 
 - **Quota-metered scheduling.** Each agent gets a share of a platform experiment's budget in accelerator-hours, or core-hours for jobs on CPU. A job runs guaranteed or burst against that one share: a guaranteed job can preempt burst jobs, and burst adds no hours. Usage cannot exceed the configured budget.
-- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run requires a written finding, attached to the hypothesis it tested, before the same agent can submit again.
+- **Structured submissions.** Every job belongs to exactly one platform experiment and tests one previously-registered hypothesis from that platform experiment's hypothesis graph - register the same idea twice and you get back the original, not a duplicate. A completed run needs a written finding, attached to the hypothesis it tested: until it is filed, the jobs its agent submitted after that run ended are accepted and stay queued (`summary_gate`).
 - **Node-failure recovery.** A node dying mid-run gets rescheduled; the scheduler tells "mid-reschedule" apart from "actually hung" before evicting for silence, and billing settles against observed usage across the gap.
 - **Inspectable eviction reasons.** Jobs are evicted with a specific reason rather than disappearing silently, so completed, failed, cancelled and evicted runs are always distinguishable and explainable.
 - **Cross-agent visibility.** Agents query a platform experiment's hypothesis graph with read-only Cypher and read the jobs and findings behind each hypothesis before submitting. In a run of 5 or more researchers an elimination ladder cuts the weakest agents at configurable stage boundaries and reallocates their held-back budget to the survivors. Anyone watching a run can add an idea to the same graph from the UI, and it dedups against the agents' own exactly as theirs do.
@@ -497,12 +522,12 @@ We think of automated research as a loop, not a pipeline. Someone sets an object
 
 That loop is built from six primitives:
 
-- **Platform experiment**, the objective. An operator opens a compute envelope with a budget, the metrics that define success, a max agent count, a reporting cadence, and the root of its own hypothesis graph. Agents sign up, then submit jobs against it once it starts.
+- **Platform experiment**, the objective. An operator opens a compute envelope with a budget, the metrics that define success, a max agent count, a reporting cadence, and the root of its own hypothesis graph. Its agents are added to it (`hl platform-experiments agents add`) or created when a draft is accepted, and they submit jobs against it once it starts.
 - **Hypothesis**, the claim. A registered research idea, scoped to one platform experiment and placed in its graph: it builds on the objective or on the hypotheses it refines or combines, and can contradict or relate to others. Agents read the graph to find where an idea belongs, then register it (or retrieve it, if the same idea already exists) before submitting any job against it, so nothing gets spent without a claim on record first.
 - **Job**, the test. One training/eval run, submitted with a hypothesis reference, a theory, and a resource description (accelerator type/count, optional distributed or heterogeneous topology, CPU/RAM/storage). Never a raw cluster manifest. A hypothesis is a claim and a branch is one agent's implementation of it, so any agent may run any hypothesis, each on a branch of its own: `hl hypothesis checkout ID` puts a clone on `hl/<platform experiment>/<agent name>/<start of the text>-<last 6 of the id>`, created from the hypothesis's `base_ref` (the commit the newest completed job of the hypothesis it builds on ran, the baseline job's for one that builds on the objective) or with `--from JOB` from the commit that job ran. `hl job submit` pushes the branch and states it as `metadata.branch`; a job on any branch outside `hl/<platform experiment>/` is 422 `branch_not_of_experiment`. `GET /hypotheses/{id}` lists the `implementations`, one per agent that ran it. The baseline is the objective's own measurement: a baseline agent registers no hypothesis (403 `baseline_registers_no_hypothesis`), its job names none (422 `baseline_tests_no_hypothesis`) and runs on `hl/<platform experiment>/baseline`, and the graph answers what it found as `objective: {finding, best_job}`.
 - **Quota tiers**, the budget the loop runs inside. Guaranteed capacity is never preempted. Burst capacity can be preempted by a guaranteed job that needs the same accelerator. Preempted burst jobs return to the queue and re-admit later; cancellations refund unused reservation.
 - **Durable data**, the memory the loop runs on. Each job gets its own writable space and a readable one shared across the platform experiment. Git stays the store for anything read as text, code, configs, small results. The data space takes anything loaded as a tensor. A requeued job keeps its identity, so a checkpoint written before a preemption is at the same place when it starts again.
-- **Lineage and findings**, the record the next iteration reads before it starts. Jobs can chain parent to child. Every completed job needs a written finding, filed against the hypothesis it tested, before its agent can submit the next one. The hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
+- **Lineage and findings**, the record the next iteration reads before it starts. Jobs can chain parent to child. Every completed job needs a written finding, filed against the hypothesis it tested, and its agent's later jobs stay queued until it is filed. The hypothesis accumulates one finding per job that tested it, forming a shared evidence trail other agents read before testing it again.
 
 ## Architecture
 
@@ -519,7 +544,7 @@ HypothesisLoop is split into two kinds of deployable things:
   does is agent- or UI-facing.
 - **Runtime agent** - installed once per *target* environment where jobs
   actually run, and the only place that holds real credentials for that
-  environment. Two runtimes exist today, sharing one backend-agnostic
+  environment. Three runtimes exist today, sharing one backend-agnostic
   reconcile loop (fetch desired state, diff against actual, converge, report
   back - the same loop a kubelet runs, one level up):
   - **Kubernetes** (`runtime/k8s/`) - a cluster-agent Deployment plus a
@@ -529,6 +554,10 @@ HypothesisLoop is split into two kinds of deployable things:
   - **Bare metal** (`runtime/bare-metal/`) - a single bare-agent process for
     a node with nothing but a container engine on it, no cluster at all.
     Useful for on-demand hardware you don't want to join to Kubernetes.
+  - **Rented compute** (`runtime/cloud/`) - a cloud-agent process that rents
+    one machine per job from a vendor (vast.ai, Fly.io or E2B) and ends it
+    with the job. The agent-launcher beside it rents the machines of the
+    agents the platform runs. `infra/README.md` has their settings.
 
   Install one runtime agent per target environment; the control plane
   coordinates all of them through Postgres, never a live connection into any
@@ -616,7 +645,7 @@ From a checkout, `make cluster-agent-up` installs the same chart from `runtime/k
 and is what local development uses:
 
 ```bash
-RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org 'org-1')" make cluster-agent-up CLUSTER='my-cluster' \
+RUNTIME_TOKEN="$(hl cluster token 'my-cluster' --org "$HL_ORG")" make cluster-agent-up CLUSTER='my-cluster' \
   API_URL='https://your-control-plane:8081' METRICS_URL='https://your-control-plane:8084' \
   REGISTRY='registry.example.com/hypothesisloop' TAG='the-tag-that-was-pushed' \
   KUBECONFIG_PATH="$HOME/.kube/config" KUBE_CONTEXT='my-cluster'
@@ -768,7 +797,7 @@ their end. A job whose org turned off every cluster it could use waits with
 cluster that is off is left out of `hl capacity`.
 
 A platform experiment can be shared the same way, as a showcase a new account opens instead of
-an empty screen. Staff share one with `hl-admin platform-experiment share pe-123` or
+an empty screen. Staff share one with `hl-admin platform-experiment share PE` or
 `POST /platform-experiments/{id}/share`, and take it back with `unshare`. Every account then
 reads it and what is in it through the read routes it uses for its own (the experiment, agents,
 jobs, hypotheses and the graph query, findings, comments, metrics, logs, data listings, results,

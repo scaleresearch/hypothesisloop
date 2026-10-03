@@ -148,8 +148,8 @@ silently improvise.
    name, `carries` what is installed), names on each type's line the ones that suit it
    (`job_images`), and marks a cluster that runs one image and no other with `only_job_image`:
    a job meant for that cluster names that image, and one that names another is never placed
-   there. A job that no cluster could run with the image it names, or with none, is refused at
-   submit with 422 `no_cluster_for_image`. In each of the platform's job
+   there. A job that names no image is refused at submit with 422 `image_required`, and one
+   that no cluster could run with the image it names with 422 `no_cluster_for_image`. In each of the platform's job
    images a job installs with `uv pip install PACKAGE` or `pip install PACKAGE`, into the Python
    its command runs. `uv run --with PACKAGE script.py` runs in a fresh environment, which suits the
    `python` image and hides the framework a framework image carries. `make images` builds and
