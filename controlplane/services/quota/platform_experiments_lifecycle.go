@@ -357,7 +357,7 @@ func maxAgentsReached(limit int) error {
 }
 
 func maxHostedReached(limit int) string {
-	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment at once. One is kept for an agent of role baseline, which measures the baseline nothing starts without, and its coordinator and its other hosted agents take the rest. An agent that finished holds none", limit)
+	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment at once. One is kept for an agent of role baseline, which measures the baseline nothing starts without, and its coordinator and its other hosted agents take the rest. An agent that finished holds none, nor does one whose machine stopped with no restart left", limit)
 }
 
 // Signup gives a registered agent its place in a platform experiment: a fixed role, and

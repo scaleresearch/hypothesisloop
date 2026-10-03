@@ -204,15 +204,16 @@ ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signu
 		}
 	}
 	// max_hosted bounds the machines the platform rents for the experiment at once. An agent that
-	// finished holds none, and a planner is no agent of an open experiment. One machine is
-	// kept for measuring the baseline, which nothing starts without: the coordinator and the
-	// agents that do not measure it take the others.
+	// finished holds none, nor does one whose machine stopped with no restart left, and a planner
+	// is no agent of an open experiment. One machine is kept for measuring the baseline, which
+	// nothing starts without: the coordinator and the agents that do not measure it take the
+	// others. A baseline agent whose machine stopped leaves that one to the next.
 	if hosted || (len(signups) == 0 && coordinatorHosted) {
 		var measuring, others int
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FILTER (WHERE role = $2), COUNT(*) FILTER (WHERE role <> $2)
 FROM experiment_signups
-WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND role <> $3`,
+WHERE platform_experiment_id = $1 AND hosted AND finished_at IS NULL AND NOT instance_stopped AND role <> $3`,
 			platformExpID, string(domain.SignupRoleBaseline), string(domain.SignupRolePlanner)).Scan(&measuring, &others); err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
 		}

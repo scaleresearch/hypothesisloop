@@ -219,7 +219,7 @@ func registerProposalHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
-			"The platform hosts its coordinator and each researcher, and starts_at is now. Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
+			"The platform hosts its coordinator, each researcher and one agent of role baseline, created here and named by its role, whose machine is asked for at once beside the coordinator's, and starts_at is now.Its length counts from the start of the run and measuring the baseline takes nothing from it: it is open until baseline_due_at, planning.baseline_limit_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. Nothing has run yet: the coordinator has the baseline measured and declares it (PATCH /platform-experiments/{id}, baseline_job_id), " +
 			"no researcher's machine is started before, and the platform starts the run once the baseline is declared. " +
 			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
@@ -308,7 +308,8 @@ func invalidTransition(format string, args ...any) error {
 }
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
-// req states, with a hosted coordinator and its researchers, in one write.
+// req states, with a hosted coordinator, its researchers and the agent that measures its
+// baseline, in one write.
 func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req AcceptRequest) (*domain.PlatformExperiment, error) {
 	pe, err := h.svc.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -351,14 +352,22 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	pe.BaselineDueAt = pe.OpenUntil(now, h.svc.cfg.BaselineLimit)
 	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: h.launch.Launcher, Model: h.launch.DefaultModel}
 
-	agents := make([]*domain.Agent, 0, len(req.Agents))
-	signups := make([]domain.AgentSignup, 0, len(req.Agents))
+	agents := make([]*domain.Agent, 0, len(req.Agents)+1)
+	signups := make([]domain.AgentSignup, 0, len(req.Agents)+1)
 	caller, err := h.caller(ctx)
 	if err != nil {
 		return nil, err
 	}
 	by := caller.Actor()
-	for i, asked := range req.Agents {
+	// The agent that measures the baseline joins with the accept: its machine is asked for with
+	// the coordinator's, and nothing waits for anyone to add it.
+	hosted := append([]ProposedAgent{}, req.Agents...)
+	hosted = append(hosted, ProposedAgent{})
+	for i, asked := range hosted {
+		role := domain.SignupRoleCompetitor
+		if i == len(req.Agents) {
+			role = domain.SignupRoleBaseline
+		}
 		flavor, model, err := domain.ResolveAgentLaunch(asked.Flavor, asked.Model, h.launch.DefaultModel, asked.Hyperparameters)
 		if err != nil {
 			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
@@ -369,7 +378,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 		}
 		agents = append(agents, &domain.Agent{ID: agentID, PerformanceScore: 0.5, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
-			AgentID: agentID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: h.launch.Launcher,
+			AgentID: agentID, Role: role, Hosted: true, Launcher: h.launch.Launcher,
 			Flavor: flavor, Model: model, Hyperparameters: asked.Hyperparameters, Actor: &by,
 		})
 	}
@@ -383,7 +392,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	case err != nil:
 		return nil, h.refusal("accept", err)
 	}
-	h.logger.Info("draft accepted", zap.String("id", id), zap.Int("researchers", len(signups)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
+	h.logger.Info("draft accepted", zap.String("id", id), zap.Int("researchers", len(req.Agents)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
 	accepted, err := h.svc.store.GetPlatformExperiment(ctx, id)
 	if err != nil || accepted == nil {
 		return nil, h.refusal("read accepted", errors.Join(err, errors.New("the platform experiment is gone")))

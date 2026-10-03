@@ -572,14 +572,23 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Launcher != "main" || pe.Coordinator.Model != "platform-model-1" {
 		t.Errorf("coordinator %+v, want one the platform hosts", pe.Coordinator)
 	}
-	if len(store.acceptedAgents) != 3 || len(store.acceptedSignups) != 3 {
-		t.Fatalf("signed up %d agents with %d signups, want 3", len(store.acceptedAgents), len(store.acceptedSignups))
+	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
+	// anything was measured: the accept signs it up beside the researchers.
+	if len(store.acceptedAgents) != 4 || len(store.acceptedSignups) != 4 {
+		t.Fatalf("signed up %d agents with %d signups, want the 3 researchers and the baseline agent", len(store.acceptedAgents), len(store.acceptedSignups))
 	}
 	for i, signup := range store.acceptedSignups {
-		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != domain.SignupRoleCompetitor || signup.Model != "platform-model-1" {
-			t.Errorf("researcher %d: %+v signed up as %+v", i, agent, signup)
+		agent, role := store.acceptedAgents[i], domain.SignupRoleCompetitor
+		if i == 3 {
+			role = domain.SignupRoleBaseline
 		}
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Launcher != "main" || signup.Role != role || signup.Model != "platform-model-1" ||
+			signup.Actor == nil || signup.Actor.ID != "u-1" {
+			t.Errorf("agent %d: %+v signed up as %+v, want a hosted one of role %s added by the person who accepted", i, agent, signup, role)
+		}
+	}
+	if measures := store.acceptedSignups[3]; measures.Flavor != domain.DefaultAgentFlavor || len(measures.Hyperparameters) != 0 {
+		t.Errorf("the baseline agent runs as %+v, want the default flavor and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.Flavor != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].Flavor != domain.DefaultAgentFlavor {
 		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)

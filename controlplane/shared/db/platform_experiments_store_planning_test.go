@@ -227,10 +227,15 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Launcher: launcher, Model: "model-1"}
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
-		for i := 0; i < researchers; i++ {
+		// The researchers, and last the agent that measures the baseline.
+		for i := 0; i <= researchers; i++ {
+			role := domain.SignupRoleCompetitor
+			if i == researchers {
+				role = domain.SignupRoleBaseline
+			}
 			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
-			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleCompetitor, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{AgentID: agent.ID, Role: role, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"})
 		}
 		return pe, agents, signups
 	}
@@ -295,10 +300,10 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("declining what is not there: got = %v, want ErrNotDraft", err)
 	}
 	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
-	// 5, its coordinator is one, and the planner is none of them.
-	pe, agents, signups = accepted(5)
+	// 5, its coordinator is one, its baseline agent another, and the planner is none of them.
+	pe, agents, signups = accepted(4)
 	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrMaxHostedReached {
-		t.Fatalf("five researchers and a coordinator in five machines: got = %v, want ErrMaxHostedReached", err)
+		t.Fatalf("four researchers, a baseline agent and a coordinator in five machines: got = %v, want ErrMaxHostedReached", err)
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, id); got.Status != domain.PlatformExpDraft || got.Name == "accepted" {
 		t.Fatalf("a refused accept left %+v", got)
@@ -325,31 +330,47 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 
 	// The planner is no participant, though its signup stays in the roster.
-	if taking, err := pes.ListParticipants(ctx, id); err != nil || len(taking) != 3 || slices.Contains(taking, planner) {
-		t.Fatalf("participants after accept = %v, %v, want the 3 researchers", taking, err)
+	if taking, err := pes.ListParticipants(ctx, id); err != nil || len(taking) != 4 || slices.Contains(taking, planner) {
+		t.Fatalf("participants after accept = %v, %v, want the 3 researchers and the baseline agent", taking, err)
 	}
 
-	// Accepted, nothing has run. The launcher runs the coordinator, which has the baseline
-	// measured, and no researcher yet, and no longer the planner.
+	// Accepted, nothing has run. The agent that measures the baseline joined with the accept, so
+	// the launcher is asked for its machine in the pass that asks for the coordinator's, and for
+	// no researcher's yet, and no longer for the planner's. It was named by its role, and holds
+	// what one researcher holds in the first stage: 40 percent of 6 over 3 places.
+	baseline := agents[3]
+	if baseline.Name != "Baseline 1" {
+		t.Fatalf("the baseline agent is named %q, want Baseline 1", baseline.Name)
+	}
 	wanted, err := pes.ListLauncherAgents(ctx, launcher, time.Minute)
-	if err != nil || len(wanted) != 0 {
-		t.Fatalf("the launcher is asked for %d agents, %v, want none before there is a baseline", len(wanted), err)
+	if err != nil || len(wanted) != 1 || wanted[0].AgentID != baseline.ID || wanted[0].Ended != "" {
+		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
 	}
 	coordinators, err := pes.ListLauncherCoordinators(ctx, launcher, time.Minute)
 	if err != nil || len(coordinators) != 1 || coordinators[0].PlatformExperimentID != id {
 		t.Fatalf("coordinators = %+v, %v", coordinators, err)
 	}
-	// The agent the coordinator adds to measure the baseline holds, from that moment, what one
-	// researcher holds in the first stage: 40 percent of 6 over 3 places, in the one machine the draft has left.
-	baseline := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Baseline", PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
-	if err := pes.SpawnAgent(ctx, id, baseline, domain.AgentSignup{AgentID: baseline.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}); err != nil {
-		t.Fatalf("add the baseline agent: %v", err)
-	}
 	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 0.8 || quota.BurstAcceleratorHours != 0 {
 		t.Fatalf("the baseline agent's quota = %+v, %v, want 0.8 guaranteed accelerator-hours", quota, err)
 	}
-	if wanted, err = pes.ListLauncherAgents(ctx, launcher, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != baseline.ID {
-		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
+	// Every machine the draft may have is taken, so a second baseline agent has none while the
+	// first holds its own, and takes its place once the first's machine stopped for good.
+	second := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], PerformanceScore: 0.5, CreatedAt: time.Now().UTC()}
+	another := domain.AgentSignup{AgentID: second.ID, Role: domain.SignupRoleBaseline, Hosted: true, Launcher: launcher, Flavor: "generalist", Model: "model-1"}
+	if err := pes.SpawnAgent(ctx, id, second, another); err != ErrMaxHostedReached {
+		t.Fatalf("a second baseline agent beside the first: got = %v, want ErrMaxHostedReached", err)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET instance_stopped = true WHERE platform_experiment_id = $1 AND agent_id = $2`, id, baseline.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pes.SpawnAgent(ctx, id, second, another); err != nil || second.Name != "Baseline 2" {
+		t.Fatalf("a second baseline agent once the first's machine stopped: got = %v, named %q, want it added as Baseline 2", err, second.Name)
+	}
+	if err := pes.RemoveAgent(ctx, id, second.ID, func(context.Context, string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET instance_stopped = false WHERE platform_experiment_id = $1 AND agent_id = $2`, id, baseline.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	// Started, the budget is shared among the researchers: the planner and the baseline agent
