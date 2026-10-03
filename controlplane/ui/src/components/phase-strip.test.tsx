@@ -106,6 +106,14 @@ describe('the phase strip', () => {
     show(experiment('running', 'running', { started_at: at, ends_at: at }))
     expect(sentence()).toBe(`The researchers are at work until ${formatDate(at)}.`)
   })
+
+  it('says no researcher is left, when the platform closes it, and the commands that close it sooner', () => {
+    show(experiment('running', 'researchers_done', { ends_at: at }, { waits_for: 'owner' }))
+    expect(sentence()).toBe(`No researcher is left to submit a job: each one finished, was cut or lost its machine. The platform closes the experiment on ${formatDate(at)}. Before then its summary is written with \`hl platform-experiments summary --file FILE --platform-experiment pe-1\` and it is closed with \`hl platform-experiments close --platform-experiment pe-1\`.`)
+    const strip = within(screen.getByRole('region', { name: 'Where this experiment stands' }))
+    expect(strip.getByText('Your move')).toBeTruthy()
+    expect(strip.queryByRole('button')).toBeNull()
+  })
 })
 
 // Why an experiment closed was a few grey words beside its status badge, and a run whose

@@ -36,7 +36,9 @@ export type OwnerAction = { opens: 'edit' | 'agents'; label: string }
  * or for the coordinator, whose move is the owner's where a person coordinates. phase.test.ts
  * reads that file and fails when the two differ. null is a move with no control in the strip:
  * the proposal and the revise box are below it, a baseline is added or declared with the hl
- * command the API's message gives, and the edit form has no field for a metric's bound.
+ * command the API's message gives, which names the platform experiment, the edit form has no
+ * field for a metric's bound, and the page has no control that closes a running experiment, so
+ * the strip's sentence gives the hl commands that write its summary and close it.
  */
 export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   proposed: null,
@@ -51,6 +53,7 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   budget_below_baseline: { opens: 'edit', label: 'Edit budget' },
   budget_spent: { opens: 'edit', label: 'Edit budget' },
   no_researchers: { opens: 'agents', label: 'Add a researcher' },
+  researchers_done: null,
 }
 
 /** The one place that says which phase an experiment is in, from its status and its status_reason. */
