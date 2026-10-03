@@ -211,6 +211,7 @@ func TestACallerIsListedTheCommandsItRunsAndRefusedTheOthersBeforeAnyRequest(t *
 // until a coordinator's summary was refused in a run. Each command a coordinator is briefed to
 // run is sent here as a coordinator, with the method and the path the platform serves.
 func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
+	pushedClone(t)
 	brief := filepath.Join(t.TempDir(), "brief.md")
 	writeJob(t, brief, "the brief\n")
 	token := derivedToken("coordinator:pe-1")
