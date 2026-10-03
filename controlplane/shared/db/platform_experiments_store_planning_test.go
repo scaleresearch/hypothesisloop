@@ -617,12 +617,12 @@ func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *te
 		by      *domain.Actor
 		want    domain.CloseReason
 	}{
-		"open, no baseline, before its end":  {"", nil, domain.CloseBaselineLimitReached},
-		"open, no baseline, at its deadline": {"ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
-		"open with a baseline":               {"baseline_job_id = 'job-1', ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
-		"running":                            {"status = 'running', started_at = now() - interval '1 hour', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
+		"open, no baseline, before its end":   {"", nil, domain.CloseBaselineLimitReached},
+		"open, no baseline, at its deadline":  {"ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
+		"open with a baseline":                {"baseline_job_id = 'job-1', ends_at = now() - interval '1 second'", nil, domain.CloseBaselineLimitReached},
+		"running":                             {"status = 'running', started_at = now() - interval '1 hour', ends_at = now() - interval '1 second'", nil, domain.CloseEndTimeReached},
 		"running, no researcher's machine up": {"status = 'running', ends_at = now() - interval '1 second'", nil, domain.CloseAgentsNotStarted},
-		"closed by a person":                 {"", &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, domain.CloseByRequest},
+		"closed by a person":                  {"", &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, domain.CloseByRequest},
 	} {
 		if got := closed(c.prepare, c.by); got != c.want {
 			t.Errorf("%s: close_reason = %q, want %q", name, got, c.want)

@@ -183,7 +183,7 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 		t.Errorf("a second close: got = %d %v, want 409 invalid_transition", code, out)
 	}
 	for name, err := range map[string]error{
-		"closing one that does not exist":    func() error { _, err := svc.Close(context.Background(), "pe-none", nil, nil); return err }(),
+		"closing one that does not exist":      func() error { _, err := svc.Close(context.Background(), "pe-none", nil, nil); return err }(),
 		"a summary of one that does not exist": func() error { _, err := svc.SetSummary(context.Background(), "pe-none", "s"); return err }(),
 	} {
 		var refused *api.Refusal
