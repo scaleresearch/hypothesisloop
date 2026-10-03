@@ -1,5 +1,5 @@
 import { apiSend } from '@/lib/api'
-import type { Actor, MetricDefinition, PlatformExperiment } from '@/types'
+import type { Actor, AgentActivity, MetricDefinition, PlatformExperiment } from '@/types'
 
 /** One researcher of a proposal or of an acceptance. */
 export interface ProposedAgent {
@@ -55,6 +55,11 @@ export type Draft = PlatformExperiment & {
   // nothing, the second once it has and the answer waits for a person.
   planning_ends_at?: string
   proposal_expires_at?: string
+  // What the draft's planner is doing now, while its machine is up.
+  activity?: AgentActivity
+  // On a draft whose planner answered: until when its machine is kept, so that a revision asked
+  // for before then is answered with nothing to boot.
+  planner_ends_at?: string
   proposal?: Proposal
   // Set while a proposal stands. Absent while the planner works, on the first plan or on a
   // revision, and on a draft it declined.

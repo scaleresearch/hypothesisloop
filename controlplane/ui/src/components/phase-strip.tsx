@@ -3,11 +3,10 @@
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate } from '@/lib/format'
-import { GITHUB_CARD } from '@/lib/github-connect'
-import { PHASES, phaseOf, reasonOf } from '@/lib/phase'
+import { OWNER_ACTIONS, PHASES, phaseOf, reasonOf, waitsFor } from '@/lib/phase'
 import type { Draft } from '@/lib/planning'
 import { useRoster } from '@/lib/roster'
-import { ExperimentStatus, PlatformExperimentStatus } from '@/types'
+import { ExperimentStatus } from '@/types'
 import type { Experiment, JoinedAgent, StatusReason } from '@/types'
 import { actorLabel } from '@/components/actor'
 import { AgentAtWork } from '@/components/agent-at-work'
@@ -37,6 +36,7 @@ const SENTENCE: Record<string, (pe: Draft) => string> = {
   planning_limit_reached: () => 'It never ran: its planner proposed nothing within the planning limit.',
   proposal_expired: () => 'It never ran: nobody took up its planner\'s answer in time.',
   baseline_limit_reached: () => 'It never ran: no baseline was measured in time.',
+  planner_stopped: () => 'It never ran: its planner\'s machine ended before it answered, as often as the platform restarts one. Nothing was spent on a run, and the same sentence makes a new draft.',
   agents_not_started: () => 'It started, and no researcher\'s machine was running in time, so the platform closed it. None of its duration was used. Agents, below, says why each machine did not come up.',
 }
 
@@ -45,28 +45,24 @@ function sentenceOf(pe: Draft): string {
   return SENTENCE[reason]?.(pe) ?? message
 }
 
-// What the org's GitHub connection lacks, as the API names it where a repository is needed.
-const GITHUB_REASONS = new Set(['github_not_connected', 'installation_not_connected', 'repository_authorization_required', 'repository_not_reachable'])
-
 /** The control for what an experiment waits on its owner for, where this page has one. */
-function OwnerAction({ pe }: { pe: Draft }) {
+function OwnerMove({ pe }: { pe: Draft }) {
   const { mutate } = useSWRConfig()
   const [editing, setEditing] = useState(false)
   const { reason } = reasonOf(pe)
-  if (reason === 'budget_spent' && pe.status === PlatformExperimentStatus.OPEN) {
-    return (
-      <>
-        <Button size="sm" onClick={() => setEditing(true)}>Edit budget</Button>
-        {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutate(['pe', pe.id])} />}
-      </>
-    )
-  }
-  if (reason === 'no_researchers') return <a className={textLinkClass} href={`#${AGENTS_CARD}`}>Add a researcher</a>
-  if (GITHUB_REASONS.has(reason)) return <TextLink href={`/settings#${GITHUB_CARD}`}>Reconnect GitHub in Settings</TextLink>
-  return null
+  if (!(reason in OWNER_ACTIONS)) throw new Error(`status reason ${reason} waits for the owner and the page has no entry for it`)
+  const action = OWNER_ACTIONS[reason]
+  if (!action) return null
+  if (action.opens === 'agents') return <a className={textLinkClass} href={`#${AGENTS_CARD}`}>{action.label}</a>
+  return (
+    <>
+      <Button size="sm" onClick={() => setEditing(true)}>{action.label}</Button>
+      {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutate(['pe', pe.id])} />}
+    </>
+  )
 }
 
-const NEXT_IS: Record<Exclude<StatusReason['actor'], 'owner'>, string> = {
+const NEXT_IS: Record<Exclude<StatusReason['waits_for'], 'owner' | undefined>, string> = {
   coordinator: 'its coordinator acts next',
   platform: 'the platform acts next',
 }
@@ -110,7 +106,6 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  */
 export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; jobs?: Experiment[]; readOnly?: boolean }) {
   const phase = phaseOf(pe)
-  const { actor } = reasonOf(pe)
   const why = (
     <p role="status" className="text-sm">
       {phase === 'baseline' && !pe.baseline_job_id && 'Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. '}
@@ -118,6 +113,8 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
       {sentenceOf(pe)}
     </p>
   )
+  // A closed experiment waits for nobody, and a reader is told neither whose move it is.
+  const who = readOnly || phase === 'closed' ? undefined : waitsFor(pe)
   const { data: agents } = useRoster(pe)
   const planner = agents?.find(agent => agent.flavor === 'planner')
   const baseline = baselineAgent(agents)
@@ -125,24 +122,19 @@ export function PhaseStrip({ pe, jobs = [], readOnly = false }: { pe: Draft; job
     <Card role="region" aria-label="Where this experiment stands">
       <CardContent className="grid gap-2.5">
         <Steps label="Phase" steps={PHASES} current={phase} live={phase !== 'closed'} />
-        {readOnly || phase === 'closed' ? why : actor === 'owner' ? (
+        {!who ? why : who === 'owner' ? (
           <Callout tone="warning" className="mb-0 grid justify-items-start gap-1.5">
             <Eyebrow tone="warning">Your move</Eyebrow>
             {why}
-            <OwnerAction pe={pe} />
+            <OwnerMove pe={pe} />
           </Callout>
         ) : (
           <div>
             {why}
-            <p className="text-xs text-muted">Nothing is needed from you: {NEXT_IS[actor]}.</p>
+            <p className="text-xs text-muted">Nothing is needed from you: {NEXT_IS[who]}.</p>
           </div>
         )}
-        {phase === 'planning' && (
-          <>
-            <AgentAtWork agent={planner} />
-            {planner?.instance?.stopped && <p className="text-xs text-muted">Abandon this draft and try once more.</p>}
-          </>
-        )}
+        {phase === 'planning' && <AgentAtWork agent={planner} activity={pe.activity} />}
         {phase === 'baseline' && baseline && (
           <div role="group" aria-label="Baseline agent" className="grid gap-1.5 rounded border bg-surface-inset px-3 py-2.5">
             <Eyebrow>Baseline agent {baseline.name}</Eyebrow>

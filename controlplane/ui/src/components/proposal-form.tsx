@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { ApiError } from '@/lib/api'
 import { useAutoAccept } from '@/lib/auto-accept'
 import { acceleratorLabel, formatAccH } from '@/lib/format'
 import { acceptDraft } from '@/lib/planning'
@@ -93,6 +94,8 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
   const [researchers, setResearchers] = useState(String(proposal.agents.length))
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // What the API refused the name for, said beside the name.
+  const [nameError, setNameError] = useState<string | null>(null)
 
   const { metrics, stages, report_interval_seconds: reportEvery } = proposal.experiment
   const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
@@ -105,11 +108,14 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
   async function accept() {
     setSending(true)
     setError(null)
+    setNameError(null)
     try {
       await acceptDraft(draft.id, { name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), agents })
       onDone()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // Accepting changes nothing of the proposal's experiment but its name.
+      if (e instanceof ApiError && e.reason === 'invalid_experiment') setNameError(e.message)
+      else setError(e instanceof Error ? e.message : String(e))
       setSending(false)
     }
   }
@@ -131,7 +137,7 @@ export function ProposalForm({ draft, proposal, editable, arrived, onDone, child
           </Callout>
         )}
         <Sentences title="Before you start, the planner asks" items={proposal.questions} />
-        <FormField label="Name">
+        <FormField label="Name" error={nameError}>
           <Input value={name} disabled={!editable} onChange={e => setName(e.target.value)} />
         </FormField>
         <Section title="What is measured">

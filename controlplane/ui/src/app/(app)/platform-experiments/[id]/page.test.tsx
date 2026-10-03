@@ -36,10 +36,10 @@ const me: Me = {
 function show(search: string, more: Partial<PlatformExperiment>) {
   navigation.search = search
   const status = more.status ?? PlatformExperimentStatus.OPEN
-  const reason = { draft: 'planning', open: 'baseline_required', running: 'running', closed: more.close_reason ?? 'closed' }[status]
+  const reason = { draft: 'planning', open: 'baseline_measuring', running: 'running', closed: more.close_reason ?? 'closed' }[status]
   vi.mocked(api.fetchPlatformExperiment).mockResolvedValue({
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
-    status_reason: { reason, message: `the API's sentence for ${reason}`, actor: 'platform' },
+    status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === PlatformExperimentStatus.CLOSED ? {} : { waits_for: 'platform' as const }) },
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at, ...more,
   })
   const resolved = resolveTenant(me, '')
@@ -161,7 +161,7 @@ describe('the page of an experiment that has not started', () => {
   it('says where it stands at the top and shows no scoreboard and no chart until the run starts', async () => {
     vi.mocked(api.fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
     const first = show('project=prj_1', { metrics })
-    expect((await screen.findByRole('region', { name: 'Where this experiment stands' })).textContent).toContain('the API\'s sentence for baseline_required')
+    expect((await screen.findByRole('region', { name: 'Where this experiment stands' })).textContent).toContain('the API\'s sentence for baseline_measuring')
     expect(screen.getByRole('heading', { name: /^Agents/ })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Jobs' })).toBeTruthy()
     for (const hidden of ['Scoreboard', 'Agents over time']) expect(screen.queryByRole('heading', { name: hidden })).toBeNull()

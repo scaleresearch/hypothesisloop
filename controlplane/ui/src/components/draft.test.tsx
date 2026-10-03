@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
+import { ApiError, apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
 import { DraftView } from '@/components/draft'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
@@ -14,7 +14,8 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/platform-experiments/pe-1',
   useSearchParams: () => new URLSearchParams('project=prj_1'),
 }))
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/api', async importActual => ({
+  ApiError: (await importActual<typeof import('@/lib/api')>()).ApiError,
   apiSend: vi.fn(), fetchPlatformExperimentAgents: vi.fn(),
 }))
 
@@ -44,7 +45,7 @@ const proposal: Proposal = {
 function draft(reason: 'planning' | 'revising' | 'proposed' | 'declined', more: Partial<Draft> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
-    status_reason: { reason, message: '', actor: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
+    status_reason: { reason, message: '', waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
     goal: 'Does a cosine schedule beat a constant one?', planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as Draft
 }
@@ -82,11 +83,8 @@ describe('a draft being planned', () => {
   })
 
   it('shows what the planner says it is doing, with how long ago it said so', async () => {
-    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({
-      instance: { state: 'running', restarts: 0, stopped: false },
-      activity: { text: 'Reading train.py to find what the loss is computed on.', at: new Date(Date.now() - 12_000).toISOString() },
-    })])
-    show(draft('planning'))
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({ instance: { state: 'running', restarts: 0, stopped: false } })])
+    show(draft('planning', { activity: { text: 'Reading train.py to find what the loss is computed on.', at: new Date(Date.now() - 12_000).toISOString() } }))
     const said = await screen.findByText('Reading train.py to find what the loss is computed on.')
     expect(said.parentElement!.textContent).toMatch(/computed on\. 1[2-5]s ago$/)
     expect(screen.getByText('Its machine is working.')).toBeTruthy()
@@ -205,6 +203,32 @@ describe('a proposed draft', () => {
     expect(screen.queryByText('Image')).toBeNull()
     expect(screen.queryByText('Rules of the run')).toBeNull()
     expect(document.body.textContent).not.toContain('undefined')
+  })
+
+  it('says beside the name why the API refused the name, and beside the button any other refusal', async () => {
+    vi.mocked(apiSend).mockRejectedValueOnce(new ApiError(422, 'name is one line and holds a line break: state it on a single line', 'invalid_experiment'))
+    show(proposed())
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
+    const refused = await screen.findByRole('alert')
+    expect(refused.textContent).toMatch(/name is one line/)
+    expect(refused.parentElement).toBe(screen.getByLabelText('Name').parentElement)
+    vi.mocked(apiSend).mockRejectedValueOnce(new ApiError(422, 'budget_accelerator_hours must be positive', 'invalid_cost'))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
+    const other = await screen.findByText('budget_accelerator_hours must be positive')
+    expect(other.parentElement).toBe(screen.getByRole('button', { name: 'Accept and run' }).parentElement)
+    expect(screen.queryByText(/name is one line/)).toBeNull()
+  })
+
+  // The planner's machine is kept a while after it answers, and nothing told the person that a
+  // change asked for soon costs no boot.
+  it('says beside the revise box until when the planner is still up, and no longer once that passed', async () => {
+    const soon = new Date(Date.now() + 5 * 60_000).toISOString()
+    const first = show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: soon }))
+    expect(screen.getByText(new RegExp(`^The planner is still up until ${formatDate(soon)}, so what you ask before then it takes up at once\\.`))).toBeTruthy()
+    first.unmount()
+    show(draft('proposed', { proposal, proposed_at: '2026-10-05T12:10:00Z', planner_ends_at: new Date(Date.now() - 60_000).toISOString() }))
+    expect(screen.queryByText(/still up until/)).toBeNull()
+    expect(screen.getByText('The planner is started again with what it knows, which takes about a minute. The proposal above stays until it proposes anew.')).toBeTruthy()
   })
 
   it('says why the API refused to accept', async () => {

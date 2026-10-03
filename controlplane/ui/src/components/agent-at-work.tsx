@@ -38,9 +38,10 @@ export function Activity({ activity, className }: { activity: AgentActivity; cla
 
 /**
  * The one agent a phase waits for, a draft's planner or the baseline agent: where its machine
- * stands, as its launcher reported it, and what the agent says it is doing.
+ * stands, as its launcher reported it, and what the agent says it is doing. `activity` is the
+ * roster's unless the caller read it elsewhere: a draft carries its planner's itself.
  */
-export function AgentAtWork({ agent }: { agent: JoinedAgent | undefined }) {
+export function AgentAtWork({ agent, activity = agent?.activity }: { agent: JoinedAgent | undefined; activity?: AgentActivity }) {
   const instance = agent?.instance
   const at = instance?.state ?? 'requested'
   return (
@@ -49,7 +50,7 @@ export function AgentAtWork({ agent }: { agent: JoinedAgent | undefined }) {
       <p aria-live="polite" className="text-xs text-muted">
         {agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : machineSentence(instance)}
       </p>
-      {agent?.activity && <Activity activity={agent.activity} />}
+      {activity && <Activity activity={activity} />}
     </div>
   )
 }

@@ -196,12 +196,13 @@ export interface MetricDefinition {
   bound?: number
 }
 
-// Why a platform experiment is in its status, and whose move it is: the person's (owner), its
-// coordinator's, or the platform's own.
+// Why a platform experiment is in its status, and whose move it waits for: a person of its
+// organisation (owner), its coordinator, or nobody (platform). A closed one waits for nobody and
+// carries no waits_for.
 export interface StatusReason {
   reason: string
   message: string
-  actor: 'owner' | 'coordinator' | 'platform'
+  waits_for?: 'owner' | 'coordinator' | 'platform'
 }
 
 // What an agent is doing now, in one short sentence, and when it said so.
@@ -260,7 +261,7 @@ export interface PlatformExperiment {
   // Why a closed one closed, and whose credential closed it when a caller did. Absent on one
   // closed before reasons were kept.
   closed_at?: string
-  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started'
+  close_reason?: 'end_time_reached' | 'closed_by_request' | 'planning_limit_reached' | 'proposal_expired' | 'baseline_limit_reached' | 'agents_not_started' | 'planner_stopped'
   closed_by?: Actor
   // The coordinator's closing summary of the run. Absent until one is filed.
   summary?: string
@@ -672,6 +673,8 @@ export interface HostedCoordinator {
   launcher: string
   model: string
   instance: AgentInstance
+  // Absent on a coordinator that has not reported yet.
+  activity?: AgentActivity
 }
 
 // One agent's place in a platform experiment and what it was launched with.
@@ -702,7 +705,7 @@ export interface AgentSignup {
 // machine asked for, or its machine is asked for and not running (instance_starting).
 export interface JoinedAgent extends AgentSignup {
   token?: string
-  status_reason?: { reason: string; message: string }
+  status_reason?: StatusReason
 }
 
 /** The platform's GitHub App: where a person installs it and where they authorise it. */

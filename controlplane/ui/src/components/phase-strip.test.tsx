@@ -24,7 +24,7 @@ const at = '2026-10-05T12:30:00Z'
 function experiment(status: `${PlatformExperimentStatus}`, reason: string, more: Partial<Draft> = {}, said: Partial<StatusReason> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Cosine or constant', status,
-    status_reason: { reason, message: `the API's sentence for ${reason}`, actor: 'platform', ...said }, ...more,
+    status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }), ...said }, ...more,
   } as Draft
 }
 
@@ -62,13 +62,16 @@ describe('the phase strip', () => {
     ['draft', 'revising', 'Planning'],
     ['draft', 'proposed', 'Proposal'],
     ['draft', 'declined', 'Proposal'],
+    ['open', 'baseline_measuring', 'Preparing baseline'],
     ['open', 'baseline_required', 'Preparing baseline'],
+    ['open', 'budget_below_baseline', 'Preparing baseline'],
     ['open', 'starts_at_ahead', 'Preparing baseline'],
     ['open', 'starting', 'Preparing baseline'],
     ['running', 'agents_starting', 'Running'],
     ['running', 'running', 'Running'],
     ['closed', 'end_time_reached', 'Closed'],
     ['closed', 'agents_not_started', 'Closed'],
+    ['closed', 'planner_stopped', 'Closed'],
   ] as const)('stands at one phase, from the status and its reason alone: %s, %s', (status, reason, phase) => {
     show(experiment(status, reason))
     expect(current()).toEqual([phase])
@@ -80,15 +83,15 @@ describe('the phase strip', () => {
   })
 
   it('says a planner is at work, with what it says it is doing, while a draft is planned', async () => {
-    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('planner', { activity: { text: 'Sizing a trial on rtx-4090.', at: new Date().toISOString() } })])
-    show(experiment('draft', 'planning', { planning_ends_at: at }))
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('planner')])
+    show(experiment('draft', 'planning', { planning_ends_at: at, activity: { text: 'Sizing a trial on rtx-4090.', at: new Date().toISOString() } }))
     expect(sentence()).toMatch(/^The planner is working out how to measure this\. It has until/)
     expect(await screen.findByText('Sizing a trial on rtx-4090.')).toBeTruthy()
   })
 
   it('says in the API\'s words why an open experiment is not running, and that its baseline is being prepared while it has none', () => {
-    const first = show(experiment('open', 'baseline_required'))
-    expect(sentence()).toBe('Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. the API\'s sentence for baseline_required')
+    const first = show(experiment('open', 'baseline_measuring'))
+    expect(sentence()).toBe('Preparing the baseline. No researcher starts and none of their machines is rented until it is measured. the API\'s sentence for baseline_measuring')
     first.unmount()
     show(experiment('open', 'starts_at_ahead', { baseline_job_id: 'job-base' }))
     expect(sentence()).toBe('the API\'s sentence for starts_at_ahead')
@@ -113,6 +116,7 @@ describe('a closed experiment', () => {
     ['planning_limit_reached', 'It never ran: its planner proposed nothing within the planning limit.'],
     ['proposal_expired', 'It never ran: nobody took up its planner\'s answer in time.'],
     ['baseline_limit_reached', 'It never ran: no baseline was measured in time.'],
+    ['planner_stopped', 'It never ran: its planner\'s machine ended before it answered, as often as the platform restarts one. Nothing was spent on a run, and the same sentence makes a new draft.'],
     ['agents_not_started', 'It started, and no researcher\'s machine was running in time, so the platform closed it. None of its duration was used. Agents, below, says why each machine did not come up.'],
     ['closed', 'the API\'s sentence for closed'],
   ])('says why in words: %s', (reason, words) => {
@@ -129,8 +133,8 @@ describe('a closed experiment', () => {
 // What an experiment waited for was a sentence in the agents card, the same whether the person
 // reading it had to act or only to wait.
 describe('whose move it is', () => {
-  const waits = (reason: string, actor: StatusReason['actor'], more: Partial<Draft> = {}) =>
-    experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { actor, message: `It waits: ${reason}.` })
+  const waits = (reason: string, who: StatusReason['waits_for'], more: Partial<Draft> = {}) =>
+    experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { waits_for: who, message: `It waits: ${reason}.` })
   const strip = () => within(screen.getByRole('region', { name: 'Where this experiment stands' }))
 
   it('says so prominently when it is the owner\'s, in the API\'s words, with the way to add a researcher', () => {
@@ -141,30 +145,36 @@ describe('whose move it is', () => {
     expect(strip().queryByText(/Nothing is needed from you/)).toBeNull()
   })
 
-  it('offers the budget to edit when the budget is what an open experiment waits for', async () => {
-    show(waits('budget_spent', 'owner', { budget_accelerator_hours: 2 }))
+  it.each([
+    ['budget_spent', 'Edit budget'],
+    ['budget_below_baseline', 'Edit budget'],
+  ])('opens the experiment\'s form when %s is what it waits for', async (reason, label) => {
+    show(waits(reason, 'owner', { budget_accelerator_hours: 2 }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    await userEvent.click(strip().getByRole('button', { name: 'Edit budget' }))
+    await userEvent.click(strip().getByRole('button', { name: label }))
     expect(screen.getByRole('dialog').textContent).toBe('Edit experiment Cosine or constant, budget 2')
   })
 
-  it('points at Settings when GitHub is what it waits for', () => {
-    show(waits('repository_authorization_required', 'owner'))
-    expect(strip().getByRole('link', { name: 'Reconnect GitHub in Settings' }).getAttribute('href')).toBe('/settings?project=prj_1#github')
-  })
-
-  it('says the owner\'s move without a control where the page has none for it', () => {
-    show(experiment('draft', 'proposed', { proposal_expires_at: at }, { actor: 'owner' }))
+  // Where a person coordinates, the coordinator's move is the owner's, and the API's message
+  // carries the hl command for it.
+  it.each(['proposed', 'declined', 'baseline_required', 'baseline_undeclared', 'baseline_missing_metric', 'baseline_breaks_constraint'])('says the owner\'s move without a control where the page has none for it: %s', reason => {
+    show(waits(reason, 'owner', reason === 'proposed' || reason === 'declined' ? { status: PlatformExperimentStatus.DRAFT, proposal_expires_at: at } : {}))
     expect(strip().getByText('Your move')).toBeTruthy()
     expect(strip().queryByRole('button')).toBeNull()
     expect(strip().queryByRole('link')).toBeNull()
   })
 
+  it('refuses a reason that waits for the owner and has no entry in the page\'s table, and an open experiment that names nobody', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => show(waits('a_reason_of_tomorrow', 'owner'))).toThrow(/waits for the owner and the page has no entry/)
+    expect(() => show(waits('starting', undefined))).toThrow(/came without waits_for/)
+  })
+
   it.each([
     ['coordinator', 'Nothing is needed from you: its coordinator acts next.'],
     ['platform', 'Nothing is needed from you: the platform acts next.'],
-  ] as const)('says plainly that nothing is needed when the move is the %s\'s', (actor, plainly) => {
-    show(waits('baseline_required', actor))
+  ] as const)('says plainly that nothing is needed when the move is the %s\'s', (who, plainly) => {
+    show(waits('baseline_required', who))
     expect(strip().getByText(plainly)).toBeTruthy()
     expect(strip().queryByText('Your move')).toBeNull()
   })
@@ -182,7 +192,7 @@ describe('whose move it is', () => {
 
 // The baseline was one more row of the jobs table, under charts and a scoreboard with nothing in them.
 describe('the baseline agent in the phase strip', () => {
-  const open = () => experiment('open', 'baseline_required')
+  const open = () => experiment('open', 'baseline_measuring')
   const group = () => screen.findByRole('group', { name: 'Baseline agent' })
   const jobLine = async () => (await within(await group()).findByRole('link', { name: 'Its job' })).parentElement!.textContent
 

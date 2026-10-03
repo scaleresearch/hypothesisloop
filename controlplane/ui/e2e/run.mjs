@@ -702,7 +702,7 @@ async function scenarios(browser) {
   }
   const draftGoal = 'Does a cosine learning-rate schedule beat a constant one?'
   let draftNow = {
-    id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', status_reason: { reason: 'planning', message: '' }, shared: false,
+    id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', status_reason: { reason: 'planning', message: '', waits_for: 'platform' }, shared: false,
     budget_accelerator_hours: 2, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
     planning_ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
@@ -715,7 +715,7 @@ async function scenarios(browser) {
     if (request.method() === 'OPTIONS') return route.fallback()
     if (request.method() === 'POST') {
       draftWrites.push({ path, body: request.postDataJSON() })
-      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, status_reason: { reason: 'revising', message: '' }, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
+      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, status_reason: { reason: 'revising', message: '', waits_for: 'platform' }, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
@@ -736,7 +736,7 @@ async function scenarios(browser) {
   const draftURL = page.url()
   async function openProposed(more) {
     await page.goto('about:blank')
-    draftNow = { ...draftNow, ...more, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '' } }
+    draftNow = { ...draftNow, ...more, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '', waits_for: 'owner' } }
     await page.goto(draftURL)
     await page.getByRole('heading', { name: 'Proposed experiment' }).waitFor()
     assert.equal(await page.getByRole('timer').count(), 0, 'a proposal already there on load does not count down')

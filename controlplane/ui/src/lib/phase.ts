@@ -20,6 +20,39 @@ export function reasonOf(pe: Stated): StatusReason {
   return pe.status_reason
 }
 
+/** Whose move a platform experiment that is not closed waits for. Every read of one says. */
+export function waitsFor(pe: Stated): NonNullable<StatusReason['waits_for']> {
+  const { reason, waits_for: who } = reasonOf(pe)
+  if (!who) throw new Error(`platform experiment ${pe.id} is ${pe.status} for ${reason} and came without waits_for`)
+  return who
+}
+
+/** What the page offers a person whose move it is: the experiment's edit form, or the agents card. */
+export type OwnerAction = { opens: 'edit' | 'agents'; label: string }
+
+/**
+ * For every status reason that can wait for the owner, what the page offers them. The reasons are
+ * those of statusWaiters in controlplane/shared/domain/status_reason.go that wait for the owner,
+ * or for the coordinator, whose move is the owner's where a person coordinates. phase.test.ts
+ * reads that file and fails when the two differ. null is a move with no control in the strip:
+ * the proposal and the revise box are below it, a baseline is added or declared with the hl
+ * command the API's message gives, and the edit form has no field for a metric's bound.
+ */
+export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
+  proposed: null,
+  declined: null,
+  baseline_required: null,
+  baseline_undeclared: null,
+  no_baseline: null,
+  baseline_not_completed: null,
+  baseline_without_finding: null,
+  baseline_missing_metric: null,
+  baseline_breaks_constraint: null,
+  budget_below_baseline: { opens: 'edit', label: 'Edit budget' },
+  budget_spent: { opens: 'edit', label: 'Edit budget' },
+  no_researchers: { opens: 'agents', label: 'Add a researcher' },
+}
+
 /** The one place that says which phase an experiment is in, from its status and its status_reason. */
 export function phaseOf(pe: Stated): Phase {
   switch (pe.status) {

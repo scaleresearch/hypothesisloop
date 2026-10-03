@@ -23,6 +23,8 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The planner's machine is kept for a while after it answers, read anew at each read of the draft.
+  const waiting = !!draft.planner_ends_at && Date.now() < new Date(draft.planner_ends_at).getTime()
 
   async function revise() {
     setSending(true)
@@ -43,9 +45,9 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
       <CardContent className="grid gap-2">
         <FormField
           label={declined ? 'What was missing?' : 'What should be different?'}
-          hint={declined
-            ? 'The planner starts again with what it knows and your answer.'
-            : 'The planner starts again with what it knows and proposes anew. The proposal above stays until it does.'}
+          hint={`${waiting
+            ? `The planner is still up until ${formatDate(draft.planner_ends_at)}, so what you ask before then it takes up at once. After that it is started again with what it knows, which takes about a minute.`
+            : 'The planner is started again with what it knows, which takes about a minute.'} ${declined ? 'It answers anew with what you say.' : 'The proposal above stays until it proposes anew.'}`}
         >
           <Textarea
             rows={2}
