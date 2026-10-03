@@ -29,9 +29,6 @@ interface FormState {
   name: string
   description: string
   budget_accelerator_hours: number
-  // AccH is the only budgeted dimension. CPU/RAM/storage are submitted as 0 (untracked) and are
-  // bounded per job by the platform's max_*_per_job admission caps instead — a second budget to
-  // size and split buys nothing the caps don't already give.
   max_agents: number
   // Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Empty string
   // means "use the platform default" — see quota.default_max_concurrent_accelerators.
