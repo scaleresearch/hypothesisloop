@@ -64,6 +64,17 @@ func TestASubmitCarriesAKeyThatOnlyTheSameSubmitRepeats(t *testing.T) {
 	}
 }
 
+// The experiment's summary replaces the one before and a job's is filed once, and only the first
+// said which. The job's stays write-once: it is announced as finding.new when it is filed and a
+// baseline's declaration copies it, so nothing can tell that nobody has read it yet.
+func TestTheHelpOfJobSummarySaysItCannotBeReplaced(t *testing.T) {
+	var help bytes.Buffer
+	run([]string{"job", "summary", "--help"}, &help, &help)
+	if !strings.Contains(help.String(), "It is filed once and cannot be replaced (409 summary_exists)") || !strings.Contains(help.String(), "a correction is a comment on the hypothesis") {
+		t.Errorf("hl job summary --help does not say a filed summary stands:\n%s", help.String())
+	}
+}
+
 // A job a submit created is QUEUED in its answer. Any other status is the job an identical submit
 // created before: hl says nothing was submitted, and fails when that job has ended, since no
 // result will arrive for the agent to wait on.

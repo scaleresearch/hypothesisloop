@@ -588,7 +588,9 @@ func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) in
 
 Files the write-up of a finished job: what changed, what the metric did, what it means. It is
 the job's finding on its hypothesis, shown there and announced as finding.new, so it needs no
-comment that repeats it. While a COMPLETED job of yours has none, your queued jobs wait.`, stderr)
+comment that repeats it. It is filed once and cannot be replaced (409 summary_exists): others
+read it the moment it is announced, so a correction is a comment on the hypothesis.
+While a COMPLETED job of yours has none, your queued jobs wait.`, stderr)
 	var text string
 	fs.StringVar(&text, "text", "", "the summary (required)")
 	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
