@@ -58,16 +58,11 @@ type hypothesisWithJobs struct {
 }
 
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
-// not been told apart from: the problem details plus the hypotheses themselves.
+// not been told apart from: the refusal with the hypotheses themselves beside it.
 type similarHypothesesError struct {
-	Status  int                        `json:"status"`
-	Title   string                     `json:"title"`
-	Detail  string                     `json:"detail"`
+	*api.Refusal
 	Similar []domain.SimilarHypothesis `json:"similar"`
 }
-
-func (e *similarHypothesesError) Error() string  { return e.Detail }
-func (e *similarHypothesesError) GetStatus() int { return e.Status }
 
 const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `similar` " +
 	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one states the same claim as " +
@@ -80,8 +75,7 @@ const similarDetail = "Nothing was registered: your hypothesis reads close to th
 func (h *Handler) hypothesisWriteError(err error) error {
 	var similar *graphdb.SimilarError
 	if errors.As(err, &similar) {
-		return &similarHypothesesError{Status: http.StatusConflict, Title: http.StatusText(http.StatusConflict),
-			Detail: similarDetail, Similar: similar.Similar}
+		return &similarHypothesesError{Refusal: api.Refuse(http.StatusConflict, "similar_hypotheses", similarDetail), Similar: similar.Similar}
 	}
 	var unsupported *UnsupportedVerdictError
 	if errors.As(err, &unsupported) {
@@ -362,7 +356,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Find where your idea belongs first with POST /hypotheses/query. Idempotent within a platform_experiment_id: " +
 			"text equivalent to an existing hypothesis (modulo case/whitespace) returns that row with 200 and " +
 			"already_existed=true and your links are not applied; a new one returns 201. While the text reads close to " +
-			"hypotheses of the platform experiment it does not build on (word overlap), or a builds_on target is refuted, it answers 409 " +
+			"hypotheses of the platform experiment it does not build on (word overlap), or a builds_on target is refuted, it answers 409 similar_hypotheses " +
 			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
 			"related link. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +

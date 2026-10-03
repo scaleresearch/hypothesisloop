@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -676,13 +677,20 @@ func TestQueryGraphBindsTheEvidence(t *testing.T) {
 func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClaimIsNew(t *testing.T) {
 	err := (&Handler{}).hypothesisWriteError(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
 	var hold *similarHypothesesError
-	if !errors.As(err, &hold) || hold.Status != http.StatusConflict || len(hold.Similar) != 1 {
+	if !errors.As(err, &hold) || hold.GetStatus() != http.StatusConflict || len(hold.Similar) != 1 {
 		t.Fatalf("hypothesisWriteError(SimilarError) = %#v, want a 409 carrying the similar hypotheses", err)
 	}
 	for _, want := range []string{"only its owner sets its status", "narrower, broader", "distinct_from"} {
-		if !strings.Contains(hold.Detail, want) {
-			t.Errorf("detail %q does not say %q", hold.Detail, want)
+		if !strings.Contains(hold.Message, want) {
+			t.Errorf("message %q does not say %q", hold.Message, want)
 		}
+	}
+	// The answer is the one envelope every refusal has, with the hypotheses beside it.
+	encoded, jsonErr := json.Marshal(err)
+	var body map[string]json.RawMessage
+	if jsonErr != nil || json.Unmarshal(encoded, &body) != nil || len(body) != 3 ||
+		string(body["reason"]) != `"similar_hypotheses"` || body["message"] == nil || body["similar"] == nil {
+		t.Errorf("the hold as answered: got = %s, want reason similar_hypotheses, message and similar only", encoded)
 	}
 }
 
