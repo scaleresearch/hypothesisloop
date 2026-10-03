@@ -69,8 +69,8 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 	// The run has no start and no end until it starts, so the boundary is a time into it.
 	progress := domain.BoundaryProgress(pe.Stages, pe.CurrentStage)
 	ends := fmt.Sprintf("within %s of the run's start, and the run has not started", time.Duration(progress*pe.DurationHours*float64(time.Hour)).Round(time.Second))
-	if !pe.StartedAt.IsZero() {
-		ends = "by " + pe.StartedAt.Add(time.Duration(progress*float64(pe.EndsAt.Sub(pe.StartedAt)))).UTC().Format(time.RFC3339)
+	if endsAt := pe.StageEndsAt(pe.CurrentStage); !endsAt.IsZero() {
+		ends = "by " + endsAt.Format(time.RFC3339)
 	}
 	return fmt.Sprintf("Stage %d of %d ends %s, or sooner as the budget is spent: the agents ranked lowest are cut then and their hours go to those that remain, so the share rises only for an agent that passes it.",
 		pe.CurrentStage, len(pe.Stages), ends)
