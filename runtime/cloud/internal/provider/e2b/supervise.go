@@ -56,7 +56,7 @@ func launchFile(command []string, env map[string]string) string {
 		Before: before.String(),
 		Output: "> " + outputPath + " 2>&1",
 		After:  "echo " + stateExited + " >> " + statePath,
-	})
+	}, 0)
 }
 
 func quoted(value string) string {

@@ -1,6 +1,10 @@
 package vast
 
-import "github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
+import (
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
+)
 
 // supervisor is what an instance runs in place of the bare command, because the host starts a
 // container again about half a minute after its command ends, whatever the exit code, for as long
@@ -24,7 +28,14 @@ import "github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/
 // of what a job prints or passes on by accident and nothing more: the supervisor is process 1 of
 // the same container under the same user (root, on every instance looked at), and its own
 // environment, key included, stays readable at /proc/1/environ.
-var supervisor = supervise.Script(supervise.Parts{
+//
+// The vendor has no lifetime of its own for an instance, so the supervisor counts the spec's:
+// when it ends the command is killed and the instance stopped as after any ending.
+func supervisor(lifetime time.Duration) string {
+	return supervise.Script(parts, lifetime)
+}
+
+var parts = supervise.Parts{
 	Before: `instance="` + defaultBaseURL + `/api/v0/instances/$CONTAINER_ID/"
 key=$CONTAINER_API_KEY
 unset CONTAINER_API_KEY
@@ -55,13 +66,13 @@ started="${TMPDIR:-/tmp}/.hl-supervisor-started"
 watcher=$!`,
 	After: `kill -KILL "$watcher" 2>/dev/null
 stop`,
-})
+}
 
 // stopPollSeconds is how often an instance reads its own label, and so the most a Stop waits to
 // reach the command beyond the request itself.
 const stopPollSeconds = "3"
 
-// supervised is the argv that runs command under the supervisor.
-func supervised(command []string) (entrypoint string, args []string) {
-	return "/bin/sh", append([]string{"-c", supervisor, "hl-supervisor"}, command...)
+// supervised is the argv that runs command under the supervisor for lifetime at most.
+func supervised(lifetime time.Duration, command []string) (entrypoint string, args []string) {
+	return "/bin/sh", append([]string{"-c", supervisor(lifetime), "hl-supervisor"}, command...)
 }

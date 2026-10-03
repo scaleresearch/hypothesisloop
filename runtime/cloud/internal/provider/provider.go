@@ -23,9 +23,8 @@
 // Pauser and Market are the capabilities there are. The ones foreseen, to be shaped the same way when
 // something needs them and not before:
 //
-//   - Extender: Extend(ctx, id, until) for a vendor that ends an instance at a lifetime it was
-//     rented with. Today an adapter rents with its longest lifetime and the instance is gone at
-//     the end of it.
+//   - Extender: Extend(ctx, id, until) to move the end of an instance rented with a
+//     Spec.Lifetime. Today the lifetime is fixed at Create and the instance ends at it.
 //   - Snapshotter: Snapshot(ctx, id) (ref, error) and a Spec field naming a snapshot to create
 //     from, for a vendor that can copy an instance's filesystem. The harness's own session
 //     snapshot covers what an agent needs across a replacement, on every vendor.
@@ -95,6 +94,14 @@ type Spec struct {
 	CPUMillis        int64
 	MemoryBytes      int64
 	DiskBytes        int64
+
+	// Lifetime is how long the instance may run its command, in whole seconds. At its end the
+	// instance ends by itself, whether or not its caller or the vendor's API can still reach
+	// it: the command is killed, and the instance is exited, or gone where the vendor ends an
+	// instance whole. Either way it stops being billed for compute. An adapter maps it to its
+	// vendor's own lifetime where there is one and counts it inside the instance otherwise.
+	// Zero asks for no end beyond what the vendor imposes.
+	Lifetime time.Duration
 }
 
 // ErrNoOffer is a Create that rented nothing because the vendor has no machine for the spec

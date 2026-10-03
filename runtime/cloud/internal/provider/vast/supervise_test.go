@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -32,7 +33,7 @@ type supervisedRun struct {
 // the given shell.
 func startSupervised(t *testing.T, shell []string, dir string, command ...string) *supervisedRun {
 	t.Helper()
-	_, args := supervised(command)
+	_, args := supervised(0, command)
 	return startScript(t, shell, dir, args)
 }
 
@@ -112,6 +113,27 @@ func TestSupervisorRunsTheArgvUnchangedThenStopsTheInstanceAndWaits(t *testing.T
 	})
 }
 
+// The cloud-agent's host is away: the label is never marked and nothing signals the supervisor.
+func TestSupervisorKillsTheCommandAtTheEndOfTheLifetimeAndStopsTheInstance(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		t.Parallel()
+		dir := t.TempDir()
+		_, args := supervised(time.Second, []string{"/bin/sh", "-c", `trap '' TERM; echo $$ > "$OUT"; while :; do sleep 0.05 & wait $!; done`})
+		run := startScript(t, shell, dir, args)
+		pid, err := strconv.Atoi(strings.TrimSpace(run.awaitFile(t, "out")))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if calls := run.awaitFile(t, "curl-calls"); calls != wantStopCall {
+			t.Errorf("stop request\n got %q\nwant %q", calls, wantStopCall)
+		}
+		if err := syscall.Kill(pid, 0); err == nil {
+			t.Error("the command still runs after its lifetime ended and the instance was asked to stop")
+		}
+	})
+}
+
 func TestSupervisorDoesNotRunTheCommandOnASecondStart(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		t.Parallel()
@@ -140,7 +162,7 @@ func TestSupervisorDoesNotRunTheCommandOnASecondStart(t *testing.T) {
 func TestSupervisorStopsTheInstanceAfterASIGTERMThatCameBeforeTheCommand(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		t.Parallel()
-		_, args := supervised([]string{"/bin/sh", "-c", `echo run >> "$OUT"`})
+		_, args := supervised(0, []string{"/bin/sh", "-c", `echo run >> "$OUT"`})
 		const marker = `: > "$started" || stop`
 		if !strings.Contains(args[1], marker) {
 			t.Fatalf("the supervisor no longer holds %q", marker)
@@ -284,7 +306,7 @@ func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) 
 					t.Fatal(err)
 				}
 			}
-			entrypoint, args := supervised([]string{"/bin/sh", "-c", `echo run > "$OUT"`})
+			entrypoint, args := supervised(0, []string{"/bin/sh", "-c", `echo run > "$OUT"`})
 			cmd := exec.Command(entrypoint, args...)
 			cmd.Env = []string{"PATH=" + dir, "TMPDIR=" + dir, "OUT=" + filepath.Join(dir, "out")}
 

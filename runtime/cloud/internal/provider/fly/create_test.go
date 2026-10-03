@@ -53,7 +53,7 @@ func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.
 		"region": "ams",
 		"config": map[string]any{
 			"image": "registry.example/agent:1",
-			"init": map[string]any{"exec": []any{"/bin/sh", "-c", supervisor, "hl-supervisor",
+			"init": map[string]any{"exec": []any{"/bin/sh", "-c", supervisor(0), "hl-supervisor",
 				"uv", "run", "agent", "--note", `two  spaces 'and' "quotes" $HOME`, ""}},
 			"env":          map[string]any{"HL_TOKEN": "t = 'x' \"y\" $Z"},
 			"metadata":     map[string]any{"hl_name": "hl-agent-pe1-a2"},
@@ -65,6 +65,31 @@ func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.
 	}
 	if !reflect.DeepEqual(made[0].Body, want) {
 		t.Errorf("create body\n got %v\nwant %v", made[0].Body, want)
+	}
+}
+
+func TestCreateHandsTheSpecsLifetimeToTheSupervisorInsideTheMachine(t *testing.T) {
+	api := newFakeAPI(t)
+	creatable(api, "hl-agent-pe1-a2")
+	p := newTestProvider(t, api)
+	spec := agentSpec()
+	spec.Lifetime = 36 * time.Hour
+
+	if _, err := p.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	config := api.sent(http.MethodPost, machinesPath)[0].Body["config"].(map[string]any)
+	script := config["init"].(map[string]any)["exec"].([]any)[2].(string)
+	if script != supervisor(36*time.Hour) || !strings.Contains(script, "(sleep 129600 && kill -USR1 $$)") {
+		t.Errorf("the Machine's supervisor does not count 129600 seconds:\n%s", script)
+	}
+	if strings.Contains(supervisor(0), "USR1") {
+		t.Error("a supervisor with no lifetime sets a timer")
+	}
+
+	spec.Lifetime = 1500 * time.Millisecond
+	if _, err := p.Create(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "whole seconds") {
+		t.Errorf("a lifetime of 1.5s: err = %v, want it refused", err)
 	}
 }
 

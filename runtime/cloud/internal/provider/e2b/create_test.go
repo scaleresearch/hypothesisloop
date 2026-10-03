@@ -119,6 +119,34 @@ func TestCreateStartsASandboxOfTheTemplateAndTheCommandInside(t *testing.T) {
 	}
 }
 
+func TestCreateGivesTheSandboxTheSpecsLifetimeUnderThePlansLongest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lifetime time.Duration
+		want     float64
+	}{
+		"shorter than the plan's": {20 * time.Minute, 1200},
+		"longer than the plan's":  {36 * time.Hour, 3600},
+		"none of its own":         {0, 3600},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			creatable(api, "hl-agent-pe1-a2")
+			p := newTestProvider(t, api)
+			spec := agentSpec()
+			spec.Lifetime = tc.lifetime
+			if _, err := p.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if got := api.sent(http.MethodPost, sandboxesPath)[0].json(t)["timeout"]; got != tc.want {
+				t.Errorf("timeout = %v, want %v", got, tc.want)
+			}
+			if file := uploaded(t, api.sent(http.MethodPost, envdFiles)[0]); strings.Contains(file, "USR1") {
+				t.Error("the supervisor counts a lifetime the vendor already keeps")
+			}
+		})
+	}
+}
+
 func TestCreateSeesTheSandboxListedBeforeAnythingOfTheSpecEntersIt(t *testing.T) {
 	api := newFakeAPI(t)
 	creatable(api, "hl-agent-pe1-a2")

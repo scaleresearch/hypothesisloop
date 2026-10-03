@@ -43,7 +43,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		SandboxID       string `json:"sandboxID"`
 		EnvdAccessToken string `json:"envdAccessToken"`
 	}
-	req := createRequest{TemplateID: template, Timeout: p.cfg.LifetimeSeconds, Metadata: map[string]string{nameKey: spec.Name}}
+	req := createRequest{TemplateID: template, Timeout: p.cfg.lifetimeSeconds(spec), Metadata: map[string]string{nameKey: spec.Name}}
 	_, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created)
 	if hasStatus(err, http.StatusNotFound) {
 		return "", fmt.Errorf("e2b: template %s for image %q with %d cores and %d MiB of memory is not built; build it with `%s %s %d %d`: %w",

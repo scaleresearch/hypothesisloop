@@ -34,6 +34,10 @@ type Config struct {
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size
+	// Lifetime is the longest any instance runs its command (provider.Spec.Lifetime): the bound on
+	// a machine this launcher can no longer reach to stop or destroy. The control plane sees such
+	// an ending as any other exit. Zero is no bound.
+	Lifetime time.Duration
 	// ModelProvider names whose models the agents run on, and Env is what that provider's
 	// harness needs in every instance: its credential. Env is added here, so what it holds never
 	// passes through the control plane, and the control plane's list may not set any of its names.
@@ -77,6 +81,9 @@ func New(cfg Config) (*Launcher, error) {
 // control plane makes it part of each instance's name, so a changed command, size or credential
 // replaces the running instances as a changed image does. It holds a credential only hashed
 // together with the rest.
+//
+// The lifetime is not part of it: it bounds an instance and changes nothing an agent runs with,
+// so a changed one replaces nothing and holds for the instances rented after it.
 func (cfg Config) launchDigest() (string, error) {
 	inputs, err := json.Marshal(struct {
 		Command       []string          `json:"command"`
@@ -108,6 +115,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Size.CPUMillis <= 0 || cfg.Size.MemoryBytes <= 0 || cfg.Size.DiskBytes <= 0 {
 		return errors.New("agentlaunch: the instance size needs positive cpu, memory and storage")
+	}
+	if cfg.Lifetime < 0 || cfg.Lifetime%time.Second != 0 {
+		return errors.New("agentlaunch: Lifetime is whole seconds and not negative")
 	}
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
@@ -407,6 +417,7 @@ func (l *Launcher) spec(i instance) provider.Spec {
 		CPUMillis:   l.cfg.Size.CPUMillis,
 		MemoryBytes: l.cfg.Size.MemoryBytes,
 		DiskBytes:   l.cfg.Size.DiskBytes,
+		Lifetime:    l.cfg.Lifetime,
 	}
 }
 

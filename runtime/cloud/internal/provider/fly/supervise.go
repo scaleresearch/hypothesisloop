@@ -1,6 +1,10 @@
 package fly
 
-import "github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
+import (
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
+)
 
 // outputPrefix starts every log line that is the command's, and endMark is the line the
 // supervisor writes after the last of them. The vendor's log holds the lines of its own init, ssh
@@ -26,7 +30,14 @@ const (
 //
 // It needs sh, mkfifo and sleep in the image and a temporary directory it can write to. Without
 // them it says so under outputPrefix and does not run the command.
-var supervisor = supervise.Script(supervise.Parts{
+//
+// Fly has no lifetime of its own for a Machine, so the supervisor counts the spec's: when it
+// ends the command is killed, the supervisor exits as after any ending, and the Machine stops.
+func supervisor(lifetime time.Duration) string {
+	return supervise.Script(parts, lifetime)
+}
+
+var parts = supervise.Parts{
 	Before: `refuse() {
   echo "` + outputPrefix + `hl-supervisor: $1, the command was not run"
   echo "` + endMark + `"
@@ -47,9 +58,9 @@ timer=$!
 while kill -0 "$reader" 2>/dev/null; do wait "$reader"; done
 kill -KILL "$timer" 2>/dev/null
 echo "` + endMark + `"`,
-})
+}
 
-// supervised is the argv that runs command under the supervisor.
-func supervised(command []string) []string {
-	return append([]string{"/bin/sh", "-c", supervisor, "hl-supervisor"}, command...)
+// supervised is the argv that runs command under the supervisor for lifetime at most.
+func supervised(lifetime time.Duration, command []string) []string {
+	return append([]string{"/bin/sh", "-c", supervisor(lifetime), "hl-supervisor"}, command...)
 }

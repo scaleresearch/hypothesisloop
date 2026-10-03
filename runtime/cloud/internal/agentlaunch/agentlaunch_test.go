@@ -172,6 +172,22 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 	}
 }
 
+// The lifetime is what ends a machine when this launcher is gone, so it is on every instance it
+// rents.
+func TestEveryInstanceIsRentedWithTheLaunchersLifetime(t *testing.T) {
+	h := newHarness(t)
+	launcher := h.launcherWith(func(c *Config) { c.Lifetime = 36 * time.Hour })
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	if err := launcher.Pass(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if got := h.rented.Spec(full(name)).Lifetime; got != 36*time.Hour {
+			t.Errorf("%s is rented with a lifetime of %s, want 36h", name, got)
+		}
+	}
+}
+
 func TestTheReconcileCallCarriesTheLaunchersTokenAndName(t *testing.T) {
 	h := newHarness(t)
 	h.mustPass()
@@ -437,6 +453,7 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 	for what, edit := range map[string]func(*Config){
 		"token":    func(c *Config) { c.Token = "hls_another" },
 		"interval": func(c *Config) { c.Interval = time.Hour },
+		"lifetime": func(c *Config) { c.Lifetime = time.Hour },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -882,6 +899,8 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		"no model provider": func(c *Config) { c.ModelProvider = "" },
 		"no provider env":   func(c *Config) { c.Env = nil },
 		"negative pause":    func(c *Config) { c.CreatePause = -time.Second },
+		"negative lifetime": func(c *Config) { c.Lifetime = -time.Second },
+		"lifetime of 1.5s":  func(c *Config) { c.Lifetime = 1500 * time.Millisecond },
 		"empty env value":   func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
 		"no provider":       func(c *Config) { c.Provider = nil },
 		"no http client":    func(c *Config) { c.HTTPClient = nil },

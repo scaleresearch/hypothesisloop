@@ -27,7 +27,8 @@ type machineConfig struct {
 	Guest    guest             `json:"guest"`
 	Rootfs   machineRootfs     `json:"rootfs"`
 	// Restart "no" and AutoDestroy false are what keep a Machine whose command ended in the
-	// list, stopped, with its logs readable.
+	// list, stopped, with its logs readable: the end of its output is how a caller learns why
+	// it ended, and a Machine the vendor destroyed could not be told from one it took away.
 	Restart     machineRestart `json:"restart"`
 	AutoDestroy bool           `json:"auto_destroy"`
 }
@@ -87,7 +88,7 @@ func (p *Provider) newCreateRequest(spec provider.Spec) (createRequest, error) {
 		Region: p.cfg.Region,
 		Config: machineConfig{
 			Image:    spec.Image,
-			Init:     machineInit{Exec: supervised(spec.Command)},
+			Init:     machineInit{Exec: supervised(spec.Lifetime, spec.Command)},
 			Env:      env,
 			Metadata: map[string]string{nameKey: spec.Name},
 			Guest:    size,

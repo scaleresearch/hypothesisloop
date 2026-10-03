@@ -1,5 +1,10 @@
 package supervise
 
+import (
+	"strconv"
+	"time"
+)
+
 // Parts are an adapter's own ends of a supervisor, as shell text. Each may be empty.
 type Parts struct {
 	// Before runs once the signal rule is in place and before the command starts.
@@ -27,17 +32,37 @@ type Parts struct {
 // starting the command only to signal it at once would leave it running unsignalled. The same
 // swallowing leaves one gap this text cannot close: a first SIGTERM in the instant between the
 // fork and the command's exec is lost, and the command then ends only when it is destroyed.
-func Script(parts Parts) string {
-	return rule + parts.Before + "\n" +
+//
+// A lifetime above zero is counted inside the instance from the supervisor's start, so it runs
+// out whether or not anything outside can still reach the instance. At its end the command is
+// killed, or not started when it has not been yet, and After runs as it does after any ending.
+// It needs sleep in the image. Zero is a supervisor with no end of its own.
+func Script(parts Parts, lifetime time.Duration) string {
+	script := rule
+	if lifetime > 0 {
+		script += expiry + "(sleep " + strconv.FormatInt(int64(lifetime/time.Second), 10) + " && kill -USR1 $$) >/dev/null 2>&1 &\n"
+	}
+	return script + parts.Before + "\n" +
 		`if [ -z "$terminated" ]; then` + "\n" +
 		`"$@" ` + parts.Output + " &\n" +
 		"child=$!\n" +
 		`[ -z "$terminated" ] || forward` + "\n" +
 		parts.Started + "\n" +
 		`while kill -0 "$child" 2>/dev/null; do wait "$child"; done` + "\n" +
+		"child=\n" +
 		"fi\n" +
 		parts.After + "\n"
 }
+
+// expiry is what the lifetime's end does. forwarded is set with it: nothing is left to pass a
+// later SIGTERM on to.
+const expiry = `expire() {
+  terminated=1
+  forwarded=1
+  [ -z "$child" ] || kill -KILL "$child" 2>/dev/null
+}
+trap expire USR1
+`
 
 const rule = `child=
 terminated=

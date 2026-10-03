@@ -19,7 +19,13 @@ type supervised struct{ cmd *exec.Cmd }
 // command write to.
 func start(t *testing.T, shell []string, dir string, parts supervise.Parts, command ...string) supervised {
 	t.Helper()
-	cmd := supervisetest.Command(shell, append([]string{"-c", supervise.Script(parts), "hl-supervisor"}, command...)...)
+	return startFor(t, shell, dir, 0, parts, command...)
+}
+
+// startFor is start with a lifetime.
+func startFor(t *testing.T, shell []string, dir string, lifetime time.Duration, parts supervise.Parts, command ...string) supervised {
+	t.Helper()
+	cmd := supervisetest.Command(shell, append([]string{"-c", supervise.Script(parts, lifetime), "hl-supervisor"}, command...)...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "DIR=" + dir}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start supervisor: %v", err)
@@ -131,6 +137,52 @@ func TestScriptDoesNotStartTheCommandAfterASIGTERMThatCameBeforeIt(t *testing.T)
 			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 				t.Errorf("%s was written: the command was started after the stop", name)
 			}
+		}
+	})
+}
+
+// Nothing outside the instance takes part: the command neither ends by itself nor heeds SIGTERM,
+// and nobody signals the supervisor.
+func TestScriptKillsACommandAtTheEndOfItsLifetimeAndRunsThePartAfterIt(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		dir := t.TempDir()
+		began := time.Now()
+		run := startFor(t, shell, dir, time.Second, supervise.Parts{After: `: > "$DIR/after"`},
+			"/bin/sh", "-c", `trap '' TERM; : > "$DIR/ready"; while :; do sleep 0.05 & wait $!; done`)
+		await(t, filepath.Join(dir, "ready"))
+		run.wait(t)
+		if lived := time.Since(began); lived < time.Second || lived > 5*time.Second {
+			t.Errorf("the supervisor ended after %s, want its lifetime of one second", lived.Round(10*time.Millisecond))
+		}
+		if _, err := os.Stat(filepath.Join(dir, "after")); err != nil {
+			t.Errorf("the part after the command did not run once the lifetime ended: %v", err)
+		}
+	})
+}
+
+func TestScriptDoesNotStartTheCommandOnceItsLifetimeHasEnded(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		dir := t.TempDir()
+		parts := supervise.Parts{Before: `sleep 2 & wait $!`, After: `: > "$DIR/after"`}
+		run := startFor(t, shell, dir, time.Second, parts, "/bin/sh", "-c", `: > "$DIR/ran"; sleep 30`)
+		run.wait(t)
+		if _, err := os.Stat(filepath.Join(dir, "after")); err != nil {
+			t.Errorf("the part after the command did not run: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
+			t.Error("the command was started after its lifetime had ended")
+		}
+	})
+}
+
+func TestScriptLeavesACommandThatEndsInsideItsLifetimeAlone(t *testing.T) {
+	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
+		dir := t.TempDir()
+		parts := supervise.Parts{After: `echo after >> "$DIR/order"; sleep 2 & wait $!; echo held >> "$DIR/order"`}
+		run := startFor(t, shell, dir, time.Second, parts, "/bin/sh", "-c", `echo ran >> "$DIR/order"`)
+		run.wait(t)
+		if got := read(t, filepath.Join(dir, "order")); got != "ran\nafter\nheld\n" {
+			t.Errorf("order = %q, want the command and the part after it run once, through the lifetime's end", got)
 		}
 	})
 }
