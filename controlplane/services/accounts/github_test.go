@@ -213,11 +213,14 @@ var (
 	acme  = github.Installation{ID: 100, AccountLogin: "Acme", AccountType: github.AccountOrganization}
 	rival = github.Installation{ID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization}
 	carol = github.Installation{ID: 300, AccountLogin: "carol", AccountType: github.AccountUser}
+	// lab is an organisation that installed the App without granting it Members (read), so GitHub
+	// does not say whether the person is its admin.
+	lab = github.Installation{ID: 168837676, AccountLogin: "carols-lab", AccountType: github.AccountOrganization}
 )
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{
-		reaches: map[string][]github.Installation{"code-acme": {acme}, "code-both": {acme, rival}, "code-none": {}, "code-guest": {acme}, "code-acme-admin-rival-guest": {acme, rival}, "code-carol": {acme, carol}},
+		reaches: map[string][]github.Installation{"code-acme": {acme}, "code-both": {acme, rival}, "code-none": {}, "code-guest": {acme}, "code-acme-admin-rival-guest": {acme, rival}, "code-carol": {acme, carol}, "code-lab-owner": {lab}},
 		guests:  map[string]map[int64]bool{"code-guest": {100: true}, "code-acme-admin-rival-guest": {200: true}, "code-carol": {100: true}},
 		covers: map[int64][]github.Repository{
 			100: {{FullName: "acme/other"}, {FullName: "Acme/Model", Private: true}},
@@ -247,7 +250,8 @@ func (a *fakeApp) UserInstallations(_ context.Context, code, redirect string) (*
 		grant.Authorization = grant.AccessToken
 	}
 	for _, one := range reached {
-		one.Controlled = !a.guests[code][one.ID]
+		one.Controlled = !a.guests[code][one.ID] && one.ID != lab.ID
+		one.MembershipHidden = one.ID == lab.ID
 		grant.Installations = append(grant.Installations, one)
 	}
 	return grant, nil
@@ -503,6 +507,26 @@ func TestConnectAsksWhichInstallationWhenThePersonReachesSeveral(t *testing.T) {
 	}
 }
 
+// A connect that names nothing adds an account the org has not connected yet, and with none left
+// says the App is to be installed on another, which is where the client sends the person next.
+func TestConnectWithNoneNamedAddsAnAccountTheOrgHasNotConnected(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	path := "/orgs/" + w.orgA + "/github-installations"
+	w.connect(w.orgA, acme)
+	var connected domain.OrgGitHubInstallation
+	w.ok("owner", "POST", path, connectBody("code-both", 0), http.StatusCreated, &connected)
+	if connected.InstallationID != rival.ID {
+		t.Fatalf("connected = %+v, want rival, the one the org has not connected", connected)
+	}
+	message := w.refused("owner", "POST", path, connectBody("code-both", 0), http.StatusUnprocessableEntity, ReasonAppNotInstalled)
+	if strings.Count(message, ".") != 1 || !strings.HasPrefix(message, "Install") {
+		t.Fatalf("message = %q, want one sentence that says to install the App", message)
+	}
+	if len(w.installations.connected[w.orgA]) != 2 {
+		t.Fatalf("%d installations connected, want acme and rival", len(w.installations.connected[w.orgA]))
+	}
+}
+
 func TestConnectRefusals(t *testing.T) {
 	for name, tc := range map[string]struct {
 		body   map[string]any
@@ -514,7 +538,9 @@ func TestConnectRefusals(t *testing.T) {
 		"a person who reaches no installation":    {connectBody("code-none", 0), nil, 422, ReasonAppNotInstalled, 1},
 		"a person who reaches none, naming one":   {connectBody("code-none", 100), nil, 422, ReasonAppNotInstalled, 1},
 		"an installation the person cannot reach": {connectBody("code-acme", 200), nil, 422, ReasonInstallationNotReachable, 1},
-		"a collaborator on one repository":        {connectBody("code-guest", 0), nil, 422, ReasonInstallationNotControlled, 1},
+		"an organisation that hides its members":  {connectBody("code-lab-owner", 0), nil, 422, ReasonMembersPermissionNotGranted, 1},
+		"naming it":                               {connectBody("code-lab-owner", lab.ID), nil, 422, ReasonMembersPermissionNotGranted, 1},
+		"a collaborator on one repository":        {connectBody("code-guest", 0), nil, 422, ReasonAppNotInstalled, 1},
 		"a collaborator naming the installation":  {connectBody("code-guest", 100), nil, 422, ReasonInstallationNotControlled, 1},
 		"an installation that does not exist":     {connectBody("code-both", 999), nil, 422, ReasonInstallationNotReachable, 1},
 		"a code github does not take":             {connectBody("code-made-up", 100), nil, 422, ReasonCodeRejected, 1},
@@ -975,12 +1001,12 @@ func TestARepositoryIsCreatedOnAPersonalAccountWithTheAuthorisationItsOwnerConne
 		t.Fatalf("naming the organisation beside a personal account: Create = %q, %v after %d renewals, want it created with no person's token", named, err, len(w.app.refreshed))
 	}
 	// An organisation's connect keeps nothing of the person: the grant is revoked.
-	w.ok("owner", "POST", path, connectBody("code-acme", 0), http.StatusCreated, &connected)
+	w.ok("owner", "POST", path, connectBody("code-acme", acme.ID), http.StatusCreated, &connected)
 	if len(w.app.revoked) != 1 || w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)] != "" {
 		t.Fatalf("an organisation connected: %v revoked, keeping %q, want the grant revoked and nothing kept", w.app.revoked, w.installations.kept[fmt.Sprintf("%s %d", w.orgA, acme.ID)])
 	}
 	// So is the grant of a connect that is refused.
-	w.refused("owner", "POST", path, connectBody("code-guest", 0), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
+	w.refused("owner", "POST", path, connectBody("code-guest", acme.ID), http.StatusUnprocessableEntity, ReasonInstallationNotControlled)
 	if len(w.app.revoked) != 2 {
 		t.Fatalf("a refused connect left its grant: %v revoked, want 2", w.app.revoked)
 	}
@@ -1143,6 +1169,9 @@ func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *tes
 	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); reasonOf(err) != ReasonRepositoryAuthorizationRequired || len(w.app.created) != 0 {
 		t.Fatalf("Create on an untyped personal account: %v (created %v), want repository_authorization_required", err, w.app.created)
 	}
+	// A connect that names nothing adds no account the org connected, so it is disconnected first.
+	w.refused("owner", "POST", path, connectBody("code-carol", 0), http.StatusUnprocessableEntity, ReasonAppNotInstalled)
+	w.ok("owner", "DELETE", fmt.Sprintf("%s/%d", path, carol.ID), nil, http.StatusNoContent, nil)
 	w.ok("owner", "POST", path, connectBody("code-carol", 0), http.StatusCreated, nil)
 	w.ok("member", "GET", path, nil, http.StatusOK, &listed)
 	if listed[0].AccountType != github.AccountUser {

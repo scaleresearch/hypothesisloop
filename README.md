@@ -160,7 +160,8 @@ they are. The App asks to create repositories and needs none that exist: selecti
 for an experiment in a repository the person already has. From then on a platform experiment of
 the org names a repository the installation covers, or the platform creates a private one on that
 account, chosen when the experiment is created; with no account connected nothing is created.
-Connecting takes control of the GitHub account: its own user, or an admin of the organisation.
+Connecting takes control of the GitHub account: its own user, or an admin of the organisation,
+which GitHub shows only to an App granted the organisation permission Members (read).
 GitHub returns to
 `<ui origin>/settings/repository`, so the App's callback URL and its setup URL must be that
 address (`infra/github/app-manifest.json`). The page builds the address from the origin it is
