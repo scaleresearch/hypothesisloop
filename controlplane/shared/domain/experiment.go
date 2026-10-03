@@ -117,6 +117,12 @@ type Experiment struct {
 	// Token is the job's own platform token, good for reporting its metrics and nothing else.
 	// Like Data it is assembled on the way out to a runtime and absent on every other read.
 	Token string `json:"token,omitempty"`
+	// EndsAt is the moment after which no instance of the job may run, whatever the runtime last
+	// heard: the platform has ended the job by then on every path it has. Like Data it is set on
+	// the way out to a runtime and absent on every other read. A runtime that rents a machine
+	// gives it this as the end of its lifetime, so a machine the platform can no longer reach
+	// ends by itself.
+	EndsAt *time.Time `json:"ends_at,omitempty"`
 	// DataKey is the job's permanent object-store key, created at submission and stored with
 	// the row. Never serialized: only Data carries it, and only to the runtime.
 	DataKey DataKey `json:"-"`
@@ -230,6 +236,7 @@ func (e *Experiment) ForRuntime() *Experiment {
 		SubmittedAt:            e.SubmittedAt,
 		Data:                   e.Data,
 		Token:                  e.Token,
+		EndsAt:                 e.EndsAt,
 	}
 }
 
