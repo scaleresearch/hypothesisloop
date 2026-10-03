@@ -60,7 +60,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		case i.live():
 			return fmt.Errorf("cloudexec: experiment %s is placed on slot %s while instance %s of it still runs", exp.ID, name, i.Name)
 		}
-		if err := e.destroy(ctx, v, i); err != nil {
+		if err := e.destroy(ctx, v, i, "it exited and is left from an earlier attempt or placement of its job"); err != nil {
 			return err
 		}
 	}
@@ -80,6 +80,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 	if err != nil {
 		return fmt.Errorf("cloudexec: create instance %s: %w", spec.Name, err)
 	}
+	log.Printf("cloudexec: created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
 	v.add(instance{
 		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
 		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
@@ -130,14 +131,14 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 			}
 			continue
 		}
-		if err := e.destroy(ctx, v, i); err != nil {
+		if err := e.destroy(ctx, v, i, "the workload of its experiment was deleted while it was "+string(i.State)); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (e *Executor) destroy(ctx context.Context, v *view, i instance) error {
+func (e *Executor) destroy(ctx context.Context, v *view, i instance, why string) error {
 	err := e.provider.Destroy(ctx, i.ID)
 	e.undestroyedMu.Lock()
 	if err != nil {
@@ -147,8 +148,9 @@ func (e *Executor) destroy(ctx context.Context, v *view, i instance) error {
 	}
 	e.undestroyedMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("cloudexec: destroy instance %s: %w", i.Name, err)
+		return fmt.Errorf("cloudexec: destroy instance %s (%s): %s: %w", i.Name, i.ID, why, err)
 	}
+	log.Printf("cloudexec: destroyed instance %s (%s): %s", i.Name, i.ID, why)
 	v.remove(i.ID)
 	return nil
 }
@@ -168,6 +170,7 @@ func (e *Executor) Leave(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("instance %s (%s) is still rented and should be destroyed: %w", name, id, err))
 			continue
 		}
+		log.Printf("cloudexec: destroyed instance %s (%s): an earlier destroy of it failed", name, id)
 		delete(e.undestroyed, id)
 	}
 	listed, err := e.provider.List(ctx, e.prefix)
@@ -337,13 +340,16 @@ func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*domain.
 			kept[i.Name] = true
 			continue
 		}
-		if err := e.destroy(ctx, v, i); err != nil {
+		why := "it exited and is not the workload of a desired experiment"
+		if wanted {
+			why = "it is a second instance of its name"
+		}
+		if err := e.destroy(ctx, v, i, why); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	for _, i := range append([]instance(nil), v.unnamed...) {
-		log.Printf("cloudexec: destroying instance %s (%s): it is under this namespace's prefix and its name is no job's", i.Name, i.ID)
-		if err := e.destroy(ctx, v, i); err != nil {
+		if err := e.destroy(ctx, v, i, "it is under this namespace's prefix and its name is no job's"); err != nil {
 			errs = append(errs, err)
 		}
 	}

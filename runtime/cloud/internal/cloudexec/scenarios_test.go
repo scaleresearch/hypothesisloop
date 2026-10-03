@@ -1,9 +1,12 @@
 package cloudexec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -181,6 +184,57 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	mustCreate(t, e, exp)
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
 		t.Fatalf("rented %v", names)
+	}
+}
+
+// What was rented and returned, and why, is read from this process's own log when the vendor's
+// events are all there is otherwise.
+func TestEveryCreateAndDestroyIsLoggedWithTheInstanceIDAndTheReason(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+
+	deleted, finished := job(t, "exp-deleted", 2, 1), job(t, "exp-finished", 0, 0)
+	mustCreate(t, e, deleted)
+	mustCreate(t, e, finished)
+	p.Start("hl-job-t1-exp-deleted-a2-h100-0")
+	p.Exit("hl-job-t1-exp-finished-a0-cpu-0", exitline.Format(0))
+	for _, name := range []string{"hl-job-t1-exp-twice-a0-h100-1", "hl-job-t1-exp-twice-a0-h100-1", "hl-job-t1-no-job"} {
+		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.DeleteWorkload(ctx, "exp-deleted", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReapTerminal(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, line := range []string{
+		"cloudexec: created instance hl-job-t1-exp-deleted-a2-h100-0 (fake-0001): attempt 2 of experiment exp-deleted is desired in slot h100-0",
+		"cloudexec: created instance hl-job-t1-exp-finished-a0-cpu-0 (fake-0002): attempt 0 of experiment exp-finished is desired in slot cpu-0",
+		"cloudexec: destroyed instance hl-job-t1-exp-deleted-a2-h100-0 (fake-0001): the workload of its experiment was deleted while it was running",
+		"cloudexec: destroyed instance hl-job-t1-exp-finished-a0-cpu-0 (fake-0002): it exited and is not the workload of a desired experiment",
+		"cloudexec: destroyed instance hl-job-t1-exp-twice-a0-h100-1 (fake-0004): it is a second instance of its name",
+		"cloudexec: destroyed instance hl-job-t1-no-job (fake-0005): it is under this namespace's prefix and its name is no job's",
+	} {
+		if strings.Count(logged.String(), line+"\n") != 1 {
+			t.Errorf("the log does not hold, once, the line %q:\n%s", line, logged.String())
+		}
+	}
+	if got := strings.Count(logged.String(), "destroyed instance"); got != 4 {
+		t.Errorf("%d destroys logged, want the 4 made:\n%s", got, logged.String())
+	}
+
+	p.Fail = failing("Destroy", "")
+	if err := e.DeleteWorkload(ctx, "exp-twice", false); err == nil || !strings.Contains(err.Error(), "(fake-0003)") {
+		t.Fatalf("a destroy that failed: err = %v, want it to name the instance's id", err)
+	}
+	if strings.Contains(logged.String(), "(fake-0003)") {
+		t.Errorf("a destroy that failed is logged as made:\n%s", logged.String())
 	}
 }
 

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -35,13 +36,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := func(format string, args ...any) {
-		fmt.Printf("[cloud-agent] "+format+"\n", args...)
-	}
-	ctx, cancel := agentloop.SignalContext(log)
+	log.SetPrefix("[cloud-agent] ")
+	log.SetFlags(log.LstdFlags | log.LUTC | log.Lmsgprefix)
+	ctx, cancel := agentloop.SignalContext(log.Printf)
 	defer cancel()
 
-	log("starting: cluster=%s provider=%s capabilities=%v account=%s namespace=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, provider.Capabilities(rented), cfg.Provider.AccountID, cfg.Namespace, cfg.APIURL, len(cfg.shapes))
+	log.Printf("starting: cluster=%s provider=%s capabilities=%v account=%s namespace=%s control_plane=%s shapes=%d", cfg.ClusterName, cfg.Provider.Name, provider.Capabilities(rented), cfg.Provider.AccountID, cfg.Namespace, cfg.APIURL, len(cfg.shapes))
 
 	a := &agentloop.Agent{
 		ClusterName:       cfg.ClusterName,
@@ -52,10 +52,10 @@ func main() {
 		ReconcileInterval: time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,
 		StatusInterval:    time.Duration(cfg.StatusIntervalSeconds) * time.Second,
 		LogTailLines:      cfg.LogTailLines,
-		Log:               log,
+		Log:               log.Printf,
 	}
 	if err := a.Run(ctx); err != nil {
-		log("%v: everything it rented is given back, exiting", err)
+		log.Printf("%v: everything it rented is given back, exiting", err)
 	}
 
 	leaving, cancelLeaving := context.WithTimeout(context.Background(), leaveLimit)

@@ -172,6 +172,24 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 	}
 }
 
+func TestEveryCreateStopAndDestroyIsLoggedWithTheInstanceIDAndTheReason(t *testing.T) {
+	h := newHarness(t)
+	h.cp.want([]entry{agent("a"), agent("b")}, nil)
+	h.mustPass()
+	a, b := h.rented.IDs(full("a"))[0], h.rented.IDs(full("b"))[0]
+	h.cp.want(nil, []string{"b"})
+	h.mustPass()
+	want := []string{
+		"created " + full("a") + " (asked for and not rented), instance " + a,
+		"created " + full("b") + " (asked for and not rented), instance " + b,
+		"destroyed " + full("a") + " (no longer desired), instance " + a,
+		"told " + full("b") + " to stop (ending), instance " + b,
+	}
+	if !reflect.DeepEqual(h.log, want) {
+		t.Fatalf("log = %q\nwant  %q", h.log, want)
+	}
+}
+
 // The lifetime is what ends a machine when this launcher is gone, so it is on every instance it
 // rents.
 func TestEveryInstanceIsRentedWithTheLaunchersLifetime(t *testing.T) {

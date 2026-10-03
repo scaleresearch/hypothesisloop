@@ -184,11 +184,11 @@ func (l *Launcher) Pass(ctx context.Context) error {
 	var failures []error
 	destroy := func(i provider.Instance, why string) bool {
 		if err := l.provider.Destroy(ctx, i.ID); err != nil {
-			l.cfg.Log("destroy %s (%s): %v", i.Name, why, err)
+			l.cfg.Log("destroy %s (%s), instance %s: %v", i.Name, why, i.ID, err)
 			failures = append(failures, fmt.Errorf("destroy %s: %w", i.Name, err))
 			return false
 		}
-		l.cfg.Log("destroyed %s (%s)", i.Name, why)
+		l.cfg.Log("destroyed %s (%s), instance %s", i.Name, why, i.ID)
 		return true
 	}
 
@@ -210,11 +210,11 @@ func (l *Launcher) Pass(ctx context.Context) error {
 				continue
 			}
 			if err := l.provider.Stop(ctx, i.ID); err != nil {
-				l.cfg.Log("stop %s (ending): %v", i.Name, err)
+				l.cfg.Log("stop %s (ending), instance %s: %v", i.Name, i.ID, err)
 				failures = append(failures, fmt.Errorf("stop %s: %w", i.Name, err))
 				continue
 			}
-			l.cfg.Log("told %s to stop (ending)", i.Name)
+			l.cfg.Log("told %s to stop (ending), instance %s", i.Name, i.ID)
 		}
 	}
 
@@ -262,7 +262,8 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 		creates++
 		spec := l.spec(want.instances[name])
-		if _, err := l.provider.Create(ctx, spec); err != nil {
+		id, err := l.provider.Create(ctx, spec)
+		if err != nil {
 			err = withoutEnvironment(err, spec.Env)
 			l.cfg.Log("create %s: %v", name, err)
 			failures = append(failures, fmt.Errorf("create %s: %w", name, err))
@@ -270,7 +271,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			lastCreateError = err
 			continue
 		}
-		l.cfg.Log("created %s", name)
+		l.cfg.Log("created %s (asked for and not rented), instance %s", name, id)
 	}
 	// Every create failing is rarely one agent's fault, so it is said once more in a line of its
 	// own. Nothing is given up on here: the control plane asks again until a machine has gone
