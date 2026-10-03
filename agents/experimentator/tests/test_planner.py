@@ -123,7 +123,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 4_000)
+        self.assertLess(len(prompt.encode()), 3_700)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -148,9 +148,10 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn("The job.yaml it gives is the one you fill in and submit, once `hl repo check` passes", flat)
         self.assertIn("Only a harness that already measures these metrics on this config runs unchanged: go to 3", flat)
         # `hl repo check` passed a repository whose files described a compression benchmark,
-        # straight after `hl repo init` had kept all three.
-        self.assertIn("`hl repo check` checks the layout and that each file is valid, and a file that was there may still describe an earlier experiment: "
-                      "make all of them match this experiment's definition before the baseline job", flat)
+        # straight after `hl repo init` had kept all three. It now holds them to the platform
+        # experiment, so the briefing asks only that it pass.
+        self.assertIn("once `hl repo check` passes: it names what a file still lacks and where one does not fit this experiment", flat)
+        self.assertNotIn("earlier experiment", flat)
         self.assertIn("`hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H a generous guess", flat)
         # The repository template supplies the helper, so no briefing sends an agent to the samples.
         self.assertNotIn("$WORKLOAD_SAMPLES", flat)
@@ -171,8 +172,9 @@ class BaselinePromptTest(unittest.TestCase):
         # The baseline left "--estimated-duration-hours H" in the job spec's header, so both
         # researchers stated estimates of two and six times the measured one, which never applied.
         # Told that the file states none, one committed `estimated_duration_hours: 0.06`, and
-        # every researcher's job carried it in place of the measured one: no submit refuses it.
-        self.assertIn("Write no estimate into the file, or every researcher's job carries it", flat)
+        # every researcher's job carried it in place of the measured one. `hl repo check` fails
+        # a job spec that states one, so the briefing says nothing of it.
+        self.assertNotIn("estimate into the file", flat)
         self.assertIn("(the job.yaml submitted unedited and the `--env` that vary it)", flat)
 
     def test_waiting_for_the_baseline_is_ending_the_turn(self):

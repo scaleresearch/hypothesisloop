@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,10 +17,19 @@ func repo(t *testing.T, command string) (int, string) {
 	return code, stdout + stderr
 }
 
+// emptyClone is a repository with nothing in it, of platform experiment pe-1 as the platform
+// answers it: named sweep and ranked on val_accuracy.
 func emptyClone(t *testing.T) string {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/platform-experiments/pe-1" {
+			t.Errorf("hl repo asked %s %s, want only the platform experiment", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"id":"pe-1","name":"sweep","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`)
+	}))
+	t.Setenv(platformExperimentEnv, "pe-1")
 	clone := t.TempDir()
 	mustGit(t, clone, "init", "-q")
 	t.Chdir(clone)
@@ -98,33 +109,46 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	write(t, clone, "README.md", "# sweep\n")
 	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 	write(t, clone, repotemplate.JobSpec, filledJobSpec)
+	// The files are whole and no code reports the metric the experiment ranks on.
+	want := "metrics: no file of the clone besides README.md and " + repotemplate.ExperimentFile + " names val_accuracy, a metric platform experiment pe-1 declares"
+	if code, out := repo(t, "check"); code != 1 || !strings.HasPrefix(out, want) || strings.Count(out, "\n") != 2 {
+		t.Fatalf("a clone whose code names no declared metric: hl repo check = %d, want only %q in\n%s", code, want, out)
+	}
+	write(t, clone, "train.py", "post_metric(1.0, accuracy, \"val_accuracy\")\n")
 	// A prepared repository, or one in another language, reports through the platform's request
 	// and holds no helper: it passes, and is told the request.
 	if err := os.Remove(filepath.Join(clone, repotemplate.MetricsHelper)); err != nil {
 		t.Fatal(err)
 	}
-	if code, out := repo(t, "check"); code != 0 || out != metricsHelperAbsent+"\n"+repoChecked+"\n" || !strings.Contains(out, "/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics") {
+	if code, out := repo(t, "check"); code != 0 || out != metricsHelperAbsent+"\n"+repoChecked("pe-1")+"\n" || !strings.Contains(out, "/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics") {
 		t.Fatalf("a clone with no metrics helper: hl repo check = %d\n%s", code, out)
 	}
 	repo(t, "init")
 	// A baseline agent read "ready" of another experiment's files and went on with them: a pass
 	// says what was checked and what was not, in one line, and never calls the repository ready.
-	if code, out := repo(t, "check"); code != 0 || out != metricsHelperPresent+"\n"+repoChecked+"\n" || strings.Contains(out, "ready") ||
-		!strings.Contains(out, "\nchecked: layout and file validity") || !strings.HasSuffix(out, "Not checked: that the files describe this experiment.\n") {
+	if code, out := repo(t, "check"); code != 0 || out != metricsHelperPresent+"\n"+repoChecked("pe-1")+"\n" || strings.Contains(out, "ready") ||
+		!strings.Contains(out, "\nchecked: the layout, each file's validity, and that") || !strings.HasSuffix(out, "fit platform experiment pe-1. Not checked: the README's text and the code the job spec runs.\n") {
 		t.Fatalf("a filled clone: hl repo check = %d\n%s", code, out)
 	}
 	for name, tc := range map[string]struct{ path, content, want string }{
-		"free text with a colon in it":   {repotemplate.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is not the YAML of an experiment: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
-		"no ranking metric":              {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
-		"a job spec that is not YAML":    {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
-		"a job spec with no job":         {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
-		"a job spec with no cpu":         {repotemplate.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.cpu: state the cores one node of the job uses, as in cpu: 2"},
-		"a job spec with no memory":      {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "states no job.memory"},
-		"a job spec with no storage":     {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "states no job.storage"},
-		"memory as a share of the node":  {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", "states job.memory as max"},
-		"storage as a share of the node": {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", "states job.storage as max"},
-		"a group with no memory":         {repotemplate.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "states no job.groups[1].memory"},
-		"a secret in the committed spec": {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
+		// `hl repo check` passed a repository whose files described a compression benchmark,
+		// straight after `hl repo init` had kept all three.
+		"an earlier experiment's name":    {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "sweep", "compression", 1), "experiment: " + repotemplate.ExperimentFile + ` states name "compression", and platform experiment pe-1 is "sweep": the file may be an earlier experiment's`},
+		"an earlier experiment's metrics": {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "val_accuracy\n    direction: maximize", "ratio\n    direction: minimize\n    role: ranking", 1), "states the metrics ratio minimize ranking, and platform experiment pe-1 declares val_accuracy maximize ranking"},
+		// A job.yaml stated estimated_duration_hours: 0.05 and all twelve jobs of a run were
+		// given that in place of the estimate the platform measured.
+		"an estimate in the committed spec": {repotemplate.JobSpec, "metadata:\n  estimated_duration_hours: 0.05\n" + filledJobSpec, "states metadata.estimated_duration_hours 0.05: every job submitted from this file would hold that"},
+		"free text with a colon in it":      {repotemplate.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is not the YAML of an experiment: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
+		"no ranking metric":                 {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
+		"a job spec that is not YAML":       {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
+		"a job spec with no job":            {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
+		"a job spec with no cpu":            {repotemplate.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.cpu: state the cores one node of the job uses, as in cpu: 2"},
+		"a job spec with no memory":         {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "states no job.memory"},
+		"a job spec with no storage":        {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "states no job.storage"},
+		"memory as a share of the node":     {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", "states job.memory as max"},
+		"storage as a share of the node":    {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", "states job.storage as max"},
+		"a group with no memory":            {repotemplate.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "states no job.groups[1].memory"},
+		"a secret in the committed spec":    {repotemplate.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
 	} {
 		write(t, clone, repotemplate.ExperimentFile, filledExperiment)
 		write(t, clone, repotemplate.JobSpec, filledJobSpec)
@@ -132,25 +156,6 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, tc.want) || strings.Count(out, "\n") != 2 || !strings.HasSuffix(out, metricsHelperPresent+"\n") {
 			t.Errorf("%s: hl repo check = %d, want only %q in\n%s", name, code, tc.want, out)
 		}
-	}
-}
-
-// A job.yaml stated estimated_duration_hours: 0.05 and all twelve jobs of a run were given that
-// in place of the estimate the platform measured. The check notes a stated estimate, failing
-// nothing, and the template states none.
-func TestRepoCheckNotesAJobSpecThatStatesAnEstimate(t *testing.T) {
-	clone := emptyClone(t)
-	repo(t, "init")
-	if data, err := os.ReadFile(filepath.Join(clone, repotemplate.JobSpec)); err != nil || statedEstimate(os.DirFS(clone)) != "" {
-		t.Fatalf("the template's job spec states an estimate (%v):\n%s", err, data)
-	}
-	write(t, clone, "README.md", "# sweep\n")
-	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
-	write(t, clone, repotemplate.JobSpec, "metadata:\n  estimated_duration_hours: 0.05\n"+filledJobSpec)
-	code, out := repo(t, "check")
-	want := "estimate: " + repotemplate.JobSpec + " states metadata.estimated_duration_hours 0.05, which fails nothing"
-	if code != 0 || !strings.Contains(out, "\n"+want) || !strings.Contains(out, "Leave it out and the measured estimate applies") || !strings.HasSuffix(out, repoChecked+"\n") {
-		t.Errorf("a job spec that states an estimate: hl repo check = %d, want a pass that notes it\n%s", code, out)
 	}
 }
 

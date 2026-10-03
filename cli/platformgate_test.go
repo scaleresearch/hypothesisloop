@@ -140,6 +140,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"hypothesis", "list"},
 		{"hypothesis", "get", "h1"},
 		{"hypothesis", "query", "MATCH (h:Hypothesis {platform_experiment_id: $pe}) RETURN h.id"},
+		{"repo", "check"},
 		{"quota"},
 		{"quota", "--all"},
 		{"results"},

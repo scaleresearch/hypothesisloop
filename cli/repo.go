@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	iofs "io/fs"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,7 +20,7 @@ import (
 
 var repoCommands = []subcommand{
 	{"init", "add the experiment files this clone lacks", repoInit},
-	{"check", "check that this clone holds the experiment files and each is valid", repoCheck},
+	{"check", "check that this clone holds the experiment files, each valid and fitting the platform experiment", repoCheck},
 }
 
 const repoFiles = `  README.md                         what is measured, how one trial runs, what to vary, what must not change
@@ -77,33 +79,33 @@ git add and commit on that branch: hl job submit pushes it. hl repo check says w
 
 const earlierExperiment = "A file that was already there may describe an earlier experiment of this repository, which hl cannot tell: read it, keep what fits yours and rewrite the rest."
 
-func repoCheck(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("repo check", `usage: hl repo check
+func repoCheck(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("repo check", `usage: hl repo check [--platform-experiment PE]
 
-Run in a clone of the experiment's repository. Checks two things in the working tree: the
-layout, that each of the first three files below is there, and each file's validity. Prints one
-line for each failure, as NAME: what to fix, and exits 1. With none it exits 0 and prints one
-line saying what it checked and what it did not. The metrics line is printed either way and
-fails nothing, and so does the estimate line of a job spec that states one.
+Run in a clone of the experiment's repository. Checks the working tree against the platform
+experiment: that each of the first three files below is there and valid, and that what they
+state fits it. Prints one line for each failure, as NAME: what to fix and why, and exits 1.
+With none it exits 0 and prints one line saying what it checked and what it did not. The
+helper line is printed either way and fails nothing.
 
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
-              them ranked
+              them ranked, and the name and the metrics are the platform experiment's: a
+              file left by an earlier experiment of the repository fails here
   job-spec    .hypothesisloop/job.yaml states a job and its cpu, memory and storage as
-              quantities, in each group of a grouped job, with no REPLACE-WITH left and no
-              secret_env
-  metrics     whether metrics.py, the Python helper hl repo init supplies, is there, and
+              quantities, in each group of a grouped job, with no REPLACE-WITH left, no
+              secret_env and no metadata.estimated_duration_hours: every job submitted from
+              it would hold that in place of the estimate measured on the baseline job
+  metrics     every metric the platform experiment declares is named, by its key, in a file
+              of the clone besides those two: a job reports each under its key
+  helper      whether metrics.py, the Python helper hl repo init supplies, is there, and
               without it the request a job reports a metric with: a repository needs no
               helper to report
-  estimate    printed when .hypothesisloop/job.yaml states metadata.estimated_duration_hours:
-              every job submitted from it is given that, and with none stated the estimate
-              the platform measured on the baseline job applies
 
-Not checked: that the files describe this experiment. Those of an earlier experiment in the
-same repository pass, so read them against the brief. Nor the code the job spec runs or its
-baseline job, which the platform checks when the baseline is declared
-(hl platform-experiments update --baseline-job).
+Not checked: the README's text, the code the job spec runs or its baseline job, which the
+platform checks when the baseline is declared (hl platform-experiments update --baseline-job).
 hl repo init adds a missing file.`, stderr)
+	pe := experimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -114,51 +116,105 @@ hl repo init adds a missing file.`, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	id, err := namedExperiment(fs, c, *pe)
+	if err != nil {
+		return parseExit(err)
+	}
+	var experiment declaredExperiment
+	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
+		return fail(stderr, err)
+	}
 	clone := os.DirFS(root)
-	failures, err := notReady(clone)
+	failures, err := notReady(clone, experiment)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	metrics := metricsHelperAbsent
+	for _, metric := range experiment.Metrics {
+		named, err := namedInClone(root, metric.Key)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if !named {
+			failures = append(failures, fmt.Sprintf("metrics: no file of the clone besides %s and %s names %s, a metric platform experiment %s declares: a job reports each declared metric under its key, as in post_metric(fraction_complete, value, %q)", repotemplate.Readme, repotemplate.ExperimentFile, metric.Key, id, metric.Key))
+		}
+	}
+	helper := metricsHelperAbsent
 	if _, err := iofs.Stat(clone, repotemplate.MetricsHelper); err == nil {
-		metrics = metricsHelperPresent
+		helper = metricsHelperPresent
 	} else if !errors.Is(err, iofs.ErrNotExist) {
 		return fail(stderr, err)
 	}
-	notes := []string{metrics}
-	if estimate := statedEstimate(clone); estimate != "" {
-		notes = append(notes, estimate)
-	}
 	if len(failures) > 0 {
-		fmt.Fprintln(stdout, strings.Join(append(failures, notes...), "\n"))
+		fmt.Fprintln(stdout, strings.Join(append(failures, helper), "\n"))
 		return 1
 	}
-	fmt.Fprintln(stdout, strings.Join(notes, "\n"))
-	fmt.Fprintln(stdout, repoChecked)
+	fmt.Fprintln(stdout, helper)
+	fmt.Fprintln(stdout, repoChecked(id))
 	return 0
 }
 
-// statedEstimate notes a job spec that states an estimate, empty for one that states none: every
-// job submitted from it holds that estimate in place of the one the platform measured.
-func statedEstimate(clone iofs.FS) string {
-	var file struct {
-		Metadata struct {
-			Estimate *float64 `yaml:"estimated_duration_hours"`
-		} `yaml:"metadata"`
+// declaredExperiment is what a clone's files are held to: the platform experiment's name and
+// the metrics it declares.
+type declaredExperiment struct {
+	ID      string           `json:"id"`
+	Name    string           `json:"name"`
+	Metrics []declaredMetric `json:"metrics"`
+}
+
+type declaredMetric struct {
+	Key       string   `json:"key" yaml:"key"`
+	Direction string   `json:"direction" yaml:"direction"`
+	Role      string   `json:"role" yaml:"role"`
+	Bound     *float64 `json:"bound" yaml:"bound"`
+}
+
+// String is the metric as a failure names it, with the role a metric that states none has.
+func (m declaredMetric) String() string {
+	role := m.Role
+	if role == "" {
+		role = "ranking"
 	}
-	data, err := iofs.ReadFile(clone, repotemplate.JobSpec)
-	if err != nil || yaml.Unmarshal(data, &file) != nil || file.Metadata.Estimate == nil {
-		return ""
+	stated := m.Key + " " + m.Direction + " " + role
+	if m.Bound != nil {
+		stated += fmt.Sprintf(" bound %g", *m.Bound)
 	}
-	return fmt.Sprintf("estimate: %s states metadata.estimated_duration_hours %g, which fails nothing: every job submitted from it is given that in place of the estimate the platform measured on the baseline job. Leave it out and the measured estimate applies; --estimated-duration-hours states one for a single submit", repotemplate.JobSpec, *file.Metadata.Estimate)
+	return stated
+}
+
+// stated is metrics as one sorted line, which two declarations of the same metrics share.
+func stated(metrics []declaredMetric) string {
+	names := make([]string, len(metrics))
+	for i, metric := range metrics {
+		names[i] = metric.String()
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}
+
+// namedInClone reports whether a file of the clone besides the README and the experiment file
+// contains text. It reads tracked and untracked files alike and none that .gitignore leaves out.
+func namedInClone(root, text string) (bool, error) {
+	cmd := exec.Command("git", "grep", "--untracked", "-q", "-F", "-e", text, "--", ".", ":(exclude)"+repotemplate.Readme, ":(exclude)"+repotemplate.ExperimentFile)
+	cmd.Dir = root
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("git grep: %w", err)
+	}
+	return true, nil
 }
 
 const (
-	metricsHelperPresent = "metrics: " + repotemplate.MetricsHelper + " is there: post_metric(fraction_complete, value, \"key\") reports a metric"
-	metricsHelperAbsent  = "metrics: no " + repotemplate.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
+	metricsHelperPresent = "helper: " + repotemplate.MetricsHelper + " is there: post_metric(fraction_complete, value, \"key\") reports a metric"
+	metricsHelperAbsent  = "helper: no " + repotemplate.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
 )
 
-const repoChecked = "checked: layout and file validity (" + repotemplate.Readme + ", " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + "). Not checked: that the files describe this experiment."
+func repoChecked(id string) string {
+	return "checked: the layout, each file's validity, and that " + repotemplate.ExperimentFile + ", " + repotemplate.JobSpec + " and the metrics the code names fit platform experiment " + id + ". Not checked: the README's text and the code the job spec runs."
+}
 
 func cloneRoot() (string, error) {
 	root, err := git(".", "rev-parse", "--show-toplevel")
@@ -177,16 +233,16 @@ func sortedPaths(files map[string]string) []string {
 	return paths
 }
 
-// notReady lists what the files of a clone lack in layout and validity, each under the name the
-// checklist gives the item.
-func notReady(clone iofs.FS) ([]string, error) {
+// notReady lists what the files of a clone lack in layout, validity and fit to experiment, each
+// under the name the checklist gives the item.
+func notReady(clone iofs.FS, experiment declaredExperiment) ([]string, error) {
 	var failures []string
 	for _, item := range []struct {
 		name, path string
 		check      func([]byte) string
 	}{
 		{"readme", repotemplate.Readme, nil},
-		{"experiment", repotemplate.ExperimentFile, experimentGap},
+		{"experiment", repotemplate.ExperimentFile, func(data []byte) string { return experimentGap(data, experiment) }},
 		{"job-spec", repotemplate.JobSpec, jobSpecGap},
 	} {
 		data, err := iofs.ReadFile(clone, item.path)
@@ -210,14 +266,14 @@ func notReady(clone iofs.FS) ([]string, error) {
 	return failures, nil
 }
 
-func experimentGap(data []byte) string {
+// experimentGap is what the experiment file lacks, and for a whole one how it differs from the
+// platform experiment: a file an earlier experiment of the repository left states another name
+// or other metrics. The description is the brief, which changes as the run learns.
+func experimentGap(data []byte, experiment declaredExperiment) string {
 	var file struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-		Metrics     []struct {
-			Key  string `yaml:"key"`
-			Role string `yaml:"role"`
-		} `yaml:"metrics"`
+		Name        string           `yaml:"name"`
+		Description string           `yaml:"description"`
+		Metrics     []declaredMetric `yaml:"metrics"`
 	}
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return "is not the YAML of an experiment: " + yamlProblem(data, err)
@@ -245,11 +301,21 @@ func experimentGap(data []byte) string {
 	case !ranked:
 		return "has no ranking metric: one metric is the goal, with role ranking and a direction"
 	}
+	const copyIt = ": the file may be an earlier experiment's. Write name, description and metrics as hl platform-experiments get shows them"
+	if name := strings.TrimSpace(file.Name); name != experiment.Name {
+		return fmt.Sprintf("states name %q, and platform experiment %s is %q%s", name, experiment.ID, experiment.Name, copyIt)
+	}
+	if own, declared := stated(file.Metrics), stated(experiment.Metrics); own != declared {
+		return fmt.Sprintf("states the metrics %s, and platform experiment %s declares %s%s", own, experiment.ID, declared, copyIt)
+	}
 	return ""
 }
 
 func jobSpecGap(data []byte) string {
 	var file struct {
+		Metadata struct {
+			Estimate *float64 `yaml:"estimated_duration_hours"`
+		} `yaml:"metadata"`
 		Job map[string]any `yaml:"job"`
 	}
 	if err := yaml.Unmarshal(data, &file); err != nil {
@@ -260,6 +326,9 @@ func jobSpecGap(data []byte) string {
 	}
 	if _, set := file.Job["secret_env"]; set {
 		return "sets job.secret_env: a committed file holds no secret, pass --secret-env NAME at submit"
+	}
+	if file.Metadata.Estimate != nil {
+		return fmt.Sprintf("states metadata.estimated_duration_hours %g: every job submitted from this file would hold that in place of the estimate the platform measures on the baseline job. Leave it out, and state it for one submit with --estimated-duration-hours", *file.Metadata.Estimate)
 	}
 	groups, _ := file.Job["groups"].([]any)
 	if len(groups) == 0 {

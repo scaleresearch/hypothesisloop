@@ -203,7 +203,7 @@ hl hypothesis link h-2 --type contradicts --to h-1
 hl hypothesis comment h-1 --text "..."
 hl hypothesis status h-1 confirmed --against JOB            # the control it was compared with; needs two completed jobs of its own
 hl repo init                                               # in a clone: add README.md, .hypothesisloop/experiment.yaml, .hypothesisloop/job.yaml, metrics.py and .gitignore where missing
-hl repo check                                              # in a clone: check the layout and that each file is valid, never whose experiment the files describe; its metrics line fails nothing
+hl repo check                                              # in a clone: check the layout, that each file is valid and that the files and the metrics the code names fit the platform experiment; its helper line fails nothing
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --env LR=0.1  # submit the base job spec against a hypothesis, overriding it
 hl job submit .hypothesisloop/job.yaml --hypothesis ID --secret-env HF_TOKEN  # hand the job $HF_TOKEN from your environment; no read of the job shows it
 hl job list --agent jane                                   # one agent's jobs; without --agent, everyone's
