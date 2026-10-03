@@ -709,5 +709,5 @@ type signupReply struct {
 	Model           string         `json:"model"`
 	Hyperparameters map[string]any `json:"hyperparameters"`
 	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
-	Ended           domain.RunEnd  `json:"ended,omitempty" enum:"closed,cut,finished,planned" doc:"Why the agent's run here is over, absent while it goes on: the platform experiment closed, the agent was cut at a stage boundary, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
+	Ended           domain.RunEnd  `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut at a stage boundary, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
 }

@@ -27,5 +27,8 @@ func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/signups/dana", ""); code != http.StatusOK || out["name"] != "Researcher 1" {
 		t.Errorf("an agent reading its own signup: got = %d %v, want = 200 with name Researcher 1", code, out)
+	} else if ended, sent := out["ended"]; !sent || ended != "" {
+		// Left out while the run goes on, every reader had to supply the default itself.
+		t.Errorf("a signup whose run goes on: ended = %v (sent: %v), want it sent as the empty string", ended, sent)
 	}
 }
