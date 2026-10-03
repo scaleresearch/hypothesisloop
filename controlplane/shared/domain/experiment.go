@@ -186,13 +186,18 @@ func (e *Experiment) OnObjective() bool {
 	return e.HypothesisID != "" && e.HypothesisID == e.PlatformExperimentID
 }
 
-// MarshalJSON answers a job on the objective with objective and no hypothesis_id.
-func (e Experiment) MarshalJSON() ([]byte, error) {
-	type wire Experiment
+// Answer is the job as an answer states it: one on the objective with objective and no
+// hypothesis_id.
+func (e Experiment) Answer() *Experiment {
 	if e.OnObjective() {
 		e.HypothesisID, e.Objective = "", true
 	}
-	return json.Marshal(wire(e))
+	return &e
+}
+
+func (e Experiment) MarshalJSON() ([]byte, error) {
+	type wire Experiment
+	return json.Marshal(wire(*e.Answer()))
 }
 
 // EffectiveJob returns e.Job as it should actually be run: e's own ResolvedJob if admission has

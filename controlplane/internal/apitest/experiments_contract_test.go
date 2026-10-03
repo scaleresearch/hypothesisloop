@@ -52,6 +52,17 @@ func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentF
 	return s.items, nil
 }
 
+func (s *filterSpyStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
+	for _, e := range s.items {
+		if e.ID == id {
+			return e, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *filterSpyStore) FindingSummary(context.Context, string) (string, error) { return "", nil }
+
 func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.ExperimentFilter) (int, error) {
 	s.gotCount = f
 	return s.total, nil
@@ -331,5 +342,21 @@ func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 	}
 	if _, stated := jobs[1]["objective"]; stated || jobs[1]["hypothesis_id"] != "hyp-1" {
 		t.Errorf("the researcher's job: got = %v, want hypothesis_id hyp-1 and no objective", jobs[1])
+	}
+}
+
+// One job is answered as an object, which gets a $schema field the list's items do not.
+func TestGetExperimentAnswersABaselineJobAsOnTheObjective(t *testing.T) {
+	spy := &filterSpyStore{items: []*domain.Experiment{{ID: "job-base", PlatformExperimentID: "pe-1", HypothesisID: "pe-1"}}}
+	code, body := get(t, schedulerRouter(t, spy), "/experiments/job-base")
+	var job map[string]any
+	if err := json.Unmarshal([]byte(body), &job); code != 200 || err != nil {
+		t.Fatalf("get: got = %d %s (%v), want 200", code, body, err)
+	}
+	if _, stated := job["hypothesis_id"]; stated || job["objective"] != true || job["$schema"] == nil {
+		t.Errorf("the baseline job: got = %v, want $schema, objective true and no hypothesis_id", job)
+	}
+	if spy.items[0].HypothesisID != "pe-1" {
+		t.Errorf("answering changed the stored job: hypothesis_id = %q, want pe-1", spy.items[0].HypothesisID)
 	}
 }

@@ -141,7 +141,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.svc.NameJobs(ctx, exp); err != nil {
 			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
-		return &struct{ Body *domain.Experiment }{Body: exp}, nil
+		return answerJob(exp), nil
 	})
 
 	// Every GET /experiments page is bounded the same way the agent, hypothesis and
@@ -337,7 +337,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if exp == nil {
 			return nil, huma.Error404NotFound("experiment not found")
 		}
-		return &struct{ Body *domain.Experiment }{Body: exp}, nil
+		return answerJob(exp), nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -363,7 +363,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if exp == nil {
 			return nil, huma.Error404NotFound("experiment not found")
 		}
-		return &struct{ Body *domain.Experiment }{Body: exp}, nil
+		return answerJob(exp), nil
 	})
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -407,6 +407,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 	return job.AcceleratorType
+}
+
+// answerJob answers one job. huma adds $schema to an object body by copying its fields into a
+// type of its own, so Experiment.MarshalJSON never runs on it and the answer is made here.
+func answerJob(exp *domain.Experiment) *struct{ Body *domain.Experiment } {
+	return &struct{ Body *domain.Experiment }{Body: exp.Answer()}
 }
 
 // ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
