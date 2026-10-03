@@ -37,8 +37,8 @@ and the experiment is closed if not running by its `baseline_due_at`.
      `uv pip install X`. Size it to finish in minutes: every trial runs it.
   3. The run: `hl job submit .hypothesisloop/job.yaml --estimated-duration-hours H`, H a
      generous guess, since nothing is measured yet. Write no estimate into the file, or every
-     researcher's job carries it. Then stop: a reply with no command in it ends your turn,
-     and the result arrives as a message. Never poll, sleep or block in `hl watch`. A job
+     researcher's job carries it. A reply with no command in it ends your turn, and the
+     next update starts another. Never poll, sleep or block in `hl watch`. A job
      that failed, or completed without one of the experiment's `metrics`, has its cause in
      `hl job logs ID`: fix it, commit and submit again, as often as you know a fix.
   4. The finding. When it has COMPLETED, file `hl job summary`: the config that ran, the

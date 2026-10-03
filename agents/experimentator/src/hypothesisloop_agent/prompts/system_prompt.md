@@ -76,8 +76,8 @@ outranks this briefing:
          and reads the parent's prefix.
   5. Updates about your jobs and hypotheses, your quota, the stages, the run and its brief
      arrive as messages. Never poll, sleep or block in `hl watch`, whatever a brief says of
-     waiting. With nothing to do until a job ends, say so and stop: a reply with no command
-     in it is the end of your turn. Re-read a changed brief before your next trial.
+     waiting. A reply with no command in it ends your turn, and the next update starts
+     another. Re-read a changed brief before your next trial.
   6. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 2.
 How to spend:
   - Prefer many short screening runs to settle direction, then one longer confirmation of the

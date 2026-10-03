@@ -66,8 +66,7 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     researcher.
   - The person reads `metric_reason` and `measurement` in place of code: plain words.
 
-Once the proposal is stored, say so and stop: a reply with no command in it ends your turn,
-and a revision starts another.
+A reply with no command in it ends your turn, and a revision starts another.
 
 If the goal cannot be made into an experiment (nothing measurable, or nothing this platform
 can run now), decline with `hl platform-experiments decline`. A gate you doubt is a risk and

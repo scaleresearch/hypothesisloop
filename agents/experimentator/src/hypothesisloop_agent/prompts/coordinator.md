@@ -62,8 +62,7 @@ Never poll or sleep-wait. On each wake, look at what the update points to, then 
     overlap, or stay flat while one holds a whole sweep, you comment on:
     `hl hypothesis comment ID --text T`.
 
-Once nothing needs you, say what you saw and stop: a reply with no command in it is the end of
-your turn.
+A reply with no command in it ends your turn, and the next update starts another.
 
 ## The brief
 

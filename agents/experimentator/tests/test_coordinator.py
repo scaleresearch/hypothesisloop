@@ -84,7 +84,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 7_760)
+        self.assertLess(len(prompt.encode()), 7_740)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
     # that only its own baseline agent could bring. The `status_reason` of an open experiment
@@ -126,7 +126,7 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("Rewrite it as your last act before `hl platform-experiments close`: what was found, in the past tense, "
                       "with nothing in it still waiting or under way", flat)
         self.assertIn("It opens with the `status` that `get` shows now, and of an `open` experiment its `status_reason`: no run is under way", flat)
-        self.assertIn("Once nothing needs you, say what you saw and stop: a reply with no command in it is the end of your turn", flat)
+        self.assertIn("A reply with no command in it ends your turn, and the next update starts another.", flat)
         for form in ("one line", "call no tool", "echo"):
             self.assertNotIn(form, flat)
         self.assertEqual(updates.message([{"kind": "comment.new", "subject": "hyp-1"}], ""), "Platform updates:\ncomment.new hyp-1")

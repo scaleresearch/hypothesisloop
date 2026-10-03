@@ -33,7 +33,7 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 8_000)
+            self.assertLess(len(prompt.encode()), 7_970)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
@@ -61,7 +61,7 @@ class SystemPromptTest(unittest.TestCase):
     def test_waiting_for_a_job_is_ending_the_turn_whatever_a_brief_says(self):
         prompt = " ".join(self.render("generalist").split())
         self.assertIn("Never poll, sleep or block in `hl watch`, whatever a brief says of waiting", prompt)
-        self.assertIn("With nothing to do until a job ends, say so and stop: a reply with no command in it is the end of your turn", prompt)
+        self.assertIn("A reply with no command in it ends your turn, and the next update starts another.", prompt)
 
     # Four of six hosted agents wrote a job's result twice, as its summary and again as a comment
     # headed "Finding:", because the briefing used both words for it.

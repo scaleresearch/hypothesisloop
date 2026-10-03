@@ -65,7 +65,7 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 4_700)
+        self.assertLess(len(prompt.encode()), 4_660)
         self.assertEqual(listed(planner()), [[], ["platform-experiments", "propose"], ["platform-experiments", "decline"]])
 
     # Told not to clone, a planner invented override flags and a gate for a harness the
@@ -121,7 +121,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 4_250)
+        self.assertLess(len(prompt.encode()), 4_240)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.
@@ -178,9 +178,9 @@ class BaselinePromptTest(unittest.TestCase):
         flat = render(baseline_agent())[1]
         # Agents of one run ended seven turns with `true` or an `echo`, each between what they
         # had written and the one-line reply the briefing asked a turn to end with.
-        self.assertIn("Then stop: a reply with no command in it ends your turn, and the result arrives as a message. "
+        self.assertIn("A reply with no command in it ends your turn, and the next update starts another. "
                       "Never poll, sleep or block in `hl watch`", flat)
-        self.assertIn("say so and stop: a reply with no command in it ends your turn", render(planner())[1])
+        self.assertIn("A reply with no command in it ends your turn, and a revision starts another.", render(planner())[1])
 
     # A baseline that cannot be measured must not hold the experiment open until its limit.
     # Told to give up after three failed jobs, one finished with the fix for the third already
