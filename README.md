@@ -360,26 +360,26 @@ text: "the hypothesis this agent is testing, in one falsifiable sentence"
 links: [{type: builds_on, to: root}]   # the objective, or ids of the hypotheses it refines
 ```
 
-**Job** (`hl job submit --agent jane job.yaml`)
+**Job** (`hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`)
 
 ```yaml
 job:
   image: pytorch-cuda       # a job image by the name `hl capacity` shows, or a full registry address
-  command: ["python", "train.py"]
-  cpu: "4"
-  memory: "16Gi"
-  storage: "10Gi"
+  command: ["bash", "-lc", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   # copied from `hl capacity`
   accelerator_count: 1
-  accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
-metadata:
-  agent_id: agent-007
-  platform_experiment_id: pe-llm-finetune-2026-07
-  hypothesis_id: "0198f2a1-3c9e-7b21-9c4a-2f6e1a8d5b3c"
-  theory: "Warmup steps > 500 reduces early-training loss spikes observed in run pe-...-003"
-  code_ref: "https://github.com/scaleresearch/agent-example@a1b2c3d4e5f6789012345678901234567890abcd"
-  capacity_tier: guaranteed
-  estimated_duration_hours: 6.0
+  cpu: 2
+  memory: 8Gi
+  storage: 4Gi
 ```
+
+That is the whole file: the repository's base job spec, submitted unedited for every trial.
+The flags state what differs from one trial to the next: `--hypothesis`, `--theory`, `--env`,
+`--secret-env`, `--capacity-tier` and `--estimated-duration-hours`. `hl` fills in the rest of
+`metadata`: the agent and the platform experiment from the token (`--agent` and
+`--platform-experiment` for a person or an API key), and `code_ref` and `branch` from the
+clone it runs in. The platform issues the job's id, `job-` and 32 hex digits, and the submit
+prints it.
 
 Every job holds units of a type the platform prices (`GET /resource-catalog/capacity`,
 `hl capacity`): an accelerator, or CPU cores. A job that needs no accelerator names none and
@@ -403,11 +403,11 @@ writes, in each group of a job with groups. One left out, or `"max"`, is refused
 is sized from the node it lands on. `max_retries` left out is 0. A job that asks
 for more than every cluster that runs it has when idle is refused with 422
 `exceeds_cluster_capacity`, which states what it asks for and what each cluster has. The
-least a submission holds is `hypothesis_id`, `theory`, `estimated_duration_hours` (left out
-once the experiment's baseline is declared, and by the baseline job itself, which is given the
-largest its agent's quota admits), and in `job` a
+least a submission holds is `hypothesis_id`, `theory`, and in `job` a
 `command`, an `image`, `cpu`, `memory`, `storage` and, on an accelerator, `accelerator_type` with
-`accelerator_count`. `code_ref` is the
+`accelerator_count`. A job that states no `estimated_duration_hours` gets the one measured on
+the baseline job, and the baseline job itself the largest its agent's quota admits, so the
+committed file states none and `hl repo check` fails one that does. `code_ref` is the
 experiment's repository at a commit and `branch` the branch it is on, both filled in by `hl` from its clone. Budget, quota, fairness, the concurrency cap
 and settlement count cores as they count accelerators, at an `acch_rate` of 1.0: 4 cores for an
 hour cost 4, so the budget of an experiment on cores reads as CPU core-hours, and the UI labels
