@@ -172,6 +172,11 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// measured against live capacity grows with every admission.
 	nodeAvailAtTickStart := cloneNodeAvailByCluster(nodeAvail)
 	nodeResourcesAtTickStart := cloneNodeAvailByCluster(nodeResources)
+	clusters := tickClusters{
+		start: start, registered: registeredClusters, multiNode: multiNodeCapable, clusterIDs: clusterIDs,
+		nodeAvail: nodeAvail, nodeResources: nodeResources, nodeResourcesTotal: nodeResourcesTotal, nodeAvailAtTickStart: nodeAvailAtTickStart,
+		nodeLabels: nodeLabels, resolveCache: resolveCache,
+	}
 
 	// 2. GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/
 	// RUNNING). No second reservation or live-usage subtraction here — either would
@@ -273,71 +278,15 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	// capacity existed before this tick) vs outranked (capacity existed, but other guaranteed
 	// jobs earlier in sort order already claimed it).
 	for _, exp := range guaranteed {
-		// A job already assigned a cluster (pinned by a prior attempt in submitJob) stays
-		// pinned — just recompute its footprint under that flavor; otherwise pick a (cluster,
-		// flavor) pair among the requested type and any AcceptableAcceleratorTypes where the
-		// whole footprint fits — see resolveClusterAndFootprint/clusterWithBestFit.
-		// What the row says right now, captured before the placement search below mutates
+		// What the row says right now, captured before the placement search mutates
 		// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it
 		// has a new flavor to persist.
 		persistedFlavor := exp.AcceleratorType
-		betFlavor := persistedFlavor
-		candidates, ineligible := eligibleClusters(gAvail, multiNodeCapable, registeredClusters, exp)
-		if ineligible != "" {
-			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ineligible); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark %s: %w", ineligible, err))
-			}
+		placed, ok := l.placeQueued(ctx, "guaranteed", exp, gAvail, guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], clusters, &tickErrs)
+		if !ok {
 			continue
 		}
-		candidates = withoutFailed(candidates, clusterIDs, exp, l.triedClusterTTL, start)
-		cluster := exp.ClusterName
-		var fp domain.Footprint
-		if cluster != "" {
-			fp = exp.Footprint()
-		} else {
-			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
-		}
-		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(guaranteedQuotas[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
-			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
-				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-				if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ranOnTypeUncoveredReason(exp)); err != nil {
-					l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
-				}
-				continue
-			}
-			// Reverting to the requested flavor re-places the job, layout included: picking on
-			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
-			// and charge it a failed placement there.
-			exp.AcceleratorType = exp.Job.AcceleratorType
-			betFlavor = exp.AcceleratorType
-			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp); ok {
-				cluster = placed
-			} else {
-				cluster = clusterWithBestFit(candidates, registeredClusters, fp)
-			}
-		}
-		// Check the job's cpu, memory and storage against THIS cluster's own fair share (or size
-		// it to a slot), now that cluster and accelerator flavor are finally settled for this
-		// attempt — see loop_resolve.go. A cluster this job's own resources
-		// cannot fit is folded into the ordinary not-admitted path below by simply un-picking the
-		// cluster, exactly like a scalar or topology miss: preemption cannot fix a job whose own
-		// request is oversized for every node, so there is nothing else to try here.
-		misfit := ""
-		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeResources[cluster], nodeLabels[cluster])
-			if rerr != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
-				continue
-			}
-			if resolveMisfit != "" {
-				cluster, misfit = "", resolveMisfit
-			} else {
-				exp.ResolvedJob = resolvedJob
-				fp = exp.Footprint()
-			}
-		}
+		cluster, fp, betFlavor, misfit := placed.cluster, placed.fp, placed.betFlavor, placed.misfit
 		// Which of the two fit checks failed decides whether preemption can help at all, so they
 		// are evaluated separately rather than or-ed into one condition.
 		scalarFits := domain.Fits(gAvail[cluster], fp)
@@ -598,57 +547,11 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 
 	for _, exp := range burst {
 		persistedFlavor := exp.AcceleratorType
-		candidates, ineligible := eligibleClusters(bAvail, multiNodeCapable, registeredClusters, exp)
-		if ineligible != "" {
-			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-			if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ineligible); err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark %s: %w", ineligible, err))
-			}
+		placed, ok := l.placeQueued(ctx, "burst", exp, bAvail, quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], clusters, &tickErrs)
+		if !ok {
 			continue
 		}
-		candidates = withoutFailed(candidates, clusterIDs, exp, l.triedClusterTTL, start)
-		cluster := exp.ClusterName
-		var fp domain.Footprint
-		if cluster != "" {
-			fp = exp.Footprint()
-		} else {
-			cluster, fp = resolveClusterAndFootprint(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp)
-		}
-		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quotaMap[quotaKey(exp.AgentID, exp.PlatformExperimentID)], exp) {
-			if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
-				obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-				if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, ranOnTypeUncoveredReason(exp)); err != nil {
-					l.skipExperiment(&tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
-				}
-				continue
-			}
-			// Reverting to the requested flavor re-places the job, layout included: picking on
-			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
-			// and charge it a failed placement there.
-			exp.AcceleratorType = exp.Job.AcceleratorType
-			fp = exp.Footprint()
-			if placed, ok := placeAtFlavor(candidates, registeredClusters, nodeAvail, nodeResources, nodeLabels, exp); ok {
-				cluster = placed
-			} else {
-				cluster = clusterWithBestFit(candidates, registeredClusters, fp)
-			}
-		}
-		// See the guaranteed pass above for why this runs here, after cluster/flavor settle and
-		// before the fit check.
-		misfit := ""
-		if cluster != "" {
-			resolvedJob, resolveMisfit, rerr := l.resolveClusterLocalResources(ctx, resolveCache, exp, cluster, nodeResourcesTotal[cluster], nodeAvailAtTickStart[cluster], nodeResources[cluster], nodeLabels[cluster])
-			if rerr != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", rerr))
-				continue
-			}
-			if resolveMisfit != "" {
-				cluster, misfit = "", resolveMisfit
-			} else {
-				exp.ResolvedJob = resolvedJob
-				fp = exp.Footprint()
-			}
-		}
+		cluster, fp, misfit := placed.cluster, placed.fp, placed.misfit
 		if !domain.Fits(bAvail[cluster], fp) || !topologyFits(nodeAvail[cluster], nodeResources[cluster], nodeLabels[cluster], exp) {
 			// Same shortage vector the guaranteed pass computes, for the same reason: "short
 			// {cpu: 12}" tells an operator which dimension to fix, where a bare
@@ -723,6 +626,94 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	}
 
 	return errors.Join(tickErrs...)
+}
+
+// tickClusters is what one tick read of the clusters, which every placement of both passes is
+// decided against. The maps are the tick's own: an admission subtracts from them in place.
+type tickClusters struct {
+	start        time.Time
+	registered   map[string]domain.Cluster
+	multiNode    map[string]bool
+	clusterIDs   map[string]string
+	nodeLabels   map[string]map[string]map[string]string
+	resolveCache *resolutionCache
+
+	nodeAvail, nodeResources, nodeResourcesTotal, nodeAvailAtTickStart map[string]map[string]map[string]int64
+}
+
+// placement is where a queued job is tried in one pass: the cluster, "" when none could be picked,
+// and its footprint there. misfit is why the cluster picked does not take the job's own cpu,
+// memory and storage, and betFlavor the flavor a bet on a cluster that scales up is made at.
+type placement struct {
+	cluster   string
+	fp        domain.Footprint
+	betFlavor domain.AcceleratorType
+	misfit    string
+}
+
+// placeQueued settles where exp is tried in one pass, for the guaranteed and the burst pass
+// alike, against avail, the pass's view of free capacity. ok is false when the job is out of this
+// tick: no cluster may run it, its quota no longer covers the type it ran on, or it could not be
+// resolved, and the reason is written or the failure recorded.
+//
+// A job already assigned a cluster stays there and only its footprint is recomputed. Any other is
+// given a (cluster, flavor) pair among the requested type and its acceptable ones where the whole
+// footprint fits (resolveClusterAndFootprint). The search says its choice by setting
+// exp.AcceleratorType, and the resolved job is set on exp.
+func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (placement, bool) {
+	skip := func(reason string) (placement, bool) {
+		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
+		if err := l.store.UpdateNotAdmittedReason(ctx, exp.ID, reason); err != nil {
+			l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
+		}
+		return placement{}, false
+	}
+	placed := placement{cluster: exp.ClusterName, betFlavor: exp.AcceleratorType}
+	candidates, ineligible := eligibleClusters(avail, c.multiNode, c.registered, exp)
+	if ineligible != "" {
+		return skip(ineligible)
+	}
+	candidates = withoutFailed(candidates, c.clusterIDs, exp, l.triedClusterTTL, c.start)
+	if placed.cluster != "" {
+		placed.fp = exp.Footprint()
+	} else {
+		placed.cluster, placed.fp = resolveClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
+	}
+	if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quota, exp) {
+		if !slices.Contains(candidateAcceleratorTypes(exp), exp.Job.AcceleratorType) {
+			return skip(ranOnTypeUncoveredReason(exp))
+		}
+		// Reverting to the requested flavor re-places the job, layout included: picking on
+		// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
+		// and charge it a failed placement there.
+		exp.AcceleratorType = exp.Job.AcceleratorType
+		placed.betFlavor = exp.AcceleratorType
+		placed.fp = exp.Footprint()
+		if cluster, ok := placeAtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
+			placed.cluster = cluster
+		} else {
+			placed.cluster = clusterWithBestFit(candidates, c.registered, placed.fp)
+		}
+	}
+	// Check the job's cpu, memory and storage against THIS cluster's own fair share (or size it to
+	// a slot), now that cluster and accelerator flavor are settled for this attempt: see
+	// loop_resolve.go. A cluster this job's own resources cannot fit is folded into the ordinary
+	// not-admitted path by un-picking the cluster, like a scalar or topology miss: preemption
+	// cannot fix a job whose own request is oversized for every node.
+	if cluster := placed.cluster; cluster != "" {
+		resolvedJob, misfit, err := l.resolveClusterLocalResources(ctx, c.resolveCache, exp, cluster, c.nodeResourcesTotal[cluster], c.nodeAvailAtTickStart[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
+		switch {
+		case err != nil:
+			l.skipExperiment(tickErrs, exp, fmt.Errorf("resolve cluster-local resources: %w", err))
+			return placement{}, false
+		case misfit != "":
+			placed.cluster, placed.misfit = "", misfit
+		default:
+			exp.ResolvedJob = resolvedJob
+			placed.fp = exp.Footprint()
+		}
+	}
+	return placed, true
 }
 
 // skipExperiment drops one experiment from this tick and records why, so a pass over many
