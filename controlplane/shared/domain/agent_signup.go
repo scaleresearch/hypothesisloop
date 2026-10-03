@@ -48,9 +48,6 @@ type AgentSignup struct {
 	Activity *AgentActivity `json:"activity,omitempty"`
 }
 
-// MaxAgentActivityLength bounds the sentence of an AgentActivity, in characters.
-const MaxAgentActivityLength = 120
-
 // AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it
 // beside its progress marker. The platform keeps the latest sentence only.
 type AgentActivity struct {

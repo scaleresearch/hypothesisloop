@@ -15,7 +15,7 @@ INTERVAL_S = 15
 # when it changes, at most every ACTIVITY_INTERVAL_S.
 ACTIVITY_PREFIX = "hl-activity"
 ACTIVITY_INTERVAL_S = 3
-# domain.MaxAgentActivityLength on the platform's side.
+# maxLength of domain.AgentActivity.Text on the platform's side.
 MAX_ACTIVITY_LENGTH = 120
 
 THINKING = "thinking"
