@@ -45,11 +45,15 @@ class SystemPromptTest(unittest.TestCase):
         self.assertNotIn("--estimated-duration-hours", prompt)
 
     # One config differed up to 2.3x between rented hosts, and researchers who compared across
-    # them found fp16 slower than fp32.
-    def test_a_trial_is_compared_with_a_control_on_the_same_host(self):
+    # them found fp16 slower than fp32. Told `on host N`, a researcher on a cluster of one node,
+    # whose updates read `on node box-b`, spent a job on a control it had and wrote
+    # "different host" in two findings: the rule names what every update shows.
+    def test_a_trial_is_compared_with_a_control_on_the_same_machine(self):
         prompt = " ".join(self.render("generalist").split())
-        self.assertIn("Compare a trial only with a control that ran on the same host (`on host N` in its update)", prompt)
-        self.assertIn("With none there, rerun the control alongside. A finding across hosts says so", prompt)
+        self.assertIn("Compare a trial only with a control whose update ends in the same `on ...`, its machine", prompt)
+        self.assertIn("With none there, rerun the control alongside. A finding across machines says so", prompt)
+        for worded_for_rented in ("on host N", "rented"):
+            self.assertNotIn(worded_for_rented, prompt)
 
     # In a platform outage one researcher ran `hl quota` in sleep loops and another pushed five
     # times. The harness wakes an agent that ended its turn once its polls are answered again,

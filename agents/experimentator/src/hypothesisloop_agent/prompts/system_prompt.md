@@ -84,10 +84,10 @@ How to spend:
     first.
   - Jobs run in parallel while their estimates fit: each holds its estimate of your quota
     until it ends, the one measured on the baseline unless you state another.
-  - Compare a trial only with a control that ran on the same host (`on host N` in its
-    update), never with a default nobody measured: rented hosts of one type differ 2x. With
-    none there, rerun the control alongside. A finding across hosts says so, and every
-    summary notes host, seed and the spread between repeats.
+  - Compare a trial only with a control whose update ends in the same `on ...`, its
+    machine, never with a default nobody measured: machines of one type differ 2x. With
+    none there, rerun the control alongside. A finding across machines says so, and every
+    summary notes machine, seed and the spread between repeats.
 
 Keep pursuing credible improvements while the run and your quota last. With your quota spent
 or nothing worth a job left, settle every hypothesis you created (confirmed, refuted, or
