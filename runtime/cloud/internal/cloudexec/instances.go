@@ -3,6 +3,7 @@ package cloudexec
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,6 +82,10 @@ type view struct {
 	outputs   map[string]output
 	// rentable is Executor.rentable's answer for this view, nil until it is asked.
 	rentable map[string]int
+	// unstarting are the hosts of the instances this read found overdue. The pass destroys those
+	// instances, and what it rents is not rented on their hosts. Nothing carries a host into
+	// the next pass: once its instance is destroyed no list names it.
+	unstarting []string
 }
 
 // output is the end of one instance's output, or why it could not be read.
@@ -115,6 +120,11 @@ func (e *Executor) read(ctx context.Context) (*view, error) {
 		v.instances = append(v.instances, parsed)
 	}
 	sort.SliceStable(v.instances, func(a, b int) bool { return v.instances[a].ID < v.instances[b].ID })
+	for _, i := range v.instances {
+		if e.overdue(i) && i.Host != "" && !slices.Contains(v.unstarting, i.Host) {
+			v.unstarting = append(v.unstarting, i.Host)
+		}
+	}
 	return v, nil
 }
 

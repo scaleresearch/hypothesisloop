@@ -73,6 +73,46 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	}
 }
 
+// A host that cannot start a container is on offer again the moment its instance is destroyed,
+// and as cheap as before. What the pass that found the instance overdue rents, it rents elsewhere.
+func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, job(t, "exp-1", 0, 1))
+	p.RunsOn("hl-job-t1-exp-1-a0-h100-0", "124592", "H100", "AMD EPYC 7B13", 2.25)
+
+	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
+	if avoided := p.Spec("hl-job-t1-exp-2-a0-h100-1").AvoidHosts; len(avoided) != 0 {
+		t.Fatalf("beside an instance still inside its time to start, a job was rented avoiding %v", avoided)
+	}
+
+	// Both are overdue now, and only the first is on a host its vendor names.
+	e.startup = time.Nanosecond
+	pass, err := e.ForPass(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pass.DeleteWorkload(ctx, "exp-1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if avoided := p.Spec("hl-job-t1-exp-3-a0-cpu-0").AvoidHosts; !reflect.DeepEqual(avoided, []string{"124592"}) {
+		t.Fatalf("after the pass destroyed an instance that never started, it rented avoiding %v, want that instance's host", avoided)
+	}
+
+	// The next pass lists no instance on that host, and nothing else names it.
+	if err := e.DeleteWorkload(ctx, "exp-3", false); err != nil {
+		t.Fatal(err)
+	}
+	e.startup = 4 * time.Minute
+	mustCreate(t, e, job(t, "exp-3", 1, 0))
+	if avoided := p.Spec("hl-job-t1-exp-3-a1-cpu-0").AvoidHosts; len(avoided) != 0 {
+		t.Fatalf("a later pass rented avoiding %v", avoided)
+	}
+}
+
 // A host that stops answering its vendor is listed as unknown, hours into a job as well. The
 // instance was rented longer ago than the startup bound and is not replaced for it: it stays the
 // job's workload, holds its slot, and reads as pending and placed with no output asked for, which

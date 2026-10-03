@@ -8,8 +8,8 @@ import "context"
 type Market interface {
 	// Rentable is how many instances of spec could be rented right now, counted up to atMost:
 	// the offers Create would choose among, under every filter it rents within, without the
-	// ones this process holds. Only the sizes and the accelerator of spec are read. It rents
-	// nothing, and an offer it counted may be gone by the time Create asks for it.
+	// ones this process holds. Only the sizes, the accelerator and AvoidHosts of spec are read.
+	// It rents nothing, and an offer it counted may be gone by the time Create asks for it.
 	Rentable(ctx context.Context, spec Spec, atMost int) (int, error)
 }
 

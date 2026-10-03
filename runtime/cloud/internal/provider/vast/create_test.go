@@ -534,6 +534,39 @@ func TestCreateNeverSearchesAnExcludedMachine(t *testing.T) {
 	}
 }
 
+// A host that could not start one instance is the cheapest again the moment that instance is
+// destroyed. The caller names the hosts it saw fail, as List named them, and the search leaves
+// them out beside the ones the settings exclude.
+func TestCreateNeverSearchesAHostTheSpecAvoids(t *testing.T) {
+	api := newFakeAPI(t)
+	rentable(api, "hl-exp1-a2")
+	settings := gpuSettings()
+	settings.ExcludedMachines = []int64{31}
+	p := newTestProvider(t, api, settings)
+	spec := gpuSpec()
+	spec.AvoidHosts = []string{"124592", "77"}
+
+	if _, err := p.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	body := api.sent(http.MethodPost, searchPath)[0].Body
+	if got := body["machine_id"]; !reflect.DeepEqual(got, map[string]any{"notin": []any{31.0, 124592.0, 77.0}}) {
+		t.Errorf("machine_id filter = %v, want the excluded machine and both avoided hosts", got)
+	}
+	if !reflect.DeepEqual(settings.ExcludedMachines, []int64{31}) {
+		t.Errorf("the settings' excluded machines became %v", settings.ExcludedMachines)
+	}
+
+	spec.AvoidHosts = []string{"fly-host-a"}
+	before := api.total()
+	if _, err := p.Create(context.Background(), spec); err == nil || !strings.Contains(err.Error(), `avoids host "fly-host-a"`) {
+		t.Fatalf("Create avoiding a host that is no machine id: err = %v, want a refusal", err)
+	}
+	if api.total() != before {
+		t.Errorf("%d requests were sent for a spec the adapter cannot meet", api.total()-before)
+	}
+}
+
 func TestCreateLogsTheMachineItRented(t *testing.T) {
 	var logged bytes.Buffer
 	log.SetOutput(&logged)

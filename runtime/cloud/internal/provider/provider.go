@@ -102,6 +102,11 @@ type Spec struct {
 	MemoryBytes      int64
 	DiskBytes        int64
 
+	// AvoidHosts are hosts the instance is not rented on, as Instance.Host named them: ones the
+	// caller found unable to start an instance. A vendor that names no host in List is never
+	// given any.
+	AvoidHosts []string
+
 	// Lifetime is how long the instance may run its command, in whole seconds. At its end the
 	// instance ends by itself, whether or not its caller or the vendor's API can still reach
 	// it: the command is killed, and the instance is exited, or gone where the vendor ends an

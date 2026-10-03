@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider"
@@ -45,8 +46,16 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 		"order":             [][]string{{"dph_total", "asc"}},
 		"limit":             offerSearchLimit,
 	}
-	if len(p.cfg.ExcludedMachines) > 0 {
-		query["machine_id"] = map[string]any{"notin": p.cfg.ExcludedMachines}
+	excluded := append([]int64(nil), p.cfg.ExcludedMachines...)
+	for _, host := range spec.AvoidHosts {
+		machine, err := strconv.ParseInt(host, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("vast: spec %q avoids host %q, which is no machine id of this vendor's", spec.Name, host)
+		}
+		excluded = append(excluded, machine)
+	}
+	if len(excluded) > 0 {
+		query["machine_id"] = map[string]any{"notin": excluded}
 	}
 	if spec.AcceleratorCount == 0 {
 		query["num_gpus"] = map[string]any{"gte": 1}
@@ -169,7 +178,8 @@ func (h *held) free(offers []offer) []offer {
 // that cannot start a container stays the cheapest because nobody keeps it. Nothing the vendor
 // shows before renting tells such a machine apart (the one met was verified, with a reliability
 // of 0.998), and the adapter remembers no machine's failures, so the choice is spread over a few
-// machines. A retry is then unlikely to meet the same machine again; it still can.
+// machines. A retry is then unlikely to meet the same machine again; it still can, unless the
+// caller names the machine in the spec's AvoidHosts, which the search leaves out.
 func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer, error) {
 	query, err := p.offerQuery(spec)
 	if err != nil {

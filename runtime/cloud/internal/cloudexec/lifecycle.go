@@ -70,6 +70,7 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *domain.Experiment) e
 		}
 	}
 	spec.Name = e.instanceName(exp.ID, exp.AttemptCount, shape.Name, index)
+	spec.AvoidHosts = v.unstarting
 	if err := provider.ValidateName(spec.Name); err != nil {
 		return fmt.Errorf("cloudexec: experiment %s: %w", exp.ID, err)
 	}
