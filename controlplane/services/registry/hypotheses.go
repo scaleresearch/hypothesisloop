@@ -58,6 +58,9 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 	}
 
 	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		if err := stamp.RequireOpen(platformExperimentID); err != nil {
+			return nil, err
+		}
 		var announce bool
 		h, out, alreadyExisted, announce, err = s.graph.Register(ctx, graphdb.NewHypothesis{
 			AgentID: agentID, Actor: actor,
@@ -126,8 +129,18 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 			return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
 		}
 	}
+	from, err := s.graph.GetHypothesis(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
+	}
+	if from == nil {
+		return nil, fmt.Errorf("registry.AddHypothesisLink: %w: %s", ErrHypothesisNotFound, id)
+	}
 	var result *graphdb.LinkResult
-	err := s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		if err := stamp.RequireOpen(from.PlatformExperimentID); err != nil {
+			return nil, err
+		}
 		var err error
 		result, err = s.graph.AddLink(ctx, id, agentID, actor, spec, stamp)
 		if err != nil || !result.Announce {
@@ -492,27 +505,33 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	if err != nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
+	if current == nil {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w: %s", ErrHypothesisNotFound, id)
+	}
 	// Whose verdict it is comes first and is the graph's to refuse, in the write below: the
 	// evidence is asked only of an agent that may give the verdict at all.
-	mayJudge := current != nil && (current.AgentID == "" || current.AgentID == callerAgentID)
+	mayJudge := current.AgentID == "" || current.AgentID == callerAgentID
 	// A verdict that stands with its basis noted is said again and changes nothing. One that
 	// stands without it lost the note to a failed write, and this call writes it.
 	note := mayJudge && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted)
-	if note && current.Status == status {
-		noted, err := s.basisNoted(ctx, current)
-		if err != nil {
-			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
-		}
-		note = !noted
-	}
-	if mayJudge && (current.Status != status || note) {
-		if err := s.supported(ctx, current, verdict); err != nil {
-			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
-		}
-	}
 	var h *domain.Hypothesis
 	var announced bool
 	err = s.events.Emit(ctx, func(stamp db.Stamp) ([]db.Event, error) {
+		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
+			return nil, err
+		}
+		if note && current.Status == status {
+			noted, err := s.basisNoted(ctx, current)
+			if err != nil {
+				return nil, err
+			}
+			note = !noted
+		}
+		if mayJudge && (current.Status != status || note) {
+			if err := s.supported(ctx, current, verdict); err != nil {
+				return nil, err
+			}
+		}
 		var err error
 		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, actor, status, stamp)
 		if err != nil || !announced {

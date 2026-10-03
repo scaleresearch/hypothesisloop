@@ -31,6 +31,7 @@ var (
 type registryAs struct {
 	store                  *poolStore
 	graph                  *fakeGraph
+	events                 *recordedEvents
 	router                 chi.Router
 	own, rivals, elsewhere *domain.Hypothesis
 	// unowned is a hypothesis of pe-1 no agent owns, and seeded how many hypotheses there are.
@@ -50,7 +51,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 		}
 		return hyp
 	}
-	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), router: chi.NewRouter(),
+	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), events: svc.events.(*recordedEvents), router: chi.NewRouter(),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
 	unowned, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
 	if err != nil {
@@ -197,6 +198,56 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 		// What is stored is the kind and the id. The name is looked up when the record is read.
 		if len(f.store.commentActors) != 1 || f.store.commentActors[0].Kind != tc.actor.Kind || f.store.commentActors[0].ID != tc.actor.ID {
 			t.Errorf("%s: stored comment actors = %+v, want one of kind %s and id %q", name, f.store.commentActors, tc.actor.Kind, tc.actor.ID)
+		}
+	}
+}
+
+// Once a platform experiment closed, only the coordinator token was refused hypothesis writes, by
+// the gate: a person or an agent still added ideas, links, verdicts and comments to its graph.
+// Every caller is refused each of them with the one 409, and every caller makes them while it is
+// open.
+func TestAClosedPlatformExperimentTakesNoHypothesisWriteFromAnyone(t *testing.T) {
+	closedCoordinator := coordinator
+	closedCoordinator.PlatformExperimentClosed = true
+	writes := map[string]func(f *registryAs) *httptest.ResponseRecorder{
+		"POST /hypotheses": func(f *registryAs) *httptest.ResponseRecorder {
+			return f.do(t, http.MethodPost, "/hypotheses", map[string]any{
+				"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
+		},
+		"POST /hypotheses/{id}/links": func(f *registryAs) *httptest.ResponseRecorder {
+			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/links", map[string]any{"type": "related", "to": f.rivals.ID})
+		},
+		"POST /hypotheses/{id}/status": func(f *registryAs) *httptest.ResponseRecorder {
+			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/status", map[string]any{"status": "refuted", "despite": enoughSaid})
+		},
+		"POST /hypotheses/{id}/comments": func(f *registryAs) *httptest.ResponseRecorder {
+			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/comments", map[string]any{"text": "a note"})
+		},
+	}
+	for name, callers := range map[string]struct{ open, closed auth.Principal }{
+		"a person":        {ada, ada},
+		"an agent":        {agentOne, agentOne},
+		"an api key":      {keyOne, keyOne},
+		"the coordinator": {coordinator, closedCoordinator},
+	} {
+		for route, write := range writes {
+			f := newRegistryAs(t, callers.closed)
+			f.store.closed = map[string]bool{"pe-1": true}
+			f.events.closed = f.store.closed
+			rec := write(f)
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusConflict || len(body) != 2 ||
+				body["reason"] != "experiment_closed" || body["message"] == "" {
+				t.Errorf("%s by %s on a closed platform experiment: got = %d %s, want 409 experiment_closed in {reason, message}", route, name, rec.Code, rec.Body)
+			}
+			if len(f.store.comments) != 0 || len(f.graph.rows) != f.seeded || len(f.graph.links) != 0 || f.graph.rows[f.unowned.ID].Status != domain.HypothesisOpen {
+				t.Errorf("%s by %s on a closed platform experiment left something behind", route, name)
+			}
+
+			f = newRegistryAs(t, callers.open)
+			if rec := write(f); rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+				t.Errorf("%s by %s while open: got = %d %s, want it made", route, name, rec.Code, rec.Body)
+			}
 		}
 	}
 }

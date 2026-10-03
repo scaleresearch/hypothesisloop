@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -39,6 +40,8 @@ type poolStore struct {
 	commentRows   []*domain.HypothesisComment
 	// failNextComment fails the next comment insert, once.
 	failNextComment bool
+	// closed holds the platform experiments that are closed.
+	closed map[string]bool
 }
 
 func (s *poolStore) ListExperimentsTesting(_ context.Context, ids []string) ([]*domain.Experiment, error) {
@@ -125,6 +128,9 @@ func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, pla
 	if s.failNextComment {
 		s.failNextComment = false
 		return nil, errors.New("insert failed")
+	}
+	if s.closed[platformExperimentID] {
+		return nil, fmt.Errorf("%w: %s", db.ErrPlatformExperimentClosed, platformExperimentID)
 	}
 	s.comments = append(s.comments, text)
 	s.commentActors = append(s.commentActors, actor)
@@ -280,6 +286,8 @@ type recordedEvents struct {
 	// write committed; its position is then aborted.
 	failNext bool
 	aborted  map[int64]bool
+	// closed holds the platform experiments that are closed.
+	closed map[string]bool
 }
 
 func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
@@ -289,7 +297,13 @@ func (r *recordedEvents) NotifyEvent(_ context.Context, e db.Event) error {
 
 func (r *recordedEvents) Emit(_ context.Context, write func(stamp db.Stamp) ([]db.Event, error)) error {
 	r.position++
-	events, err := write(db.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil }})
+	events, err := write(db.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil },
+		RequireOpen: func(pe string) error {
+			if r.closed[pe] {
+				return fmt.Errorf("%w: %s", db.ErrPlatformExperimentClosed, pe)
+			}
+			return nil
+		}})
 	if err != nil {
 		return err
 	}

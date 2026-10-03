@@ -425,6 +425,9 @@ type Stamp struct {
 	// finds such a position on what it would have written records its own and emits the events
 	// again.
 	Aborted func(position int64) (bool, error)
+	// RequireOpen refuses the write with ErrPlatformExperimentClosed once the platform experiment
+	// is closed, and keeps a close from committing until Emit's transaction ends.
+	RequireOpen func(platformExperimentID string) error
 }
 
 // Emit runs a write to another store inside a Postgres transaction and emits the events it
@@ -444,6 +447,8 @@ func (s *EventsStore) Emit(ctx context.Context, write func(stamp Stamp) ([]Event
 			return false, fmt.Errorf("events_store.Emit: status of %d: %w", position, err)
 		}
 		return status != nil && *status == "aborted", nil
+	}, RequireOpen: func(platformExperimentID string) error {
+		return holdOpenPlatformExperiment(ctx, tx, platformExperimentID)
 	}}
 	if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&stamp.Position); err != nil {
 		return fmt.Errorf("events_store.Emit: position: %w", err)

@@ -70,6 +70,11 @@ const similarDetail = "Nothing was registered: your hypothesis reads close to th
 	"otherwise different claim is yours to register: resubmit naming each one, as a contradicts link when yours " +
 	"cannot hold together with it, else in distinct_from (hl: --distinct-from), also when you build on it."
 
+const closedDetail = "the platform experiment is closed, and its hypothesis graph takes no more hypotheses, links, verdicts or comments from anyone"
+
+// closedRefusal is how each hypothesis write states its 409 on a closed platform experiment.
+const closedRefusal = "409 experiment_closed once the platform experiment is closed, for every caller. "
+
 // hypothesisWriteError maps the errors a hypothesis write can return to the status an agent can
 // act on, keeping the message.
 func (h *Handler) hypothesisWriteError(err error) error {
@@ -87,6 +92,8 @@ func (h *Handler) hypothesisWriteError(err error) error {
 		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return api.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
+	case errors.Is(err, db.ErrPlatformExperimentClosed):
+		return api.Refuse(http.StatusConflict, "experiment_closed", closedDetail)
 	case errors.Is(err, db.ErrNotSignedUp):
 		return api.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
@@ -346,7 +353,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	// ---- hypotheses ----
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	// The hypothesis writes are AfterClose so that a coordinator token is refused like every other
+	// caller, by the store's 409 experiment_closed, and not first by the gate's 403.
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "register-hypothesis", Method: "POST", Path: "/hypotheses",
 		Summary: "Register a hypothesis in the graph", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -365,9 +374,10 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"agent_id says whose hypothesis it is: an agent token's is its own agent's, named or not, and any other caller names an agent it " +
 			"reaches to register for it, or names none and the hypothesis has no owning agent. Both sit in the same graph under the same " +
 			"dedup, and any agent may submit a job against either. 403 not_signed_up for an agent that has no place in this platform experiment. 403 baseline_registers_no_hypothesis for an agent of role baseline: the baseline " +
-			"is the objective's own measurement and its job names no hypothesis. What one with no owning agent does not get is quota or a place in the " +
+			"is the objective's own measurement and its job names no hypothesis. " + closedRefusal +
+			"What one with no owning agent does not get is quota or a place in the " +
 			"standings — those key on agent_id.",
-	}, func(ctx context.Context, in *struct {
+	}), func(ctx context.Context, in *struct {
 		Body struct {
 			AgentID              string            `json:"agent_id,omitempty" required:"false" doc:"The agent whose hypothesis this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
 			PlatformExperimentID string            `json:"platform_experiment_id"`
@@ -415,7 +425,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: status, Body: hypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed, Links: links}}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "add-hypothesis-link", Method: "POST", Path: "/hypotheses/{id}/links",
 		Summary: "Link a hypothesis to another", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -424,8 +434,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"hypothesis it is may link from it, and one with no owning agent can be linked by anyone; others get 403. " +
 			"agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. " +
 			"400 on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
-			"are append-only and re-adding one changes nothing. Returns the hypothesis's outgoing links.",
-	}, func(ctx context.Context, in *struct {
+			"are append-only and re-adding one changes nothing. " + closedRefusal + "Returns the hypothesis's outgoing links.",
+	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string          `json:"agent_id,omitempty" required:"false" doc:"The agent whose link this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
@@ -674,7 +684,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "add-hypothesis-comment", Method: "POST", Path: "/hypotheses/{id}/comments",
 		Summary: "Add a comment to a hypothesis", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -683,8 +693,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"/hypotheses/{id}) first — don't re-record a conclusion already there. " +
 			"Who wrote it is the caller, answered as actor, and no field of the body names it: author is refused. " +
 			"agent_id says whose note it is. An agent token's note is its own agent's, named or not. " +
-			"Any other caller names an agent it reaches to write that agent's note, or names none and the note is the caller's own.",
-	}, func(ctx context.Context, in *struct {
+			"Any other caller names an agent it reaches to write that agent's note, or names none and the note is the caller's own. " +
+			closedRefusal,
+	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent whose note this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
@@ -715,7 +726,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		}{Status: http.StatusCreated, Body: c}, nil
 	})
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
 		OperationID: "set-hypothesis-status", Method: "POST", Path: "/hypotheses/{id}/status",
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
 		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +
@@ -729,8 +740,8 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"hypothesis no agent owns may be settled by anyone who reaches it — an idea " +
 			"nobody owns would otherwise sit open forever however much evidence it collected. " +
 			"agent_id says as which agent the verdict is given: an agent token's is its own, named or not, and any other caller names " +
-			"the owning agent to rule for it. Who gave it is the caller, answered as status_actor.",
-	}, func(ctx context.Context, in *struct {
+			"the owning agent to rule for it. Who gave it is the caller, answered as status_actor. " + closedRefusal,
+	}), func(ctx context.Context, in *struct {
 		ID   string `path:"id"`
 		Body struct {
 			AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns."`
