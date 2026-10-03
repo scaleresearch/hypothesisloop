@@ -32,9 +32,24 @@ type HTTPError struct {
 	Body         string
 }
 
-// Unreachable is the Body of an answer that is no JSON, which the platform never sends: a proxy
-// in front of it answered in its place, often with a whole HTML page.
-const Unreachable = "the platform could not be reached and something in front of it answered. Nothing in your request caused this: run the same command again later"
+// Unreachable says the platform gave no answer: the request did not reach it, or a proxy in front
+// of it answered 502, 503 or 504 in its place. It tells no reader what to do next, since a
+// person runs the command again and an agent's harness tells it when the platform is back.
+const Unreachable = "the platform could not be reached. Nothing in your request caused this, and the same command works once the platform answers again"
+
+// notThePlatforms is the Body of an answer that is no JSON, which the platform's API never sends,
+// said in one line in place of what may be a whole HTML page. The platform's router answers a
+// method and path it does not serve in plain text: that is an hl older or newer than the
+// platform, and no outage.
+func notThePlatforms(method, path string, status int) string {
+	switch status {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return Unreachable
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return fmt.Sprintf("the platform serves no %s %s: this hl and the platform are of different versions", method, strings.SplitN(path, "?", 2)[0])
+	}
+	return "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
+}
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s -> HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
@@ -73,7 +88,7 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+		return nil, fmt.Errorf("%s %s: %s (%w)", method, path, Unreachable, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -83,7 +98,7 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body := strings.TrimSpace(string(data))
 		if !json.Valid(data) {
-			body = Unreachable
+			body = notThePlatforms(method, path, resp.StatusCode)
 		}
 		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: body}
 	}

@@ -947,18 +947,49 @@ func TestAWakeEntryNamesAKindOrAKindWithTheValueThatWakesOrTheOneThatDoesNot(t *
 
 // A tunnel in front of the platform answered 530 with a whole HTML page, which hl printed into
 // the agent's context on every call.
+//
+// Every such answer then read as an outage, the router's own 404 for a route this hl is too old
+// or too new for among them. Only a gateway's 502, 503 and 504 and a request that got no answer
+// say the platform could not be reached.
 func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
-	for status, body := range map[int]string{530: "<!DOCTYPE html>\n<html><head><title>Cloudflare Tunnel error</title></head>\n<body>" + strings.Repeat("<p>x</p>\n", 500) + "</body></html>", 502: "error code: 502"} {
+	const unreachable = "the platform could not be reached. Nothing in your request caused this, and the same command works once the platform answers again"
+	const inFront = "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
+	const noRoute = "the platform serves no GET /experiments/job-1: this hl and the platform are of different versions"
+	for status, tc := range map[int]struct{ body, want string }{
+		530: {"<!DOCTYPE html>\n<html><head><title>Cloudflare Tunnel error</title></head>\n<body>" + strings.Repeat("<p>x</p>\n", 500) + "</body></html>", inFront},
+		500: {"Internal Server Error", inFront},
+		502: {"error code: 502", unreachable},
+		503: {"", unreachable},
+		504: {"<html>gateway timeout</html>", unreachable},
+		404: {"404 page not found\n", noRoute},
+		405: {"Method Not Allowed\n", noRoute},
+	} {
 		setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(status)
-			_, _ = w.Write([]byte(body))
+			_, _ = w.Write([]byte(tc.body))
 		}))
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"job", "status", "job-1"}, &stdout, &stderr)
-		want := fmt.Sprintf("hl: GET /experiments/job-1 -> HTTP %d: the platform could not be reached and something in front of it answered. Nothing in your request caused this: run the same command again later\n", status)
+		want := fmt.Sprintf("hl: GET /experiments/job-1 -> HTTP %d: %s\n", status, tc.want)
 		if code != 1 || stdout.Len() != 0 || stderr.String() != want {
 			t.Errorf("HTTP %d: exit %d, stdout %q, stderr %q, want %q", status, code, stdout.String(), stderr.String(), want)
 		}
+	}
+
+	// A 503 of the platform's own is JSON and is printed as it is.
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"reason":"object_store_unavailable","message":"nothing was stored"}`, http.StatusServiceUnavailable)
+	}))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), `"reason":"object_store_unavailable"`) || strings.Contains(stderr.String(), "could not be reached") {
+		t.Errorf("the platform's own 503: exit %d, stderr %q, want its reason and no word of an outage", code, stderr.String())
+	}
+
+	down := withServer(t, func(http.ResponseWriter, *http.Request) {})
+	setAPIURL(t, strings.Replace(down, "127.0.0.1", "127.0.0.1.invalid", 1))
+	stderr.Reset()
+	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "hl: GET /experiments/job-1: "+unreachable+" (") || strings.Count(stderr.String(), "\n") != 1 {
+		t.Errorf("a request that got no answer: exit %d, stderr %q, want one line saying the platform could not be reached and the cause", code, stderr.String())
 	}
 }
 
