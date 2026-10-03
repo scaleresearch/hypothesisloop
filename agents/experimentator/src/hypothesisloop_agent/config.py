@@ -60,7 +60,7 @@ class Config:
 
     # From the agent's signup, or for a coordinator from its platform experiment. flavor selects
     # the brief inlined into the prompt (prompts/flavors/<flavor>.md), model is what it runs on,
-    # and hyperparameters is a small JSON object of sweep knobs the agent reads back in its prompt.
+    # and hyperparameters is the direction the agent was given, a small JSON object its prompt shows.
     flavor: str = field(init=False, default="")
     model: str = field(init=False, default="")
     hyperparameters: dict = field(init=False, default_factory=dict)
