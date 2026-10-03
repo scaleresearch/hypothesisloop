@@ -29,13 +29,13 @@ const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('clu
 // clusterHostsJob is the placement rule (domain.Cluster.HostsJob) as a condition on a job row e
 // and a cluster named $2: the cluster is registered, is shared or belongs to the job's org, that
 // org has not turned it off, and it runs the image the job names: a cluster with one image a job
-// that names it or names none, any other cluster a job that names one.
+// that names it, any other cluster a job that names one.
 const clusterHostsJob = `EXISTS (
 	SELECT 1 FROM clusters c, platform_experiments pe JOIN projects p ON p.id = pe.project_id
 	WHERE c.name = $2 AND pe.id = e.platform_experiment_id AND (c.shared OR c.org_id = p.org_id)
 	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = p.org_id)
 	  AND CASE WHEN c.job_image = '' THEN COALESCE(e.job_spec ->> 'image', '') <> ''
-	           ELSE COALESCE(e.job_spec ->> 'image', '') IN ('', c.job_image) END)`
+	           ELSE COALESCE(e.job_spec ->> 'image', '') = c.job_image END)`
 
 // requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
 // all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure

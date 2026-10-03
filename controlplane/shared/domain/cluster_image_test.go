@@ -11,7 +11,7 @@ func TestAClusterRunsTheJobsItsImageRuleAdmits(t *testing.T) {
 		image   string
 		want    bool
 	}{
-		{"a fixed image runs a job that names none", rented, "", true},
+		{"a fixed image has nothing to run a job with none in either", rented, "", false},
 		{"a fixed image runs a job that names it", rented, fixed, true},
 		{"a fixed image does not run another", rented, "registry.test/mine:1", false},
 		{"a fixed image does not run another tag of itself", rented, "registry.test/platform-job:8", false},

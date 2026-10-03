@@ -70,8 +70,8 @@ const (
 	// of them off for its jobs. Waiting does not fix it; turning one on does.
 	NotAdmittedClustersDisabled = "clusters_disabled"
 	// NotAdmittedNoClusterForImage means the job's image choice keeps it off every cluster taking
-	// its org's jobs: none runs the image it names, or it names none and every one of them needs
-	// one named, or those that run its choice have installed less than it asks for while a cluster
+	// its org's jobs: none runs the image it names, which holds of every cluster for a job stored
+	// with none, or those that run its choice have installed less than it asks for while a cluster
 	// its choice rules out has it. Waiting does not fix it; the reason says which choice runs
 	// where. A submit is refused with it, and a job queued before the clusters changed carries it.
 	NotAdmittedNoClusterForImage = "no_cluster_for_image"

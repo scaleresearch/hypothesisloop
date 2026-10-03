@@ -432,13 +432,15 @@ func TestAClaimPlacesAJobOnlyWhereItsImageRuns(t *testing.T) {
 	if got := w.get(t, named); got.Status != domain.StatusQueued || got.ClusterName != "" {
 		t.Fatalf("after the refused claim: %s on %q, want still queued", got.Status, got.ClusterName)
 	}
-	for _, id := range []string{bare, platform} {
-		if !w.claim(t, id, w.ofA) {
-			t.Fatalf("%s was refused on the cluster whose image it runs in", id)
-		}
-		if got := w.get(t, id); got.ResolvedJob.Image != platformImage || got.Job.Image != map[string]string{bare: "", platform: platformImage}[id] {
-			t.Fatalf("%s is to run in %q and names %q, want the cluster's image written at admission and the job as submitted", id, got.ResolvedJob.Image, got.Job.Image)
-		}
+	// Submit refuses a job that names no image, so one stored without is placed nowhere.
+	if w.claim(t, bare, w.ofA) {
+		t.Fatal("a job with no image was placed on a cluster that runs one image")
+	}
+	if !w.claim(t, platform, w.ofA) {
+		t.Fatal("a job was refused on the cluster whose image it names")
+	}
+	if got := w.get(t, platform); got.ResolvedJob.Image != platformImage || got.Job.Image != platformImage {
+		t.Fatalf("it is to run in %q and names %q, want the cluster's image written at admission and the job as submitted", got.ResolvedJob.Image, got.Job.Image)
 	}
 
 	// The runtime is replaced by one that runs a job in the image it names.
