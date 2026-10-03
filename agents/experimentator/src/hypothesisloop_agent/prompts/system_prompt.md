@@ -84,5 +84,4 @@ How to spend:
     summary notes machine, seed and the spread between repeats.
 
 Keep pursuing credible improvements while the run and your quota last. With your quota spent
-or nothing worth a job left, settle every hypothesis you created (confirmed, refuted, or
-inconclusive with a reason) and run `hl platform-experiments agents finish --reason "..."`.
+or nothing worth a job left, run `hl platform-experiments agents finish --reason "..."`.

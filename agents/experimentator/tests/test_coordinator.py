@@ -84,7 +84,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 7_049)
+        self.assertLess(len(prompt.encode()), 6_909)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
     # that only its own baseline agent could bring. The accept now creates that agent, the
@@ -93,7 +93,7 @@ class BriefingTest(unittest.TestCase):
     # and its message carries the step with its command.
     def test_before_the_run_it_acts_only_where_status_reason_waits_for_it(self):
         flat = " ".join(self.render().split())
-        self.assertIn("`status_reason` (while `open`, your next step and its command)", flat)
+        self.assertIn("`status_reason` (where its `waits_for` reads `coordinator`, your next step and its command)", flat)
         self.assertIn("The platform declares the job the baseline agent finishes with and starts the run, whose duration counts from "
                       "the first researcher at work. An experiment still `open` at its `baseline_due_at` is closed", flat)
         self.assertIn("When `status_reason.waits_for` reads `coordinator`, its message is your step.", flat)

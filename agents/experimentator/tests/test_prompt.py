@@ -33,7 +33,7 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 6_912)
+            self.assertLess(len(prompt.encode()), 6_820)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))
@@ -110,8 +110,10 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("Only its own jobs confirm that child: run that configuration twice with `--hypothesis CHILD`, "
                       "or settle it `inconclusive` with the reason", prompt)
         self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
-        self.assertIn("settle every hypothesis you created (confirmed, refuted, or inconclusive with a reason) and run "
+        # The finish prints the hypotheses it leaves open, so the briefing asks for no settling.
+        self.assertIn("With your quota spent or nothing worth a job left, run "
                       "`hl platform-experiments agents finish --reason \"...\"`", prompt)
+        self.assertNotIn("settle every hypothesis", prompt)
 
     # What the platform says when it matters is said there alone: a submit names the field it
     # lacks, the image it does not know, the branch to check out, the hypotheses yours reads

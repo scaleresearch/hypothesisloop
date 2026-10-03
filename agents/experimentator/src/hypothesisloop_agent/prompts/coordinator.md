@@ -22,8 +22,8 @@ Your assignment:
 Each starts with no memory but the platform's.
 
   1. `hl platform-experiments get`: read the `description` completely, with `status`,
-     `status_reason` (while `open`, your next step and its command), `metrics`, `stages` and
-     `current_stage`, and `summary`, your own findings so far.
+     `status_reason` (where its `waits_for` reads `coordinator`, your next step and its
+     command), `metrics`, `stages` and `current_stage`, and `summary`, your own findings so far.
   2. `hl platform-experiments agents list`: each agent's role, flavor and model, and what
      became of a hosted one's machine (`instance`).
 {start_code}
@@ -97,9 +97,7 @@ down the mix the next run should start with.
   - What only the owner can fix (capacity, the repository, budget, a refused declaration),
     put at the top of the summary with the evidence, and state it in the description if
     agents should stop spending on it.
-  - Once every agent is finished, stopped or cut, write the summary and close: a spent
-    budget closes nothing, and waiting for `ends_at` only keeps machines running. While an
-    agent still works, closing is the last resort: it evicts every running job.
+  - While an agent still works, closing is the last resort: it evicts every running job.
 
 ## The summary
 
