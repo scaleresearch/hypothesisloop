@@ -63,8 +63,10 @@ silently improvise.
    placed on, so a cluster missing there is unregistered, another org's, disconnected, or turned off for the org
    (`enabled: false` in `hl cluster list`; `hl cluster enable <name>` turns it on). A job
    with nowhere to go stays QUEUED with `not_admitted_reason: no_cluster_for_org`, or `clusters_disabled` when the org turned off every cluster it could use. To add a
-   cluster, `hl cluster add <name>` registers the name and prints the `make cluster-agent-up`
-   command with the platform's addresses filled in; run it with `kubectl` pointed at the cluster (it reads the runtime token with `hl cluster token` when it runs). `hl cluster remove <name>` ends a cluster and requeues its jobs. The local stack registers its own clusters for the
+   cluster, `hl cluster add <name>` registers the name and prints a helm command with the
+   platform's addresses filled in and, below it, the cluster's runtime token. Run the command
+   where helm reaches the cluster and give it the token when it asks: the command holds none.
+   `--bare-metal` prints the command for a bare-metal node instead. `hl cluster remove <name>` ends a cluster and requeues its jobs. The local stack registers its own clusters for the
    org `default`.
    **After any host reboot, check these too — none of them auto-restart:** the Tenstorrent DRA
    driver pod (kubelet sometimes fails to re-register it; `kubectl delete pod -n
