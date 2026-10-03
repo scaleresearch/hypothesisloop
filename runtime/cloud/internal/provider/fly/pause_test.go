@@ -56,13 +56,43 @@ func TestPauseRefusedForAMachineBeingDestroyedIsNotAnErrorAndForALivingOneIs(t *
 
 func TestResumeStartsTheMachineAndSaysWhenItIsGone(t *testing.T) {
 	api := newFakeAPI(t)
-	api.on(http.MethodPost, startPath, inSequence(answer(200, `{"previous_state":"suspended"}`), answer(404, `{"error":"machine not found"}`)))
+	api.on(http.MethodGet, machinesPath+"/9001", inSequence(
+		answer(200, machineJSON("9001", "hl-a", "suspended", 0)),
+		answer(200, machineJSON("9001", "hl-a", "started", 0)),
+		answer(200, machineJSON("9001", "hl-a", "suspended", 0)),
+		answer(404, `{"error":"machine not found"}`),
+	))
+	api.on(http.MethodPost, startPath, inSequence(answer(200, `{"previous_state":"suspended"}`), answer(200, `{"previous_state":"started"}`), answer(404, `{"error":"machine not found"}`)))
 	p := newTestProvider(t, api)
 
-	if err := p.Resume(context.Background(), "9001"); err != nil {
-		t.Fatalf("Resume: %v", err)
+	for _, was := range []string{"suspended", "running"} {
+		if err := p.Resume(context.Background(), "9001"); err != nil {
+			t.Fatalf("Resume of a %s machine: %v", was, err)
+		}
 	}
-	if err := p.Resume(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "is gone") {
-		t.Fatalf("Resume of a machine that is gone: err = %v", err)
+	for _, gone := range []string{"between the read and the start", "at the read"} {
+		if err := p.Resume(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "is gone") {
+			t.Fatalf("Resume of a machine that is gone %s: err = %v", gone, err)
+		}
+	}
+	if starts := len(api.sent(http.MethodPost, startPath)); starts != 3 {
+		t.Errorf("starts = %d, want 3: a machine gone at the read is not started", starts)
+	}
+}
+
+// The vendor starts a stopped Machine like a suspended one, on the image's filesystem, and the
+// command that had ended would run a second time.
+func TestResumeNeverStartsAMachineWhoseCommandHasEnded(t *testing.T) {
+	for _, state := range []string{"stopped", "failed"} {
+		api := newFakeAPI(t)
+		api.on(http.MethodGet, machinesPath+"/9001", answer(200, machineJSON("9001", "hl-a", state, 0)))
+		p := newTestProvider(t, api)
+
+		if err := p.Resume(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "its command has ended") {
+			t.Fatalf("Resume of a %s machine: err = %v, want a refusal", state, err)
+		}
+		if api.total() != 1 {
+			t.Errorf("%s: requests = %d, want the read alone and no start", state, api.total())
+		}
 	}
 }

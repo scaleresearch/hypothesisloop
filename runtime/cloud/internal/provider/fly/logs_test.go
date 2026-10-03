@@ -55,6 +55,40 @@ func TestLogsReturnsTheLastTailLines(t *testing.T) {
 	}
 }
 
+// A Machine started a second time boots the image again and runs its command again into the log
+// of the first run. What a caller reads is the run that is the Machine's now: an exit line or a
+// progress marker of the earlier one says nothing of it.
+func TestLogsOfAMachineStartedAgainAreThoseOfItsNewestStart(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, logsPath, answer(200, logJSON(
+		"hl-started", "hl-out|first run", "hl-out|hl-exit 0", "hl-ended", shutdownLine,
+		"\x1b[32m INFO\x1b[0m Starting init (commit: 6172d83)...",
+		"hl-started", "hl-out|second run", "hl-out|hl-started",
+	)))
+	p := newTestProvider(t, api)
+
+	got, err := p.Logs(context.Background(), "9001", 100)
+	if err != nil || !reflect.DeepEqual(got, []string{"second run", "hl-started"}) {
+		t.Fatalf("Logs = %q, %v, want the lines of the second start alone, a line of the command that reads like the mark among them", got, err)
+	}
+}
+
+func TestLogsOfARunThatStartsInsideAFullReadAreTheWholeRun(t *testing.T) {
+	api := newFakeAPI(t)
+	entries := make([]string, logPage)
+	for i := range entries {
+		entries[i] = "[    6.975632] kernel: noise"
+	}
+	entries[logPage-3], entries[logPage-2], entries[logPage-1] = "hl-started", "hl-out|one", "hl-out|two"
+	api.on(http.MethodGet, logsPath, answer(200, logJSON(entries...)))
+	p := newTestProvider(t, api)
+
+	got, err := p.Logs(context.Background(), "9001", 100)
+	if err != nil || !reflect.DeepEqual(got, []string{"one", "two"}) {
+		t.Fatalf("Logs = %q, %v, want both lines and no error: nothing of this run is further back", got, err)
+	}
+}
+
 // chatty answers a log read as the vendor does, with the last entries of a log of total in which
 // every third entry is the command's, and never more than a page of them.
 func chatty(total int) http.HandlerFunc {

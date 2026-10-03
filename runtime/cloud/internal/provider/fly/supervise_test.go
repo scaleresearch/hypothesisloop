@@ -53,8 +53,10 @@ func awaitFile(t *testing.T, path string) {
 	}
 }
 
+// wantLines holds got against the start mark, which every start writes first, and then want.
 func wantLines(t *testing.T, got []string, want ...string) {
 	t.Helper()
+	want = append([]string{"hl-started"}, want...)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("output\n got %q\nwant %q", got, want)
 	}
@@ -88,8 +90,8 @@ func TestSupervisorMarksTheEndOfACommandThatCannotBeRun(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
 		lines := finish(t, startSupervised(t, shell, t.TempDir(), nil, "/no/such/program"))
 
-		if len(lines) < 2 || !strings.HasPrefix(lines[0], "hl-out|") || lines[len(lines)-1] != "hl-ended" {
-			t.Errorf("output = %q, want the shell's complaint as output and then the end mark", lines)
+		if len(lines) < 3 || lines[0] != "hl-started" || !strings.HasPrefix(lines[1], "hl-out|") || lines[len(lines)-1] != "hl-ended" {
+			t.Errorf("output = %q, want the start mark, the shell's complaint as output and then the end mark", lines)
 		}
 	})
 }
@@ -225,8 +227,8 @@ func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) 
 			if !errors.As(err, &exit) || exit.ExitCode() != 127 {
 				t.Fatalf("supervisor ended with %v, want exit code 127", err)
 			}
-			if string(output) != "hl-out|hl-supervisor: the image has no "+missing+", the command was not run\nhl-ended\n" {
-				t.Errorf("output = %q, want the reason as a line of output and the end mark", output)
+			if string(output) != "hl-started\nhl-out|hl-supervisor: the image has no "+missing+", the command was not run\nhl-ended\n" {
+				t.Errorf("output = %q, want the start mark, the reason as a line of output and the end mark", output)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
 				t.Error("the command ran with no way to read its output")
@@ -245,7 +247,7 @@ func TestSupervisorRefusesToRunTheCommandWithoutATemporaryDirectory(t *testing.T
 	if !errors.As(err, &exit) || exit.ExitCode() != 127 {
 		t.Fatalf("supervisor ended with %v, want exit code 127", err)
 	}
-	if !strings.Contains(string(output), "hl-out|hl-supervisor: no pipe could be made at ") || !strings.HasSuffix(string(output), "hl-ended\n") {
+	if !strings.HasPrefix(string(output), "hl-started\n") || !strings.Contains(string(output), "hl-out|hl-supervisor: no pipe could be made at ") || !strings.HasSuffix(string(output), "hl-ended\n") {
 		t.Errorf("output = %q, want the reason as a line of output and the end mark", output)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {

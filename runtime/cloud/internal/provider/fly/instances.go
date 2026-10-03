@@ -86,6 +86,8 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 // supervisor's end mark is there, or the Machine stopped longer ago than the log ever trails.
 // The second covers a Machine that stopped without its supervisor finishing (the host killed it,
 // it ran out of memory, the image has no shell), which writes no mark and nothing more either.
+// The end mark of an earlier start of the Machine says nothing of this one, so only what follows
+// the newest start mark is searched.
 func (p *Provider) outputComplete(ctx context.Context, found machine, now time.Time) bool {
 	if now.Sub(found.UpdatedAt) > logSettle {
 		return true
@@ -95,7 +97,8 @@ func (p *Provider) outputComplete(ctx context.Context, found machine, now time.T
 		log.Printf("fly: machine %s stopped and its log could not be read for the end mark; reporting it as running: %v", found.ID, err)
 		return false
 	}
-	for _, entry := range entries {
+	run, _ := lastRun(entries)
+	for _, entry := range run {
 		if entry == endMark {
 			return true
 		}

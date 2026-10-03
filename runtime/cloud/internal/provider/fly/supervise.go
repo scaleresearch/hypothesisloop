@@ -6,12 +6,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/internal/provider/supervise"
 )
 
-// outputPrefix starts every log line that is the command's, and endMark is the line the
-// supervisor writes after the last of them. The vendor's log holds the lines of its own init, ssh
-// server and kernel under the same source as the command's, in between them, and nothing in an
-// entry tells them apart.
+// outputPrefix starts every log line that is the command's, startMark is the line the supervisor
+// writes before the first of them and endMark the one it writes after the last. The vendor's log
+// holds the lines of its own init, ssh server and kernel under the same source as the command's,
+// in between them, and nothing in an entry tells them apart.
+//
+// A Machine that is started a second time (by the vendor, by hand, or by a Resume of one whose
+// snapshot the vendor dropped) boots the image's filesystem again, so nothing inside it can tell
+// the supervisor that it ran before, and the command runs again into the same log. startMark is
+// what keeps the two runs apart: a reader takes what follows the newest one (lastRun).
 const (
 	outputPrefix = "hl-out|"
+	startMark    = "hl-started"
 	endMark      = "hl-ended"
 
 	// drainSeconds is how long after the command ended the supervisor still passes on output
@@ -21,7 +27,7 @@ const (
 )
 
 // supervisor is what a Machine runs in place of the bare command: the shared core with this
-// vendor's ends. Before the command starts it opens a pipe and a reader that passes every line
+// vendor's ends. It writes startMark first. Before the command starts it opens a pipe and a reader that passes every line
 // the command writes to stdout or stderr on under outputPrefix, a last line with no newline
 // included. After the command has ended it waits for the reader, which ends when everything
 // holding the pipe has, for drainSeconds at most, and then writes endMark and exits, which stops
@@ -38,7 +44,8 @@ func supervisor(lifetime time.Duration) string {
 }
 
 var parts = supervise.Parts{
-	Before: `refuse() {
+	Before: `echo "` + startMark + `"
+refuse() {
   echo "` + outputPrefix + `hl-supervisor: $1, the command was not run"
   echo "` + endMark + `"
   exit 127

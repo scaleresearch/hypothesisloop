@@ -34,9 +34,10 @@ type logAnswer struct {
 	} `json:"data"`
 }
 
-// Logs reads the Machine's last log entries, as many as one read gives, and keeps the command's.
-// The vendor's own lines sit among them, so a full read that holds fewer lines of the command
-// than asked for is an error: older ones exist and cannot be reached.
+// Logs reads the Machine's last log entries, as many as one read gives, and keeps the command's
+// of the Machine's newest start. The vendor's own lines sit among them, so a full read that
+// holds fewer lines of the command than asked for, and not the start of its run, is an error:
+// older ones exist and cannot be reached.
 func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, error) {
 	if tail <= 0 {
 		return nil, fmt.Errorf("fly: logs of machine %s: tail must be positive, got %d", id, tail)
@@ -45,11 +46,12 @@ func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	lines := commandLines(entries)
+	run, whole := lastRun(entries)
+	lines := commandLines(run)
 	if len(lines) >= tail {
 		return lines[len(lines)-tail:], nil
 	}
-	if len(entries) >= logPage {
+	if len(entries) >= logPage && !whole {
 		return nil, fmt.Errorf("fly: logs of machine %s: the %d entries one read of the vendor's log gives hold %d lines of the command, and %d were asked for", id, logPage, len(lines), tail)
 	}
 	return lines, nil
@@ -68,6 +70,18 @@ func (p *Provider) logEntries(ctx context.Context, id string, limit int) ([]stri
 		entries[i] = entry.Attributes.Message
 	}
 	return entries, nil
+}
+
+// lastRun is what the Machine's newest start wrote: the entries after the supervisor's newest
+// start mark. whole is false when entries hold no start mark, and they are then all returned:
+// the run began before the first of them.
+func lastRun(entries []string) (run []string, whole bool) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i] == startMark {
+			return entries[i+1:], true
+		}
+	}
+	return entries, false
 }
 
 // commandLines keeps the lines the supervisor passed on from the command.

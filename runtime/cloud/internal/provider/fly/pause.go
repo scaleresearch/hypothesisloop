@@ -46,8 +46,24 @@ func (p *Provider) Pause(ctx context.Context, id string) error {
 
 // Resume starts the Machine, which the vendor does from the snapshot when it has one. Starting
 // a Machine that runs is answered 200.
+//
+// The vendor starts a stopped Machine as readily as a suspended one, and that runs a command
+// that has ended a second time. So the Machine is read first, and one whose command ended is
+// refused: it is exited, and a caller that wants its command again rents another.
 func (p *Provider) Resume(ctx context.Context, id string) error {
-	_, err := p.call(ctx, http.MethodPost, p.machinesPath("/"+url.PathEscape(id)+"/start"), nil, nil)
+	path := p.machinesPath("/" + url.PathEscape(id))
+	var found machine
+	_, err := p.call(ctx, http.MethodGet, path, nil, &found)
+	if hasStatus(err, http.StatusNotFound) {
+		return fmt.Errorf("fly: machine %s is gone and cannot be resumed: %w", id, err)
+	}
+	if err != nil {
+		return err
+	}
+	if found.State == "stopped" || found.State == "failed" {
+		return fmt.Errorf("fly: machine %s is %s and cannot be resumed: its command has ended, and a start would run it again", id, found.State)
+	}
+	_, err = p.call(ctx, http.MethodPost, path+"/start", nil, nil)
 	if hasStatus(err, http.StatusNotFound) {
 		return fmt.Errorf("fly: machine %s is gone and cannot be resumed: %w", id, err)
 	}
