@@ -31,6 +31,12 @@ type rosterStore struct {
 	signups []domain.AgentSignup
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
+	// left is the COMPLETED jobs on the objective its baseline agents that finished left.
+	left []*domain.Experiment
+}
+
+func (f *rosterStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
+	return f.left, nil
 }
 
 func (f *rosterStore) Reachable(_ context.Context, _, repository string) (string, error) {
@@ -81,7 +87,7 @@ func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int)
 	}
 	for _, s := range append(append([]domain.AgentSignup{}, f.signups...), more...) {
 		switch {
-		case !s.Hosted || s.FinishedAt != nil:
+		case !s.Hosted || s.FinishedAt != nil || s.Instance != nil && s.Instance.Stopped:
 		case s.Role == domain.SignupRoleBaseline:
 			measuring++
 		default:
@@ -820,8 +826,8 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 		message, _ := why["message"].(string)
 		return reason, message
 	}
-	if reason, message := reasonOf(added[0]); reason != "baseline_required" || !strings.HasPrefix(message, "its machine is asked for when the platform starts the run, and none is before: ") {
-		t.Errorf("the researcher as it was added: status_reason %q %q, want baseline_required and that no machine is asked for yet", reason, message)
+	if reason, message := reasonOf(added[0]); reason != "baseline_measuring" || !strings.HasPrefix(message, "its machine is asked for when the platform starts the run, and none is before: ") {
+		t.Errorf("the researcher as it was added: status_reason %q %q, want baseline_measuring and that no machine is asked for yet", reason, message)
 	}
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/agents", "")
 	if code != http.StatusOK {
@@ -833,8 +839,8 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 	}
 	for i, begins := range map[int]string{1: "its machine is asked for when the platform starts the run", 2: "it takes its first turn when the platform starts the run"} {
 		reason, message := reasonOf(roster[i])
-		if reason != "baseline_required" || !strings.HasPrefix(message, begins) || !strings.HasSuffix(message, "the platform starts the run only once it has") {
-			t.Errorf("agent %d: status_reason %q %q, want baseline_required beginning %q", i, reason, message, begins)
+		if reason != "baseline_measuring" || !strings.HasPrefix(message, begins) || !strings.Contains(message, "the platform declares its COMPLETED job and starts the run") {
+			t.Errorf("agent %d: status_reason %q %q, want baseline_measuring beginning %q", i, reason, message, begins)
 		}
 	}
 

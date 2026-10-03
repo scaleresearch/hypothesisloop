@@ -106,6 +106,24 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 	return completed, nil
 }
 
+// FinishedBaselineJobs returns the COMPLETED jobs on the objective of a platform experiment whose
+// agent is one of role baseline that finished, oldest first: what its baseline can be declared
+// from once nobody is measuring any more.
+func (s *ExperimentsStore) FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+	q := `SELECT` + experimentColumns + `FROM experiments
+WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND hypothesis_id = platform_experiment_id
+  AND EXISTS (SELECT 1 FROM experiment_signups s
+              WHERE s.platform_experiment_id = experiments.platform_experiment_id AND s.agent_id = experiments.agent_id
+                AND s.role = '` + string(domain.SignupRoleBaseline) + `' AND s.finished_at IS NOT NULL)
+ORDER BY created_at, id`
+	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.FinishedBaselineJobs: %w", err)
+	}
+	defer rows.Close()
+	return collectExperiments(rows)
+}
+
 // AgentJobs is what one agent's jobs in a platform experiment can still give a stage boundary to
 // rank on.
 type AgentJobs struct {

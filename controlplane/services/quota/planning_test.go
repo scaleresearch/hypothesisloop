@@ -314,6 +314,11 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	if signup, ok := s.signups[platformExperimentID]; ok && signup.AgentID == agentID {
 		return &signup, nil
 	}
+	for _, signup := range s.baselines {
+		if signup.AgentID == agentID {
+			return &signup, nil
+		}
+	}
 	if agentID == "ag-researcher" {
 		return &domain.AgentSignup{AgentID: agentID, Flavor: domain.DefaultAgentFlavor}, nil
 	}
@@ -532,9 +537,29 @@ func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperimen
 		accepted.Status, accepted.StartsAt = domain.PlatformExpOpen, time.Now().UTC()
 		s.created[i] = &accepted
 		s.acceptedAgents, s.acceptedSignups = create, signups
+		for _, signup := range signups {
+			if signup.Role == domain.SignupRoleBaseline {
+				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				s.baselines = append(s.baselines, signup)
+				continue
+			}
+			s.researchers = append(s.researchers, signup.AgentID)
+		}
 		return nil
 	}
 	return db.ErrNotDraft
+}
+
+// FinishAgent finishes a baseline agent of an open experiment, as the store does.
+func (s *draftStore) FinishAgent(_ context.Context, _, agentID, reason string) error {
+	for i, signup := range s.baselines {
+		if signup.AgentID == agentID {
+			now := time.Now().UTC()
+			s.baselines[i].FinishedAt, s.baselines[i].FinishedReason = &now, reason
+			return nil
+		}
+	}
+	return db.ErrNotSignedUp
 }
 
 // A person accepts in one call, and what the run costs is what they state: the proposal's own
@@ -554,8 +579,8 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		t.Fatalf("accept: got = %d %v, want 200", code, out)
 	}
 	// The answer says what the open experiment waits for, as every later read of it does.
-	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_required" {
-		t.Errorf("accept: status_reason = %v, want baseline_required", out["status_reason"])
+	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_measuring" {
+		t.Errorf("accept: status_reason = %v, want baseline_measuring", out["status_reason"])
 	}
 	pe := store.created[0]
 	if pe.Status != domain.PlatformExpOpen || out["status"] != "open" || pe.Name != "Cosine or constant" || !strings.HasPrefix(pe.Description, "Train the small transformer") ||
@@ -798,5 +823,91 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	store.created[0].Status = domain.PlatformExpOpen
 	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r"}); code != http.StatusConflict || out["reason"] != "not_a_draft" {
 		t.Errorf("declining what is no draft: got = %d %v, want 409 not_a_draft", code, out)
+	}
+}
+
+// An accepted draft waited for its coordinator three times before anything ran: to add the agent
+// that measures the baseline, to notice it had finished, and to declare its job. One coordinator
+// that ended its turn early left a paid experiment open until its baseline limit. From the accept
+// to the running experiment nobody but the baseline agent acts.
+func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningAPI(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	svc, call := planningAPI(t, store, planner)
+	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "agents": []map[string]any{{}, {}}}
+	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK || out["status"] != "open" || out["status_reason"].(map[string]any)["reason"] != "baseline_measuring" {
+		t.Fatalf("accept: got = %d %v, want it open with its baseline agent measuring", code, out)
+	}
+	if len(store.baselines) != 1 || len(store.researchers) != 2 {
+		t.Fatalf("accepted with %d baseline agents and %d researchers, want 1 and 2", len(store.baselines), len(store.researchers))
+	}
+	measures := store.baselines[0].AgentID
+	measured := measuredBaseline()
+	measured.Job.AgentID, measured.Job.PlatformExperimentID, measured.Reported = measures, "pe-draft", map[string]float64{"val_loss": 1.8}
+	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+		if jobID != measured.Job.ID {
+			return nil, nil
+		}
+		return measured, nil
+	}
+	ctx := context.Background()
+
+	// A baseline agent that gives up leaves nothing to declare, and the experiment says whose move it is.
+	gaveUp := *store
+	gaveUp.baselines = append([]domain.AgentSignup{}, store.baselines...)
+	gaveUp.created = []*domain.PlatformExperiment{store.created[0]}
+	gaveUpSvc, _ := planningAPI(t, &gaveUp, planner)
+	if _, err := gaveUpSvc.FinishAgent(ctx, "pe-draft", measures, "train.py does not run"); err != nil {
+		t.Fatalf("a baseline agent finishing with no job: %v", err)
+	}
+	left := gaveUp.created[0]
+	if err := gaveUpSvc.Describe(ctx, left, planner); err != nil || left.Status != domain.PlatformExpOpen || left.StatusReason.Reason != "baseline_required" ||
+		!strings.Contains(left.StatusReason.Message, "train.py does not run") {
+		t.Fatalf("after a finish that left no job: %s %+v, %v, want it open, baseline_required, with the reason the agent gave", left.Status, left.StatusReason, err)
+	}
+
+	// The one that measured: its finish declares its job and starts the run.
+	store.left = []*domain.Experiment{measured.Job}
+	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured")
+	if err != nil || finished.FinishedAt == nil {
+		t.Fatalf("the baseline agent finishing: %+v, %v", finished, err)
+	}
+	pe := store.created[0]
+	if pe.BaselineJobID != "job-1" || pe.Status != domain.PlatformExpRunning || store.started != 1 || pe.JobEstimatedDurationHours != baselineHeadroom*measured.ObservedHours ||
+		!strings.Contains(pe.Description, measuredBaselineHeader+"\njob: job-1") {
+		t.Fatalf("after the finish: baseline %q, status %s, %d starts, estimate %v, brief %q: want job-1 declared as a coordinator's PATCH declares it and the run started",
+			pe.BaselineJobID, pe.Status, store.started, pe.JobEstimatedDurationHours, pe.Description)
+	}
+	// Finishing again changes nothing.
+	if _, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured"); err != nil || store.started != 1 {
+		t.Fatalf("a second finish: %v with %d starts, want nothing changed", err, store.started)
+	}
+}
+
+// A declaration the platform makes is refused as a coordinator's is. The finish still stands, the
+// experiment says what the declaration was refused for, and the owner's change that clears it is
+// the request that declares the job and starts the run.
+func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(t *testing.T) {
+	finished := time.Now().UTC()
+	pe := openExperiment()
+	pe.BudgetAcceleratorHours, pe.BaselineDueAt = 1, time.Now().UTC().Add(time.Hour)
+	measured := measuredBaseline()
+	store, patch := declareAPI(t, pe, measured, auth.Principal(ownerOfA))
+	store.researchers = []string{"ag-1", "ag-2"}
+	store.baselines = []domain.AgentSignup{{AgentID: "ag-baseline", Name: "Baseline 1", Role: domain.SignupRoleBaseline, FinishedAt: &finished}}
+	store.left = []*domain.Experiment{measured.Job}
+
+	code, out := patch(map[string]any{"description": "Train train.py and report val_loss, on the small split."})
+	why, _ := out["status_reason"].(map[string]any)
+	if code != http.StatusOK || out["status"] != "open" || store.created[0].BaselineJobID != "" || why["reason"] != "budget_below_baseline" ||
+		!strings.Contains(why["message"].(string), "the platform did not declare job job-1") {
+		t.Fatalf("a change that clears nothing: got = %d %v, want it open, nothing declared and budget_below_baseline", code, out["status_reason"])
+	}
+	code, out = patch(map[string]any{"budget_accelerator_hours": 8})
+	if code != http.StatusOK || out["status"] != "running" || store.created[0].BaselineJobID != "job-1" || store.started != 1 {
+		t.Fatalf("the owner raising the budget: got = %d %v with baseline %q and %d starts, want job-1 declared and the run started", code, out, store.created[0].BaselineJobID, store.started)
 	}
 }

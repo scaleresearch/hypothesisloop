@@ -72,6 +72,9 @@ type PlatformExperimentsStore interface {
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
 	ListParticipants(ctx context.Context, platformExpID string) ([]string, error)
+	// FinishedBaselineJobs is the COMPLETED jobs on the objective that the baseline agents of a
+	// platform experiment that finished left, oldest first.
+	FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
 	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)

@@ -135,8 +135,16 @@ type createdStore struct {
 	created []*domain.PlatformExperiment
 	// researchers are the agents of role competitor that joined.
 	researchers []string
+	// baselines are the agents of role baseline that joined, and left the COMPLETED jobs on the
+	// objective of those of them that finished.
+	baselines []domain.AgentSignup
+	left      []*domain.Experiment
 	// started counts the starts that reached the store.
 	started int
+}
+
+func (s *createdStore) FinishedBaselineJobs(context.Context, string) ([]*domain.Experiment, error) {
+	return s.left, nil
 }
 
 // StartPlatformExperimentTx starts the open platform experiment id with a researcher at work.
@@ -188,7 +196,7 @@ func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.Agent
 	for i, agentID := range s.researchers {
 		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
 	}
-	return signups, nil
+	return append(signups, s.baselines...), nil
 }
 
 func (s *createdStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ domain.PlatformExperimentStatus) error {

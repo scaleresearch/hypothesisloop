@@ -299,26 +299,25 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 	}
 	patched.Name, patched.Description, patched.Metrics = checked.Name, checked.Description, checked.Metrics
 	if pe.Status == domain.PlatformExpOpen && (patch.BaselineJobID != nil || pe.BaselineJobID != "") {
-		baseline, err := s.baseline(ctx, &patched, patched.BaselineJobID)
-		if err != nil {
-			return nil, fmt.Errorf("platform_experiments.Update: read baseline: %w", err)
-		}
-		if err := checkBaseline(&patched, baseline); err != nil {
+		if measured, err = s.heldToBaseline(ctx, &patched); err != nil {
 			return nil, err
 		}
-		patched.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
-		if err := budgetCoversTrials(&patched, baseline.Job); err != nil {
-			return nil, err
-		}
-		measured = baselineBlock(baseline, patched.Metrics)
 	}
 	patched.Description = withMeasuredBaseline(patched.Description, measured)
 	pe = &patched
 	if err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus); err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
-	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID == "" {
+	if pe.Status != domain.PlatformExpOpen {
 		return pe, nil
+	}
+	if pe.BaselineJobID == "" {
+		// The change may be what a job its baseline agent left was refused for: a budget raised
+		// to hold a trial apiece, a metric taken out.
+		if err := s.DeclareMeasured(ctx, pe.ID); err != nil {
+			return nil, err
+		}
+		return s.stored(ctx, pe.ID)
 	}
 	// Nothing but the baseline may have been missing: the run starts in the request that
 	// declared it, and one that still waits says for what in its status_reason.
@@ -326,6 +325,142 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 		return nil, err
 	}
 	return s.stored(ctx, pe.ID)
+}
+
+// heldToBaseline holds pe, as it would be stored, to the job it names as its baseline: the job
+// must have done what a baseline does (checkBaseline) and the budget must hold a trial of it for
+// each researcher (budgetCoversTrials). It sets on pe the estimate of a job that states none and
+// answers the block the brief is given. It is the one check of a declaration, whoever declares.
+func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment) (string, error) {
+	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
+	if err != nil {
+		return "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
+	}
+	if err := checkBaseline(pe, baseline); err != nil {
+		return "", err
+	}
+	pe.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
+	if err := budgetCoversTrials(pe, baseline.Job); err != nil {
+		return "", err
+	}
+	return baselineBlock(baseline, pe.Metrics), nil
+}
+
+// measuredJob is the job the platform declares as the baseline of the open pe by itself: the one
+// COMPLETED job on the objective that reports the ranking metric, among those its baseline agents
+// that finished left. With none, or several, it answers the refusal that is the experiment's
+// status_reason until someone declares one or another baseline agent finishes: a choice between
+// jobs, and what to do about none, need judgement.
+func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (string, error) {
+	var joined, measuring, finished, gaveUp []string
+	for _, signup := range signups {
+		if signup.Role != domain.SignupRoleBaseline {
+			continue
+		}
+		joined = append(joined, signup.Name)
+		switch {
+		case signup.FinishedAt != nil:
+			finished = append(finished, signup.Name)
+			gaveUp = append(gaveUp, signup.Name+" finished with the reason \""+signup.FinishedReason+"\"")
+		case signup.Instance != nil && signup.Instance.Stopped:
+			gaveUp = append(gaveUp, signup.Name+"'s machine stopped with no restart left (its instance says why)")
+		default:
+			measuring = append(measuring, signup.Name)
+		}
+	}
+	ranked, _ := domain.PrimaryRankingMetric(pe.Metrics)
+	var measured []string
+	if len(finished) > 0 {
+		jobs, err := s.store.FinishedBaselineJobs(ctx, pe.ID)
+		if err != nil {
+			return "", fmt.Errorf("platform_experiments.measuredJob: %w", err)
+		}
+		for _, job := range jobs {
+			baseline, err := s.baseline(ctx, pe, job.ID)
+			if err != nil {
+				return "", fmt.Errorf("platform_experiments.measuredJob: read %s: %w", job.ID, err)
+			}
+			if baseline == nil {
+				continue
+			}
+			if _, reported := baseline.Reported[ranked.Key]; reported {
+				measured = append(measured, job.ID)
+			}
+		}
+	}
+	switch {
+	case len(measured) == 1:
+		return measured[0], nil
+	case len(measured) > 1:
+		return "", api.Refuse(http.StatusConflict, "baseline_undeclared", fmt.Sprintf("the baseline agents of platform experiment %s left %d COMPLETED jobs that report %s (%s), and the platform declares a job by itself only where there is one to declare: its coordinator declares the one the run is ranked against with %s",
+			pe.ID, len(measured), ranked.Key, strings.Join(measured, ", "), declareBaseline))
+	case len(measuring) > 0:
+		return "", api.Refuse(http.StatusConflict, "baseline_measuring", fmt.Sprintf("baseline agent %s is measuring the baseline of platform experiment %s: when it finishes the platform declares its COMPLETED job and starts the run, and nobody else has anything to do until then",
+			strings.Join(measuring, ", "), pe.ID))
+	case len(joined) == 0:
+		return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared and no agent of role baseline to measure one: its coordinator adds one with %s, and the platform declares the job it leaves and starts the run",
+			pe.ID, addBaselineAgent))
+	}
+	return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the brief can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
+		pe.ID, ranked.Key, strings.Join(gaveUp, "; "), addBaselineAgent))
+}
+
+// DeclareMeasured declares the baseline of the open platform experiment id when its baseline
+// agents left exactly one job to declare (measuredJob), by the declaration a coordinator makes
+// (Update), which starts the run when nothing else is missing. The request in which a baseline
+// agent finishes calls it, the one that changes what a declaration was refused for, and the
+// sweep for what neither could do. A declaration that is refused stores nothing, and the
+// experiment's status_reason says the refusal (undeclared) until it is cleared.
+func (s *PlatformExperimentsService) DeclareMeasured(ctx context.Context, id string) error {
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return err
+	}
+	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID != "" {
+		return nil
+	}
+	signups, err := s.store.ListAgentSignups(ctx, id)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.DeclareMeasured: %w", err)
+	}
+	jobID, err := s.measuredJob(ctx, pe, signups)
+	var refused *api.Refusal
+	if errors.As(err, &refused) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.Update(ctx, id, PlatformExperimentPatch{BaselineJobID: &jobID}); errors.As(err, &refused) {
+		s.logger.Info("the platform did not declare the measured baseline", zap.String("platform_experiment_id", id), zap.String("job_id", jobID), zap.String("reason", refused.Reason))
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("platform_experiments.DeclareMeasured: %w", err)
+	}
+	s.logger.Info("the platform declared the measured baseline", zap.String("platform_experiment_id", id), zap.String("job_id", jobID))
+	return nil
+}
+
+// undeclared is why the open pe, which has no baseline, has none: what measuredJob refuses with,
+// or for the one job the platform would declare, what the declaration is refused for.
+func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*api.Refusal, error) {
+	jobID, err := s.measuredJob(ctx, pe, signups)
+	var refused *api.Refusal
+	if errors.As(err, &refused) {
+		return refused, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	declared := *pe
+	declared.BaselineJobID = jobID
+	if _, err := s.heldToBaseline(ctx, &declared); errors.As(err, &refused) {
+		return api.Refuse(http.StatusConflict, refused.Reason, fmt.Sprintf("the platform did not declare job %s, the one job its baseline agents left, as the baseline of platform experiment %s: %s. The platform declares it in the request that clears this",
+			jobID, pe.ID, refused.Message)), nil
+	} else if err != nil {
+		return nil, err
+	}
+	return api.Refuse(http.StatusConflict, "baseline_declaring", fmt.Sprintf("job %s is the baseline of platform experiment %s and the platform declares it within a minute", jobID, pe.ID)), nil
 }
 
 // StartIfReady starts the open platform experiment id when nothing is missing, in the request
@@ -509,6 +644,12 @@ func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.Pla
 	_, err := s.notStartable(ctx, pe, signups, time.Now().UTC())
 	var refused *api.Refusal
 	switch {
+	case errors.As(err, &refused) && pe.BaselineJobID == "":
+		// Without a baseline the reason is where the measuring stands and whose move it is.
+		if refused, err = s.undeclared(ctx, pe, signups); err != nil {
+			return nil, err
+		}
+		return &domain.StatusReason{Reason: refused.Reason, Message: refused.Message}, nil
 	case errors.As(err, &refused):
 		return &domain.StatusReason{Reason: refused.Reason, Message: refused.Message}, nil
 	case err != nil:
@@ -517,45 +658,21 @@ func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.Pla
 	return &domain.StatusReason{Reason: "starting", Message: "nothing is missing and the platform starts the run within a minute"}, nil
 }
 
-// nextStep is what reader does about an open pe that waits for reason, a sentence that ends in
-// a space, or nothing when all it can do is wait. A coordinator told only that a baseline was
-// required waited for one and added no agent to measure it, so the step names its command.
-func nextStep(pe *domain.PlatformExperiment, reason string, signups []domain.AgentSignup, reader auth.Principal) string {
-	if reader.Kind == auth.KindAgent {
-		measures := slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
-			return signup.AgentID == reader.AgentID && signup.Role == domain.SignupRoleBaseline
-		})
-		switch {
-		case !measures:
-			return "Every job you submit is refused until the platform starts the run: prepare, then end your turn, and the start arrives as an update. "
-		case reason == "baseline_required":
-			return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish. "
-		}
+// nextStep is what an agent that reads an open pe does while it waits for reason, a sentence that
+// ends in a space, or nothing when all it can do is wait. The reason's own sentence says what
+// everyone else does.
+func nextStep(reason string, signups []domain.AgentSignup, reader auth.Principal) string {
+	if reader.Kind != auth.KindAgent {
 		return ""
 	}
-	if reason != "baseline_required" {
-		return ""
-	}
-	if reader.Kind != auth.KindCoordinator && pe.CoordinatorHosted {
-		return "Its coordinator adds the agent of role baseline that measures it and declares the job: nothing is yours to do. "
-	}
-	var baselines, measuring []string
-	for _, signup := range signups {
-		if signup.Role != domain.SignupRoleBaseline {
-			continue
-		}
-		baselines = append(baselines, signup.Name)
-		if signup.FinishedAt == nil && (signup.Instance == nil || !signup.Instance.Stopped) {
-			measuring = append(measuring, signup.Name)
-		}
-	}
+	own := slices.IndexFunc(signups, func(signup domain.AgentSignup) bool { return signup.AgentID == reader.AgentID })
 	switch {
-	case len(baselines) == 0:
-		return "Add a baseline agent with " + addBaselineAgent + ": none has joined. Once its job is COMPLETED with a summary, declare it with " + declareBaseline + ". "
-	case len(measuring) == 0:
-		return "Every baseline agent (" + strings.Join(baselines, ", ") + ") finished or stopped: declare the COMPLETED job one of them left (hl job list) with " + declareBaseline + ". When none left a job that can be declared, add another baseline agent with " + addBaselineAgent + ". "
+	case own < 0 || signups[own].Role != domain.SignupRoleBaseline:
+		return "Every job you submit is refused until the platform starts the run: prepare, then end your turn, and the start arrives as an update. "
+	case signups[own].FinishedAt == nil && reason == "baseline_measuring":
+		return "Your job is admitted now: measure the baseline with one job (hl job submit), file its summary (hl job summary), then hl platform-experiments agents finish, and the platform declares that job. "
 	}
-	return "Baseline agent " + strings.Join(measuring, ", ") + " is measuring: once its job is COMPLETED with a summary, declare it with " + declareBaseline + ". "
+	return ""
 }
 
 // runningReason is where a running pe stands with its clock.
@@ -605,7 +722,7 @@ func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.Pl
 	if err != nil {
 		return err
 	}
-	why.Message = nextStep(pe, why.Reason, signups, reader) + why.Message
+	why.Message = nextStep(why.Reason, signups, reader) + why.Message
 	pe.StatusReason = why
 	return nil
 }
@@ -806,8 +923,10 @@ func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
 // SweepAutoStart starts every open platform experiment that is to be started: its baseline is
 // declared, its starts_at is absent or past, and it has a researcher and budget left for one.
 // The request that declares the baseline or adds the researcher starts it itself (StartIfReady),
-// so what the sweep brings is time: a starts_at that arrives. One that is not startable waits,
-// saying why in its status_reason (Describe), until SweepExpired closes it.
+// so what the sweep brings is time: a starts_at that arrives. One with no baseline is given the
+// job its baseline agents left, where the request they finished in could not declare it
+// (DeclareMeasured). One that is not startable waits, saying why in its status_reason (Describe),
+// until SweepExpired closes it.
 func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 	now := time.Now().UTC()
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
@@ -815,6 +934,13 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 		return fmt.Errorf("list open platform experiments: %w", err)
 	}
 	for _, pe := range pes {
+		if pe.BaselineJobID == "" {
+			if err := s.DeclareMeasured(ctx, pe.ID); err != nil {
+				s.logger.Error("sweep_auto_start: declare the measured baseline failed",
+					zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			}
+			continue
+		}
 		_, err := s.start(ctx, pe, now)
 		var waiting *api.Refusal
 		if errors.As(err, &waiting) {

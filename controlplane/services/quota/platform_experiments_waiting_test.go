@@ -30,44 +30,62 @@ func waitingAgent(id string) auth.Principal {
 	return auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: id, OrgIDs: []string{"org-a"}}
 }
 
-// hl printed each caller's next step on stderr beside the record, which broke every reader that
-// parsed both streams as JSON, and a coordinator told only that a baseline was required waited
-// for one. status_reason is the one place that says what an open platform experiment waits for,
-// and its message begins with what its reader does, the command included.
-func TestStatusReasonOfAnOpenPlatformExperimentNamesItsReadersNextStep(t *testing.T) {
+// A coordinator told only that a baseline was required waited for one, and a person read the same
+// words whether an agent was measuring, had left nothing, or had left a job the budget could not
+// hold. Without a baseline status_reason says where the measuring stands, by a reason of its own
+// for each state, and names the command of whoever acts.
+func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *testing.T) {
 	finished := time.Now()
 	measuring := domain.AgentSignup{AgentID: "ag-b", Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true}
 	done := measuring
-	done.FinishedAt = &finished
+	done.FinishedAt, done.FinishedReason = &finished, "train.py does not run"
 	stopped := measuring
 	stopped.Instance = &domain.AgentInstance{Stopped: true}
+	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, Hosted: true}
 	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, Hosted: true}
 	const add, declare = "`hl platform-experiments agents add --hosted --role baseline`", "`hl platform-experiments update --baseline-job JOB"
+	job := func(id string) *domain.Experiment {
+		measured := *measuredBaseline().Job
+		measured.ID = id
+		return &measured
+	}
 
 	for name, c := range map[string]struct {
-		reader            auth.Principal
-		signups           []domain.AgentSignup
-		coordinatorHosted bool
-		begins            string
-		names, omits      []string
+		reader       auth.Principal
+		signups      []domain.AgentSignup
+		left         []*domain.Experiment
+		budget       float64
+		reason       string
+		names, omits []string
 	}{
-		"a coordinator with no baseline agent":      {waitingCoordinator, []domain.AgentSignup{researcher}, true, "Add a baseline agent with " + add, []string{declare}, nil},
-		"a coordinator whose baseline agent works":  {waitingCoordinator, []domain.AgentSignup{measuring, researcher}, true, "Baseline agent Baseline 1 is measuring", []string{declare}, []string{add}},
-		"a coordinator whose baseline agent ended":  {waitingCoordinator, []domain.AgentSignup{done, researcher}, true, "Every baseline agent (Baseline 1) finished or stopped", []string{declare, add}, nil},
-		"a coordinator whose baseline machine died": {waitingCoordinator, []domain.AgentSignup{stopped}, true, "Every baseline agent (Baseline 1) finished or stopped", []string{declare, add}, nil},
-		"the baseline agent":                        {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, true, "Your job is admitted now", []string{"hl job summary", "agents finish"}, []string{add}},
-		"a researcher":                              {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, true, "Every job you submit is refused until the platform starts the run", []string{"end your turn"}, []string{add}},
-		"a person who coordinates":                  {waitingPerson, nil, false, "Add a baseline agent with " + add, []string{declare}, nil},
-		"a person whose coordinator is hosted":      {waitingPerson, nil, true, "Its coordinator adds the agent of role baseline", nil, []string{add}},
+		"no baseline agent":                      {waitingCoordinator, []domain.AgentSignup{researcher}, nil, 6, "baseline_required", []string{add}, []string{declare}},
+		"a baseline agent at work":               {waitingCoordinator, []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Baseline 1", "the platform declares"}, []string{add, declare}},
+		"one that finished with no job":          {waitingPerson, []domain.AgentSignup{done, researcher}, nil, 6, "baseline_required", []string{add, `Baseline 1 finished with the reason "train.py does not run"`}, []string{declare}},
+		"one whose machine stopped for good":     {waitingCoordinator, []domain.AgentSignup{stopped}, nil, 6, "baseline_required", []string{add, "Baseline 1's machine stopped with no restart left"}, nil},
+		"a second at work after the first ended": {waitingCoordinator, []domain.AgentSignup{done, second}, nil, 6, "baseline_measuring", []string{"Baseline 2"}, []string{add}},
+		"one that left two jobs":                 {waitingCoordinator, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1"), job("job-2")}, 6, "baseline_undeclared", []string{"job-1, job-2", declare}, []string{add}},
+		"one that left a job the budget is under": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, 1, "budget_below_baseline",
+			[]string{"the platform did not declare job job-1", "its owner raises budget_accelerator_hours", "declares it in the request that clears this"}, []string{add, declare}},
+		"one that left a job the sweep has yet to declare": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, 6, "baseline_declaring", []string{"job-1"}, []string{add, declare}},
+		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish"}, []string{add}},
+		"a baseline agent that finished":                   {waitingAgent("ag-b"), []domain.AgentSignup{done, second}, nil, 6, "baseline_measuring", nil, []string{"Your job is admitted now", "Every job you submit"}},
+		"a researcher":                                     {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn"}, []string{add}},
 	} {
-		store := newRosterStore(domain.PlatformExpOpen, 5)
-		store.pe.CoordinatorHosted, store.signups = c.coordinatorHosted, c.signups
-		if err := newSignupTestService(t, store).Describe(context.Background(), store.pe, c.reader); err != nil {
+		store := newRosterStore(domain.PlatformExpOpen, 2)
+		store.pe.CoordinatorHosted, store.signups, store.left = true, c.signups, c.left
+		store.pe.Metrics, store.pe.BudgetAcceleratorHours = openExperiment().Metrics, c.budget
+		svc := newSignupTestService(t, store)
+		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+			baseline := measuredBaseline()
+			baseline.Job = job(jobID)
+			return baseline, nil
+		}
+		if err := svc.Describe(context.Background(), store.pe, c.reader); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		why := store.pe.StatusReason
-		if why == nil || why.Reason != "baseline_required" || !strings.HasPrefix(why.Message, c.begins) || !strings.HasSuffix(why.Message, "pe-1 has no baseline declared, and the platform starts the run only once it has") {
-			t.Errorf("%s: status_reason = %+v, want baseline_required, beginning %q and ending in what the start waits for", name, why, c.begins)
+		if why == nil || why.Reason != c.reason {
+			t.Errorf("%s: status_reason = %+v, want %s", name, why, c.reason)
 			continue
 		}
 		for _, want := range c.names {
@@ -77,7 +95,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentNamesItsReadersNextStep(t *testin
 		}
 		for _, not := range c.omits {
 			if strings.Contains(why.Message, not) {
-				t.Errorf("%s: message %q names %q, which is not this reader's step", name, why.Message, not)
+				t.Errorf("%s: message %q names %q, which is nobody's step in this state", name, why.Message, not)
 			}
 		}
 	}
@@ -90,13 +108,12 @@ func TestStatusReasonNamesNoStepWhereTheReaderOnlyWaits(t *testing.T) {
 		{AgentID: "ag-b", Name: "Baseline 1", Role: domain.SignupRoleBaseline},
 		{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor},
 	}
-	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen}
 	for _, reader := range []auth.Principal{waitingCoordinator, waitingPerson, waitingAgent("ag-b")} {
-		if step := nextStep(pe, "starts_at_ahead", signups, reader); step != "" {
+		if step := nextStep("starts_at_ahead", signups, reader); step != "" {
 			t.Errorf("%s past the baseline: step %q, want none", reader.Kind, step)
 		}
 	}
-	if step := nextStep(pe, "starts_at_ahead", signups, waitingAgent("ag-r")); !strings.HasPrefix(step, "Every job you submit is refused") {
+	if step := nextStep("starts_at_ahead", signups, waitingAgent("ag-r")); !strings.HasPrefix(step, "Every job you submit is refused") {
 		t.Errorf("a researcher past the baseline: step %q, want it told its jobs are refused until the start", step)
 	}
 }

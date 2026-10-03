@@ -532,3 +532,40 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 		t.Fatalf("a stated name nobody carries: got = %q, %v, want it kept", agent.Name, err)
 	}
 }
+
+// What the platform declares as a baseline by itself is read from here: the COMPLETED jobs on the
+// objective of baseline agents that finished. A job of one still at work may be the first of two,
+// a failed one measured nothing, and a researcher's job is no baseline.
+func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFinished(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewPlatformExperimentsStore(pool)
+	jobs := NewExperimentsStore(pool)
+	pe := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, pe, 10)
+	measuring := domain.AgentSignup{Role: domain.SignupRoleBaseline, Flavor: "generalist"}
+	baselines := spawnTestAgents(t, pes, pe, measuring, measuring)
+	researcher := spawnTestAgents(t, pes, pe, domain.AgentSignup{Flavor: "generalist"})[0]
+	if err := pes.FinishAgent(ctx, pe, baselines[0], "the baseline is measured"); err != nil {
+		t.Fatal(err)
+	}
+	seed := func(agent string, status domain.ExperimentStatus, onObjective bool) string {
+		id := seedPricedExperiment(t, pool, agent, pe, quotaL40, 1, 1, status)
+		if onObjective {
+			if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET hypothesis_id = platform_experiment_id WHERE id = $1`, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id
+	}
+	measured := seed(baselines[0], domain.StatusCompleted, true)
+	seed(baselines[0], domain.StatusFailed, true)
+	seed(baselines[0], domain.StatusCompleted, false)
+	seed(baselines[1], domain.StatusCompleted, true)
+	seed(researcher, domain.StatusCompleted, true)
+
+	left, err := jobs.FinishedBaselineJobs(ctx, pe)
+	if err != nil || len(left) != 1 || left[0].ID != measured {
+		t.Fatalf("got = %+v, %v, want the one COMPLETED objective job of the baseline agent that finished", left, err)
+	}
+}

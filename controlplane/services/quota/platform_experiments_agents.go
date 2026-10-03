@@ -50,7 +50,7 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_required, starts_at_ahead, no_researchers, budget_spent, starting), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
+	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure."`
 	Token        string               `json:"token,omitempty"`
 }
 
@@ -312,7 +312,9 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 }
 
 // FinishAgent records that an agent has nothing left to do, which releases its machine, and
-// answers its signup as finished. Calling it again changes nothing.
+// answers its signup as finished. Calling it again changes nothing. The finish of an agent of
+// role baseline is the hand-over of what it measured: the platform declares the job it left in
+// this request (DeclareMeasured), which starts the run when nothing else is missing.
 func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) (*domain.AgentSignup, error) {
 	err := s.store.FinishAgent(ctx, platformExpID, agentID, reason)
 	switch {
@@ -342,6 +344,11 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 		return nil, fmt.Errorf("platform_experiments.FinishAgent: agent %s is not signed up after finishing", agentID)
 	}
 	s.logger.Info("agent finished", zap.String("platformExpID", platformExpID), zap.String("agentID", agentID))
+	if finished.Role == domain.SignupRoleBaseline {
+		if err := s.DeclareMeasured(ctx, platformExpID); err != nil {
+			return nil, err
+		}
+	}
 	return finished, nil
 }
 
@@ -510,7 +517,9 @@ func RegisterAgentsHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
 			"its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
-			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing.",
+			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. " +
+			"The finish of an agent of role baseline in an open platform experiment hands over what it measured: when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. " +
+			"The finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).",
 	}, func(ctx context.Context, in *struct {
 		ID      string `path:"id"`
 		AgentID string `path:"agent_id"`
