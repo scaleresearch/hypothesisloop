@@ -148,6 +148,7 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"data-key"},
 		{"watch", "--wake", "experiment.status", "--no-wait"},
 		{"watch", "--experiment", "job-1", "--until", "status in COMPLETED,FAILED,EVICTED,REJECTED,CANCELLED", "--timeout", "1"},
+		{"repo", "init"},
 	} {
 		requests = 0
 		var stdout, stderr bytes.Buffer

@@ -15,8 +15,8 @@ A job runs the code of one commit, which `hl job submit` pushes on its branch.
 | `metrics.py` | how a job reports a metric: `from metrics import post_metric`, then `post_metric(fraction_complete, value, "key")` as it runs and once at the end |
 | `.gitignore` | keeps bytecode caches, virtual environments and editor files out of a commit |
 
-`hl repo init` adds whichever of these a clone lacks, and `hl repo check` says what is left to
-fill in.
+`hl repo init` writes them into a clone with what the platform holds of the experiment filled
+in, and `hl repo check` says what is left to fill in.
 
 ## What is measured
 

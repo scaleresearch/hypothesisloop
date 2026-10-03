@@ -160,6 +160,15 @@ agents/coordinator/experiments.`, stderr)
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
 		metadata["platform_experiment_id"] = experimentOf(c, "")
 	}
+	// A job that named no image passed every check, queued, and waited under a reason that said
+	// nothing of it.
+	if job, _ := body["job"].(map[string]any); job != nil && imageGap(job, declaredExperiment{}) != "" {
+		var experiment declaredExperiment
+		if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(fmt.Sprint(metadata["platform_experiment_id"])), nil, &experiment); err != nil {
+			return fail(stderr, err)
+		}
+		return fail(stderr, errors.New("job submit: "+path+" "+imageGap(job, experiment)))
+	}
 	if err := fillCodeRef(metadata, ""); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}

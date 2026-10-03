@@ -8,8 +8,26 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v4"
+
 	"github.com/scaleresearch/hypothesisloop/cli/repotemplate"
 )
+
+// A job spec with no image names the one its experiment was proposed with, in hl repo check and
+// before a submit pushes or sends anything.
+func TestAJobThatNamesNoImageIsToldTheImageOfItsExperiment(t *testing.T) {
+	clone := cloneOf(t, proposed)
+	repo(t, "init")
+	write(t, clone, repotemplate.JobSpec, "job:\n  command: [\"python\", \"bench.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n")
+	want := "states no job.image: every job names the image it runs in, and platform experiment pe-1 was proposed with image: torch"
+	if code, out := repo(t, "check"); code != 1 || !strings.Contains(out, "job-spec: "+repotemplate.JobSpec+" "+want) {
+		t.Fatalf("hl repo check = %d, want %q in\n%s", code, want, out)
+	}
+	code, _, stderr := hl(t, "job", "submit", "--agent", "ag-1", repotemplate.JobSpec)
+	if code != 1 || strings.TrimSpace(stderr) != "hl: job submit: "+repotemplate.JobSpec+" "+want {
+		t.Fatalf("hl job submit = %d\n%s", code, stderr)
+	}
+}
 
 func repo(t *testing.T, command string) (int, string) {
 	t.Helper()
@@ -21,19 +39,166 @@ func repo(t *testing.T, command string) (int, string) {
 // answers it: named sweep and ranked on val_accuracy.
 func emptyClone(t *testing.T) string {
 	t.Helper()
+	return cloneOf(t, `{"id":"pe-1","name":"sweep","description":"the brief\n","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`)
+}
+
+// cloneOf is a repository with nothing in it, of platform experiment pe-1 as the platform
+// answers it with experiment.
+func cloneOf(t *testing.T, experiment string) string {
+	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" || r.URL.Path != "/platform-experiments/pe-1" {
 			t.Errorf("hl repo asked %s %s, want only the platform experiment", r.Method, r.URL.Path)
 		}
-		_, _ = io.WriteString(w, `{"id":"pe-1","name":"sweep","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`)
+		_, _ = io.WriteString(w, experiment)
 	}))
 	t.Setenv(platformExperimentEnv, "pe-1")
 	clone := t.TempDir()
 	mustGit(t, clone, "init", "-q")
 	t.Chdir(clone)
 	return clone
+}
+
+// proposed is platform experiment pe-1 as accepted from a planner's proposal: a name with a
+// colon in it, a brief of several lines, a gate, and the image and the type its jobs run on.
+const proposed = `{"id":"pe-1","name":"ResNet-18: throughput\n","description":"GOAL: images per second.\n\nBASELINE\n  config: fp32\n  measured: not yet established\n",
+"metrics":[{"key":"images_per_s","direction":"maximize","role":"ranking"},{"key":"top1_agreement","direction":"maximize","role":"constraint","bound":0.99}],
+"proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","image":"torch","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
+
+func read(t *testing.T, clone, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(clone, filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// A baseline agent copied a 54-line brief into experiment.yaml by hand, broke the YAML on the
+// colon in the experiment's name and committed placeholders: what the platform holds of the
+// experiment is written by hl repo init, and only the command of a trial is left to type.
+func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
+	clone := cloneOf(t, proposed)
+	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "added    ") != 5 {
+		t.Fatalf("hl repo init = %d\n%s", code, out)
+	}
+	var stated statedExperiment
+	if err := yaml.Unmarshal([]byte(read(t, clone, repotemplate.ExperimentFile)), &stated); err != nil {
+		t.Fatalf("the experiment file is not YAML: %v\n%s", err, read(t, clone, repotemplate.ExperimentFile))
+	}
+	if stated.Name != "ResNet-18: throughput\n" || !strings.HasSuffix(stated.Description, "measured: not yet established\n") || len(stated.Metrics) != 2 ||
+		stated.Metrics[1].Role != "constraint" || *stated.Metrics[1].Bound != 0.99 {
+		t.Fatalf("the experiment file states %+v", stated)
+	}
+	var spec struct {
+		Job map[string]any `yaml:"job"`
+	}
+	if err := yaml.Unmarshal([]byte(read(t, clone, repotemplate.JobSpec)), &spec); err != nil || spec.Job["image"] != "torch" ||
+		spec.Job["accelerator_type"] != "nvidia.com/gpu.product=RTX-4090" || spec.Job["accelerator_count"] != 1 {
+		t.Fatalf("the job spec states %v, %v, want the proposal's image and accelerator_type", spec.Job, err)
+	}
+	if left := strings.Count(read(t, clone, repotemplate.JobSpec), repotemplate.Placeholder); left != 1 {
+		t.Fatalf("the job spec leaves %d %s, want only the command of one trial", left, repotemplate.Placeholder)
+	}
+	readme := read(t, clone, repotemplate.Readme)
+	if !strings.HasPrefix(readme, "# ResNet-18: throughput\n") || !strings.Contains(readme, "Throughput is what the goal asks for.\n\nImages per second over 200 batches. A\ntrial reports the gate") {
+		t.Fatalf("the README lacks the experiment's name or what its proposal says is measured:\n%s", readme)
+	}
+	// With the command and the README written and the code naming its metrics, the files pass.
+	write(t, clone, repotemplate.JobSpec, strings.Replace(read(t, clone, repotemplate.JobSpec), "REPLACE-WITH-THE-COMMAND-OF-ONE-TRIAL", "python bench.py", 1))
+	write(t, clone, repotemplate.Readme, "# ResNet-18: throughput\n")
+	write(t, clone, "bench.py", "post_metric(1.0, rate, \"images_per_s\")\npost_metric(1.0, agreement, \"top1_agreement\")\n")
+	if code, out := repo(t, "check"); code != 0 {
+		t.Fatalf("hl repo check on the files hl repo init wrote = %d\n%s", code, out)
+	}
+	// A second init keeps the agent's work and the experiment file it wrote.
+	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "kept     ") != 5 {
+		t.Fatalf("a second hl repo init = %d\n%s", code, out)
+	}
+}
+
+// Work on cores names no accelerator, so the job spec of an experiment on the CPU type has none.
+func TestRepoInitWritesAJobSpecWithNoAcceleratorForWorkOnCores(t *testing.T) {
+	clone := cloneOf(t, strings.Replace(proposed, "nvidia.com/gpu.product=RTX-4090", cpuType, 1))
+	repo(t, "init")
+	var spec struct {
+		Job map[string]any `yaml:"job"`
+	}
+	text := read(t, clone, repotemplate.JobSpec)
+	if err := yaml.Unmarshal([]byte(text), &spec); err != nil || spec.Job["accelerator_type"] != nil || spec.Job["accelerator_count"] != nil || spec.Job["cpu"] != 2 ||
+		!strings.Contains(text, "runs on CPU cores") || strings.Contains(text, "hl capacity`. Work that needs no accelerator") {
+		t.Fatalf("the job spec for work on cores = %v, %v\n%s", spec.Job, err, text)
+	}
+}
+
+// hl repo init kept the job spec and the README of an earlier experiment of the repository,
+// and the platform creates a repository with the unfilled template committed: neither is the
+// agent's work, so both are replaced, by the one test hl repo check fails such a file on.
+func TestRepoInitReplacesTheFilesOfAnotherExperimentAndTheUnfilledTemplate(t *testing.T) {
+	clone := cloneOf(t, proposed)
+	write(t, clone, repotemplate.ExperimentFile, filledExperiment)
+	write(t, clone, repotemplate.JobSpec, filledJobSpec)
+	write(t, clone, repotemplate.Readme, "# sweep\n")
+	write(t, clone, "train.py", "print(1)\n")
+	code, out := repo(t, "init")
+	for _, want := range []string{
+		"replaced " + repotemplate.ExperimentFile + ": it is written from platform experiment pe-1",
+		"replaced " + repotemplate.JobSpec + `: the clone's experiment file states name "sweep", and platform experiment pe-1 is "ResNet-18: throughput"`,
+		"replaced " + repotemplate.Readme + ": the clone's experiment file states name",
+		"added    " + repotemplate.MetricsHelper,
+	} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("hl repo init = %d, want %q in\n%s", code, want, out)
+		}
+	}
+	if spec := read(t, clone, repotemplate.JobSpec); !strings.Contains(spec, "image: torch") || read(t, clone, "train.py") != "print(1)\n" {
+		t.Fatalf("the job spec was not replaced, or code was touched:\n%s", spec)
+	}
+	if staged := mustGit(t, clone, "status", "--porcelain"); strings.Contains(staged, "A ") {
+		t.Fatalf("hl repo init staged files:\n%s", staged)
+	}
+
+	clone = cloneOf(t, proposed)
+	for path, content := range repotemplate.Files() {
+		write(t, clone, path, content)
+	}
+	code, out = repo(t, "init")
+	for _, want := range []string{"replaced " + repotemplate.JobSpec + ": it was the unfilled template", "replaced " + repotemplate.Readme + ": it was the unfilled template",
+		"kept     " + repotemplate.MetricsHelper, "kept     " + repotemplate.Gitignore} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("hl repo init over the unfilled template = %d, want %q in\n%s", code, want, out)
+		}
+	}
+}
+
+// The first branch pushed to an empty repository became its default branch: a run's repository
+// had hl/pe-.../baseline for one and no main.
+func TestRepoInitGivesAnEmptyRepositoryItsDefaultBranchFirst(t *testing.T) {
+	clone := cloneOf(t, proposed)
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	mustGit(t, clone, "init", "-q", "--bare", origin)
+	mustGit(t, clone, "remote", "add", "origin", origin)
+	mustGit(t, clone, "checkout", "-q", "-b", "hl/pe-1/baseline")
+	for name, value := range map[string]string{"GIT_AUTHOR_NAME": "ag-1", "GIT_AUTHOR_EMAIL": "ag-1@t", "GIT_COMMITTER_NAME": "ag-1", "GIT_COMMITTER_EMAIL": "ag-1@t"} {
+		t.Setenv(name, value)
+	}
+	code, out := repo(t, "init")
+	if code != 0 || !strings.HasPrefix(out, "pushed main: the repository had no branch") {
+		t.Fatalf("hl repo init on an empty repository = %d\n%s", code, out)
+	}
+	if heads := mustGit(t, origin, "for-each-ref", "--format=%(refname)", "refs/heads"); heads != "refs/heads/main" {
+		t.Fatalf("origin has %q, want main alone", heads)
+	}
+	mustGit(t, clone, "add", ".")
+	mustGit(t, clone, "commit", "-q", "-m", "the harness")
+	if parent, main := mustGit(t, clone, "rev-parse", "HEAD~1"), mustGit(t, origin, "rev-parse", "refs/heads/main"); parent != main {
+		t.Fatalf("the baseline's branch starts from %s, want origin's main %s", parent, main)
+	}
+	if code, out := repo(t, "init"); code != 0 || strings.Contains(out, "pushed") {
+		t.Fatalf("a second hl repo init = %d\n%s", code, out)
+	}
 }
 
 func write(t *testing.T, clone, path, content string) {
@@ -52,14 +217,14 @@ const (
 	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n"
 )
 
-// An empty repository gets every file of the template, and one with code keeps what it has: a file that is
-// there is never written, whatever it holds. Nothing is staged or committed.
+// An empty repository gets every file of the template, and one with code keeps what it has: a
+// file of the agent's own is never written. Nothing is staged or committed.
 func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	clone := emptyClone(t)
 	write(t, clone, "README.md", "ours\n")
 	write(t, clone, "train.py", "print(1)\n")
 	code, out := repo(t, "init")
-	if code != 0 || !strings.Contains(out, "kept   README.md") || !strings.Contains(out, "added  "+repotemplate.JobSpec) || !strings.Contains(out, "added  "+repotemplate.ExperimentFile) || !strings.Contains(out, "added  "+repotemplate.Gitignore) || !strings.Contains(out, "added  "+repotemplate.MetricsHelper) {
+	if code != 0 || !strings.Contains(out, "kept     README.md") || !strings.Contains(out, "added    "+repotemplate.JobSpec) || !strings.Contains(out, "added    "+repotemplate.ExperimentFile) || !strings.Contains(out, "added    "+repotemplate.Gitignore) || !strings.Contains(out, "added    "+repotemplate.MetricsHelper) {
 		t.Fatalf("hl repo init = %d\n%s", code, out)
 	}
 	if kept, _ := os.ReadFile(filepath.Join(clone, "README.md")); string(kept) != "ours\n" {
@@ -71,11 +236,6 @@ func TestRepoInitAddsOnlyTheFilesTheCloneLacks(t *testing.T) {
 	}
 	if staged := mustGit(t, clone, "status", "--porcelain"); strings.Contains(staged, "A ") {
 		t.Fatalf("hl repo init staged files:\n%s", staged)
-	}
-	// Two planners found another experiment's files here, were told "kept" and "ready" before
-	// they had written a line, and had to work out for themselves that the files were not theirs.
-	if !strings.Contains(out, "may describe an earlier experiment") {
-		t.Fatalf("hl repo init kept a file and did not say whose it may be:\n%s", out)
 	}
 	if code, out := repo(t, "init"); code != 0 || strings.Contains(out, "added") {
 		t.Fatalf("a second hl repo init = %d\n%s", code, out)
@@ -101,8 +261,8 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	}
 	repo(t, "init")
 	code, out = repo(t, "check")
-	for _, name := range []string{"readme: README.md still has", "experiment: " + repotemplate.ExperimentFile + " states no name, description, metrics", "job-spec: " + repotemplate.JobSpec + " still has"} {
-		if code != 1 || !strings.Contains(out, name) {
+	for _, name := range []string{"readme: README.md still has", "job-spec: " + repotemplate.JobSpec + " still has"} {
+		if code != 1 || !strings.Contains(out, name) || strings.Contains(out, "experiment: ") {
 			t.Fatalf("the unfilled template: hl repo check = %d, want %q in\n%s", code, name, out)
 		}
 	}
@@ -133,7 +293,7 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 	for name, tc := range map[string]struct{ path, content, want string }{
 		// `hl repo check` passed a repository whose files described a compression benchmark,
 		// straight after `hl repo init` had kept all three.
-		"an earlier experiment's name":    {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "sweep", "compression", 1), "experiment: " + repotemplate.ExperimentFile + ` states name "compression", and platform experiment pe-1 is "sweep": the file may be an earlier experiment's`},
+		"an earlier experiment's name":    {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "sweep", "compression", 1), "experiment: " + repotemplate.ExperimentFile + ` states name "compression", and platform experiment pe-1 is "sweep": the file is another experiment's, and hl repo init writes this one's`},
 		"an earlier experiment's metrics": {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "val_accuracy\n    direction: maximize", "ratio\n    direction: minimize\n    role: ranking", 1), "states the metrics ratio minimize ranking, and platform experiment pe-1 declares val_accuracy maximize ranking"},
 		// A job.yaml stated estimated_duration_hours: 0.05 and all twelve jobs of a run were
 		// given that in place of the estimate the platform measured.
@@ -142,6 +302,8 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		"no ranking metric":                 {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
 		"a job spec that is not YAML":       {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":            {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
+		// A spec with no image passed three checks, was submitted and sat in the queue.
+		"a job spec with no image": {repotemplate.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.image: every job names the image it runs in, a job_image of hl capacity"},
 		"a job spec with no cpu":            {repotemplate.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.cpu: state the cores one node of the job uses, as in cpu: 2"},
 		"a job spec with no memory":         {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "states no job.memory"},
 		"a job spec with no storage":        {repotemplate.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "states no job.storage"},
