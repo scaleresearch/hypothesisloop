@@ -131,7 +131,7 @@ func untoldSimilar(ctx context.Context, tx neo4j.ManagedTransaction, n NewHypoth
 	}
 	records, err := collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe})
 OPTIONAL MATCH (h)-[:BUILDS_ON]->(t)
-RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_id, ''), h.author, h.status, h.text, collect(t.id)`, map[string]any{"pe": n.PlatformExperimentID})
+RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_id, ''), coalesce(h.author, ''), h.status, h.text, collect(t.id)`, map[string]any{"pe": n.PlatformExperimentID})
 	if err != nil {
 		return nil, err
 	}

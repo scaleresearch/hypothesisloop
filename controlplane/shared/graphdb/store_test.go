@@ -113,6 +113,13 @@ func TestRegisterCreatesTheHypothesisWithItsLinksInOneStep(t *testing.T) {
 			t.Errorf("outgoing links: got = %v, want to include %s", got, want)
 		}
 	}
+	// author is what a record from before actors were kept stated, and no write sets it.
+	if n := count(t, s, `MATCH (h:Hypothesis {platform_experiment_id: '`+pe+`'}) WHERE h.author IS NOT NULL RETURN count(h)`); n != 0 {
+		t.Errorf("hypotheses written with an author: got = %d, want 0", n)
+	}
+	if n := count(t, s, `MATCH (:Hypothesis {platform_experiment_id: '`+pe+`'})-[r]->() WHERE r.author IS NOT NULL RETURN count(r)`); n != 0 {
+		t.Errorf("links written with an author: got = %d, want 0", n)
+	}
 }
 
 func similarIDs(t *testing.T, err error) map[string]string {
@@ -460,7 +467,8 @@ func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 }
 
 // A node and a link from before the credential was kept carry no actor. They read as unverified
-// under the name they stated: the author, or else the agent.
+// under the name they stated: the author, or else the agent. Only such a record has an author at
+// all, and one with none reads as one that stated none.
 func TestAHypothesisFromBeforeActorsWereKeptReadsAsUnverified(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
@@ -470,11 +478,11 @@ func TestAHypothesisFromBeforeActorsWereKeptReadsAsUnverified(t *testing.T) {
 	}
 	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		return collect(ctx, tx, `MATCH (o:Objective {id: $pe})
-CREATE (a:Hypothesis {id: $pe + '-agent', platform_experiment_id: $pe, agent_id: 'agent-1', source: 'agent', author: '',
+CREATE (a:Hypothesis {id: $pe + '-agent', platform_experiment_id: $pe, agent_id: 'agent-1', source: 'agent',
   text: 'an old agent idea', normalized_text: 'an old agent idea', status: 'open', created_at: $at, created_xid: 1})
 CREATE (p:Hypothesis {id: $pe + '-person', platform_experiment_id: $pe, agent_id: '', source: 'human', author: 'Grace',
   text: 'an old human idea', normalized_text: 'an old human idea', status: 'open', created_at: $at, created_xid: 1})
-CREATE (a)-[:BUILDS_ON {agent_id: 'agent-1', author: '', created_at: $at, created_xid: 1}]->(o)
+CREATE (a)-[:BUILDS_ON {agent_id: 'agent-1', created_at: $at, created_xid: 1}]->(o)
 CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at, created_xid: 1}]->(o)`, map[string]any{"pe": pe, "at": now()})
 	})
 	if err != nil {
@@ -970,27 +978,6 @@ func TestReAddingARegistrationLinkAnnouncesNothing(t *testing.T) {
 	abortedAll := db.Stamp{Position: 31, Aborted: func(int64) (bool, error) { return true, nil }}
 	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), onRoot(pe)[0], abortedAll); err != nil || result.Announce {
 		t.Errorf("AddLink of the registration link: got = (%+v, %v), want nothing announced", result, err)
-	}
-}
-
-// A hypothesis written before writes carried a position must still be in a snapshot replay.
-func TestEnsureSchemaGivesAHypothesisWrittenWithoutAPositionPositionZero(t *testing.T) {
-	s := testStore(t)
-	pe := testExperiment(t, s)
-	h := register(t, s, pe, "agent-1", "written before positions", onRoot(pe))
-	ctx := context.Background()
-	if _, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		return collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) REMOVE h.created_xid`, map[string]any{"id": h.ID})
-	}); err != nil {
-		t.Fatalf("remove created_xid: got = %v, want nil", err)
-	}
-	if err := s.EnsureSchema(ctx); err != nil {
-		t.Fatalf("EnsureSchema: got = %v, want nil", err)
-	}
-
-	events, err := s.ReplayEvents(ctx, pe, 0)
-	if err != nil || len(events) != 1 || events[0].Subject != h.ID || events[0].Position != 0 {
-		t.Errorf("snapshot replay: got = (%+v, %v), want = hypothesis.new for %s at position 0", events, err, h.ID)
 	}
 }
 

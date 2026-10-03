@@ -94,7 +94,7 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
-  author: '', actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
+  actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
 RETURN h`, map[string]any{
 			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID,
 			"actor_kind": string(n.Actor.Kind), "actor_id": n.Actor.ID, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
@@ -394,7 +394,7 @@ func (s *Store) ExperimentGraph(ctx context.Context, platformExperimentID string
 			return nil, err
 		}
 		records, err := collect(ctx, tx, `MATCH (a:Hypothesis {platform_experiment_id: $pe})-[r]->(b)
-RETURN a.id, b.id, type(r), r.agent_id, coalesce(r.actor_kind, 'unverified'), coalesce(r.actor_id, ''), r.author, r.created_at ORDER BY r.created_at, a.id, b.id`, params)
+RETURN a.id, b.id, type(r), r.agent_id, coalesce(r.actor_kind, 'unverified'), coalesce(r.actor_id, ''), coalesce(r.author, ''), r.created_at ORDER BY r.created_at, a.id, b.id`, params)
 		if err != nil {
 			return nil, err
 		}
@@ -630,7 +630,7 @@ MATCH p = (t)-[:BUILDS_ON *BFS]->(f) RETURN count(p)`, map[string]any{"from": fr
 func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, ordinal int, agentID string, actor domain.Actor, at time.Time, position int64) (bool, error) {
 	records, err := collect(ctx, tx, linkMatch(platformExperimentID, spec)+`
 MERGE (h)-[r:`+relTypes[spec.Type]+`]->(t)
-ON CREATE SET r.agent_id = $agent_id, r.author = '', r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position, r.ordinal = $ordinal
+ON CREATE SET r.agent_id = $agent_id, r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position, r.ordinal = $ordinal
 RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID,
 		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "position": position, "ordinal": ordinal})
 	if err != nil {
@@ -758,7 +758,11 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 func storedActor(d *decoder, props map[string]any, kindProp, idProp, agentID string) domain.Actor {
 	kind, ok := props[kindProp]
 	if !ok || kind == nil {
-		return domain.StoredActor(domain.ActorUnverified, "", d.str(props["author"]), agentID)
+		author := ""
+		if stated, ok := props["author"]; ok && stated != nil {
+			author = d.str(stated)
+		}
+		return domain.StoredActor(domain.ActorUnverified, "", author, agentID)
 	}
 	return domain.StoredActor(domain.ActorKind(d.str(kind)), d.str(props[idProp]), "", agentID)
 }

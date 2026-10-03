@@ -67,21 +67,13 @@ var schemaStatements = []string{
 	"CREATE TEXT INDEX " + TextIndex + " ON :Hypothesis(text)",
 }
 
-// positionBackfill gives what was written before writes carried a position (see
-// db.EventsStore.Emit) position 0, below every cursor, so replay still finds it.
-var positionBackfill = []string{
-	"MATCH (h:Hypothesis) WHERE h.created_xid IS NULL SET h.created_xid = 0",
-	"MATCH (h:Hypothesis) WHERE h.status_changed_at IS NOT NULL AND h.status_changed_xid IS NULL SET h.status_changed_xid = 0",
-	"MATCH (:Hypothesis)-[r]->() WHERE r.created_xid IS NULL SET r.created_xid = 0",
-}
-
 // EnsureSchema creates the constraints and indexes the store relies on. Every statement is a
 // no-op when its object already exists, so it runs on every start.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	// Memgraph refuses schema changes inside an explicit transaction, so these run auto-commit.
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
-	for _, stmt := range append(schemaStatements, positionBackfill...) {
+	for _, stmt := range schemaStatements {
 		result, err := session.Run(ctx, stmt, nil)
 		if err == nil {
 			_, err = result.Consume(ctx)
