@@ -396,7 +396,7 @@ func (s *slotStore) GetPlatformExperiment(_ context.Context, id string) (*domain
 	return &domain.PlatformExperiment{ID: id}, nil
 }
 func (s *slotStore) IsAgentCut(context.Context, string, string) (bool, error) { return false, nil }
-func (s *slotStore) UnsummarizedCompleted(context.Context, string, string) ([]string, error) {
+func (s *slotStore) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
 	return nil, nil
 }
 func (s *slotStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {

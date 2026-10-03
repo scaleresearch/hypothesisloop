@@ -77,7 +77,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. " +
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits, " +
-			"and while a COMPLETED job of yours has no summary (not_admitted_reason summary_gate, with the jobs owed and the command that files one in not_admitted_message, and a job.held event at once). Every not_admitted_reason comes with its sentence in not_admitted_message.",
+			"and, when it was submitted after a COMPLETED job of yours ended, while that job has no summary (not_admitted_reason summary_gate, with the jobs owed and the command that files one in not_admitted_message, and a job.held event at once). A job already queued when another of yours completes is not held by it: jobs submitted together run in parallel. Every not_admitted_reason comes with its sentence in not_admitted_message.",
 	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 		req := in.Body
 		if req.ID == "" {
@@ -142,7 +142,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"?status, ?since (RFC3339; created at or after — the cheap way to catch up on what " +
 			"changed since a previous session), ?q (substring match " +
 			"against hypothesis and theory), ?needs_summary (finished experiments still missing " +
-			"their write-up -- the set that holds your queued jobs back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
+			"their write-up -- the set that holds the jobs you submit next back), ?limit (default 20, max 50), ?offset. ?sort selects order: created_at, " +
 			"updated_at, priority_score, or status, optionally prefixed with - for descending (default -created_at, newest first; " +
 			"-priority_score is the order the scheduler considers queued jobs in). " +
 			"Each carries metrics: its one value on each declared metric it reported, which the metric's role decides (its best in the metric's direction on a ranking metric, its last on a constraint or an attribute), and metric, the one on the first ranking metric. " +
@@ -156,7 +156,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
 		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
 		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
-		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps your queued jobs from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
+		NeedsSummary         bool   `query:"needs_summary" doc:"Only finished experiments whose write-up was never filed -- exactly the set that keeps the jobs you submit next from being admitted (not_admitted_reason summary_gate). Combine with ?agent and ?platform_experiment_id, then file each one via POST /experiments/{id}/summary."`
 		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
 		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
 		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`

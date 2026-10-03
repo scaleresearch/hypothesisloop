@@ -214,15 +214,17 @@ const UnsummarizedCompletedPredicate = `status = 'COMPLETED' AND NOT EXISTS (
 	SELECT 1 FROM hypothesis_findings f WHERE f.experiment_id = experiments.id)`
 
 // UnsummarizedCompleted returns the ids of the agent's COMPLETED jobs in the platform experiment
-// that have no summary, oldest first: the jobs that hold its queued ones back. FAILED and EVICTED
-// jobs owe none.
-func (s *ExperimentsStore) UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) ([]string, error) {
+// that have no summary and ended by endedBy, oldest first: the jobs that hold back a job the
+// agent submitted at that moment. A job that was queued before one of them ended is not held by
+// it. FAILED and EVICTED jobs owe none. A COMPLETED row's updated_at is when it ended.
+func (s *ExperimentsStore) UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string, endedBy time.Time) ([]string, error) {
 	const q = `SELECT id FROM experiments
 		WHERE agent_id = $1
 		  AND platform_experiment_id = $2
+		  AND updated_at <= $3
 		  AND ` + UnsummarizedCompletedPredicate + `
 		ORDER BY created_at, id`
-	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
+	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID, endedBy)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.UnsummarizedCompleted: %w", err)
 	}

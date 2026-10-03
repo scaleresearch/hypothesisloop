@@ -115,7 +115,7 @@ func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { 
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
-func (poolOnlyStore) UnsummarizedCompleted(_ context.Context, _, _ string) ([]string, error) {
+func (poolOnlyStore) UnsummarizedCompleted(_ context.Context, _, _ string, _ time.Time) ([]string, error) {
 	return nil, nil
 }
 func (poolOnlyStore) ProjectOrg(context.Context, string) (string, error) { return "org-a", nil }
@@ -244,7 +244,7 @@ func TestSubmitRefusesAJobAgainstAHumanHypothesisFromAnotherPlatformExperiment(t
 
 type unsummarizedStore struct{ poolOnlyStore }
 
-func (unsummarizedStore) UnsummarizedCompleted(_ context.Context, _, _ string) ([]string, error) {
+func (unsummarizedStore) UnsummarizedCompleted(_ context.Context, _, _ string, _ time.Time) ([]string, error) {
 	return []string{"job-done"}, nil
 }
 

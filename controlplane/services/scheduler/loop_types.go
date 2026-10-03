@@ -41,9 +41,10 @@ type LoopStore interface {
 	// MarkHeldJobs tells the owner of every job that has waited longer than its estimated
 	// duration and longer than minimum why it is held, once per job.
 	MarkHeldJobs(ctx context.Context, minimum time.Duration) error
-	// UnsummarizedCompleted is the summary gate: an agent's queued jobs wait while one of its
-	// COMPLETED jobs has no summary. It returns those jobs' ids.
-	UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string) ([]string, error)
+	// UnsummarizedCompleted is the summary gate: a job waits while a COMPLETED job of its agent
+	// that ended by endedBy, the moment the waiting job was submitted, has no summary. It returns
+	// those jobs' ids.
+	UnsummarizedCompleted(ctx context.Context, agentID, platformExpID string, endedBy time.Time) ([]string, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// GetPlatformExperiment supplies the current stage, whose max_job_hours gates admission of
 	// jobs queued before the ladder moved.

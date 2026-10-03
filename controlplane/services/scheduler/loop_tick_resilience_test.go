@@ -46,7 +46,7 @@ func (s *resilienceStore) IsAgentCut(context.Context, string, string) (bool, err
 	return false, nil
 }
 
-func (s *resilienceStore) UnsummarizedCompleted(context.Context, string, string) ([]string, error) {
+func (s *resilienceStore) UnsummarizedCompleted(context.Context, string, string, time.Time) ([]string, error) {
 	return nil, nil
 }
 

@@ -184,7 +184,9 @@ func (l *Loop) tick(ctx context.Context) error {
 	}
 	completion := l.completionFractions(ctx, queued)
 
-	// 3a. Enforce the summary gate: skip agents with COMPLETED experiments missing a summary.
+	// 3a. Enforce the summary gate: a COMPLETED job is summarised before its agent's next job
+	// runs. It holds a job the agent submitted after that job ended, and never one that was
+	// already queued then: a batch submitted together runs in parallel.
 	// 3b. Enforce the current stage's max_job_hours: a job queued while an earlier, looser stage
 	// was running must not slip through after the ladder tightened. Held, not rejected — a later
 	// stage may lift the cap, and then it admits normally.
@@ -194,8 +196,7 @@ func (l *Loop) tick(ctx context.Context) error {
 	// important.md #19 exists to forbid. Per-experiment failures are logged, collected, and the
 	// experiment is dropped from this tick's consideration; the pass finishes, and the joined
 	// error surfaces at the end so the failure is still loud.
-	summaryOwed := map[string][]string{} // key: agentID+"/"+platformExpID
-	maxJobHours := map[string]float64{}  // key: platformExpID; 0 = unlimited
+	maxJobHours := map[string]float64{} // key: platformExpID; 0 = unlimited
 	filtered := queued[:0]
 	for _, exp := range queued {
 		if exp.PlatformExperimentID == "" {
@@ -233,15 +234,10 @@ func (l *Loop) tick(ctx context.Context) error {
 			}
 			continue
 		}
-		key := exp.AgentID + "/" + exp.PlatformExperimentID
-		owed, seen := summaryOwed[key]
-		if !seen {
-			owed, err = l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID)
-			if err != nil {
-				l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
-				continue
-			}
-			summaryOwed[key] = owed
+		owed, err := l.store.UnsummarizedCompleted(ctx, exp.AgentID, exp.PlatformExperimentID, exp.CreatedAt)
+		if err != nil {
+			l.skipExperiment(&tickErrs, exp, fmt.Errorf("summary gate: %w", err))
+			continue
 		}
 		if len(owed) == 0 {
 			filtered = append(filtered, exp)
