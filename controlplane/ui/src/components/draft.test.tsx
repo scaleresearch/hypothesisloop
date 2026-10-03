@@ -32,6 +32,7 @@ const proposal: Proposal = {
   duration_hours: 4,
   agents: [{ flavor: 'hyperparameter-search' }, {}],
   accelerator_type: 'rtx-4090',
+  image: 'pytorch',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
   sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 researchers is 6.',
@@ -77,7 +78,8 @@ describe('a proposed draft', () => {
     show(proposed())
     expect(await screen.findByText('val_loss, lower is better')).toBeTruthy()
     expect(screen.getByText('exact_match must stay at or above 1')).toBeTruthy()
-    expect(screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090 before any researcher starts/)).toBeTruthy()
+    const measured = screen.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090, in the image/)
+    expect(measured.textContent).toContain('in the image pytorch, before any researcher starts')
     expect(screen.getByText(/the figures are an estimate, since nothing has run, and the budget is a cap/)).toBeTruthy()
     expect(screen.queryByText(/baseline 1/)).toBeNull()
     expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()

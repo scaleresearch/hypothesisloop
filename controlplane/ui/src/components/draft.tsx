@@ -63,7 +63,8 @@ function ProposalCard({ proposal }: { proposal: Proposal }) {
           <Eyebrow className="mb-1 block">How it is measured</Eyebrow>
           <p className="text-sm">{proposal.measurement}</p>
           <p className="mt-1 text-xs text-muted">
-            Nothing has run yet. Once you accept, the baseline is measured on {proposal.accelerator_type} before any researcher starts.
+            Nothing has run yet. Once you accept, the baseline is measured on {proposal.accelerator_type}, in the
+            image <span className="font-mono">{proposal.image}</span>, before any researcher starts.
           </p>
         </div>
         <Sentences title="What could mislead" items={proposal.risks} />

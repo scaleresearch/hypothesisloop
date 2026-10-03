@@ -23,6 +23,8 @@ export interface Proposal {
   agents: ProposedAgent[]
   // The type the jobs are sized for: an accelerator, or CPU cores (units.CPU_TYPE) for work that needs none.
   accelerator_type: string
+  // The image its jobs name: a job image the platform offers, by name, or the whole address of another.
+  image: string
   metric_reason: string
   measurement: string
   // Why the proposed budget, duration and researchers are the least that reach the goal. Absent
