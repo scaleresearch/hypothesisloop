@@ -170,7 +170,8 @@ def test_the_owner_reads_everything_of_its_own(tenants):
             r = t.api.get(path)
             assert r.status_code == 200 and t.marker in r.text, f"owner GET {path} does not list its own rows: {r.text}"
         # A page over a list's maximum is refused, so a short page is never read as the whole set.
-        for path in (f"/experiments?limit={MAX_JOB_PAGE + 1}", "/hypotheses?limit=201"):
+        for path in (f"/experiments?limit={MAX_JOB_PAGE + 1}", "/hypotheses?limit=201", "/agents?limit=201",
+                     "/platform-experiments?limit=201", "/platform-experiments?limit=-1", "/agents?offset=-1"):
             r = t.api.get(path)
             assert r.status_code == 422 and r.json()["reason"] == "invalid_page", f"owner GET {path}: {r.status_code} {r.text}"
 

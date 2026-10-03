@@ -112,13 +112,20 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
     pe_id = r.json()["id"]
     try:
         assert r.json()["repository"] == project.sandbox_repository() and r.json()["repository_url"], r.text
+        # Created with a hosted coordinator, it has the agent that measures its baseline from the
+        # create on, as an accepted draft has, and says so.
+        assert r.json()["signup_count"] == 1, r.json()
+        created_with = [(a["name"], a["role"], a["hosted"]) for a in project.agents(pe_id)]
+        assert created_with == [("Baseline 1", "baseline", True)], created_with
+        waits = project.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
+        assert (waits["reason"], waits["waits_for"]) == ("baseline_measuring", "platform"), waits
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
         assert r.status_code == 201, f"hosted: {r.status_code} {r.text}"
         hosted = r.json()["agents"][0]
         assert hosted["hosted"] and hosted["launcher"], hosted
         removed = project.remove_agent(pe_id, hosted["agent_id"])
         assert removed.status_code == 204 and not removed.content, f"remove: {removed.status_code} {removed.text}"
-        assert project.agents(pe_id) == [], "the hosted agent was not removed"
+        assert [a["name"] for a in project.agents(pe_id)] == ["Baseline 1"], "the hosted agent was not removed"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
         # runs is resolved here and shown: the default flavor and the platform's default model.
@@ -132,7 +139,7 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
         assert r.status_code == 400 and "no-such-flavor" in r.text, f"an unknown flavor: {r.status_code} {r.text}"
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hyperparameters": {"blob": "x" * 5000}})
         assert r.status_code == 400 and "4096" in r.text, f"oversize hyperparameters: {r.status_code} {r.text}"
-        assert len(project.agents(pe_id)) == 2
+        assert len(project.agents(pe_id)) == 3
 
         # Removal takes the place and leaves the agent, which joins again by its id.
         assert project.remove_agent(pe_id, own["agent_id"]).status_code == 204
@@ -391,6 +398,13 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
                accept=lambda said: said.returncode == 0, deadline=deadline)
     again = as_done.hl_expect(*finish)
     assert again.returncode == 0, f"finishing a second time: {again.stderr}"
+    # A hypothesis it leaves open refuses nothing: the answer carries each, and hl prints them as a note.
+    left_open = [h for h in api.hypotheses(pe_id) if h.get("agent_id") == done and h["status"] == "open"]
+    assert left_open, "the agent that finished left no open hypothesis, so the note was not looked at"
+    answered = as_done.post_json(f"/platform-experiments/{pe_id}/agents/{done}/finish", {"reason": "quota spent"})
+    assert [a["agent_id"] for a in answered["agents"]] == [done], answered
+    assert sorted((h["id"], h["text"]) for h in answered["open_hypotheses"]) == sorted((h["id"], h["text"]) for h in left_open), answered
+    assert "hypotheses still open" in again.stderr and all(h["id"] in again.stderr for h in left_open), again.stderr
     signup = roster(api, pe_id)[done]
     assert signup["finished_at"] and signup["finished_reason"] == "quota spent", signup
     instances, ending = desired_for(api, pe_id, up)
@@ -424,19 +438,24 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
-        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 0, r.json()
+        # The create made the one agent that measures the baseline.
+        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 1, r.json()
+        (measurer,) = roster(with_repo, pe_id)
         with_repo.add_agents(pe_id, count=2, hosted=True)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
         assert pe["coordinator"]["launcher"] == LAUNCHER and pe["coordinator"]["model"], pe.get("coordinator")
         assert pe["coordinator"]["instance"]["restarts"] == 0 and not pe["coordinator"]["instance"]["stopped"], pe["coordinator"]
+        assert (pe["status_reason"]["reason"], pe["status_reason"]["waits_for"]) == ("baseline_measuring", "platform"), pe["status_reason"]
 
-        # The coordinator is no agent: the roster and the quotas hold the two agents and nothing else.
+        # The coordinator is no agent: the roster and the quotas hold the baseline agent and the
+        # two researchers and nothing else.
         agents = roster(with_repo, pe_id)
-        assert len(agents) == 2 and all(a["hosted"] and a["launcher"] == LAUNCHER for a in agents.values()), agents
+        assert len(agents) == 3 and all(a["hosted"] and a["launcher"] == LAUNCHER for a in agents.values()), agents
+        assert sorted(a["role"] for a in agents.values()) == ["baseline", "competitor", "competitor"], agents
         assert {q["agent_id"] for q in with_repo.platform_experiment_quotas(pe_id)} <= set(agents), "the coordinator holds a quota"
 
-        # Open: the coordinator has its machine, which is who declares the baseline, and no researcher has one.
-        assert not desired_for(with_repo, pe_id)[0], "a researcher's machine is asked for before there is a baseline"
+        # Open: the coordinator and the baseline agent have their machines, and no researcher has one.
+        assert set(desired_for(with_repo, pe_id)[0]) == {measurer}, "a researcher's machine is asked for before there is a baseline"
         coordinator, _ = coordinator_for(with_repo, pe_id)
         assert coordinator is not None, "the launcher is not asked for the coordinator of an open platform experiment"
         env = coordinator["env"]
@@ -446,7 +465,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
 
         # Its token coordinates this platform experiment: it reads the roster and changes the brief.
         as_coordinator = with_repo.as_caller(env["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
-        assert len(as_coordinator.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]) == 2
+        assert len(as_coordinator.get_json(f"/platform-experiments/{pe_id}/agents")["agents"]) == 3
         changed = {"description": "the coordinator's brief"}
         put = as_coordinator.patch(f"/platform-experiments/{pe_id}", changed)
         assert put.status_code == 200, f"the coordinator updating the description: {put.status_code} {put.text}"
@@ -512,9 +531,18 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
         coordinator, _ = coordinator_for(with_repo, pe_id)
         assert coordinator is not None
         as_coordinator = with_repo.as_caller(coordinator["env"]["HL_TOKEN"], with_repo.org_id, with_repo.project_id)
-        # A platform experiment starts with at least one agent in it.
-        with_repo.add_agents(pe_id)
+        # A platform experiment starts with at least one researcher in it.
+        researcher = with_repo.add_agents(pe_id)[0]
         with_repo.declare_baseline_and_wait_running(pe_id)
+        assert with_repo.get_json(f"/platform-experiments/{pe_id}")["status_reason"]["reason"] == "running"
+        # Its only researcher finishes: nobody is left to submit a job, the run waits for its end,
+        # and its coordinator is told to write the summary and close it, in whole commands.
+        as_researcher = with_repo.as_caller(researcher["token"], with_repo.org_id, with_repo.project_id)
+        as_researcher.hl("platform-experiments", "agents", "finish", "--reason", "nothing left to try")
+        done = with_repo.get_json(f"/platform-experiments/{pe_id}")
+        assert (done["status"], done["status_reason"]["reason"], done["status_reason"]["waits_for"]) == ("running", "researchers_done", "coordinator"), done
+        for command in ("hl platform-experiments summary --file FILE", "hl platform-experiments close"):
+            assert f"{command} --platform-experiment {pe_id}" in done["status_reason"]["message"], done["status_reason"]
         as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "why it is closed")
         as_coordinator.hl("platform-experiments", "close", "--platform-experiment", pe_id)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
@@ -729,8 +757,8 @@ def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role
         for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True}):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
             assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
-        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
-        assert r.status_code == 201, f"a hosted baseline agent on the machine kept for one: {r.status_code} {r.text}"
+        # The machine kept for an agent of role baseline is taken by the one the create made.
+        assert [a["role"] for a in roster(with_repo, pe_id).values() if a["role"] != "reviewer"] == ["baseline"]
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
         assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"a second hosted baseline agent at the bound: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})

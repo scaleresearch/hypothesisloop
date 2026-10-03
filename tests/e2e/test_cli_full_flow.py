@@ -79,6 +79,12 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     agent = json.loads(signup_out)["agent_id"]  # one joined agent per line, as valid JSON
     assert agent.startswith("ag-"), f"hl platform-experiments agents add: the platform issues the id, got {signup_out}"
 
+    # -- hl quota before the start: no quota is granted yet, said by its reason, and exit 1 --
+    early = api.hl_expect("quota", "--agent", agent, "--platform-experiment", pe_id)
+    assert early.returncode == 1 and early.stderr.startswith("hl: quota: quota_not_granted: ") and not early.stdout, (
+        f"hl quota before the start exited {early.returncode}: {early.stdout!r} {early.stderr!r}"
+    )
+
     api.declare_baseline_and_wait_running(pe_id)  # hl platform-experiments update --baseline-job, and the platform starts the run
 
     # -- hl hypothesis submit --file / list --
@@ -280,6 +286,12 @@ def test_usage_errors_exit_2(api):
     register_gone = api.hl_expect("register", "--id", "jane")
     assert register_gone.returncode == 2 and "unknown command" in register_gone.stderr, (
         f"hl register exited {register_gone.returncode}: {register_gone.stderr}"
+    )
+    # One file makes one platform experiment: a file that lists several is refused before any request.
+    several = yaml.safe_dump({"experiments": [{"name": "one"}, {"name": "two"}]})
+    listed = api.hl_expect("platform-experiments", "create", "-", input=several)
+    assert listed.returncode == 2 and "experiments" in listed.stderr and not listed.stdout, (
+        f"hl platform-experiments create with an experiments list exited {listed.returncode}: {listed.stderr}"
     )
     watch_bad = api.hl_expect("watch")
     assert watch_bad.returncode == 2, (
