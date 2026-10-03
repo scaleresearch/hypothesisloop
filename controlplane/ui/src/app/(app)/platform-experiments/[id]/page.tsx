@@ -26,6 +26,7 @@ import { PlatformExperimentStatus } from '@/types'
 import { Baseline } from '@/components/baseline'
 import { JobHypothesis } from '@/components/job-hypothesis'
 import { DraftView } from '@/components/draft'
+import { PhaseStrip } from '@/components/phase-strip'
 import { AgentJobsPanel, AgentSelector, CompetingAgentsChart, LiveMetricsPicker, MetricSelector, useAgentColorMap } from '@/components/experiment-charts'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { HostedMachines } from '@/components/hosted-machines'
@@ -49,6 +50,7 @@ import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis,
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
+import { phaseOf } from '@/lib/phase'
 import { pollEvery } from '@/lib/roster'
 
 function StatusBadge({ status }: { status: string }) {
@@ -255,6 +257,9 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const activeMetricKeys = selectedMetricKeys ?? new Set(metrics.map(m => m.key))
 
   const readOnly = isReadOnly(me, pe)
+  // Nobody is ranked and nothing is charted before the run starts: until then the phase strip says what happens.
+  const phase = phaseOf(pe)
+  const started = phase === 'running' || phase === 'closed'
 
   return (
     <ReadOnlyProvider value={readOnly}>
@@ -279,6 +284,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
         }
       />
 
+      <PhaseStrip pe={pe} jobs={jobRows} />
       <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       <Baseline pe={pe} />
 
@@ -369,7 +375,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
       )}
 
       {/* Competing agents over time */}
-      {metrics.length > 0 && (
+      {started && metrics.length > 0 && (
         <Card>
           <CardHeader><CardTitle>Agents over time</CardTitle></CardHeader>
           <CardContent>
@@ -492,7 +498,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
       <ExperimentAgents pe={pe} />
 
       {/* Scoreboard */}
-      <Card>
+      {started && <Card>
         <CardHeader>
           <CardTitle note={primaryStandings && `ranked by ${primaryStandings.metric} (${primaryStandings.direction})`}>Scoreboard</CardTitle>
         </CardHeader>
@@ -621,7 +627,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
             </Table>
           )}
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Live job metrics */}
       {jobRows.length > 0 && (

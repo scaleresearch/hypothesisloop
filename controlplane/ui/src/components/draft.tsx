@@ -5,17 +5,17 @@ import { useSWRConfig } from 'swr'
 import { formatDate, relTime } from '@/lib/format'
 import { abandonDraft, reviseDraft } from '@/lib/planning'
 import type { Draft } from '@/lib/planning'
-import { useRoster } from '@/lib/roster'
+import { reasonOf } from '@/lib/phase'
 import { useProjectRouter } from '@/lib/query-state'
 import { actorLabel } from '@/components/actor'
-import { AgentAtWork } from '@/components/agent-at-work'
+import { PhaseStrip } from '@/components/phase-strip'
 import { ProposalForm } from '@/components/proposal-form'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
-import { Callout, InlineError } from '@/components/ui/status-message'
+import { InlineError } from '@/components/ui/status-message'
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -63,22 +63,6 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
   )
 }
 
-/** What the planner's machine is doing, while there is no proposal to read. */
-function Planning({ draft, revising }: { draft: Draft; revising: boolean }) {
-  const { data: agents } = useRoster(draft)
-  const planner = agents?.find(a => a.flavor === 'planner')
-  return (
-    <Callout tone="info" className="grid gap-2">
-      <p role="status" className="font-semibold">{revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this.'}</p>
-      <AgentAtWork agent={planner} />
-      <p className="text-xs text-muted">
-        {planner?.instance?.stopped && 'Abandon this draft and try once more. '}
-        It has until {formatDate(draft.planning_ends_at)}; a draft with no proposal by then is closed. This page updates by itself.
-      </p>
-    </Callout>
-  )
-}
-
 /**
  * The page of an experiment that is still a draft: the sentence it came from, what its
  * planner is doing or proposed, and the two things a person does with a proposal, accepting it
@@ -88,8 +72,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
   const router = useProjectRouter()
   const { mutate } = useSWRConfig()
   const [abandonError, setAbandonError] = useState<string | null>(null)
-  if (!draft.status_reason) throw new Error(`draft ${draft.id} came without a status_reason`)
-  const state = draft.status_reason.reason
+  const state = reasonOf(draft).reason
   const reread = () => void mutate(['pe', draft.id])
   const revise = !readOnly && (state === 'proposed' || state === 'declined') && <Revise draft={draft} declined={state === 'declined'} onDone={reread} />
 
@@ -110,6 +93,7 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
         title={draft.name}
         description={<span className="text-xs text-subtle">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : 'being planned'}</span>}
       />
+      <PhaseStrip pe={draft} />
       <Card>
         <CardHeader>What you asked</CardHeader>
         <CardContent className="grid gap-2">
@@ -122,7 +106,6 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           ))}
         </CardContent>
       </Card>
-      {(state === 'planning' || state === 'revising') && <Planning draft={draft} revising={state === 'revising'} />}
       {draft.declined_reason && (
         <Card>
           <CardHeader>The planner proposed no experiment</CardHeader>

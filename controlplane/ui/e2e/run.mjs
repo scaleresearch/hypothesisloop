@@ -465,7 +465,7 @@ async function scenarios(browser) {
   await page.getByText(experimentName).first().click()
   await page.waitForURL(/\/platform-experiments\/[^/?]+/)
   const experimentURL = page.url()
-  await page.getByText('No agents yet.', { exact: true }).waitFor()
+  await page.getByText('No agents yet. Nothing runs in this experiment until at least one joins.', { exact: true }).waitFor()
   const agentAdds = []
   page.on('request', request => {
     if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/agents')) agentAdds.push(request)

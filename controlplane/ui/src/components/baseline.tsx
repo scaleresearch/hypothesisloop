@@ -2,7 +2,6 @@
 
 import useSWR from 'swr'
 import { fetchExperimentMetrics } from '@/lib/api'
-import { PlatformExperimentStatus } from '@/types'
 import type { MetricDataPoint, PlatformExperiment } from '@/types'
 import { Link } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
@@ -18,20 +17,12 @@ export function lastReported(points: MetricDataPoint[]): Map<string, number> {
 
 /**
  * What every researcher is ranked against: the job that measured the baseline with what it
- * reported, read from the job itself, or that it is still being prepared in an experiment that
- * is open and does not start without one.
+ * reported, read from the job itself. Nothing while none is declared, which the phase strip says.
  */
 export function Baseline({ pe }: { pe: PlatformExperiment }) {
   const job = pe.baseline_job_id
   const { data: points } = useSWR(job ? ['baseline', job] : null, () => fetchExperimentMetrics(job!))
-  if (!job) {
-    if (pe.status !== PlatformExperimentStatus.OPEN) return null
-    return (
-      <Callout tone="info">
-        Preparing the baseline. No researcher starts and none of their machines is rented until it is measured and declared.
-      </Callout>
-    )
-  }
+  if (!job) return null
   const reported = points && lastReported(points)
   const values = (pe.metrics ?? []).filter(m => reported?.has(m.key)).map(m => `${m.key} ${reported!.get(m.key)}`).join(', ')
   return (

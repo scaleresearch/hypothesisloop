@@ -223,10 +223,9 @@ describe('an experiment waiting to start', () => {
   const agentWaits = { reason: 'baseline_required', message: 'its machine is asked for when the platform starts the run, and none is before: platform experiment pe-1 has no baseline declared' }
   const requested = { state: 'requested', restarts: 0, stopped: false } as const
 
-  it('says the reader\'s next step in the API\'s words alone, and offers nothing to start it with', async () => {
+  it('offers nothing to start it with', async () => {
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
-    expect(screen.getByRole('status').textContent).toBe(waits.message)
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
   })
 
@@ -241,12 +240,6 @@ describe('an experiment waiting to start', () => {
     expect(row('ag-waits').getByText('waiting')).toBeTruthy()
     expect(row('ag-baseline').getByText('requested')).toBeTruthy()
     expect(row('ag-baseline').queryByText(/none is before/)).toBeNull()
-  })
-
-  it('says nothing of the kind once it runs', async () => {
-    show(PlatformExperimentStatus.RUNNING)
-    await screen.findByRole('cell', { name: 'ag-old' })
-    expect(screen.queryByRole('status')).toBeNull()
   })
 })
 

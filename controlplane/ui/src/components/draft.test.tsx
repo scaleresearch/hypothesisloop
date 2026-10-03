@@ -44,7 +44,7 @@ const proposal: Proposal = {
 function draft(reason: 'planning' | 'revising' | 'proposed' | 'declined', more: Partial<Draft> = {}): Draft {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
-    status_reason: { reason, message: '' },
+    status_reason: { reason, message: '', actor: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
     goal: 'Does a cosine schedule beat a constant one?', planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as Draft
 }
@@ -63,6 +63,7 @@ beforeEach(() => {
 const planner = (more: Partial<JoinedAgent>): JoinedAgent => (
   { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, flavor: 'planner', signed_up_at: '', actor: { kind: 'staff', id: '', name: '' }, ...more }
 )
+const phase = () => within(screen.getByRole('list', { name: 'Phase' })).getAllByRole('listitem').filter(li => li.getAttribute('aria-current') === 'step').map(li => li.textContent).join()
 const machineStep = () => within(screen.getByRole('list', { name: 'Machine' })).queryAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')?.textContent
 
 // The page said one sentence for as long as planning took, and the same one whether the
@@ -71,7 +72,8 @@ describe('a draft being planned', () => {
   it('says the phase and where the planner\'s machine stands, and offers nothing to accept', async () => {
     show(draft('planning'))
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe('The planner is working out how to measure this.')
+    expect(screen.getByRole('status').textContent).toBe(`The planner is working out how to measure this. It has until ${formatDate('2026-10-05T12:30:00Z')}; a draft with no proposal by then is closed. This page updates by itself.`)
+    expect(phase()).toBe('Planning')
     expect(await screen.findByText('Its machine is starting, which takes about a minute.')).toBeTruthy()
     expect(machineStep()).toBe('Machine starting')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
@@ -138,7 +140,9 @@ describe('a proposed draft', () => {
     expect(screen.getByText('Is 4 hours enough?')).toBeTruthy()
     expect(within(screen.getByText('Why this size').parentElement!).getByText(/30 trials each for 2 researchers is 6/)).toBeTruthy()
     expect(screen.getByText('Validation loss on held-out text is the goal itself.')).toBeTruthy()
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(phase()).toBe('Proposal')
+    expect(screen.getByRole('status').textContent).toMatch(/^The planner proposed the experiment below\. Nothing runs and nothing is spent until it is accepted/)
+    expect(screen.queryByRole('list', { name: 'Machine' })).toBeNull()
   })
 
   // The page once started the experiment right after accepting it. The platform starts it,
@@ -225,6 +229,7 @@ describe('a proposed draft', () => {
     expect(screen.getByText(/Ada asked/)).toBeTruthy()
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/changing its proposal/))
+    expect(phase()).toBe('Planning')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
   })
 
@@ -358,7 +363,8 @@ describe('a draft the planner declined', () => {
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
     expect(screen.getByText(new RegExp(`it is closed on ${formatDate('2026-10-12T12:10:00Z')} otherwise`))).toBeTruthy()
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(phase()).toBe('Proposal')
+    expect(screen.getByRole('status').textContent).toBe('The planner proposed no experiment and says why below.')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What was missing?'), 'The small transformer, by validation loss.')

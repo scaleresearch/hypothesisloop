@@ -97,6 +97,9 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   )
 }
 
+/** The anchor of the agents card, for a link that says to add a researcher. */
+export const AGENTS_CARD = 'agents'
+
 /** Who takes part in a platform experiment, and while it has not started, adding and removing them. */
 export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const { data: agents, error, mutate } = useRoster(pe)
@@ -145,7 +148,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   }
 
   return (
-    <Card>
+    <Card id={AGENTS_CARD}>
       <CardHeader><CardTitle note={agents && `(${agents.length})`}>Agents</CardTitle></CardHeader>
       <CardContent scrollX>
         <div className="grid gap-3.5">
@@ -159,9 +162,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
           {readOnly ? null : started
             ? <p className="text-xs text-subtle">The experiment is {pe.status}: from its start an agent leaves only by finishing, by being cut or by the experiment closing.</p>
             : <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
-          {pe.status === PlatformExperimentStatus.OPEN && pe.status_reason && (
-            <p role="status" className="text-xs text-subtle">{pe.status_reason.message}</p>
-          )}
           {shown.map(agent => (
             <Secret
               key={agent.agent_id}
