@@ -133,7 +133,14 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 			if err != nil {
 				return nil, fmt.Errorf("workload: ResourceSlice %q has invalid spec.nodeName", slice.GetName())
 			}
-			if node != "" && !schedulable[node] {
+			// A slice that names no node (a node selector, every node, a choice per device) puts
+			// its devices on no node a job could be placed on, so they are in no figure: counted
+			// in the total alone they read as free hardware that no node has.
+			if node == "" {
+				log.Printf("workload: ResourceSlice %q of driver %s names no node; its devices are not counted", slice.GetName(), driver)
+				continue
+			}
+			if !schedulable[node] {
 				continue
 			}
 			pool, found, err := unstructured.NestedString(slice.Object, "spec", "pool", "name")
@@ -163,9 +170,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 					entry.total++
 					if free {
 						entry.available++
-						if node != "" {
-							entry.freeByNode[node]++
-						}
+						entry.freeByNode[node]++
 					}
 					out[key] = entry
 				}

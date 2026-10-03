@@ -115,6 +115,35 @@ func TestLiveDRACapacitySnapshotsReportsRealInventory(t *testing.T) {
 	}
 }
 
+// A slice that names no node has devices no node's figure holds. Counted in the total alone they
+// read as free hardware a job is admitted for and no node can take.
+func TestDevicesOfASliceThatNamesNoNodeAreInNoFigure(t *testing.T) {
+	c := newDRATestClient(
+		tenstorrentDeviceClass(),
+		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1"),
+		tenstorrentResourceSlice("slice-anywhere", "", "chip-2", "chip-3", "chip-4"),
+	)
+
+	out, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true})
+	if err != nil {
+		t.Fatalf("liveDRACapacitySnapshots: %v", err)
+	}
+	entry := out["tenstorrent.com/chipArch=blackhole"]
+	var onNodes int64
+	for _, free := range entry.freeByNode {
+		onNodes += free
+	}
+	if entry.total != 2 || entry.available != 2 || onNodes != 2 || entry.freeByNode["worker-a"] != 2 {
+		t.Fatalf("entry = %+v, want the two devices of worker-a in every figure and no others", entry)
+	}
+
+	// A driver whose every slice names no node is still one that reported its inventory.
+	c = newDRATestClient(tenstorrentDeviceClass(), tenstorrentResourceSlice("slice-anywhere", "", "chip-2"))
+	if out, err := c.liveDRACapacitySnapshots(context.Background(), map[string]bool{"worker-a": true}); err != nil || len(out) != 0 {
+		t.Fatalf("only a slice with no node: %v, %v, want no capacity and no error", out, err)
+	}
+}
+
 func TestLiveDRACapacitySnapshotsSkipsADeviceClassItCannotRead(t *testing.T) {
 	foreignClass := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "resource.k8s.io/v1", "kind": "DeviceClass",
