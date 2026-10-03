@@ -18,8 +18,8 @@ races:
      Cluster-exclusive: it deliberately saturates a shared accelerator pool.
 
   2. `test_concurrent_same_agent_requests_race_one_quota_boundary` -- two same-agent submissions
-     that each fit alone but not both against one PostgreSQL quota boundary (phase-1 guaranteed
-     allocation 0.4 AccH, each request 0.24 AccH). The correct outcome is exactly one committed
+     that each fit alone but not both against one PostgreSQL quota boundary (each request 60% of
+     the agent's guaranteed allocation). The correct outcome is exactly one committed
      desired row and one 4xx; zero winners would expose the old provisional-row visibility race,
      two would expose over-admission. This half needs no real accelerator capacity -- the raced
      jobs are never expected to run, only to be admitted or rejected at the quota-commit boundary
@@ -131,13 +131,17 @@ def test_concurrent_same_agent_requests_race_one_quota_boundary(api, run_id, dea
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
     api.declare_baseline_and_wait_running(pe_id)
 
-    # Phase-1 guaranteed allocation is 0.4 AccH. Each job reserves 0.24 AccH, so either job fits
-    # alone but both cannot. The correct outcome is exactly one committed desired row and one 4xx;
-    # zero winners exposes the old provisional-row visibility race, while two exposes
-    # over-admission.
+    # A run of one researcher has one stage, so the agent holds its whole share from the start.
+    # Each job reserves 60% of it (4 H100 at 1 AccH each), so either job fits alone but both
+    # cannot. The correct outcome is exactly one committed desired row and one 4xx; zero winners
+    # exposes the old provisional-row visibility race, while two exposes over-admission.
+    allocation = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
+    hours = round(allocation * 0.6 / 4, 4)
+    reserved = hours * 4
+
     def fire(_i: int) -> tuple[int, str]:
         return api.submit_job_expect(
-            pe_id, agent, hours=0.06,
+            pe_id, agent, hours=hours,
             job_overrides={"accelerator_type": H100, "accelerator_count": 4},
         )
 
@@ -156,8 +160,8 @@ def test_concurrent_same_agent_requests_race_one_quota_boundary(api, run_id, dea
 
     winner_job = accepted[0][1]
     used = api.quota_field(pe_id, agent, "used_guaranteed_acch")
-    assert round(used, 6) == 0.24, (
-        f"the sole committed PostgreSQL row contributes {used} AccH desired usage; expected exactly 0.24"
+    assert abs(used - reserved) < 1e-6, (
+        f"the sole committed PostgreSQL row contributes {used} AccH desired usage; expected exactly {reserved}"
     )
 
     api.cancel_job(winner_job)
