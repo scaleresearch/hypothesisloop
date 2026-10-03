@@ -210,7 +210,8 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 // Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
 // by name: HYPOTHESISLOOP_GITHUB_LIVE_CREATE=1, on the installation
 // HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION names, which is on an organisation and grants
-// the creation of repositories. GitHub lets no installation create on a person's own account.
+// the creation of repositories. On a person's own account their own token creates, which only
+// their browser's pass through GitHub yields, so no live check covers it.
 func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	if os.Getenv("HYPOTHESISLOOP_GITHUB_LIVE_CREATE") != "1" {
 		t.Skip("HYPOTHESISLOOP_GITHUB_LIVE_CREATE is not 1: this creates a repository on an organisation and cannot delete it")
@@ -222,10 +223,10 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 		t.Fatalf("Installation(%d) = %v", installation, err)
 	}
 	if target.AccountType != AccountOrganization {
-		t.Skipf("HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION is on %s, a personal account, where GitHub lets no App installation create a repository: name an installation on an organisation", target.AccountLogin)
+		t.Skipf("HYPOTHESISLOOP_GITHUB_LIVE_CREATE_INSTALLATION is on %s, a personal account, where a repository is created with its owner's own token: name an installation on an organisation", target.AccountLogin)
 	}
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
-	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
+	created, err := client.CreateRepository(t.Context(), installation, "", name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
 	if err != nil {
 		t.Fatalf("CreateRepository(%s) = %v", name, err)
 	}

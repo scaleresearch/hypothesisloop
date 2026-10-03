@@ -107,6 +107,51 @@ func (s *AccountsStore) SetGitHubInstallationAccountType(ctx context.Context, in
 	return nil
 }
 
+// KeepGitHubUserToken records the refresh token of the person who connected an installation on
+// their own account to an org, in place of any kept before. An empty one keeps none.
+func (s *AccountsStore) KeepGitHubUserToken(ctx context.Context, orgID string, installationID int64, refreshToken string) error {
+	tag, err := s.pool.pool.Exec(ctx, `UPDATE org_github_installations SET user_refresh_token = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, refreshToken)
+	if err != nil {
+		return fmt.Errorf("accounts_store.KeepGitHubUserToken: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrGitHubInstallationNotFound
+	}
+	return nil
+}
+
+// RenewGitHubUserToken hands renew the refresh token kept for an org's installation, empty when
+// none is, and keeps the one renew answers in its place. GitHub takes a refresh token once, so
+// the row is held from the read to the write and a second renewal waits for the first. What
+// renew returns beside the next token is returned. ErrGitHubInstallationNotFound when the org
+// has not connected the installation.
+func (s *AccountsStore) RenewGitHubUserToken(ctx context.Context, orgID string, installationID int64, renew func(ctx context.Context, refreshToken string) (accessToken, next string, err error)) (string, error) {
+	tx, err := s.pool.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var kept string
+	err = tx.QueryRow(ctx, `SELECT user_refresh_token FROM org_github_installations WHERE org_id = $1 AND installation_id = $2 FOR UPDATE`, orgID, installationID).Scan(&kept)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrGitHubInstallationNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: %w", err)
+	}
+	accessToken, next, err := renew(ctx, kept)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE org_github_installations SET user_refresh_token = $3 WHERE org_id = $1 AND installation_id = $2`, orgID, installationID, next); err != nil {
+		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: keep the next token: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("accounts_store.RenewGitHubUserToken: commit: %w", err)
+	}
+	return accessToken, nil
+}
+
 // DisconnectGitHubInstallation takes an installation away from an org.
 // ErrGitHubInstallationNotFound when the org had not connected it.
 func (s *AccountsStore) DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error {

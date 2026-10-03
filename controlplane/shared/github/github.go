@@ -69,15 +69,29 @@ var (
 	// ErrInvalidRepository reports a name that is not owner/name.
 	ErrInvalidRepository = errors.New("a repository is named owner/name")
 	// ErrCannotCreateRepositories reports an installation that does not let the App create a
-	// repository on its organisation: it has not granted the permission, or the organisation
-	// forbids it. CreationNotPermittedError carries it.
+	// repository on its account: it has not granted the permission, or the account forbids it.
+	// CreationNotPermittedError carries it.
 	ErrCannotCreateRepositories = errors.New("the installation does not let the GitHub App create repositories")
-	// ErrPersonalAccount reports an installation on a person's own account, where GitHub lets no
-	// App installation create a repository.
-	ErrPersonalAccount = errors.New("a GitHub App installation creates no repository on a personal account")
+	// ErrUserAuthorization reports that the platform holds no authorisation of the App by the
+	// person a call acts for, or one GitHub no longer takes: it ran out or was revoked.
+	ErrUserAuthorization = errors.New("the person's authorisation of the GitHub App is missing, expired or revoked")
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
 )
+
+// NotCoveredError reports a repository that was created on a person's own account and that the
+// installation there, which covers selected repositories only, was not made to cover. It is left
+// on the account for its owner to add to the installation.
+type NotCoveredError struct {
+	Repository string
+	Cause      error
+}
+
+func (e *NotCoveredError) Error() string {
+	return "github: " + e.Repository + " was created and not added to the installation: " + e.Cause.Error()
+}
+
+func (e *NotCoveredError) Unwrap() error { return e.Cause }
 
 // FirstCommitError reports a repository that was created and did not take its first commit. It
 // is left on the account holding what GitHub starts one with: the App creates repositories and
@@ -136,10 +150,22 @@ const (
 type Installation struct {
 	ID           int64  `json:"installation_id"`
 	AccountLogin string `json:"account_login" doc:"The GitHub user or organisation the App is installed on. It is the owner part of every repository the installation covers."`
-	AccountType  string `json:"account_type" enum:"User,Organization" doc:"Whether that account is a person's own or an organisation. The platform creates repositories on an organisation only."`
+	AccountType  string `json:"account_type" enum:"User,Organization" doc:"Whether that account is a person's own or an organisation."`
 	// Controlled says the person asked about controls that account: it is their own, or an
 	// organisation they are an admin of. Set by UserInstallations alone.
 	Controlled bool `json:"-"`
+	// SelectedRepositories says the installation covers the repositories its owner selected and
+	// no other. Set by Installation alone.
+	SelectedRepositories bool `json:"-"`
+}
+
+// UserGrant is what a person's authorisation of the App gave: the installations they reach, and
+// RefreshToken, which renews the authorisation for six months and is empty when the App's user
+// tokens do not expire.
+type UserGrant struct {
+	Installations []Installation
+	RefreshToken  string
+	accessToken   string
 }
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
@@ -162,6 +188,8 @@ type App struct {
 	ClientID     string `json:"client_id"`
 	InstallURL   string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. GitHub sends them back with installation_id."`
 	AuthorizeURL string `json:"authorize_url" doc:"Where a person proves who they are on GitHub. Add redirect_uri and state. GitHub sends them back with code."`
+	// NewRepositoryURL is GitHub's own form for a new repository.
+	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
 }
 
 // Client is the only code that talks to GitHub. It acts as the platform's GitHub App and keeps
@@ -197,8 +225,9 @@ func New(cfg config.GitHubConfig) (*Client, error) {
 func (c *Client) App() App {
 	return App{
 		Slug: c.slug, ClientID: c.clientID,
-		InstallURL:   c.webURL + "/apps/" + url.PathEscape(c.slug) + "/installations/new",
-		AuthorizeURL: c.webURL + "/login/oauth/authorize?client_id=" + url.QueryEscape(c.clientID),
+		InstallURL:       c.webURL + "/apps/" + url.PathEscape(c.slug) + "/installations/new",
+		AuthorizeURL:     c.webURL + "/login/oauth/authorize?client_id=" + url.QueryEscape(c.clientID),
+		NewRepositoryURL: c.webURL + "/new",
 	}
 }
 
@@ -225,21 +254,40 @@ func CloneURL(fullName string) string {
 // UserInstallations returns the installations of the App that the person behind userCode
 // reaches on GitHub, each marked with whether they control the account it is on. Reaching one
 // takes no more than being a collaborator on a single repository it covers, so only Controlled
-// says who may connect it. redirectURI is the one the code was issued to. The person's token
-// answers this one question and is revoked before anything is returned.
-func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) ([]Installation, error) {
-	userToken, err := c.exchangeCode(ctx, userCode, redirectURI)
+// says who may connect it. redirectURI is the one the code was issued to. The grant is the
+// caller's to keep by its RefreshToken or to end with RevokeUser. One whose installations could
+// not be read is revoked here.
+func (c *Client) UserInstallations(ctx context.Context, userCode, redirectURI string) (*UserGrant, error) {
+	if userCode == "" {
+		return nil, ErrCodeRejected
+	}
+	tokens, err := c.userTokens(ctx, url.Values{"code": {userCode}, "redirect_uri": {redirectURI}})
 	if err != nil {
 		return nil, err
 	}
-	found, err := c.installationsOf(ctx, userToken)
-	if revokeErr := c.revoke(ctx, userToken); revokeErr != nil && err == nil {
-		err = revokeErr
-	}
-	if err != nil {
+	grant := &UserGrant{RefreshToken: tokens.RefreshToken, accessToken: tokens.AccessToken}
+	if grant.Installations, err = c.installationsOf(ctx, grant.accessToken); err != nil {
+		_ = c.RevokeUser(ctx, grant)
 		return nil, err
 	}
-	return found, nil
+	return grant, nil
+}
+
+// RefreshUser trades the refresh token of a person's grant for a token that acts as them for
+// eight hours and for the refresh token that replaces the one given, which GitHub takes once.
+// ErrUserAuthorization when there is none or GitHub no longer takes it.
+func (c *Client) RefreshUser(ctx context.Context, refreshToken string) (accessToken, next string, err error) {
+	if refreshToken == "" {
+		return "", "", ErrUserAuthorization
+	}
+	tokens, err := c.userTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}})
+	if err != nil {
+		return "", "", err
+	}
+	if tokens.RefreshToken == "" {
+		return "", "", errors.New("github: the refresh answered without the refresh token that replaces the one used")
+	}
+	return tokens.AccessToken, tokens.RefreshToken, nil
 }
 
 const pageSize = 100
@@ -342,9 +390,10 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 		return nil, err
 	}
 	var out struct {
-		ID          int64   `json:"id"`
-		SuspendedAt *string `json:"suspended_at"`
-		Account     struct {
+		ID                  int64   `json:"id"`
+		SuspendedAt         *string `json:"suspended_at"`
+		RepositorySelection string  `json:"repository_selection"`
+		Account             struct {
 			Login string `json:"login"`
 			Type  string `json:"type"`
 		} `json:"account"`
@@ -361,10 +410,10 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	if out.SuspendedAt != nil {
 		return nil, ErrInstallationGone
 	}
-	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) {
-		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for or its account, a user or an organisation")
+	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, its account, a user or an organisation, or whether it covers all repositories or selected ones")
 	}
-	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type}, nil
+	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected"}, nil
 }
 
 // Repositories lists every repository an installation covers, as GitHub pages them. The token
@@ -401,13 +450,14 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 
 var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
-// CreateRepository creates a private repository of that name on the organisation an installation
-// is on, whose default branch holds one commit: files, by path. GitHub then counts it among the
+// CreateRepository creates a private repository of that name on the account an installation is
+// on, whose default branch holds one commit: files, by path. On an organisation the installation
+// creates it, with a token that holds everything it granted, and GitHub then counts it among the
 // repositories the installation covers, whichever ones its owner selected. On a person's own
-// account it is ErrPersonalAccount and GitHub is not asked: its route for that account creates
-// "for the authenticated user", and an installation token is no user's. The token it creates
-// with holds everything the installation granted and does not leave here.
-func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error) {
+// account GitHub creates "for the authenticated user", and an installation token is no user's:
+// userToken, that person's from RefreshUser, creates it, and adds it to an installation that
+// covers selected repositories only. Neither token leaves here.
+func (c *Client) CreateRepository(ctx context.Context, installationID int64, userToken, name, description string, files map[string]string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
 	}
@@ -418,17 +468,22 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	if err != nil {
 		return nil, err
 	}
-	if installation.AccountType != AccountOrganization {
-		return nil, ErrPersonalAccount
+	owner, personal := installation.AccountLogin, installation.AccountType == AccountUser
+	creator, path := userToken, "/user/repos"
+	if personal && userToken == "" {
+		return nil, ErrUserAuthorization
 	}
-	owner := installation.AccountLogin
-	// GitHub documents no name by which a token is narrowed to creating repositories, so the
-	// token is asked for whole.
-	token, err := c.mint(ctx, installationID, map[string]any{})
-	if err != nil {
-		return nil, err
+	if !personal {
+		// GitHub documents no name by which a token is narrowed to creating repositories, so the
+		// token is asked for whole.
+		token, err := c.mint(ctx, installationID, map[string]any{})
+		if err != nil {
+			return nil, err
+		}
+		creator, path = token.Token, "/orgs/"+url.PathEscape(owner)+"/repos"
 	}
 	var out struct {
+		ID            int64  `json:"id"`
 		FullName      string `json:"full_name"`
 		Private       bool   `json:"private"`
 		DefaultBranch string `json:"default_branch"`
@@ -436,11 +491,12 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	// GitHub writes no tree to a repository with no commit, so it makes the first one itself
 	// and firstCommit takes its place.
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
-	path := "/orgs/" + url.PathEscape(owner) + "/repos"
 	var refused *refusal
-	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
+	switch err := c.call(ctx, http.MethodPost, path, creator, body, &out); {
 	case errors.Is(err, ErrRateLimited):
 		return nil, err
+	case errors.Is(err, errUnauthorized) && personal:
+		return nil, ErrUserAuthorization
 	case errors.Is(err, errUnprocessable) && errors.As(err, &refused) && refused.nameExists:
 		return nil, ErrRepositoryExists
 	case errors.Is(err, errForbidden) && errors.As(err, &refused), errors.Is(err, errNotFound) && errors.As(err, &refused):
@@ -450,8 +506,15 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	case err != nil:
 		return nil, err
 	}
-	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
+	// The name is also what says the person behind userToken owns the installation's account.
+	if !out.Private || out.ID <= 0 || !strings.EqualFold(out.FullName, owner+"/"+name) {
 		return nil, fmt.Errorf("github: POST %s answered without the private repository asked for", path)
+	}
+	if personal && installation.SelectedRepositories {
+		added := fmt.Sprintf("/user/installations/%d/repositories/%d", installationID, out.ID)
+		if err := c.call(ctx, http.MethodPut, added, userToken, nil, nil); err != nil {
+			return nil, &NotCoveredError{Repository: out.FullName, Cause: err}
+		}
 	}
 	write, err := c.Token(ctx, installationID, out.FullName, Write)
 	if err != nil {
@@ -490,12 +553,12 @@ func (c *Client) firstCommit(ctx context.Context, token *Token, branch string, f
 	return c.call(ctx, http.MethodPatch, git+"refs/heads/"+branch, token.Value, map[string]any{"sha": commit.SHA, "force": true}, nil)
 }
 
-// revoke ends a person's token at GitHub, so that nothing of theirs outlives the question it
+// RevokeUser ends a grant at GitHub, so that nothing of the person's outlives the question it
 // was issued to answer.
-func (c *Client) revoke(ctx context.Context, userToken string) error {
+func (c *Client) RevokeUser(ctx context.Context, grant *UserGrant) error {
 	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.clientID+":"+c.clientSecret))
 	path := "/applications/" + url.PathEscape(c.clientID) + "/token"
-	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": userToken}, nil)
+	err := c.request(ctx, http.MethodDelete, path, basic, maxResponseBytes, map[string]string{"access_token": grant.accessToken}, nil)
 	if errors.Is(err, errUnauthorized) {
 		return ErrAppCredentials
 	}
@@ -614,48 +677,52 @@ func (c *Client) File(ctx context.Context, token *Token, ref, path string) ([]by
 	return data, nil
 }
 
-// exchangeCode trades the code GitHub handed a person's browser for that person's token.
-func (c *Client) exchangeCode(ctx context.Context, code, redirectURI string) (string, error) {
-	if code == "" {
-		return "", ErrCodeRejected
-	}
-	form := url.Values{"client_id": {c.clientID}, "client_secret": {c.clientSecret}, "code": {code}, "redirect_uri": {redirectURI}}
+type userTokens struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	Error        string `json:"error"`
+}
+
+// userTokens trades what a person's authorisation left, the code GitHub handed their browser or
+// the refresh token of an earlier trade, for that person's tokens.
+func (c *Client) userTokens(ctx context.Context, form url.Values) (*userTokens, error) {
+	form.Set("client_id", c.clientID)
+	form.Set("client_secret", c.clientSecret)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.webURL+"/login/oauth/access_token", strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", errors.New("github: build the code exchange request")
+		return nil, errors.New("github: build the user token request")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("github: the code exchange did not complete: %w", transportError(err))
+		return nil, fmt.Errorf("github: the user token request did not complete: %w", transportError(err))
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return "", errors.New("github: the code exchange answer could not be read")
+		return nil, errors.New("github: the user token answer could not be read")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github: the code exchange answered %d", resp.StatusCode)
+		return nil, fmt.Errorf("github: the user token request answered %d", resp.StatusCode)
 	}
-	var out struct {
-		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
-	}
+	var out userTokens
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", errors.New("github: the code exchange answer is not JSON")
+		return nil, errors.New("github: the user token answer is not JSON")
 	}
 	switch {
 	case out.Error == "bad_verification_code", out.Error == "redirect_uri_mismatch":
-		return "", ErrCodeRejected
+		return nil, ErrCodeRejected
+	case out.Error == "bad_refresh_token":
+		return nil, ErrUserAuthorization
 	case out.Error == "incorrect_client_credentials":
-		return "", ErrAppCredentials
+		return nil, ErrAppCredentials
 	case out.Error != "":
-		return "", fmt.Errorf("github: the code exchange was refused: %s", bounded(out.Error))
+		return nil, fmt.Errorf("github: the user token request was refused: %s", bounded(out.Error))
 	case out.AccessToken == "":
-		return "", errors.New("github: the code exchange answered without a token")
+		return nil, errors.New("github: the user token request answered without a token")
 	}
-	return out.AccessToken, nil
+	return &out, nil
 }
 
 func (c *Client) appJWT() (string, error) {

@@ -105,6 +105,69 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 	}
 }
 
+func TestThePersonsRefreshTokenIsKeptPerOrgAndReplacedAtEachUse(t *testing.T) {
+	pool := eventsTestDB(t)
+	accounts := NewAccountsStore(pool)
+	ctx := context.Background()
+	_, orgA := newTestUserHome(t, accounts)
+	_, orgB := newTestUserHome(t, accounts)
+	for _, org := range []string{orgA, orgB} {
+		if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: org, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	renewal := func(access, next string, err error) (func(context.Context, string) (string, string, error), *string) {
+		var handed string
+		return func(_ context.Context, kept string) (string, string, error) {
+			handed = kept
+			return access, next, err
+		}, &handed
+	}
+
+	// With none kept the renewal is handed none, and what it refuses is the answer.
+	refused := errors.New("no authorisation")
+	renew, handed := renewal("", "", refused)
+	if access, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); !errors.Is(err, refused) || access != "" || *handed != "" {
+		t.Fatalf("with no token kept: got = %q, %v after handing %q, want the renewal's refusal of an empty token", access, err, *handed)
+	}
+	if err := accounts.KeepGitHubUserToken(ctx, orgA, 8, "ghr_first"); err != nil {
+		t.Fatalf("keep: %v", err)
+	}
+	renew, handed = renewal("ghu_access", "ghr_second", nil)
+	if access, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || access != "ghu_access" || *handed != "ghr_first" {
+		t.Fatalf("renew: got = %q, %v after handing %q, want the access token for the one kept", access, err, *handed)
+	}
+	// A renewal that fails leaves the token it was handed in place.
+	renew, handed = renewal("", "ghr_lost", refused)
+	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); !errors.Is(err, refused) || *handed != "ghr_second" {
+		t.Fatalf("a failed renewal: got = %v after handing %q, want the token the last renewal left", err, *handed)
+	}
+	renew, handed = renewal("ghu_access", "ghr_third", nil)
+	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || *handed != "ghr_second" {
+		t.Fatalf("after a failed renewal: got = %v after handing %q, want the token still kept", err, *handed)
+	}
+	// Another org's record of the same installation holds its own, and connecting again keeps it.
+	renew, handed = renewal("", "", refused)
+	if _, err := accounts.RenewGitHubUserToken(ctx, orgB, 8, renew); !errors.Is(err, refused) || *handed != "" {
+		t.Fatalf("the other org: handed %q, %v, want none", *handed, err)
+	}
+	if err := accounts.ConnectGitHubInstallation(ctx, &domain.OrgGitHubInstallation{OrgID: orgA, InstallationID: 8, AccountLogin: "carol", AccountType: "User", ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	renew, handed = renewal("ghu_access", "ghr_fourth", nil)
+	if _, err := accounts.RenewGitHubUserToken(ctx, orgA, 8, renew); err != nil || *handed != "ghr_third" {
+		t.Fatalf("after connecting again: handed %q, %v, want the token kept", *handed, err)
+	}
+	for name, err := range map[string]error{
+		"keep on an installation the org did not connect":  accounts.KeepGitHubUserToken(ctx, orgA, 99, "ghr_x"),
+		"renew on an installation the org did not connect": func() error { _, err := accounts.RenewGitHubUserToken(ctx, orgA, 99, renew); return err }(),
+	} {
+		if !errors.Is(err, ErrGitHubInstallationNotFound) {
+			t.Errorf("%s: got = %v, want = %v", name, err, ErrGitHubInstallationNotFound)
+		}
+	}
+}
+
 func TestTheSchemaNoLongerHoldsAProjectsRepository(t *testing.T) {
 	pool := eventsTestDB(t)
 	var exists bool
