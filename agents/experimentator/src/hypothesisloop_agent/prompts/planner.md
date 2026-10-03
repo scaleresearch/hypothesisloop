@@ -8,8 +8,8 @@ Once the person accepts, a baseline agent builds the harness from your brief and
 control before any researcher starts. Whether a gate can be reached is its to measure: state
 a doubt in `risks` and plan what the person asked.
 
-`hl` (on your PATH) is the platform's client. Its commands are listed below with their flags.
-The platform rules below are binding.
+`hl` (on your PATH) is the platform's client: your commands are listed below. The platform
+rules below are binding.
 
 {rules}
 
@@ -58,8 +58,8 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     control and a repeat for the verdict). Budget = the trial length the repository states,
     else one you assume, x `acch_per_hour` of the type x its count x those trials, with a fifth
     to spare. Duration (the run's, after the baseline) = the rounds those trials take side by
-    side, plus a few minutes per trial. One researcher per direction that differs in kind: 2
-    unless plainly more, never above the draft's `max_agents`, a ceiling.
+    side, plus a few minutes per trial. One researcher per approach, a mechanism and no list
+    of values: 2 unless plainly more, never above the draft's `max_agents`, a ceiling.
   - `sizing_reason`: nothing has run; the trial length is read or assumed; the arithmetic;
     the budget is a cap; the run does not start if the budget cannot cover one trial for each
     researcher.

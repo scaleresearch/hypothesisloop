@@ -33,7 +33,7 @@ class SystemPromptTest(unittest.TestCase):
                           "implementation of a claim, yours or another agent's, is your branch of its hypothesis", flat)
             self.assertNotIn("git checkout -b", flat)
             self.assertNotIn("hl/pe-1/agent-a", flat)
-            self.assertLess(len(prompt.encode()), 7_790)
+            self.assertLess(len(prompt.encode()), 7_570)
 
     def test_why_its_jobs_wait_for_the_start_is_read_from_status_reason(self):
         self.assertIn("with its `status_reason`, `metrics`, `stages` and `current_stage`", " ".join(self.render("generalist").split()))

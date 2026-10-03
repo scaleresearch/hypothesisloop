@@ -876,8 +876,9 @@ a leading quote.
         measured: not yet established
     report_interval_seconds: 30        # how often a job is to report
     metrics:
-      - key: val_accuracy              # one metric ranks: role ranking is the default
-        direction: maximize            # or minimize
+      - key: val_accuracy              # one metric ranks: role ranking is the default. A job ranks
+        direction: maximize            # by the best value it reports on it (or minimize: the
+                                       # lowest), so a harness reports there only its result
       - key: exact_match               # optional gate
         direction: maximize
         role: constraint
@@ -891,7 +892,8 @@ a leading quote.
     - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
       hyperparameters:                 #   data-search or hyperparameter-search. The direction you
         direction: |                   #   give a researcher goes in hyperparameters, any keys.
-          what this one tries
+          the approach this one explores: a mechanism, never a list of values to try, since
+          its researcher makes each claim under it a hypothesis of its own
     - {}
   metric_reason: |
     why this metric is the goal, in plain words

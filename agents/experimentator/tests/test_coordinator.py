@@ -84,7 +84,7 @@ class BriefingTest(unittest.TestCase):
     def test_it_acts_through_hl_and_names_no_host_tool_and_no_http_endpoint(self):
         prompt = self.render()
         self.assertIsNone(re.search(r"podman|kubectl|\bmake\b|docker|(GET|POST|PUT) /|\$API_URL|curl", prompt))
-        self.assertLess(len(prompt.encode()), 7_720)
+        self.assertLess(len(prompt.encode()), 7_480)
 
     # A coordinator of an accepted draft read "not started" and waited 36 minutes for a start
     # that only its own baseline agent could bring. The `status_reason` of an open experiment

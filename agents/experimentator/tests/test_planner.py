@@ -43,6 +43,10 @@ class PlannerPromptTest(unittest.TestCase):
         # A draft's max_agents is the most a proposal may ask for, which one read as the number.
         self.assertIn("2 unless plainly more, never above the draft's `max_agents`, a ceiling", flat)
         self.assertNotIn("Every agent competes", flat)
+        # Directions like "sweep num_workers, try 1, 2, 4, 8, 16 and 32" made each researcher's
+        # graph one root holding a whole sweep: a direction is a way to the goal, and its
+        # researcher splits it into claims.
+        self.assertIn("One researcher per approach, a mechanism and no list of values: 2 unless plainly more", flat)
         for word in ("One ranked metric that is the goal itself", "role `constraint`",
                      "With revisions, the last one is what the person wants now"):
             self.assertIn(word, flat)
@@ -67,8 +71,10 @@ class PlannerPromptTest(unittest.TestCase):
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 4_530)
-        self.assertEqual(listed(planner()), [[], ["platform-experiments", "propose"], ["platform-experiments", "decline"]])
+        self.assertLess(len(prompt.encode()), 4_380)
+        # hl's own listing named `quota`, which answers a planner 404, and no `repo init`, whose
+        # files one guessed at.
+        self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"]])
 
     # Told not to clone, a planner invented override flags and a gate for a harness the
     # repository held, and asked for 32 core-hours where its README said a trial takes 90 s.
@@ -123,7 +129,7 @@ class BaselinePromptTest(unittest.TestCase):
         self.assertIn('`hl platform-experiments agents finish --reason "baseline measured by job ID"`', flat)
         self.assertNotIn("Every agent competes", flat)
         self.assertNotIn("hl platform-experiments propose", flat)
-        self.assertLess(len(prompt.encode()), 3_700)
+        self.assertLess(len(prompt.encode()), 3_420)
         self.assertEqual(listed(baseline_agent()), [[], ["job"], ["job", "submit"], ["repo"]])
 
     # It reads where its code goes in the words the researchers' briefing uses.

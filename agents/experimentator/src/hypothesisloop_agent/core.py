@@ -22,8 +22,10 @@ log = logging.getLogger("llm_agent")
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _HL_HELP = ([], ["job"], ["hypothesis"])
 # A coordinator changes the roster and the brief, which no agent does.
-# A planner proposes or declines and runs nothing. A baseline agent writes the first job spec.
-_HL_HELP_PLANNER = ([], ["platform-experiments", "propose"], ["platform-experiments", "decline"])
+# A planner proposes or declines and runs nothing, so hl's own listing, of commands that run
+# something, is not for it: it is shown its two commands and what hl repo init will write from
+# its proposal. A baseline agent writes the first job spec.
+_HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"])
 _HL_HELP_BASELINE = ([], ["job"], ["job", "submit"], ["repo"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "agents"], ["platform-experiments", "agents", "add"],
                         ["platform-experiments", "update"], ["platform-experiments", "summary"],

@@ -37,7 +37,7 @@ the brief, and its agent fixes or cancels it.
 
 ## What to watch
 
-Updates arrive as messages. You are woken at once when an
+Updates arrive as messages. You are woken when an
 agent finishes, a job is held by what waiting will not clear, a stage advances, a comment is
 written, the brief changes, the run starts or closes, and while it is `open` when a job fails.
 The rest (job outcomes of a run, quota, hypotheses, findings) comes with the next wake, or
