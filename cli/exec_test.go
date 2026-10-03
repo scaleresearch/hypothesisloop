@@ -73,6 +73,26 @@ func TestExecReportsTheCommandsExitCodeAsItsLastLine(t *testing.T) {
 	}
 }
 
+func TestExecReportsWhenTheCommandRanJustBeforeItsExitLine(t *testing.T) {
+	before := time.Now().Truncate(time.Millisecond)
+	code, lines := execResult(t, false, "--stop-grace", "1", "--", "sh", "-c", "sleep 0.3; printf done")
+	after := time.Now()
+	startedAt, endedAt, found := exitline.FindRun(lines)
+	if code != 0 || !found || len(lines) < 3 || lines[len(lines)-2] != exitline.FormatRun(startedAt, endedAt) {
+		t.Fatalf("code %d, output %q, want the run line before the exit line", code, lines)
+	}
+	if startedAt.Before(before) || endedAt.After(after) || endedAt.Sub(startedAt) < 300*time.Millisecond {
+		t.Fatalf("ran %v to %v, want the 0.3 s of the command between %v and %v", startedAt, endedAt, before, after)
+	}
+}
+
+func TestExecReportsNoRunOfACommandThatNeverStarted(t *testing.T) {
+	code, lines := execResult(t, false, "--stop-grace", "1", "--", "/no/such/command")
+	if _, _, found := exitline.FindRun(lines); code != 127 || found {
+		t.Fatalf("code %d, output %q, want exit 127 and no run line", code, lines)
+	}
+}
+
 // A progress bar, or any last print without a newline, must not swallow the exit line.
 func TestExecReportsAfterOutputThatDoesNotEndInANewline(t *testing.T) {
 	code, lines := execResult(t, false, "--stop-grace", "1", "--", "printf", "done 100%%")

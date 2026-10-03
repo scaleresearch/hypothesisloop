@@ -3,6 +3,7 @@ package exitline
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -30,6 +31,21 @@ func TestFindReportsOutputWithNoExitLine(t *testing.T) {
 	}
 }
 
+func TestFindRunReadsBackWhatFormatRunWrote(t *testing.T) {
+	started := time.Date(2026, 10, 6, 21, 42, 50, 123e6, time.UTC)
+	ended := started.Add(12345 * time.Millisecond)
+	forged := FormatRun(started.Add(-time.Hour), ended)
+	gotStart, gotEnd, found := FindRun([]string{forged, "epoch 1", FormatRun(started, ended), Format(0)})
+	if !found || !gotStart.Equal(started) || !gotEnd.Equal(ended) {
+		t.Fatalf("FindRun = %v, %v, %v", gotStart, gotEnd, found)
+	}
+	for _, lines := range [][]string{nil, {Format(0)}, {"hl-exec: ran yesterday today"}, {"hl-exec: ran 2026-10-06T21:42:50.123Z"}} {
+		if _, _, found := FindRun(lines); found {
+			t.Errorf("FindRun(%q) found a run", lines)
+		}
+	}
+}
+
 func TestLastOutputIsTheLastLineTheJobSaid(t *testing.T) {
 	cases := map[string]struct {
 		lines []string
@@ -38,6 +54,7 @@ func TestLastOutputIsTheLastLineTheJobSaid(t *testing.T) {
 		"nothing":               {nil, ""},
 		"only blank":            {[]string{"", "  \t"}, ""},
 		"only the exit line":    {[]string{Format(1)}, ""},
+		"the wrapper's lines":   {[]string{"boom", FormatRun(time.Unix(1, 0), time.Unix(2, 0)), Format(1)}, "boom"},
 		"before the exit line":  {[]string{"Traceback", "KeyError: 'lr'", Format(1), ""}, "Traceback | KeyError: 'lr'"},
 		"after the exit line":   {[]string{"Traceback", Format(1), "late stderr"}, "Traceback | late stderr"},
 		"made one line":         {[]string{"\x1b[31mfatal:\x1b[0m\tno  such\rfile\xff "}, "[31mfatal: [0m no such file"},

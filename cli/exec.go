@@ -47,6 +47,7 @@ is written as the last line of output and returned.`, stderr)
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(stderr, "hl exec: %v\n", err)
 		return report(stdout, 127)
@@ -90,6 +91,9 @@ is written as the last line of output and returned.`, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "hl exec: %v\n", err)
 	}
+	// The runtime outside sees the instance through its vendor, which says late that the command
+	// runs and that it ended, so when it ran is measured here.
+	fmt.Fprintf(stdout, "\n%s", exitline.FormatRun(startedAt, time.Now()))
 	return report(stdout, code)
 }
 
