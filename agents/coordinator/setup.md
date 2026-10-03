@@ -224,8 +224,8 @@ The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
 has it run the coordinator: one more machine beside the agents', started from the same image with the
 platform experiment's coordinator token and briefed with
-`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, which is `supervise.md`
-for a coordinator that has `hl`, the repository and no host. It is no agent of the experiment,
+`agents/experimentator/src/hypothesisloop_agent/prompts/coordinator.md`, the one text on how a
+run is supervised, to which `supervise.md` adds the steps that need a host. It is no agent of the experiment,
 holds no quota and is not ranked. `coordinator_model` names its model; omitted, the platform's
 default applies. Both keys are read from the request only. With a hosted coordinator and hosted
 agents, creating the experiment and adding the researchers is all there is to do: the
@@ -347,7 +347,7 @@ are added (step 4):
     axis that region's own finding says moved the metric, and drop or reduce `generalist` slots.
     If the leading result was a data change, the next wave is mostly `data-search` (plus a
     `hyperparameter-search` or two to harden it), not another blind spread.
-  - Re-decide at every stage boundary (`GET .../stages` — see supervise.md), not just once:
+  - Re-decide at every stage boundary (`current_stage` in `hl platform-experiments get`), not just once:
     a stage cut is a checkpoint to read which branches of the graph are confirmed or refuted and
     adjust the *next* wave's flavor mix accordingly, the same way it decides who gets cut.
   - You cannot change a running agent's flavor (it's read once at launch) — narrowing means new
@@ -461,9 +461,10 @@ on rootless podman only: a rootful podman machine (macOS) rejects `--userns=keep
 Never use `--bare`; it ignores the token.
 
 Each agent prints its activity log to stdout: one line per action (UTC time, agent id, kind,
-summary), where the kind is `say` (its own text), `tool` (a tool call, with the Bash command),
-`error` (the first line of a failed tool result) or `event` (a platform update the harness handed
-the agent). The agent does not run `hl watch` itself: whenever it ends its turn, the harness runs
+summary), where the kind is one of seven: `say` (its own text), `tool` (a tool call, with the
+Bash command), `error` (the first line of a failed tool result), `event` (a platform update the
+harness handed the agent), `retry` (a model call that failed and is tried again), `limit` (a
+rate limit that is not `allowed`) or `slow` (a model call answered after 60 s or more). The agent does not run `hl watch` itself: whenever it ends its turn, the harness runs
 it for the agent's own resources and starts the next turn with the batch it returns, and nudges the
 agent after 30 minutes without one. The cursor lives in `.hl-state/` under `AGENT_STATE_DIR`, so a
 restarted agent resumes where it stopped. Harness logs (turn results, rate limits,
