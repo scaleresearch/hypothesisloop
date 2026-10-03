@@ -287,12 +287,21 @@ gate, writes the brief and sizes the run, and proposes the experiment
 (`hl platform-experiments propose`). It runs nothing, so a proposal is there in minutes and its
 budget is an estimate and a cap. A person then accepts it, stating the budget, the duration and
 the researchers themselves (`POST /platform-experiments/{id}/accept`), or asks for a change in a
-sentence (`.../revise`), or closes the draft. An accepted draft is an `open` experiment with a
-hosted coordinator. A planner that cannot make the goal into an experiment declines with a
+sentence (`.../revise`), or closes the draft. The planner's machine is kept after its answer
+until the draft's `planner_ends_at` (`planning.planner_kept_minutes`, 10): a revision asked for
+before then reaches the planner that is still there as its next update, and a later one starts
+the planner again with its session. A planner whose machine dies is restarted as any hosted
+agent is, and a draft whose planner is given up on before it answered is closed
+(`close_reason: planner_stopped`). While the planner's machine is up the draft carries
+`activity`, a short sentence of what the planner is doing now and since when. An accepted
+draft is an `open` experiment with a hosted coordinator, a baseline agent and its researchers.
+A planner that cannot make the goal into an experiment declines with a
 reason (`hl platform-experiments decline --reason`). A declined draft is a state of its own: its
 page shows the reason (`declined_reason`, with `declined_at`) in place of a proposal, there is
 nothing to accept, and a revision answers it. Read one by one, a draft says where it stands in
-`status_reason`: `planning`, `revising`, `proposed` or `declined`. Its `max_agents` is the most
+`status_reason`: `planning`, `revising`, `proposed` or `declined`. In every status but closed,
+`status_reason.waits_for` says whose move it is: `owner`, `coordinator` (the owner where a
+person coordinates) or `platform`, which means nobody has anything to do. Its `max_agents` is the most
 researchers a proposal may name, `max_hosted` less the coordinator and the baseline agent, until
 accepting replaces it with the number accepted.
 

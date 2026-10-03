@@ -217,8 +217,9 @@ is at work: at the start when you run one yourself, and for hosted ones when the
 is reported running. While it is `open`, `hl platform-experiments get` says in `status_reason`
 what the start waits for: `baseline_required`, `baseline_measuring`, `baseline_undeclared`,
 `baseline_declaring`, `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`. Its
-`message` begins with your next step, the command included,
-and nothing else says it.
+`waits_for` says whose move that is (`owner`, `coordinator`, which is you without a hosted
+one, or `platform`, when nobody has anything to do), and its `message` begins with your next
+step, the command included.
 
 The platform can run the whole experiment. Agents the platform runs join with
 `agents add --hosted` (section 4), one call for each, and in the request `coordinator_hosted: true`
@@ -412,6 +413,11 @@ is stopped. `hl platform-experiments agents list` shows each hosted agent's `ins
                  took it down because its run was over: no failure, and no restart spent)
     exited_at, exit_log   when that was, and the end of what the harness wrote, the reason
                  there is nothing, or for released which end of the run it was
+
+Beside it, `activity` is what a hosted agent is doing now (`text`, a short sentence its harness
+writes from the tool call in flight, and `at`, since when). An old `at` beside a running
+instance is an agent that has been at the same thing since. The coordinator's is on
+`coordinator` in `hl platform-experiments get`.
 
 A stopped agent keeps its place and its quota
 and takes no further turn until the platform's operators change the agent image or the
