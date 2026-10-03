@@ -446,8 +446,9 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *domain.Experime
 	// The job's TOTAL, not its top-level count: a grouped job states its accelerators per group
 	// and leaves the top-level count at zero, so keying on that resolved no devices and then
 	// failed the job in BuildContainerSpec for a placement nobody had been asked to make. This
-	// runtime only ever runs a one-node job, so the total is that node's own count.
-	count := exp.Job.TotalAccelerators()
+	// runtime only ever runs a one-node job, so the total is that node's own count. Read from
+	// EffectiveJob, as BuildContainerSpec reads the count it checks this placement against.
+	count := exp.EffectiveJob().TotalAccelerators()
 	if count <= 0 || onCores(exp.AcceleratorType) {
 		return Placement{}, nil
 	}

@@ -519,6 +519,26 @@ func TestADeviceIsNeverHeldByTwoJobs(t *testing.T) {
 	}
 }
 
+// Placement counted the devices of the submitted job and the container was built from the
+// resolved one, so a job whose two counts differ was refused for a placement of the wrong size.
+func TestAJobIsPlacedOnTheDevicesItsResolvedSpecCounts(t *testing.T) {
+	f := newFakeEngine()
+	e := newFakeExecutor(f, "/dev/fake/0", "/dev/fake/1")
+	ctx := t.Context()
+	job := fakeJob("resolved", "fast", 1)
+	resolved := job.Job
+	resolved.AcceleratorCount = 2
+	job.ResolvedJob = &resolved
+
+	placement, err := e.resolvePlacementFor(ctx, job)
+	if err != nil || len(placement.DevicePaths) != 2 {
+		t.Fatalf("placement = %v (err %v), want the two devices the resolved job counts", placement.DevicePaths, err)
+	}
+	if _, err := e.BuildContainerSpec(job, placement); err != nil {
+		t.Fatalf("BuildContainerSpec refused the placement made for the same job: %v", err)
+	}
+}
+
 func TestAJobCancelledMidPullEndsStopped(t *testing.T) {
 	f := newFakeEngine()
 	e := newFakeExecutor(f, "/dev/fake/0")
