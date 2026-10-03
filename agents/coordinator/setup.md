@@ -376,8 +376,9 @@ the platform after each turn and reads it back before its first turn. Work that 
 is not carried over, so an agent pushes its branch as it goes. After the third restart the agent
 is stopped. `hl platform-experiments agents list` shows each hosted agent's `instance`:
 
-    state        requested (asked for, not reported by the launcher yet, or waiting for the
-                 start), starting, running, or stopped (no restart left, or released)
+    state        waiting (the experiment is open and no machine is asked for before the
+                 start), requested (asked for, not reported by the launcher yet), starting,
+                 running, or stopped (no restart left, or released)
     asked_at     when this machine was asked of the launcher
     progress_at  when the platform last saw the harness's progress marker change
     seen_at      when the launcher first reported this machine
@@ -393,7 +394,7 @@ A stopped agent keeps its place and its quota
 and takes no further turn until the platform's operators change the agent image or the
 launcher's settings, which starts it again. There is nothing more to do for a hosted agent than
 to read that list. While the experiment is `open`, every agent but a baseline agent waits for
-the start: its `instance` reads `requested`, no machine is asked for it yet, and its
+the start: its `instance` reads `waiting`, no machine is asked for it yet, and its
 `status_reason` in that list says what the start waits for. A hosted agent whose machine is
 asked for and not running yet, its `instance` reading `requested` or `starting`, carries
 `status_reason` `instance_starting` with how long ago that was: a start in progress and no

@@ -624,9 +624,10 @@ export interface RegisteredCluster {
 // What became of the machine the platform runs for a hosted agent or a coordinator, as its
 // launcher reported it. Mirrors domain.AgentInstance.
 export interface AgentInstance {
+  // 'waiting' while the agent's platform experiment is open and no machine is asked for,
   // 'requested' until the launcher lists the machine asked for, then as it reports it, and
   // 'stopped' once no further machine is asked for.
-  state: 'requested' | 'starting' | 'running' | 'stopped'
+  state: 'waiting' | 'requested' | 'starting' | 'running' | 'stopped'
   // When the platform last saw the machine's command make progress. Absent until it first did.
   progress_at?: string
   // When the machine now asked for was asked of the launcher.
@@ -674,7 +675,7 @@ export interface AgentSignup {
 
 // An agent as the roster and the answer to adding it carry it. token is set in the answer to
 // adding one the platform does not run. status_reason is set while the agent is not at work yet:
-// it waits for its open platform experiment to start, its instance reading requested and no
+// it waits for its open platform experiment to start, its instance reading waiting and no
 // machine asked for, or its machine is asked for and not running (instance_starting).
 export interface JoinedAgent extends AgentSignup {
   token?: string

@@ -311,8 +311,9 @@ is `open` the experiment says in `status_reason` what the start waits for (`base
 `starts_at_ahead`, `no_researchers`, `budget_spent`, or `starting`), in a `message` that begins
 with the next step of whoever reads it, the command included. Each agent of the roster that
 waits for the start, every one but a baseline agent, carries the same reason in its own
-`status_reason`, its `instance` reads `requested`, and no machine is asked for it before the
-start. `hl quota` answers 404 `quota_not_granted` with that message until then. The experiment
+`status_reason`, its `instance` reads `waiting`, and no machine is asked for it before the
+start. From the start an instance reads `requested` once its machine is asked for, then
+`starting`, `running` and `stopped`. `hl quota` answers 404 `quota_not_granted` with that message until then. The experiment
 says in `baseline_due_at`
 when the platform closes it if it is not running by then, with
 `close_reason: baseline_limit_reached`. That is `planning.baseline_limit_minutes` (90) after it

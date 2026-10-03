@@ -36,6 +36,12 @@ describe('the health of a hosted machine', () => {
     expect(screen.getByText('no progress seen yet')).toBeTruthy()
   })
 
+  it('says nothing of progress while it waits for the start, when no machine exists', () => {
+    render(<InstanceHealth instance={instance({ state: 'waiting' })} />)
+    expect(screen.getByText('waiting')).toBeTruthy()
+    expect(screen.queryByText('no progress seen yet')).toBeNull()
+  })
+
   it('keeps the age of the last progress up with the clock between reads', () => {
     render(<InstanceHealth instance={instance({ progress_at: ago(30) })} />)
     expect(screen.getByText('last progress 30s ago')).toBeTruthy()

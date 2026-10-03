@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Disclosure } from '@/components/ui/disclosure'
 
 const STATE_TONE: Record<AgentInstance['state'], Tone> = {
+  waiting: 'neutral',
   requested: 'neutral',
   starting: 'warning',
   running: 'success',
@@ -49,7 +50,7 @@ export function InstanceHealth({ instance }: { instance: AgentInstance }) {
     <div className="grid justify-items-start gap-1">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <Badge tone={released && instance.state === 'stopped' ? 'neutral' : STATE_TONE[instance.state]}>{instance.state}</Badge>
-        {instance.state !== 'stopped' && (
+        {instance.state !== 'stopped' && instance.state !== 'waiting' && (
           <span className="text-xs text-muted">
             {instance.progress_at ? `last progress ${relTime(instance.progress_at)}` : 'no progress seen yet'}
           </span>

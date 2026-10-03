@@ -232,13 +232,14 @@ describe('an experiment waiting to start', () => {
 
   it('says beside an agent whose machine is not asked for yet why it waits', async () => {
     roster = [
-      { ...signup('ag-waits', true), instance: requested, status_reason: agentWaits },
+      { ...signup('ag-waits', true), instance: { ...requested, state: 'waiting' }, status_reason: agentWaits },
       { ...signup('ag-baseline', true), role: 'baseline', instance: requested },
     ]
     show(PlatformExperimentStatus.OPEN, { status_reason: waits })
     const row = (id: string) => within(screen.getByRole('cell', { name: id }).closest('tr')!)
     expect((await screen.findByText(agentWaits.message)).closest('tr')).toBe(screen.getByRole('cell', { name: 'ag-waits' }).closest('tr'))
-    expect(row('ag-waits').getByText('requested')).toBeTruthy()
+    expect(row('ag-waits').getByText('waiting')).toBeTruthy()
+    expect(row('ag-baseline').getByText('requested')).toBeTruthy()
     expect(row('ag-baseline').queryByText(/none is before/)).toBeNull()
   })
 
