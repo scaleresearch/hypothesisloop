@@ -17,10 +17,10 @@ COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","
 ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
 
 
-def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "") -> tuple[list[str], str]:
+def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0) -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
-    `hl job status`, `hl job stats` and `hl quota` print status, stats and quota and record their
-    arguments. A new one has had no outage."""
+    `hl job status`, `hl job stats` and `hl quota` print status, stats and quota, record their
+    arguments and exit read_exit. A new one has had no outage."""
     updates._unreachable_since = None
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
@@ -28,8 +28,8 @@ def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "") -> 
         with open(f"{path}.{name}", "w") as f:
             f.write(text)
     with open(path, "w") as f:
-        f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit 0; }\n"
-                "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.quota\"; exit 0; }\n"
+        f.write("#!/bin/sh\n[ \"$1\" = job ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.$2\"; exit %d; }\n"
+                "[ \"$1\" = quota ] && { echo \"$*\" >> \"$0.reads\"; cat \"$0.quota\"; exit %d; }\n" % (read_exit, read_exit) +
                 "count=$(cat \"$0.runs\" 2>/dev/null || echo 0)\nRUNS=$((count + 1))\n"
                 "echo $RUNS > \"$0.runs\"\n" + script)
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
@@ -70,25 +70,37 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
         # A job that waited an hour for cores no node had told neither its agent nor the coordinator.
         for role in ("agent", "coordinator"):
-            self.assertIn("job.held", updates.WAKES[role])
             self.assertIn("experiment.blocked", updates.WAKES[role])
-        self.assertNotIn("experiment.status", updates.WAKES["coordinator"])
+        self.assertIn("job.held", updates.WAKES["agent"])
+        # A coordinator was woken for each job a researcher's missing summary held, which only
+        # the researcher clears.
+        self.assertIn("job.held!=summary_gate", updates.WAKES["coordinator"])
+        self.assertNotIn("job.held", updates.WAKES["coordinator"])
+        self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake.startswith("experiment.status")])
         self.assertNotIn("finding.new", updates.WAKES["coordinator"] + updates.WAKES["agent"])
 
     # Three baseline jobs failed, one of them for the image the brief named, and the coordinator
-    # heard of none until the agent gave up.
-    async def test_a_coordinator_of_an_open_experiment_is_woken_by_a_job_that_ended_and_of_a_running_one_is_not(self):
+    # heard of none until the agent gave up. Woken by every job that ended, it was woken by the
+    # one that completed too, before the agent's finish it has to wait for.
+    async def test_a_coordinator_of_an_open_experiment_is_woken_by_a_job_that_failed_and_of_a_running_one_is_not(self):
         coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
-        for status, wakes in (("open", updates.WAKES["coordinator"] + ("experiment.status",)), ("running", updates.WAKES["coordinator"])):
+        for status, wakes in (("open", updates.WAKES["coordinator"] + ("experiment.status=FAILED",)), ("running", updates.WAKES["coordinator"])):
             command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{\n "status": "%s"\n}\'; exit 0; }\n'
                                        'echo "$*" >> "$0.args"\nexit 0\n' % status)
             await updates.next_batch(coordinator, lambda: False, 0.2, command=command)
             with open(counter.replace(".runs", ".args")) as f:
                 self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(wakes))
-        refused, counter = fake_hl('[ "$1" = platform-experiments ] && exit 1\necho "$*" >> "$0.args"\nexit 0\n')
-        await updates.next_batch(coordinator, lambda: False, 0.2, command=refused)
+
+    # A platform experiment that could not be read was taken as running, so a coordinator of an
+    # open one waited without the wake for a failed job and nothing said so.
+    async def test_a_wait_that_cannot_be_set_up_is_a_poll_that_failed(self):
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        refused, counter = fake_hl('[ "$1" = platform-experiments ] && { [ -e "$0.args" ] || exit 1; echo \'{"status": "open"}\'; exit 0; }\n'
+                                   'echo "$*" >> "$0.args"\nexit 0\n')
+        events = await updates.next_batch(coordinator, lambda: False, 10, command=refused, retry_s=0.1)
+        self.assertEqual([e["kind"] for e in events], ["platform.reachable"])
         with open(counter.replace(".runs", ".args")) as f:
-            self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(updates.WAKES["coordinator"]))
+            self.assertEqual(f.read().splitlines(), ["watch --no-wait --timeout 5"])
 
     async def test_a_failed_watch_is_retried(self):
         command, counter = fake_hl(f"[ $RUNS -eq 1 ] && {{ echo refused >&2; exit 2; }}\necho '{COMPLETED}'\n")
@@ -182,6 +194,15 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n")
         events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED")
+
+    # The exit code of each read was ignored, so what a failed one had printed was taken for the
+    # platform's answer.
+    async def test_a_read_that_failed_is_logged_and_adds_nothing_to_the_batch(self):
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", self.JOBS, self.STATS, self.QUOTA, read_exit=1)
+        with self.assertLogs("llm_agent", "WARNING") as logged:
+            events = await updates.drain(ENV, command=command)
+        self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED")
+        self.assertEqual(len(logged.records), 3)
 
 
 class DrainTest(unittest.IsolatedAsyncioTestCase):

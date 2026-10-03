@@ -75,10 +75,10 @@ type Options struct {
 	Follow bool
 	// NoWait returns once the events already waiting have been printed.
 	NoWait bool
-	// Wake, when set, names the kinds that end the wait. An event of another kind is neither
-	// printed nor passed by the cursor until one of these arrives, and then goes out ahead of
-	// it: until then it stays the platform's to replay.
-	Wake    map[string]bool
+	// Wake, when set, says of an event's kind and value whether it ends the wait. Any other
+	// event is neither printed nor passed by the cursor until one that does arrives, and then
+	// goes out ahead of it: until then it stays the platform's to replay.
+	Wake    func(kind, value string) bool
 	Timeout time.Duration
 	Since   int64
 	// CursorFile, when set, is where the cursor is resumed from and saved to (see cursorState).
@@ -286,7 +286,9 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 		}
 		position, _ := event["position"].(float64)
 		arrived := heldEvent{line: line, identity: string(identity), position: int64(position), cursor: int64(c)}
-		if kind, _ := event["kind"].(string); w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake[kind] {
+		kind, _ := event["kind"].(string)
+		value, _ := event["value"].(string)
+		if w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake(kind, value) {
 			// A reconnect replays what is held, since the cursor has not passed it.
 			if !slices.ContainsFunc(w.held, func(h heldEvent) bool { return h.identity == arrived.identity }) {
 				w.held = append(w.held, arrived)

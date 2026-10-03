@@ -1170,7 +1170,7 @@ estimate. value is the code of what it waits for (not_admitted_reason), detail t
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
 	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'. A job ends COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
-	wake := fs.String("wake", "", "comma-separated event kinds: return only once an event of one of them arrives, and print ahead of it the others that came before. Until then those are not printed and the next watch gets them again")
+	wake := fs.String("wake", "", "comma-separated event kinds, each KIND, KIND=VALUE for events of that value only or KIND!=VALUE for events of any other: return only once an event of one of them arrives, and print ahead of it the others that came before. Until then those are not printed and the next watch gets them again")
 	noWait := fs.Bool("no-wait", false, "print the events already waiting and return at once, without listening for more")
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
@@ -1204,7 +1204,7 @@ estimate. value is the code of what it waits for (not_admitted_reason), detail t
 		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 
-	var waking map[string]bool
+	var waking func(kind, value string) bool
 	if *wake != "" {
 		var kinds []struct {
 			Kind string `json:"kind"`
@@ -1216,13 +1216,18 @@ estimate. value is the code of what it waits for (not_admitted_reason), detail t
 		for _, k := range kinds {
 			known[k.Kind] = true
 		}
-		waking = map[string]bool{}
-		for _, kind := range strings.Split(*wake, ",") {
-			if !known[kind] {
+		entries := strings.Split(*wake, ",")
+		for _, entry := range entries {
+			if kind, _, _ := cutWake(entry); !known[kind] {
 				fmt.Fprintf(stderr, "hl watch: --wake: %q is no event kind; GET /watch/kinds lists them\n", kind)
 				return 2
 			}
-			waking[kind] = true
+		}
+		waking = func(kind, value string) bool {
+			return slices.ContainsFunc(entries, func(entry string) bool {
+				wanted, of, wakes := cutWake(entry)
+				return wanted == kind && wakes(of == value)
+			})
 		}
 	}
 
@@ -1245,6 +1250,19 @@ estimate. value is the code of what it waits for (not_admitted_reason), detail t
 		Stdout:             stdout,
 		Stderr:             stderr,
 	})
+}
+
+// cutWake reads one entry of --wake: KIND wakes for every event of the kind, KIND=VALUE for
+// those with that value and KIND!=VALUE for those with any other. wakes says, for whether an
+// event's value is the entry's, whether the event wakes.
+func cutWake(entry string) (kind, value string, wakes func(same bool) bool) {
+	if kind, value, ok := strings.Cut(entry, "!="); ok {
+		return kind, value, func(same bool) bool { return !same }
+	}
+	if kind, value, ok := strings.Cut(entry, "="); ok {
+		return kind, value, func(same bool) bool { return same }
+	}
+	return entry, "", func(bool) bool { return true }
 }
 
 // stateDir is where hl keeps state between runs: $HL_STATE_DIR, else $XDG_STATE_HOME/hl, else

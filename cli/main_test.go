@@ -919,6 +919,27 @@ func TestAWakeKindThePlatformDoesNotKnowIsRefusedBeforeAnyWatch(t *testing.T) {
 	}
 }
 
+// A coordinator was woken for a baseline job that completed, which it acts on only once the
+// agent finishes, and for a job held by a summary only its researcher files: a kind wakes for
+// the values its reader can act on.
+func TestAWakeEntryNamesAKindOrAKindWithTheValueThatWakesOrTheOneThatDoesNot(t *testing.T) {
+	for entry, wakes := range map[string]map[string]bool{
+		"experiment.status":        {"FAILED": true, "COMPLETED": true},
+		"experiment.status=FAILED": {"FAILED": true, "COMPLETED": false},
+		"job.held!=summary_gate":   {"summary_gate": false, "capacity_unavailable": true},
+	} {
+		kind, value, woken := cutWake(entry)
+		if wantKind, _, _ := strings.Cut(strings.ReplaceAll(entry, "!", ""), "="); kind != wantKind {
+			t.Errorf("%s: kind = %q", entry, kind)
+		}
+		for of, want := range wakes {
+			if woken(of == value) != want {
+				t.Errorf("%s: an event of value %s wakes = %v, want %v", entry, of, !want, want)
+			}
+		}
+	}
+}
+
 // A tunnel in front of the platform answered 530 with a whole HTML page, which hl printed into
 // the agent's context on every call.
 func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {

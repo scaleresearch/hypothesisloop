@@ -601,7 +601,7 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 		cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 		var stdout, stderr bytes.Buffer
 		code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
-			Wake: map[string]bool{"agent.finished": true}, Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+			Wake: func(kind, _ string) bool { return kind == "agent.finished" }, Timeout: 500 * time.Millisecond, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
 		if code != 0 || stdout.String() != tc.want {
 			t.Fatalf("exit code = %d, output = %q, want = %q, stderr = %s", code, stdout.String(), tc.want, stderr.String())
 		}

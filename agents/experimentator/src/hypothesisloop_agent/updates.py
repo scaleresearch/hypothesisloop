@@ -32,17 +32,20 @@ _DRAIN_S = 5
 # within seconds that an agent finished, that a job is held by what waiting will not clear or has
 # waited past its own estimate (job.held, sent once, to the job's agent too), that a stage
 # advanced, that someone wrote a comment, that the brief changed or the run closed. An agent has
-# to learn the same of its own jobs ending. Everything else is read when next acting.
+# to learn the same of its own jobs ending. Everything else is read when next acting. A kind
+# wakes only for what its reader can act on: a job held for a summary is cleared by its agent
+# alone, so it wakes no coordinator.
 WAKES = {
-    "coordinator": ("agent.finished", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
+    "coordinator": ("agent.finished", "experiment.blocked", "job.held!=summary_gate", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut",
               "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description"),
 }
-# What wakes a coordinator besides, while its platform experiment is open: every job that ends
-# then is a baseline agent's, and one that failed for what the brief says is the coordinator's to
-# repair. Three failed in a row before a coordinator heard of any, from the agent giving up.
-OPEN_WAKES = ("experiment.status",)
+# What wakes a coordinator besides, while its platform experiment is open: a job that failed then
+# is a baseline agent's, and one that failed for what the brief says is the coordinator's to
+# repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
+# that completed is acted on when its agent finishes, which wakes by itself.
+OPEN_WAKES = ("experiment.status=FAILED",)
 
 # How long an agent that ended its turn waits without any update before it is nudged: one that
 # ended its turn with nothing in flight would otherwise wait for an update that never comes.
@@ -122,16 +125,19 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     """events, completed with what whoever is told of an ended job would otherwise read: the
     machine it ran on, and for a COMPLETED one its declared metrics and, when it ranks nowhere,
     why, as its event's detail. An agent's batch closes with two more events, the count of its
-    unfinished jobs and its quota used. One hl call each per batch; what one could not read is
-    left out."""
+    unfinished jobs and its quota used. One hl call each per batch; a call that failed is logged
+    and what it would have added is left out, so the batch is delivered either way."""
     def ended(e: dict) -> bool:
         return e["kind"] == "experiment.status" and e["value"] in _ENDED
+
+    async def read(*command: str) -> list[dict]:
+        code, stdout = await _run_hl([hl, *command], env, lambda: False)
+        return _events(stdout) if code == 0 else []
 
     ids = list(dict.fromkeys(e["subject"] for e in events if ended(e)))
     if not ids:
         return events
-    _, stdout = await _run_hl([hl, "job", "status", *ids], env, lambda: False)
-    jobs = {job["id"]: job for job in _events(stdout)}
+    jobs = {job["id"]: job for job in await read("job", "status", *ids)}
 
     def told(e: dict) -> dict:
         job = jobs.get(e["subject"]) if ended(e) else None
@@ -143,13 +149,11 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     agent = _agent(env)
     if not agent:
         return events
-    _, stdout = await _run_hl([hl, "job", "stats", "--agent", agent], env, lambda: False)
-    for stats in _events(stdout):
+    for stats in await read("job", "stats", "--agent", agent):
         counts = stats["by_status"]
         events.append({"kind": "unfinished_jobs",
                        "value": ", ".join(f"{counts[s]} {s}" for s in _UNFINISHED if counts.get(s)) or "none"})
-    _, stdout = await _run_hl([hl, "quota"], env, lambda: False)
-    for q in _events(stdout):
+    for q in await read("quota"):
         events.append({"kind": "quota_used", "value": (
             f"{q['used_guaranteed_acch'] + q['used_burst_acch']:.3g} of {q['share_accelerator_hours']:g} AccH, "
             f"room for a job of {q['remaining_guaranteed_accelerator_hours']:.3g} guaranteed "
@@ -203,15 +207,26 @@ async def drain(env: dict[str, str], command: list[str] | None = None) -> list[d
     return await _with_job_state([*_events(stdout), *_polled(code)], env, command[0])
 
 
-async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...]:
-    """The kinds that end the wait of whoever watches with env, as its platform experiment
-    stands now. One it could not read is taken as running."""
+async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
+    """What ends the wait of whoever watches with env, as its platform experiment stands now.
+    None for a coordinator whose platform experiment could not be read."""
     if _agent(env):
         return WAKES["agent"]
     code, stdout = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
-    if code == 0 and json.loads(stdout)["status"] == "open":
-        return WAKES["coordinator"] + OPEN_WAKES
-    return WAKES["coordinator"]
+    if code != 0:
+        return None
+    return WAKES["coordinator"] + (OPEN_WAKES if json.loads(stdout)["status"] == "open" else ())
+
+
+async def _poll(env: dict[str, str], command: list[str], stopped: Callable[[], bool]) -> tuple[int | None, str]:
+    """One poll of the platform: the wait for an event that wakes, or in an outage only what
+    waits. A wait that could not be set up is a poll that failed."""
+    if _unreachable_since is not None:
+        return await _run_hl(_drain_command(command), env, stopped)
+    wakes = await _wakes(env, command[0])
+    if wakes is None:
+        return 1, ""
+    return await _run_hl([*command, "--wake", ",".join(wakes)], env, stopped)
 
 
 async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: float,
@@ -221,10 +236,9 @@ async def next_batch(env: dict[str, str], stopped: Callable[[], bool], idle_s: f
     [] as soon as stopped() is true. A failed hl watch is retried after retry_s, without waiting
     for an event, so the first one answered ends the wait with the platform reachable again."""
     command = command or watch_command(env)
-    waking = [*command, "--wake", ",".join(await _wakes(env, command[0]))]
     give_up = time.monotonic() + idle_s
     while not stopped() and time.monotonic() < give_up:
-        code, stdout = await _run_hl(waking if _unreachable_since is None else _drain_command(command), env, stopped)
+        code, stdout = await _poll(env, command, stopped)
         events = [*_events(stdout), *_polled(code)]
         if events:
             return await _with_job_state(events, env, command[0])

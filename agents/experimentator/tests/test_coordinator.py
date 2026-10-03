@@ -111,7 +111,7 @@ class BriefingTest(unittest.TestCase):
     # looked at one.
     def test_a_failed_baseline_job_is_the_agents_to_fix_and_the_briefs_cause_the_coordinators(self):
         flat = " ".join(self.render().split())
-        self.assertIn("and while it is `open` when a job ends", flat)
+        self.assertIn("and while it is `open` when a job fails", flat)
         self.assertIn("A failed baseline job is its agent's to fix and run again. Read `hl job logs ID`: "
                       "if the cause is in the brief (an image, a type, a config that cannot run), fix the brief", flat)
         self.assertIn("State in it only what you read on the platform", flat)
