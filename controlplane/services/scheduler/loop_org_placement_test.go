@@ -749,14 +749,71 @@ func TestAJobHeldByItsImageChoiceIsNotToldItAsksForTooMuch(t *testing.T) {
 	large := domain.CapacityFootprint(16, nil, 64<<30, 500<<30)
 	exp := &domain.Experiment{OrgID: "org-a", Job: domain.JobSpec{CPU: "8", Memory: "1Gi", Storage: "1Gi"}}
 
-	got := exceedsInstalledReason(map[string]domain.Footprint{"rented": small, "metal": large}, nil, registered, exp)
-	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image (rented), and none has installed what it asks for, " +
-		"8 cores, 1 GiB memory, 1 GiB storage. A cluster that runs the image a job names has (metal): set job.image (hl capacity lists the images offered)"
+	whenIdle := func(totals map[string]domain.Footprint) installed {
+		return installed{registered: registered, totals: totals}
+	}
+
+	got := whenIdle(map[string]domain.Footprint{"rented": small, "metal": large}).neverFitsReason(exp)
+	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, " +
+		"8 cores, 1 GiB memory, 1 GiB storage, when idle: rented has 2 cores, 8 GiB memory, 100 GiB storage. " +
+		"A cluster that runs the image a job names has it (metal): set job.image (hl capacity lists the images offered)"
 	if got != want {
 		t.Errorf("a cluster the image choice rules out has it installed:\n got %q\nwant %q", got, want)
 	}
-	if got := exceedsInstalledReason(map[string]domain.Footprint{"rented": small, "metal": small}, nil, registered, exp); got != exceedsClusterCapacityReason(exp) {
-		t.Errorf("no cluster has it installed: got %q, want %q", got, exceedsClusterCapacityReason(exp))
+	got = whenIdle(map[string]domain.Footprint{"rented": small, "metal": small}).neverFitsReason(exp)
+	want = "exceeds_cluster_capacity: the job asks for 8 cores, 1 GiB memory, 1 GiB storage, more than any connected cluster that runs it has when idle: " +
+		"rented has 2 cores, 8 GiB memory, 100 GiB storage. Ask for less (hl capacity lists what each cluster has)"
+	if got != want {
+		t.Errorf("no cluster has it installed:\n got %q\nwant %q", got, want)
+	}
+}
+
+// A job of one chip that named no image was told it asked for more than any cluster has, and its
+// agent shrank it three times: the rented cluster that runs such a job has no chip, a second
+// cluster with one job image was registered and away, and the cluster with the chip runs the
+// image a job names. A cluster that reports nothing is not judged and holds nothing open, so the
+// reason is the image choice, in the queue and at submit alike.
+func TestAClusterThatIsAwayDoesNotHideThatTheImageChoiceKeepsAJobOut(t *testing.T) {
+	const chip = "tenstorrent.com/chipArch=blackhole"
+	registered := map[string]domain.Cluster{
+		"rented": {Name: "rented", Shared: true, JobImage: "registry.test/platform-job:7"},
+		"box":    {Name: "box", Shared: true, JobImage: "registry.test/tenstorrent:7"},
+		"small":  {Name: "small", Shared: true},
+	}
+	totals := map[string]domain.Footprint{
+		"rented": domain.CapacityFootprint(64, map[string]int64{h100: 4}, 256<<30, 1<<40),
+		"small":  domain.CapacityFootprint(32, map[string]int64{chip: 1}, 128<<30, 1<<40),
+	}
+	exp := &domain.Experiment{OrgID: "org-a", AcceleratorType: chip, AcceleratorCount: 1,
+		Job: domain.JobSpec{CPU: "1", Memory: "512Mi", Storage: "512Mi", AcceleratorType: chip, AcceleratorCount: 1}}
+
+	got := installed{registered: registered, totals: totals}.neverFitsReason(exp)
+	want := "no_cluster_for_image: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, " +
+		"1 x tenstorrent.com/chiparch=blackhole, 1 core, 512 MiB memory, 512 MiB storage, when idle: " +
+		"box reports nothing now; rented has 0 x tenstorrent.com/chiparch=blackhole, 64 cores, 256 GiB memory, 1 TiB storage. " +
+		"A cluster that runs the image a job names has it (small): set job.image (hl capacity lists the images offered)"
+	if got != want {
+		t.Errorf("a cluster of the job's image choice is away:\n got %q\nwant %q", got, want)
+	}
+
+	named := *exp
+	named.Job.Image = "registry.test/tenstorrent:7"
+	if got := (installed{registered: registered, totals: totals}).neverFitsReason(&named); got != "" {
+		t.Errorf("the image named, which the cluster with the chip runs: got %q, want no reason", got)
+	}
+	// With no cluster of the choice reporting, nothing is known of the job and it waits.
+	if got := (installed{registered: registered, totals: map[string]domain.Footprint{"small": totals["small"]}}).neverFitsReason(exp); got != "" {
+		t.Errorf("no cluster of the job's image choice reports: got %q, want no reason", got)
+	}
+	// One that scales up may yet hold it.
+	if got := (installed{registered: registered, totals: totals, scalesUp: map[string]bool{"rented": true}}).neverFitsReason(exp); got != "" {
+		t.Errorf("the cluster of the job's image choice scales up: got %q, want no reason", got)
+	}
+	// A job over several nodes is judged on the clusters that run one.
+	gang := *exp
+	gang.Job.Image, gang.Job.NumNodes = "registry.test/mine:1", 2
+	if got := (installed{registered: registered, totals: totals}).neverFitsReason(&gang); got != "" {
+		t.Errorf("a job over two nodes where no cluster runs one: got %q, want no reason here, the queue names the missing capability", got)
 	}
 }
 

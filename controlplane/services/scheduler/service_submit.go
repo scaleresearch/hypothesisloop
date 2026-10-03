@@ -83,100 +83,31 @@ func (s *Service) resolveImage(job *domain.JobSpec) error {
 	return nil
 }
 
-// imageChoiceServed refuses a job that its image choice keeps off every cluster of its org
-// (noClusterForImageReason): no wait admits it, and the admission loop would say the same of it
-// for as long as it queued.
-func (s *Service) imageChoiceServed(ctx context.Context, exp *domain.Experiment) error {
-	registered, err := s.store.RegisteredClusters(ctx)
-	if err != nil {
+// runsAsStated refuses a job that no wait admits as it is stated, for its image choice or its
+// size, with the reason the admission loop would give it for as long as it queued
+// (installed.neverFitsReason).
+func (s *Service) runsAsStated(ctx context.Context, exp *domain.Experiment) error {
+	var whenIdle installed
+	var err error
+	if whenIdle.registered, err = s.store.RegisteredClusters(ctx); err != nil {
 		return fmt.Errorf("scheduler: registered clusters: %w", err)
 	}
-	runs, others := byImageChoice(registered, exp)
-	// What is installed decides only between clusters on both sides of the choice.
-	var installed map[string]domain.Footprint
-	var autoscalerEnabled map[string]bool
-	if len(runs) > 0 && len(others) > 0 {
-		if installed, err = s.clusters.GetTotalCapacity(ctx); err != nil {
-			return fmt.Errorf("scheduler: installed capacity: %w", err)
-		}
-		if autoscalerEnabled, err = s.clusters.GetAutoscalerCapability(ctx); err != nil {
-			return fmt.Errorf("scheduler: autoscaler capability: %w", err)
-		}
-	}
-	if reason := noClusterForImageReason(runs, others, installed, autoscalerEnabled, exp); reason != "" {
-		return &AdmissionError{Reason: domain.NotAdmittedNoClusterForImage, Message: strings.TrimPrefix(reason, domain.NotAdmittedNoClusterForImage+": ")}
-	}
-	return nil
-}
-
-// heldWhenIdle refuses a job that asks for more than every cluster that would run it has with
-// nothing else on it (fitsWhenIdle): no wait admits it, and the admission loop would say so for
-// as long as it queued. A cluster that scales up, or whose installed capacity was not read, may
-// yet hold it. The refusal states what the job asks for and what each cluster has.
-func (s *Service) heldWhenIdle(ctx context.Context, exp *domain.Experiment) error {
-	registered, err := s.store.RegisteredClusters(ctx)
-	if err != nil {
-		return fmt.Errorf("scheduler: registered clusters: %w", err)
-	}
-	runs, _ := byImageChoice(registered, exp)
-	if len(runs) == 0 {
-		return nil
-	}
-	installed, err := s.clusters.GetTotalCapacity(ctx)
-	if err != nil {
+	if whenIdle.totals, err = s.clusters.GetTotalCapacity(ctx); err != nil {
 		return fmt.Errorf("scheduler: installed capacity: %w", err)
 	}
-	autoscalerEnabled, err := s.clusters.GetAutoscalerCapability(ctx)
-	if err != nil {
-		return fmt.Errorf("scheduler: autoscaler capability: %w", err)
-	}
-	nodeTotals, err := s.clusters.GetNodeTotalCapacity(ctx)
-	if err != nil {
+	if whenIdle.nodeTotals, err = s.clusters.GetNodeTotalCapacity(ctx); err != nil {
 		return fmt.Errorf("scheduler: installed capacity of nodes: %w", err)
 	}
-	var offers []string
-	for _, c := range runs {
-		total, read := installed[c.Name]
-		if !read || autoscalerEnabled[c.Name] || fitsWhenIdle(total, nodeTotals[c.Name], exp) {
-			return nil
-		}
-		offers = append(offers, c.Name+" has "+describeOffer(total, nodeTotals[c.Name], exp))
+	if whenIdle.scalesUp, err = s.clusters.GetAutoscalerCapability(ctx); err != nil {
+		return fmt.Errorf("scheduler: autoscaler capability: %w", err)
 	}
-	asks := describeFootprint(exp.Footprint())
-	if nodes := exp.Job.Nodes(); nodes > 1 {
-		asks += fmt.Sprintf(" over %d nodes", nodes)
+	if whenIdle.multiNode, err = s.clusters.GetMultiNodeCapability(ctx); err != nil {
+		return fmt.Errorf("scheduler: multi-node capability: %w", err)
 	}
-	return &AdmissionError{Reason: domain.NotAdmittedExceedsClusterCapacity, Message: fmt.Sprintf(
-		"the job asks for %s, more than any cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
-		asks, strings.Join(offers, "; "))}
-}
-
-// describeOffer says what a cluster has installed of what exp asks for, and the most one node of
-// it has where it has several.
-func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
-	asked := domain.NewFootprint()
-	probe := *exp
-	types := candidateAcceleratorTypes(exp)
-	if len(types) == 0 {
-		types = []domain.AcceleratorType{exp.AcceleratorType}
+	if reason, message := domain.SplitQueueReason(whenIdle.neverFitsReason(exp)); reason != "" {
+		return &AdmissionError{Reason: reason, Message: message}
 	}
-	for _, t := range types {
-		probe.AcceleratorType = t
-		for key := range probe.Footprint() {
-			asked[key] = total[key]
-		}
-	}
-	offer := describeFootprint(asked)
-	if len(nodeTotals) < 2 {
-		return offer
-	}
-	largest := map[string]int64{}
-	for _, node := range nodeTotals {
-		for name, amount := range node {
-			largest[name] = max(largest[name], amount)
-		}
-	}
-	return offer + ", at most " + describeNodeResources(largest) + " on one node"
+	return nil
 }
 
 // Submit runs the admission gate for an experiment. On success the experiment is
@@ -276,10 +207,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if exp.OrgID, err = s.store.ProjectOrg(ctx, pe.ProjectID); err != nil {
 		return fmt.Errorf("scheduler: org of platform experiment: %w", err)
 	}
-	if err := s.imageChoiceServed(ctx, exp); err != nil {
-		return err
-	}
-	if err := s.heldWhenIdle(ctx, exp); err != nil {
+	if err := s.runsAsStated(ctx, exp); err != nil {
 		return err
 	}
 

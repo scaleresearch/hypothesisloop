@@ -154,6 +154,7 @@ func (l *Loop) tick(ctx context.Context) error {
 		l.logger.Warn("per-node total capacity unavailable; disbalance eviction cannot judge this tick", zap.Error(err))
 		nodeResourcesTotal = nil
 	}
+	whenIdle := installed{registered: registeredClusters, totals: totalCapacity, nodeTotals: nodeResourcesTotal, scalesUp: autoscalerEnabled, multiNode: multiNodeCapable}
 
 	// Credit back capacity from disbalance victims a prior tick already evicted but that this
 	// fresh read still can't see as free (the node/agent hasn't reported it back yet) — otherwise
@@ -532,6 +533,7 @@ func (l *Loop) tick(ctx context.Context) error {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			backlog.record(start, cluster, "guaranteed", exp, shortage)
 			noOffer := noOfferReason(exp, cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster])
+			neverFits := whenIdle.neverFitsReason(exp)
 			reason := ""
 			switch {
 			case leaving != "":
@@ -542,8 +544,8 @@ func (l *Loop) tick(ctx context.Context) error {
 				reason = noScalableCapacityReason()
 			case misfit != "":
 				reason = misfit
-			case exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, gAvail, multiNodeCapable, registeredClusters, exp):
-				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
+			case neverFits != "":
+				reason = neverFits
 			case noOffer != "":
 				reason = noOffer
 			default:
@@ -679,8 +681,8 @@ func (l *Loop) tick(ctx context.Context) error {
 			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
 			backlog.record(start, cluster, "burst", exp, shortage)
 			reason := misfit
-			if reason == "" && exceedsInstalled(totalCapacity, nodeResourcesTotal, autoscalerEnabled, bAvail, multiNodeCapable, registeredClusters, exp) {
-				reason = exceedsInstalledReason(totalCapacity, autoscalerEnabled, registeredClusters, exp)
+			if reason == "" {
+				reason = whenIdle.neverFitsReason(exp)
 			}
 			if reason == "" {
 				reason = noOfferReason(exp, cluster, nodeResourcesTotal[cluster], nodeResourcesAtTickStart[cluster], nodeLabels[cluster])
@@ -835,21 +837,120 @@ func holdersOf(claimed []*domain.Experiment, cluster string, shortage domain.Foo
 	return held
 }
 
-// exceedsInstalled reports whether exp asks for more than every cluster that may run it has
-// when idle (fitsWhenIdle), on each accelerator type it accepts: a job no wait will admit. A
-// cluster that scales up, or whose installed capacity was not read, may yet hold it.
-func exceedsInstalled(installed map[string]domain.Footprint, nodeTotals map[string]map[string]map[string]int64, autoscalerEnabled map[string]bool, avail map[string]domain.Footprint, multiNodeCapable map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) bool {
-	clusters, _ := eligibleClusters(avail, multiNodeCapable, registered, exp)
-	if len(clusters) == 0 {
-		return false
+// installed is what the clusters have with nothing running on them. A job is held to it at submit
+// and in the queue by the one function that reads it, neverFitsReason.
+type installed struct {
+	registered map[string]domain.Cluster
+	// totals has a cluster only while it is connected and reports all it has.
+	totals     map[string]domain.Footprint
+	nodeTotals map[string]map[string]map[string]int64
+	scalesUp   map[string]bool
+	multiNode  map[string]bool
+}
+
+// neverFitsReason is the not_admitted_reason of a job that no wait admits as it is stated, and ""
+// for one that may yet run. Such a job asks for more than every cluster that runs its image
+// choice and reports what it has installed holds when idle (fitsWhenIdle), on each accelerator
+// type the job accepts. A cluster that scales up may yet hold it. A cluster that reports nothing
+// is away or not whole: it is named and not judged, and with none judged the job waits.
+//
+// The cause is the job's image choice where a cluster that choice rules out holds the job when
+// idle, and its size otherwise. Both say what each cluster judged has.
+func (in installed) neverFitsReason(exp *domain.Experiment) string {
+	runs, others := byImageChoice(in.registered, exp)
+	if len(runs) == 0 {
+		return noClusterRunsImageReason(others, exp)
 	}
-	for cluster := range clusters {
-		total, read := installed[cluster]
-		if !read || autoscalerEnabled[cluster] || fitsWhenIdle(total, nodeTotals[cluster], exp) {
-			return false
+	spansNodes := exp.Job.Nodes() > 1
+	var judged []string
+	lacking := 0
+	for _, c := range runs {
+		total, reported := in.totals[c.Name]
+		switch {
+		case !reported:
+			judged = append(judged, c.Name+" reports nothing now")
+		case spansNodes && !in.multiNode[c.Name]:
+		case in.scalesUp[c.Name] || fitsWhenIdle(total, in.nodeTotals[c.Name], exp):
+			return ""
+		default:
+			lacking++
+			judged = append(judged, c.Name+" has "+describeOffer(total, in.nodeTotals[c.Name], exp))
 		}
 	}
-	return true
+	if lacking == 0 {
+		return ""
+	}
+	var holding []string
+	for _, c := range others {
+		total, reported := in.totals[c.Name]
+		switch {
+		case !reported || (spansNodes && !in.multiNode[c.Name]) || !fitsWhenIdle(total, in.nodeTotals[c.Name], exp):
+		case c.JobImage != "":
+			holding = append(holding, c.Name+" runs every job in "+c.JobImage)
+		default:
+			holding = append(holding, c.Name)
+		}
+	}
+	asks := describeFootprint(exp.Footprint())
+	if spansNodes {
+		asks += fmt.Sprintf(" over %d nodes", exp.Job.Nodes())
+	}
+	has := strings.Join(judged, "; ")
+	switch {
+	case len(holding) == 0:
+		return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
+			domain.NotAdmittedExceedsClusterCapacity, asks, has)
+	case exp.Job.Image == "":
+		return fmt.Sprintf("%s: the job names no image, so it runs only on a cluster with one job image, and no connected one has what it asks for, %s, when idle: %s. A cluster that runs the image a job names has it (%s): set job.image (hl capacity lists the images offered)",
+			domain.NotAdmittedNoClusterForImage, asks, has, strings.Join(holding, ", "))
+	}
+	return fmt.Sprintf("%s: the job names image %s, and no connected cluster that runs it has what the job asks for, %s, when idle: %s. A cluster with one job image has it (%s): leave job.image out to run there",
+		domain.NotAdmittedNoClusterForImage, exp.Job.Image, asks, has, strings.Join(holding, "; "))
+}
+
+// noClusterRunsImageReason is the reason of a job whose image choice no cluster of its org runs,
+// with which choice runs where. "" when the org has no cluster on the other side of the choice
+// either, which is the org's matter and none of the job's.
+func noClusterRunsImageReason(others []domain.Cluster, exp *domain.Experiment) string {
+	switch {
+	case len(others) == 0:
+		return ""
+	case exp.Job.Image == "":
+		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)"
+	}
+	serving := make([]string, len(others))
+	for i, c := range others {
+		serving[i] = c.Name + " runs every job in " + c.JobImage
+	}
+	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(serving, "; ") + ": leave job.image out to run there"
+}
+
+// describeOffer says what a cluster has installed of what exp asks for, and the most one node of
+// it has where it has several.
+func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
+	asked := domain.NewFootprint()
+	probe := *exp
+	types := candidateAcceleratorTypes(exp)
+	if len(types) == 0 {
+		types = []domain.AcceleratorType{exp.AcceleratorType}
+	}
+	for _, t := range types {
+		probe.AcceleratorType = t
+		for key := range probe.Footprint() {
+			asked[key] = total[key]
+		}
+	}
+	offer := describeFootprint(asked)
+	if len(nodeTotals) < 2 {
+		return offer
+	}
+	largest := map[string]int64{}
+	for _, node := range nodeTotals {
+		for name, amount := range node {
+			largest[name] = max(largest[name], amount)
+		}
+	}
+	return offer + ", at most " + describeNodeResources(largest) + " on one node"
 }
 
 // fitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed
@@ -896,21 +997,6 @@ func fitsInstalled(total domain.Footprint, exp *domain.Experiment) bool {
 	return false
 }
 
-// exceedsInstalledReason says why a job that exceeds what every cluster that may run it has
-// installed is not admitted: its image choice, where a cluster that choice rules out has it
-// installed, and its size otherwise.
-func exceedsInstalledReason(installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, registered map[string]domain.Cluster, exp *domain.Experiment) string {
-	runs, others := byImageChoice(registered, exp)
-	if reason := noClusterForImageReason(runs, others, installed, autoscalerEnabled, exp); reason != "" {
-		return reason
-	}
-	return exceedsClusterCapacityReason(exp)
-}
-
-func exceedsClusterCapacityReason(exp *domain.Experiment) string {
-	return domain.NotAdmittedExceedsClusterCapacity + ": it asks for " + describeFootprint(exp.Footprint()) + ", more than any connected cluster that runs it has when idle"
-}
-
 // eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
 // it: registered clusters of the job's own org and shared ones that the org has not turned off,
 // and of those, for a job that spans nodes, the ones that report multi-node execution. This is
@@ -945,7 +1031,7 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 		return map[string]domain.Footprint{}, clustersDisabledReason()
 	}
 	if runs, others := byImageChoice(registered, exp); len(runs) == 0 {
-		return map[string]domain.Footprint{}, noClusterForImageReason(runs, others, nil, nil, exp)
+		return map[string]domain.Footprint{}, noClusterRunsImageReason(others, exp)
 	}
 	if exp.Job.Nodes() <= 1 {
 		return hosted, ""
@@ -996,51 +1082,6 @@ func byImageChoice(registered map[string]domain.Cluster, exp *domain.Experiment)
 	slices.SortFunc(runs, byName)
 	slices.SortFunc(others, byName)
 	return runs, others
-}
-
-// noClusterForImageReason says that exp's image choice is what keeps it off every cluster, and
-// which choice runs where. That is so when no cluster of runs exists, and when every one of them
-// is known to have installed less than exp asks for while one of others has it installed: a
-// cluster that scales up, or whose installed capacity was not read, may yet hold the job. Empty
-// when the image choice is not the cause. A job that names an image is ruled out only by
-// clusters with another fixed one, and a job that names none only by clusters that run the image
-// a job names.
-func noClusterForImageReason(runs, others []domain.Cluster, installed map[string]domain.Footprint, autoscalerEnabled map[string]bool, exp *domain.Experiment) string {
-	if len(others) == 0 {
-		return ""
-	}
-	var lacking, serving []string
-	for _, c := range runs {
-		total, read := installed[c.Name]
-		if !read || autoscalerEnabled[c.Name] || fitsInstalled(total, exp) {
-			return ""
-		}
-		lacking = append(lacking, c.Name)
-	}
-	for _, c := range others {
-		total, read := installed[c.Name]
-		if len(runs) > 0 && (!read || !fitsInstalled(total, exp)) {
-			continue
-		}
-		if c.JobImage != "" {
-			serving = append(serving, c.Name+" runs every job in "+c.JobImage)
-		} else {
-			serving = append(serving, c.Name)
-		}
-	}
-	if len(serving) == 0 {
-		return ""
-	}
-	needs := describeFootprint(exp.Footprint())
-	switch {
-	case exp.Job.Image == "" && len(runs) == 0:
-		return domain.NotAdmittedNoClusterForImage + ": the job names no image, and every cluster that takes this org's jobs runs the image a job names: set job.image (hl capacity lists the images offered)"
-	case exp.Job.Image == "":
-		return domain.NotAdmittedNoClusterForImage + ": the job names no image, so it runs only on a cluster with one job image (" + strings.Join(lacking, ", ") + "), and none has installed what it asks for, " + needs + ". A cluster that runs the image a job names has (" + strings.Join(serving, ", ") + "): set job.image (hl capacity lists the images offered)"
-	case len(runs) == 0:
-		return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(serving, "; ") + ": leave job.image out to run there"
-	}
-	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and no cluster that runs it (" + strings.Join(lacking, ", ") + ") has installed what the job asks for, " + needs + ". A cluster with one job image has (" + strings.Join(serving, "; ") + "): leave job.image out to run there"
 }
 
 func cloneAvail(avail map[string]domain.Footprint) map[string]domain.Footprint {
