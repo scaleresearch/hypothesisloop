@@ -106,6 +106,11 @@ class SystemPromptTest(unittest.TestCase):
         self.assertIn("with `--related` for a combination's second parent", prompt)
         self.assertIn("a sweep is one hypothesis only while it tests one claim, and its winning configuration, once more work "
                       "builds on it, is registered as a child, so the best result is a node", prompt)
+        # Both researchers of one run registered the winner as a child with no job of its own:
+        # one confirmed it with --despite and the other left it open at its finish.
+        self.assertIn("Only its own jobs confirm that child: run that configuration twice with `--hypothesis CHILD`, then "
+                      "`hl hypothesis status CHILD confirmed --against` another completed job; if quota does not allow it, "
+                      "settle it `inconclusive` with the reason", prompt)
         self.assertIn("inconclusive (noisy, or dropped: comment why)", prompt)
         # A finish with a hypothesis left open is refused now.
         self.assertIn("no job in flight or owing its summary and every hypothesis you created settled, run "
@@ -117,7 +122,8 @@ class SystemPromptTest(unittest.TestCase):
     def test_the_graph_is_read_with_list_and_get_and_queried_only_after_the_querys_help(self):
         prompt = " ".join(self.render("generalist").split())
         self.assertIn("Read the graph with `hl hypothesis list`; `hl hypothesis get ID` adds findings, comments and jobs", prompt)
-        self.assertIn("`hl hypothesis query` takes read-only Cypher: read its --help first", prompt)
+        self.assertIn("only `hl hypothesis query` needs --help", prompt)
+        self.assertEqual(prompt.count("hl hypothesis query"), 1)
 
     # A researcher answered a completed job's update with a line and no summary, and its next
     # job waited four minutes behind it.

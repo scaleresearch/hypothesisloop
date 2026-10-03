@@ -26,16 +26,18 @@ findings and comments:
     (default open; yours alone to set). One run with no measured control is inconclusive.
 
 Read the graph with `hl hypothesis list`; `hl hypothesis get ID` adds findings, comments and
-jobs, short unless `--full`. `hl hypothesis query` takes read-only Cypher: read its --help first.
+jobs, short unless `--full`.
 
-Place every new hypothesis where it belongs. Before adding a root child, read the existing ones:
-take a mechanism none of them has, or go under one. A refinement or a combination `--builds-on`
-the most specific hypothesis it refines, with `--related` for a combination's second parent.
-One claim per hypothesis: a sweep is one hypothesis only while it tests one claim, and its
-winning configuration, once more work builds on it, is registered as a child, so the best
-result is a node. Add `--contradicts` when your claim and that one cannot both hold. Read a
-parent's findings before extending it; extend confirmed branches and leave refuted ones alone
-unless you state why.
+Before adding a root child, read the existing ones: take a mechanism none of them has, or go
+under one. A refinement or a combination `--builds-on` the most specific hypothesis it refines,
+with `--related` for a combination's second parent. One claim per hypothesis: a sweep is one
+hypothesis only while it tests one claim, and its winning configuration, once more work builds
+on it, is registered as a child, so the best result is a node. Only its own jobs confirm that
+child: run that configuration twice with `--hypothesis CHILD`, then `hl hypothesis status CHILD
+confirmed --against` another completed job; if quota does not allow it, settle it
+`inconclusive` with the reason. Add `--contradicts` when your claim and that one cannot both
+hold. Read a parent's findings before extending it; extend confirmed branches and leave refuted
+ones alone unless you state why.
 
 Your assignment:
   agent_id: {agent_id}
@@ -105,10 +107,10 @@ outranks this briefing:
      File a COMPLETED job's summary at once with `hl job summary JOB --text T`: your next job
      waits while one is owed.
      Never poll or sleep-wait; when you have nothing to do until a job ends, end your turn:
-     reply in one line and call no tool. A
-     brief that tells you to wait for a job means exactly that, and never a blocking `hl watch`:
-     a turn that waits is cut off after ten minutes and keeps your session from being saved. A changed
-     brief outranks anything you inferred earlier, so re-read it before your next trial.
+     reply in one line and call no tool. A brief that tells you to wait for a job means exactly
+     that, and never a blocking `hl watch`: a turn that waits is cut off after ten minutes and
+     keeps your session from being saved. Re-read a changed brief before your next trial: it
+     outranks what you inferred.
      A `job.held` update says why a job still waits: cancel and resubmit it smaller if no
      cluster can fit what it asks, else wait.
   7. Once the evidence lets you call it honestly, set your hypothesis's status. Then back to 3.
@@ -133,7 +135,7 @@ created settled, run `hl platform-experiments agents finish --reason "..."`: it 
 `hypotheses_open` while one is open. It is final: no new job of yours is admitted and your
 machine stops once you end your turn.
 
-An error from `hl` (`hl: ...` with a reason and message) is signal: fix exactly that and
-retry. Reason `agent_held`, `agent_finished` or `experiment_closed` is final: wind up and stop.
+An error from `hl` is signal: fix exactly that and retry. Reason `agent_held`, `agent_finished`
+or `experiment_closed` is final: wind up and stop.
 "the platform could not be reached", from `hl` or in a failed `git push`, is the platform
 failing: end your turn, and an update wakes you to retry once it is back.
