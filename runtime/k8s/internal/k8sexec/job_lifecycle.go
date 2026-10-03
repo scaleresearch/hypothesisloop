@@ -619,18 +619,31 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	// A device is counted under every label in its vendor's domain, for the same reason DRA
 	// devices are counted under every attribute: these are selectors a job picks one of, not a
 	// partition, and it keeps the platform from having to decide which label is the model name.
+	//
+	// A node advertising several extended resources in one domain is counted under none of that
+	// domain's labels: nothing says which resource a label describes, and
+	// resolveDevicePluginPlacement refuses to place a job there for the same reason.
 	for _, node := range nodes {
 		nodeLabels[node.Name] = node.Labels
-		for resourceName, allocatable := range node.Status.Allocatable {
+		byDomain := map[string][]corev1.ResourceName{}
+		for resourceName := range node.Status.Allocatable {
 			name := string(resourceName)
 			if !strings.Contains(name, "/") || strings.HasPrefix(name, "kubernetes.io/") {
 				continue
 			}
-			free := allocatable.Value() - requested[node.Name][resourceName]
+			byDomain[resourceDomain(name)] = append(byDomain[resourceDomain(name)], resourceName)
+		}
+		for domainName, resourceNames := range byDomain {
+			if len(resourceNames) > 1 {
+				sort.Slice(resourceNames, func(a, b int) bool { return resourceNames[a] < resourceNames[b] })
+				log.Printf("workload: node %s advertises several %s extended resources (%v); reporting no capacity for that domain on it", node.Name, domainName, resourceNames)
+				continue
+			}
+			allocatable := node.Status.Allocatable[resourceNames[0]]
+			free := allocatable.Value() - requested[node.Name][resourceNames[0]]
 			if free < 0 {
 				free = 0
 			}
-			domainName := resourceDomain(name)
 			for labelKey, labelValue := range node.Labels {
 				if resourceDomain(labelKey) != domainName {
 					continue

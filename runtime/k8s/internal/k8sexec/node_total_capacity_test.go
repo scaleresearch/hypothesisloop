@@ -78,6 +78,39 @@ func TestGetNodeTotalCapacityExcludesNonPlatformPodsButNotPlatformOnes(t *testin
 	}
 }
 
+// A label counts the devices of the one extended resource its domain advertises on the node. A
+// node with two resources in a domain used to report whichever the map walk reached last per node
+// and both added together in the total; placement refuses such a node, so it reports none.
+func TestANodeWithTwoResourcesInOneDomainReportsNoCapacityForIt(t *testing.T) {
+	gpuNode := func(name string, resources map[corev1.ResourceName]int64) *corev1.Node {
+		node := totalCapacityTestNode(name, 8, 32)
+		node.Labels = map[string]string{"nvidia.com/gpu.product": "H100"}
+		for resourceName, count := range resources {
+			node.Status.Allocatable[resourceName] = *resource.NewQuantity(count, resource.DecimalSI)
+		}
+		return node
+	}
+	holder := requestingPod("holder", "plain", true, 1000)
+	holder.Spec.Containers[0].Resources.Requests["nvidia.com/gpu"] = *resource.NewQuantity(1, resource.DecimalSI)
+	c := newDRATestClient()
+	c.kube = fake.NewClientset(
+		gpuNode("plain", map[corev1.ResourceName]int64{"nvidia.com/gpu": 4}),
+		gpuNode("mixed", map[corev1.ResourceName]int64{"nvidia.com/gpu": 2, "nvidia.com/mig-1g.5gb": 7}),
+		holder)
+
+	const key = "nvidia.com/gpu.product=H100"
+	for range 20 {
+		available, total, byNode, _, err := c.GetLiveAcceleratorCapacitySnapshot(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, mixedReported := byNode["mixed"][key]
+		if total[key] != 4 || available[key] != 3 || byNode["plain"][key] != 3 || mixedReported {
+			t.Fatalf("total %d, available %d, by node %v; want the plain node's 4 with 3 free and nothing for the mixed node", total[key], available[key], byNode)
+		}
+	}
+}
+
 // A node's whole cores are units of the CPU type, counted from what Kubernetes already says and
 // written nowhere. A chip job and a job on cores share a node: the cores the chip job holds are
 // gone from the free count, and the job on cores is a pod that requests its cpu and nothing else.
