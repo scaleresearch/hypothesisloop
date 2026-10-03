@@ -115,7 +115,7 @@ describe('the repository of a new platform experiment', () => {
     show()
     const create = await screen.findByRole('link', { name: 'create it on GitHub' })
     expect(create.getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
-    expect(screen.getByRole('link', { name: 'add it to the App\'s repositories' }).getAttribute('href')).toBe('https://github.test/install')
+    expect(screen.getByRole('link', { name: 'give the App access' }).getAttribute('href')).toBe('https://github.test/install')
     await userEvent.click(screen.getByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
     expect(screen.queryByRole('option', { name: /acme\/mine/ })).toBeNull()
@@ -164,8 +164,7 @@ describe('the repository of a new platform experiment', () => {
   it('leads to the GitHub card of Settings when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect(await screen.findByText(/No GitHub account is connected to Lab, and an experiment keeps its code in a repository\./)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Connect GitHub in Settings' }).getAttribute('href')).toBe('/settings?project=prj_1#github')
+    expect((await screen.findByRole('link', { name: 'Connect GitHub in Settings' })).getAttribute('href')).toBe('/settings?project=prj_1#github')
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(fetchGitHubRepositories).not.toHaveBeenCalled()
   })
@@ -175,7 +174,6 @@ describe('the repository of a new platform experiment', () => {
     show()
     await userEvent.type(await screen.findByRole('textbox', { name: 'Repository' }), 'sweep.git')
     expect(screen.getByRole('status').textContent).toBe('sweep.git')
-    expect(screen.getByText(/created there beforehand/)).toBeTruthy()
     expect(fetchGitHubInstallations).not.toHaveBeenCalled()
   })
 

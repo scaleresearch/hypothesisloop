@@ -37,7 +37,7 @@ const variantClass: Record<Variant, string> = {
 const sizeClass: Record<Size, string> = {
   default: 'h-9 px-4 text-sm',
   sm: 'h-8 px-3 text-xs',
-  icon: 'h-6 w-6 flex-none text-xs',
+  icon: 'h-5 w-5 flex-none text-xs',
 }
 
 const linkSizeClass: Record<Size, string> = {

@@ -56,8 +56,8 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   if (app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED) {
     return (
       <>
-        <Input mono className="w-full" aria-label="Repository" value={value} onChange={e => onChange(e.target.value)} />
-        <p className="text-sm text-muted">The name of a repository on this deployment&apos;s git host, created there beforehand.</p>
+        <Input className="w-full" aria-label="Repository" value={value} onChange={e => onChange(e.target.value)} />
+        <p className="text-xs text-subtle">A repository on this deployment&apos;s git host, created there first.</p>
       </>
     )
   }
@@ -65,8 +65,8 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   if (installations.error) return <InlineError>Could not load the GitHub accounts of {org.name}: {installations.error.message}</InlineError>
   if (installations.data && !connected) {
     return (
-      <p className="text-sm text-muted">
-        No GitHub account is connected to {org.name}, and an experiment keeps its code in a repository.{' '}
+      <p className="text-xs text-muted">
+        No GitHub account is connected to {org.name}.{' '}
         <TextLink inline href={`/settings#${GITHUB_CARD}`}>Connect GitHub in Settings</TextLink>
       </p>
     )
@@ -97,7 +97,6 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
   return (
     <>
       <SearchableSelect
-        mono={!compact}
         fieldSize="default"
         className={compact ? 'w-56' : 'w-full'}
         value={value}
@@ -111,13 +110,11 @@ export function RepositorySelect({ value, onChange, notCreated, compact = false 
       />
       {notCreated && <InlineError>The platform could not create the repository: {notCreated}</InlineError>}
       {app.data && (!compact || notCreated) && (
-        <p className="text-sm text-muted">
-          To use a repository of your own,{' '}
-          <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a>,{' '}
-          <a href={app.data.install_url} target="_blank" rel="noreferrer" className={inlineLinkClass}>add it to the App&apos;s repositories</a>{' '}
-          when the App covers selected ones only, then{' '}
-          <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>{' '}
-          and choose it.
+        <p className="text-xs text-subtle">
+          Not listed?{' '}
+          <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a> or{' '}
+          <a href={app.data.install_url} target="_blank" rel="noreferrer" className={inlineLinkClass}>give the App access</a>, then{' '}
+          <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>.
         </p>
       )}
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}

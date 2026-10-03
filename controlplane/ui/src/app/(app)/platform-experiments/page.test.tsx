@@ -20,7 +20,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api', async importActual => ({
   ...(await importActual<typeof import('@/lib/api')>()),
-  apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
+  addPlatformExperimentAgents: vi.fn(), apiSend: vi.fn(), createPlatformExperiment: vi.fn(), fetchAgentsPage: vi.fn(), fetchExperimentStats: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(),
   fetchGitHubRepositories: vi.fn(), fetchOrgClusters: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
 }))
 vi.mock('@/components/platform-experiment-card', () => ({
@@ -124,7 +124,8 @@ describe('the experiments page', () => {
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
     await userEvent.type(dialog.getByPlaceholderText(/^Goals, evaluation protocol/), 'The brief')
-    await userEvent.click(dialog.getByRole('button', { name: 'Next: budget and rules' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
     expect(await dialog.findByText('the org has reached its limit of platform experiments')).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
