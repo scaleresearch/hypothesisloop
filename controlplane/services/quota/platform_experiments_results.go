@@ -22,8 +22,11 @@ type AgentStanding struct {
 	Basis        string `json:"basis"`
 	ExperimentID string `json:"experiment_id,omitempty"`
 	CodeRef      string `json:"code_ref,omitempty"`
-	// HypothesisID and Env say what that experiment tested and with which settings.
+	// HypothesisID and Env say what that experiment tested and with which settings. A job on the
+	// objective tested no hypothesis: Objective says so, as the job's own answer does
+	// (domain.Experiment.OnObjective).
 	HypothesisID string            `json:"hypothesis_id,omitempty"`
+	Objective    bool              `json:"objective,omitempty" doc:"True when the job measured the platform experiment's objective and tested no hypothesis: it has no hypothesis_id."`
 	Env          map[string]string `json:"env,omitempty"`
 }
 
@@ -206,7 +209,10 @@ func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.Platfo
 				return nil, fmt.Errorf("results: %s: job %s: %w", metric.Key, b.ExperimentID, err)
 			}
 			if exp != nil {
-				st.CodeRef, st.HypothesisID, st.Env = exp.CodeRef, exp.HypothesisID, exp.Job.Env
+				st.CodeRef, st.Env, st.Objective = exp.CodeRef, exp.Job.Env, exp.OnObjective()
+				if !st.Objective {
+					st.HypothesisID = exp.HypothesisID
+				}
 			}
 		}
 		standings = append(standings, st)

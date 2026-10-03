@@ -127,9 +127,14 @@ func (f *standingsStore) ListSignupsByRole(ctx context.Context, platformExpID st
 	return f.competitors, nil
 }
 
+// job-c2 is on the objective of pe-1, as a baseline agent's job is stored.
 func (f *standingsStore) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
-	return &domain.Experiment{ID: id, CodeRef: "repo@" + id, HypothesisID: "hyp-" + id,
-		Job: domain.JobSpec{Env: map[string]string{"LR": "0.1"}}}, nil
+	job := &domain.Experiment{ID: id, CodeRef: "repo@" + id, HypothesisID: "hyp-" + id, PlatformExperimentID: "pe-1",
+		Job: domain.JobSpec{Env: map[string]string{"LR": "0.1"}}}
+	if id == "job-c2" {
+		job.HypothesisID = "pe-1"
+	}
+	return job, nil
 }
 
 // The metrics store answers for every agent that reported, which is the point — a baseline's
@@ -158,8 +163,12 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	if got, want := standings[0].AgentID, "c1"; got != want {
 		t.Errorf("rank 1 = %v, want %v", got, want)
 	}
-	if st := standings[0]; st.CodeRef != "repo@job-c1" || st.HypothesisID != "hyp-job-c1" || st.Env["LR"] != "0.1" {
+	if st := standings[0]; st.CodeRef != "repo@job-c1" || st.HypothesisID != "hyp-job-c1" || st.Objective || st.Env["LR"] != "0.1" {
 		t.Errorf("rank 1 = %+v, want the code ref, hypothesis and env of job-c1", st)
+	}
+	// It was shown the platform experiment's id as the hypothesis it tested.
+	if st := standings[1]; st.HypothesisID != "" || !st.Objective || st.CodeRef != "repo@job-c2" {
+		t.Errorf("rank 2 = %+v, want job-c2 on the objective with no hypothesis id", st)
 	}
 	for _, st := range standings {
 		if st.AgentID == "baseline" {
