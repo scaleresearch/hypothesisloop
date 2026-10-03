@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -48,6 +50,17 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 		if err != nil || stats.Total != len(tc.want) {
 			t.Fatalf("%s: stats = (%+v, %v), want total %d", tc.name, stats, err, len(tc.want))
 		}
+	}
+}
+
+// A taken id was told from the text of the database's error.
+func TestAnAgentIDThatIsTakenIsRefusedAsExisting(t *testing.T) {
+	pool := eventsTestDB(t)
+	id := "veteran-" + uuid.New().String()[:8]
+	createTestAgent(t, pool, id)
+	err := NewAgentsStore(pool).CreateAgent(context.Background(), &domain.Agent{ID: id, Name: "again", OrgID: "default", CreatedAt: time.Now().UTC()})
+	if !errors.Is(err, ErrAgentExists) {
+		t.Fatalf("a second agent of id %s: %v, want ErrAgentExists", id, err)
 	}
 }
 
