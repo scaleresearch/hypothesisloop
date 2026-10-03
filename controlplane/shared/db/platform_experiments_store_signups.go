@@ -490,7 +490,21 @@ type LauncherAgent struct {
 	// AgentImage is the image the agent's platform experiment names for its machines, empty for
 	// the platform's own.
 	AgentImage string
+	// EndsBy is the latest moment a machine rented for the agent now may still run
+	// (launcherEndsBySQL).
+	EndsBy time.Time
 }
+
+// launcherEndsBySQL is the latest moment platform experiment pe can still have a machine, $2
+// seconds of wind-down included: of a draft the end of its planning, of a running one the end
+// of its run, and of an open one the end of the longest run it can still have, which starts at
+// its baseline deadline. A running one's never moves. An open one's moves only when its owner
+// changes starts_at or duration_hours, and a machine rented before that ends at the moment it
+// was rented with.
+const launcherEndsBySQL = `(CASE pe.status
+            WHEN 'closed' THEN pe.closed_at
+            WHEN 'open' THEN pe.ends_at + make_interval(secs => pe.duration_hours * 3600)
+            ELSE pe.ends_at END + make_interval(secs => $2))`
 
 // launcherAgentsFrom selects the hosted agents a launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
@@ -519,7 +533,7 @@ WHERE s.hosted AND s.launcher = $1
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
 func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, launcher string, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image, `+launcherEndsBySQL+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -529,7 +543,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, launcher, windDown.Seconds())
 	for rows.Next() {
 		var agent LauncherAgent
 		var err error
-		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage); err != nil {
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage, &agent.EndsBy); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 		}
 		agents = append(agents, agent)

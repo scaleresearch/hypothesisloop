@@ -61,24 +61,41 @@ func newControlPlane(t *testing.T) *controlPlane {
 }
 
 type entry struct {
-	Name  string            `json:"name"`
-	Image string            `json:"image"`
-	Env   map[string]string `json:"env"`
+	Name   string            `json:"name"`
+	Image  string            `json:"image"`
+	Env    map[string]string `json:"env"`
+	EndsAt time.Time         `json:"ends_at"`
 }
 
+// testEndsAt is the moment every instance of these tests must be gone by.
+var testEndsAt = time.Now().Add(36 * time.Hour).UTC().Truncate(time.Second)
+
 func agent(name string) entry {
-	return entry{Name: name, Image: "registry.example.invalid/agent:1", Env: map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}}
+	return entry{Name: name, Image: "registry.example.invalid/agent:1", Env: map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}, EndsAt: testEndsAt}
 }
 
 func (cp *controlPlane) want(instances []entry, ending []string) {
+	cp.answer(http.StatusOK, answerOf(instances, ending, ""))
+}
+
+// refuse answers with the lists and a refusal of the launcher's configuration.
+func (cp *controlPlane) refuse(instances []entry, ending []string, message string) {
+	cp.answer(http.StatusOK, answerOf(instances, ending, message))
+}
+
+func answerOf(instances []entry, ending []string, refusal string) string {
 	if instances == nil {
 		instances = []entry{}
 	}
 	if ending == nil {
 		ending = []string{}
 	}
-	raw, _ := json.Marshal(map[string]any{"instances": instances, "ending": ending})
-	cp.answer(http.StatusOK, string(raw))
+	answer := map[string]any{"instances": instances, "ending": ending}
+	if refusal != "" {
+		answer["refusal"] = map[string]string{"reason": "pass_does_not_fit", "message": refusal}
+	}
+	raw, _ := json.Marshal(answer)
+	return string(raw)
 }
 
 func (cp *controlPlane) answer(status int, body string) {
@@ -155,6 +172,10 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 	h.names(full("a"), full("b"))
 
 	spec := h.rented.Spec(full("a"))
+	if left := time.Until(testEndsAt); spec.Lifetime > left || spec.Lifetime < left-time.Minute || spec.Lifetime%time.Second != 0 {
+		t.Fatalf("lifetime = %s, want the whole seconds left until ends_at, %s", spec.Lifetime, left)
+	}
+	spec.Lifetime = 0
 	want := provider.Spec{
 		Name:        full("a"),
 		Image:       "registry.example.invalid/agent:1",
@@ -180,8 +201,8 @@ func TestEveryCreateStopAndDestroyIsLoggedWithTheInstanceIDAndTheReason(t *testi
 	h.cp.want(nil, []string{"b"})
 	h.mustPass()
 	want := []string{
-		"created " + full("a") + " (asked for and not rented), instance " + a,
-		"created " + full("b") + " (asked for and not rented), instance " + b,
+		"created " + full("a") + " (asked for and not rented), instance " + a + ", which ends itself at " + testEndsAt.Format(time.RFC3339),
+		"created " + full("b") + " (asked for and not rented), instance " + b + ", which ends itself at " + testEndsAt.Format(time.RFC3339),
 		"destroyed " + full("a") + " (no longer desired), instance " + a,
 		"told " + full("b") + " to stop (ending), instance " + b,
 	}
@@ -190,19 +211,33 @@ func TestEveryCreateStopAndDestroyIsLoggedWithTheInstanceIDAndTheReason(t *testi
 	}
 }
 
-// The lifetime is what ends a machine when this launcher is gone, so it is on every instance it
-// rents.
-func TestEveryInstanceIsRentedWithTheLaunchersLifetime(t *testing.T) {
+// The lifetime is what ends a machine when this launcher is gone or cut off. It is the time left
+// until the moment the control plane names for that instance, and nothing of the launcher's own.
+func TestEachInstanceIsRentedWithTheTimeLeftUntilItsOwnEnd(t *testing.T) {
 	h := newHarness(t)
-	launcher := h.launcherWith(func(c *Config) { c.Lifetime = 36 * time.Hour })
-	h.cp.want([]entry{agent("a"), agent("b")}, nil)
-	if err := launcher.Pass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"a", "b"} {
-		if got := h.rented.Spec(full(name)).Lifetime; got != 36*time.Hour {
-			t.Errorf("%s is rented with a lifetime of %s, want 36h", name, got)
+	short, long := agent("a"), agent("b")
+	short.EndsAt, long.EndsAt = time.Now().Add(2*time.Hour), time.Now().Add(100*time.Hour)
+	h.cp.want([]entry{short, long}, nil)
+	h.mustPass()
+	for name, want := range map[string]time.Duration{"a": 2 * time.Hour, "b": 100 * time.Hour} {
+		if got := h.rented.Spec(full(name)).Lifetime; got > want || got < want-time.Minute || got%time.Second != 0 {
+			t.Errorf("%s is rented with a lifetime of %s, want whole seconds just under %s", name, got, want)
 		}
+	}
+}
+
+// A machine with no time left would be rented with no bound at all, so it is not rented.
+func TestAnInstanceWhoseEndHasPassedIsNotRentedAndTheRestOfThePassRuns(t *testing.T) {
+	h := newHarness(t)
+	late := agent("a")
+	late.EndsAt = time.Now().Add(-time.Minute)
+	h.cp.want([]entry{late, agent("b")}, nil)
+	if err := h.pass(); err == nil || !strings.Contains(err.Error(), "create "+full("a")+": its ends_at") {
+		t.Fatalf("pass = %v, want the create refused for its passed ends_at", err)
+	}
+	h.names(full("b"))
+	if h.rented.Calls("Create") != 1 {
+		t.Fatalf("creates = %d", h.rented.Calls("Create"))
 	}
 }
 
@@ -471,7 +506,6 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 	for what, edit := range map[string]func(*Config){
 		"token":    func(c *Config) { c.Token = "hls_another" },
 		"interval": func(c *Config) { c.Interval = time.Hour },
-		"lifetime": func(c *Config) { c.Lifetime = time.Hour },
 	} {
 		cfg := h.config()
 		edit(&cfg)
@@ -652,15 +686,19 @@ func TestAnAnswerThatIsNotACompleteListChangesNothing(t *testing.T) {
 		"an error with 200":       {http.StatusOK, `{"error":"something"}`},
 		"instances null":          {http.StatusOK, `{"instances":null,"ending":[]}`},
 		"no ending list":          {http.StatusOK, `{"instances":[]}`},
-		"truncated":               {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}`},
-		"instance without a name": {http.StatusOK, `{"instances":[{"image":"i","env":{}}],"ending":[]}`},
-		"instance without image":  {http.StatusOK, `{"instances":[{"name":"a","env":{}}],"ending":[]}`},
-		"name outside the rules":  {http.StatusOK, `{"instances":[{"name":"A_b","image":"i","env":{}}],"ending":[]}`},
-		"name too long":           {http.StatusOK, `{"instances":[{"name":"` + strings.Repeat("x", 120) + `","image":"i","env":{}}],"ending":[]}`},
-		"one name twice":          {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}},{"name":"a","image":"i","env":{}}],"ending":[]}`},
-		"running and ending":      {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}],"ending":["a"]}`},
+		"truncated":               {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}`},
+		"instance without a name": {http.StatusOK, `{"instances":[{"image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"instance without image":  {http.StatusOK, `{"instances":[{"name":"a","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"name outside the rules":  {http.StatusOK, `{"instances":[{"name":"A_b","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"name too long":           {http.StatusOK, `{"instances":[{"name":"` + strings.Repeat("x", 120) + `","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"one name twice":          {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"},{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"running and ending":      {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"2099-01-01T00:00:00Z"}],"ending":["a"]}`},
 		"ending without a name":   {http.StatusOK, `{"instances":[],"ending":[""]}`},
-		"sets the launcher's env": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{"CLAUDE_CODE_OAUTH_TOKEN":"x"}}],"ending":[]}`},
+		"sets the launcher's env": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{"CLAUDE_CODE_OAUTH_TOKEN":"x"},"ends_at":"2099-01-01T00:00:00Z"}],"ending":[]}`},
+		"instance without an end": {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{}}],"ending":[]}`},
+		"an end that is no time":  {http.StatusOK, `{"instances":[{"name":"a","image":"i","env":{},"ends_at":"in three days"}],"ending":[]}`},
+		"refusal without message": {http.StatusOK, `{"instances":[],"ending":[],"refusal":{"reason":"pass_does_not_fit"}}`},
+		"conflict":                {http.StatusConflict, `{"instances":[],"ending":[]}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
@@ -766,46 +804,33 @@ func TestEveryQuestionSaysHowTheLauncherPacesItsPasses(t *testing.T) {
 	}
 }
 
-// The platform's limits can change under a launcher that holds machines. Its process is the only
-// thing that stops and destroys them, so it outlives the refusal.
-func TestARefusalAfterTheFirstPassKeepsRunPassingUntilItsInstancesAreEndedAndDestroyed(t *testing.T) {
-	const refusal = `{"error":"this launcher's pass does not fit the platform's agents.boot_limit_seconds"}`
+// The refusal stops creation and nothing else: the launcher's process is the only thing that
+// stops and destroys what it holds, so the lists of a refused answer are acted on.
+func TestARefusedPassStopsAndDestroysByTheListsAndCreatesNothing(t *testing.T) {
 	h := newHarness(t)
-	launcher := h.launcherWith(func(*Config) {})
-	launcher.cfg.Interval = 5 * time.Millisecond
-	h.cp.want([]entry{agent("a"), agent("b")}, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- launcher.Run(ctx) }()
-	h.eventually("both instances rented", func() bool { return len(h.rented.Names()) == 2 })
-	h.rented.Start(full("a"))
-
-	h.cp.answer(http.StatusConflict, refusal)
-	h.eventually("refused passes logged", func() bool { return h.logged("agents.boot_limit_seconds") >= 3 })
-	select {
-	case err := <-done:
-		t.Fatalf("Run returned %v on a refusal after its first pass, with %v still rented", err, h.rented.Names())
-	default:
+	h.cp.want([]entry{agent("kept"), agent("over"), agent("winding-down")}, nil)
+	h.mustPass()
+	for _, name := range h.rented.Names() {
+		h.rented.Start(name)
 	}
-	h.names(full("a"), full("b"))
-	if h.rented.Calls("Create") != 2 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Stop") != 0 {
-		t.Fatalf("refused passes changed the provider: creates %d destroys %d stops %d", h.rented.Calls("Create"), h.rented.Calls("Destroy"), h.rented.Calls("Stop"))
+	kept := h.rented.IDs(full("kept"))
+
+	h.cp.refuse([]entry{agent("kept"), agent("new")}, []string{"winding-down"}, "this launcher's pass does not fit the platform's agents.boot_limit_seconds")
+	for range 2 {
+		err := h.pass()
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "pass_does_not_fit: this launcher's pass does not fit the platform's agents.boot_limit_seconds") {
+			t.Fatalf("pass = %v, want the refusal in the control plane's words", err)
+		}
+	}
+	h.names(full("kept"), full("winding-down"))
+	if h.rented.Calls("Create") != 3 || h.rented.Calls("Destroy") != 1 || h.rented.Stops(full("winding-down")) != 2 || !reflect.DeepEqual(h.rented.IDs(full("kept")), kept) {
+		t.Fatalf("refused passes: creates %d destroys %d stops %d, want nothing created, the one over destroyed and the ending one told to stop on each",
+			h.rented.Calls("Create"), h.rented.Calls("Destroy"), h.rented.Stops(full("winding-down")))
 	}
 
-	h.cp.want(nil, []string{"a"})
-	h.eventually("the ending instance told to stop and the other destroyed", func() bool {
-		return h.rented.Stops(full("a")) > 0 && reflect.DeepEqual(h.rented.Names(), []string{full("a")})
-	})
-	h.cp.want(nil, nil)
-	h.eventually("nothing rented", func() bool { return len(h.rented.Names()) == 0 })
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("Run = %v", err)
-	}
-	if h.rented.Calls("Create") != 2 {
-		t.Fatalf("creates = %d", h.rented.Calls("Create"))
-	}
+	h.cp.want([]entry{agent("kept"), agent("new")}, nil)
+	h.mustPass()
+	h.names(full("kept"), full("new"))
 }
 
 func (h *harness) eventually(what string, reached func() bool) {
@@ -817,21 +842,38 @@ func (h *harness) eventually(what string, reached func() bool) {
 	}
 }
 
-func TestARefusalOfTheLaunchersConfigurationOnTheFirstPassEndsRunWithTheControlPlanesWords(t *testing.T) {
+// A launcher refused at its start may be the only thing left to end what an earlier process of
+// its name rented, so its first pass is like any other: it ends by the lists and goes on passing.
+func TestRunRefusedOnItsFirstPassEndsWhatAnEarlierProcessRentedAndKeepsPassing(t *testing.T) {
 	h := newHarness(t)
-	rent(t, h.rented, full("kept"))
-	h.cp.answer(http.StatusConflict, `{"error":"2 x (10 new instances per answer x create_pause 30s + reconcile_interval 15s) = 10m30s is above agents.boot_limit_seconds 5m0s"}`)
+	rent(t, h.rented, full("over"))
+	rent(t, h.rented, full("winding-down"))
+	h.cp.refuse([]entry{agent("new")}, []string{"winding-down"}, "is above agents.boot_limit_seconds 5m0s")
+	launcher := h.launcherWith(func(*Config) {})
+	launcher.cfg.Interval = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- h.launcher.Run(context.Background()) }()
+	go func() { done <- launcher.Run(ctx) }()
+	h.eventually("the earlier process's instances ended", func() bool {
+		return h.rented.Stops(full("winding-down")) > 0 && reflect.DeepEqual(h.rented.Names(), []string{full("winding-down")})
+	})
+	h.eventually("the refusal said on every pass", func() bool { return h.logged("is above agents.boot_limit_seconds 5m0s") >= 3 })
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "is above agents.boot_limit_seconds 5m0s") {
-			t.Fatalf("Run returned %v, want the refusal with its arithmetic", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run kept passing after the control plane refused the launcher's configuration")
+		t.Fatalf("Run returned %v on a refusal, with %v still rented", err, h.rented.Names())
+	default:
 	}
-	h.names(full("kept"))
+	if creates := h.rented.Calls("Create"); creates != 2 {
+		t.Fatalf("creates = %d, want only the two of the earlier process", creates)
+	}
+
+	h.cp.want([]entry{agent("new")}, nil)
+	h.eventually("the instance rented once the refusal is gone", func() bool { return reflect.DeepEqual(h.rented.Names(), []string{full("new")}) })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
 }
 
 func TestAnExitedInstancesOutputIsSentWithoutTheLaunchersOwnCredential(t *testing.T) {
@@ -917,8 +959,6 @@ func TestAConfigThatCannotLaunchIsRefused(t *testing.T) {
 		"no model provider": func(c *Config) { c.ModelProvider = "" },
 		"no provider env":   func(c *Config) { c.Env = nil },
 		"negative pause":    func(c *Config) { c.CreatePause = -time.Second },
-		"negative lifetime": func(c *Config) { c.Lifetime = -time.Second },
-		"lifetime of 1.5s":  func(c *Config) { c.Lifetime = 1500 * time.Millisecond },
 		"empty env value":   func(c *Config) { c.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": ""} },
 		"no provider":       func(c *Config) { c.Provider = nil },
 		"no http client":    func(c *Config) { c.HTTPClient = nil },

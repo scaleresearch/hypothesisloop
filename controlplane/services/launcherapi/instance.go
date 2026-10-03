@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
@@ -13,10 +14,14 @@ import (
 
 // Instance is one machine a launcher keeps: what it boots and the environment its agent starts
 // with. Name is its identity, and the launcher puts its own prefix in front of it.
+//
+// EndsAt bounds a machine nobody can reach any more: the launcher rents it with the time left
+// until then as its lifetime. It is no part of the name, so a later one replaces nothing.
 type Instance struct {
-	Name  string            `json:"name"`
-	Image string            `json:"image"`
-	Env   map[string]string `json:"env"`
+	Name   string            `json:"name"`
+	Image  string            `json:"image"`
+	Env    map[string]string `json:"env"`
+	EndsAt time.Time         `json:"ends_at" doc:"The latest moment the instance may run: the latest end its platform experiment can still have, wind-down included. A rented instance ends by itself then."`
 }
 
 const (

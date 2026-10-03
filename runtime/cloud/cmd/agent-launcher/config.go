@@ -61,9 +61,6 @@ type instanceConfig struct {
 	CPU     string   `yaml:"cpu"`
 	Memory  string   `yaml:"memory"`
 	Storage string   `yaml:"storage"`
-	// LifetimeSeconds is the longest an instance runs before it ends by itself, launcher or no
-	// launcher. Left out, an instance ends only when this launcher ends it.
-	LifetimeSeconds int `yaml:"lifetime_seconds"`
 }
 
 func loadConfig(path string) (*config, error) {
@@ -115,7 +112,6 @@ func (cfg *config) launch() agentlaunch.Config {
 		APIURL:        cfg.APIURL,
 		Command:       cfg.Instance.Command,
 		Size:          cfg.size,
-		Lifetime:      time.Duration(cfg.Instance.LifetimeSeconds) * time.Second,
 		ModelProvider: cfg.ModelProvider.Name,
 		Env:           cfg.modelProviderEnv,
 		Interval:      time.Duration(cfg.ReconcileIntervalSeconds) * time.Second,

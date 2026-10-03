@@ -95,10 +95,22 @@ const maxRequestBytes = 16 << 20
 // Ending names instances whose run is over: they are told to stop and are otherwise left
 // alone for a last turn, neither created nor replaced nor destroyed. An
 // instance in neither list should not exist.
+//
+// Refusal is set while the platform refuses the launcher's own configuration. The lists stand
+// and are acted on as in any answer, so every machine whose run is over is still ended, and
+// nothing new is rented: Instances then names only machines asked for before.
 type Desired struct {
 	Instances []Instance `json:"instances"`
 	Ending    []string   `json:"ending"`
+	Refusal   *Refusal   `json:"refusal,omitempty" doc:"Present while the platform refuses this launcher's configuration. The launcher creates no instance, and stops and destroys by the two lists as always."`
 }
+
+type Refusal struct {
+	Reason  string `json:"reason" enum:"pass_does_not_fit" doc:"pass_does_not_fit: one pass of the launcher can outlast the platform's boot limit or progress limit."`
+	Message string `json:"message" doc:"What to change, in the launcher's config or the platform's."`
+}
+
+const refusalPassDoesNotFit = "pass_does_not_fit"
 
 // kept is one thing a launcher keeps a machine for: an agent, or a platform experiment's
 // coordinator, whose agentID is empty. Both are evaluated by the same steps.
@@ -106,6 +118,8 @@ type kept struct {
 	platformExperimentID, agentID string
 	instance                      domain.AgentInstance
 	ending                        bool
+	// endsBy is the latest moment a machine rented for it now may still run.
+	endsBy time.Time
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch   string
 	describe func(restarts int) (Instance, error)
@@ -133,7 +147,10 @@ func (h *Handler) imageOf(agentImage string) string {
 // left, and which get another machine after theirs ended. One that cannot be evaluated is
 // logged and left out and the rest of the list stands. It also records whether the launcher
 // holds machines once it has acted on the answer, which is what its removal waits for.
-func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed) (*Desired, error) {
+//
+// With a refusal everything is recorded and evaluated the same and no new machine is asked for:
+// the answer carries the refusal beside the machines to keep and the ones that end.
+func (h *Handler) reconcile(ctx context.Context, launcher string, observed Observed, refusal *Refusal) (*Desired, error) {
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
 	if err := h.store.ReleaseInstances(ctx, launcher, domain.AgentWindDown); err != nil {
@@ -160,7 +177,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "",
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, instance: *agent.Instance, ending: agent.Ended != "", endsBy: agent.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(restarts int) (Instance, error) {
 				return instanceFor(signup, restarts, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -170,7 +187,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 	for _, coordinator := range coordinators {
 		pe, model, image := coordinator.PlatformExperimentID, coordinator.Model, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending,
+			platformExperimentID: pe, instance: coordinator.Instance, ending: coordinator.Ending, endsBy: coordinator.EndsBy,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(restarts int) (Instance, error) {
 				return coordinatorInstanceFor(pe, model, restarts, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
@@ -178,11 +195,16 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		})
 	}
 
-	out := &Desired{Instances: []Instance{}, Ending: []string{}}
+	out := &Desired{Instances: []Instance{}, Ending: []string{}, Refusal: refusal}
 	asked := 0
 	for _, one := range all {
 		log := h.logger.With(zap.String("launcher", launcher), zap.String("platformExpID", one.platformExperimentID), zap.String("agentID", one.agentID))
 		current := one.instance
+		describe := func(restarts int) (Instance, error) {
+			instance, err := one.describe(restarts)
+			instance.EndsAt = one.endsBy.UTC()
+			return instance, err
+		}
 		if one.ending {
 			// Named as it was created, whatever config says now: a new name would have its
 			// machine destroyed in the middle of its last turn.
@@ -199,7 +221,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		} else if current.Stopped {
 			continue
 		}
-		instance, err := one.describe(restarts)
+		instance, err := describe(restarts)
 		if err != nil {
 			log.Error("hosted instance cannot be described", zap.Error(err))
 			continue
@@ -218,7 +240,7 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 					continue
 				}
 				current.Name = ""
-				if instance, err = one.describe(after.Restarts); err != nil {
+				if instance, err = describe(after.Restarts); err != nil {
 					log.Error("hosted instance cannot be described", zap.Error(err))
 					continue
 				}
@@ -227,8 +249,9 @@ func (h *Handler) reconcile(ctx context.Context, launcher string, observed Obser
 		if instance.Name != current.Name {
 			// A launcher creates one machine after another, so an answer asks for a bounded
 			// number of new ones and the rest wait for the next: a pass must end, and its
-			// machines be reported, well inside the boot limit.
-			if asked == h.cfg.MaxNewPerAnswer {
+			// machines be reported, well inside the boot limit. A refused launcher is asked for
+			// none.
+			if refusal != nil || asked == h.cfg.MaxNewPerAnswer {
 				continue
 			}
 			asked++
@@ -329,7 +352,8 @@ func (o Observed) validate() error {
 	return nil
 }
 
-// fits refuses a launcher whose pass can outlast the boot limit or the progress limit. A running
+// fits is the refusal of a launcher whose pass can outlast the boot limit or the progress limit,
+// nil for one that fits. A running
 // machine's progress reaches the platform once a pass, so the progress limit has to cover two
 // of them as well.
 //
@@ -337,7 +361,7 @@ func (o Observed) validate() error {
 // MaxNewPerAnswer new machines, which the launcher creates one after another with its pause
 // between them and reports with its next question, one interval later. A machine not reported
 // within the boot limit of being asked for spends a restart, so the limit has to cover that.
-func (h *Handler) fits(o Observed) error {
+func (h *Handler) fits(o Observed) *Refusal {
 	pause := time.Duration(o.CreatePauseMilliseconds) * time.Millisecond
 	interval := time.Duration(o.ReconcileIntervalSeconds) * time.Second
 	pass := time.Duration(h.cfg.MaxNewPerAnswer)*pause + interval
@@ -346,8 +370,8 @@ func (h *Handler) fits(o Observed) error {
 		value time.Duration
 	}{{"boot_limit_seconds", h.cfg.BootLimit}, {"progress_limit_seconds", h.cfg.ProgressLimit}} {
 		if 2*pass > limit.value {
-			return fmt.Errorf("this launcher's pass does not fit the platform's agents.%s: %d new instances per answer x create_pause %s + reconcile_interval %s = %s, and twice that must be at most agents.%s %s. Lower the launcher's create_pause_milliseconds or reconcile_interval_seconds, or change the platform's agents.max_new_instances_per_answer or agents.%s",
-				limit.key, h.cfg.MaxNewPerAnswer, pause, interval, pass, limit.key, limit.value, limit.key)
+			return &Refusal{Reason: refusalPassDoesNotFit, Message: fmt.Sprintf("this launcher's pass does not fit the platform's agents.%s: %d new instances per answer x create_pause %s + reconcile_interval %s = %s, and twice that must be at most agents.%s %s. Lower the launcher's create_pause_milliseconds or reconcile_interval_seconds, or change the platform's agents.max_new_instances_per_answer or agents.%s",
+				limit.key, h.cfg.MaxNewPerAnswer, pause, interval, pass, limit.key, limit.value, limit.key)}
 		}
 	}
 	return nil
@@ -361,12 +385,14 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		Summary: "Report a launcher's instances and receive the ones it should keep", Tags: []string{"agent-launcher"},
 		MaxBodyBytes: maxRequestBytes,
 		Description: "The launcher sends what its provider lists, for an exited instance the end of its output, for a running one its progress marker, and how it paces its passes. The answer is its complete desired state. " +
-			"instances: each {name, image, env} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
+			"instances: each {name, image, env, ends_at} should exist and be running: one per hosted agent, and one per platform experiment whose coordinator the platform runs. " +
+			"ends_at is the latest moment its platform experiment can still have a machine, wind-down included, and the launcher rents the instance so that it ends by itself then, reachable or not. It decides nothing about an instance already rented. " +
 			"ending: names whose agent's run is over; each is told to stop and is otherwise left to finish, neither created nor replaced nor destroyed. " +
 			"Any other instance of the launcher should not exist, and an answer asks for a bounded number of instances that do not exist yet: the rest follow in the next. " +
 			"The platform gives up on an instance that exited, that the provider listed and no longer does, that was not listed within the platform's boot limit of being asked for, " +
 			"that stayed starting for the boot limit, or that runs while the progress marker it reports has not changed for the platform's progress limit. That is recorded on its agent, and the launcher never replaces one on its own: " +
-			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one.",
+			"the answer either asks for the agent under a new name or no longer names it. The answer is a list and carries no rule; ask again for the next one. " +
+			"A launcher whose pass can outlast the platform's boot limit or progress limit is answered 200 with refusal {reason: pass_does_not_fit, message}: the two lists stand and are acted on, so instances whose run is over are still stopped and destroyed, no instance that does not exist yet is asked for, and the launcher creates none until an answer carries no refusal.",
 	}, func(ctx context.Context, in *struct {
 		Name string `path:"name"`
 		Body Observed
@@ -374,10 +400,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := in.Body.validate(); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
 		}
-		if err := h.fits(in.Body); err != nil {
-			return nil, huma.Error409Conflict(err.Error())
-		}
-		desired, err := h.reconcile(ctx, in.Name, in.Body)
+		desired, err := h.reconcile(ctx, in.Name, in.Body, h.fits(in.Body))
 		if err != nil {
 			// Never the answer itself: it holds every agent's token.
 			return nil, auth.Internal(h.logger, "launcher reconcile failed", err, zap.String("launcher", in.Name))

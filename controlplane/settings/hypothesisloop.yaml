@@ -72,7 +72,8 @@ auth:
 #              how long a pass takes. A launcher says how it paces itself with every question and
 #              is refused unless twice (this x its create pause + its interval) fits the boot
 #              limit: with 10 here, the 1 s pause and 15 s interval of the launcher's example
-#              settings, a pass is 25 s and the limit must be at least 50 s.
+#              settings, a pass is 25 s and the limit must be at least 50 s. A refused launcher
+#              rents nothing new and still stops and destroys the machines whose run is over.
 #   max_hosted_per_platform_experiment  how many machines the platform runs for one platform
 #              experiment: its hosted agents of every role and its coordinator. Written onto the
 #              platform experiment when it is created, so a change bounds new ones only.

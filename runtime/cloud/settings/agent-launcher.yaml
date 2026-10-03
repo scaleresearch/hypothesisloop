@@ -42,21 +42,18 @@ provider:
 # fails the create of every agent on every pass, which the log reports as NO AGENT COULD BE
 # STARTED. The storage here is under the smallest disk among the providers shipped, about
 # 11 GiB; check cpu and memory against the section of the one you configure.
+#
+# How long an instance may run is the control plane's to say as well: each one is rented to end
+# by itself at the latest moment its platform experiment can still be running, so a launcher
+# that is down or cut off leaves nothing running past that. Its command is killed inside the
+# machine and compute is no longer billed. A provider that ends every instance at an age of its
+# own (settings/provider.<name>.yaml) still does, whichever comes first.
 instance:
   # The whole argv, in place of the image's entrypoint.
   command: ["uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"]
   cpu: "2"
   memory: 4Gi
   storage: 10Gi
-  # The longest an instance runs before it ends by itself: its command is killed inside the
-  # machine and compute is no longer billed, whether or not this launcher is alive or can reach
-  # the provider. It bounds what a launcher that is down or cut off leaves running. The control
-  # plane sees such an ending as any other exit and spends one of the agent's restarts on it, so
-  # set it above the longest run an agent should have. A changed value holds for the instances
-  # rented after it and replaces none. A provider that ends every instance at an age of its own
-  # (settings/provider.<name>.yaml) still does, whichever comes first. Left out, an instance
-  # ends only when this launcher ends it.
-  lifetime_seconds: 259200
 
 # Whose models the agents run on, and what that provider's harness needs in every instance. Each
 # env entry is a variable of the instance (name) and the variable of this process that holds its

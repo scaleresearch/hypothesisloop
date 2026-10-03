@@ -33,8 +33,11 @@ var contractSettings = launcherapi.Settings{
 	SigningSecret: contractSecret, BootLimit: contractBootLimit, ProgressLimit: 4 * contractBootLimit, MaxNewPerAnswer: 50,
 }
 
+// contractEndsBy is the latest end of every platform experiment of these tests.
+var contractEndsBy = time.Now().Add(30 * time.Hour)
+
 func hostedAgent(pe, agent string) db.LauncherAgent {
-	return db.LauncherAgent{AgentSignup: domain.AgentSignup{
+	return db.LauncherAgent{EndsBy: contractEndsBy, AgentSignup: domain.AgentSignup{
 		PlatformExperimentID: pe, AgentID: agent, Hosted: true, Launcher: "main",
 		Flavor: "data-search", Model: "model-1", Hyperparameters: map[string]any{"batch_size": float64(64)},
 		Instance: &domain.AgentInstance{},
@@ -129,6 +132,11 @@ func TestTheLaunchersPassAgainstTheControlPlanesOwnHandler(t *testing.T) {
 	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec.Image != "registry.example.invalid/agent:1" || !reflect.DeepEqual(spec.Env, wantEnv) || !reflect.DeepEqual(spec.Command, []string{"run-agent"}) {
 		t.Fatalf("spec = %+v\nwant env %v", spec, wantEnv)
+	}
+	// The machine ends by itself at the latest end the control plane knows for its platform
+	// experiment, whatever becomes of this launcher.
+	if left := time.Until(contractEndsBy); spec.Lifetime > left || spec.Lifetime < left-time.Minute || spec.Lifetime%time.Second != 0 {
+		t.Fatalf("rented with a lifetime of %s, want the whole seconds of the %s left to its platform experiment", spec.Lifetime, left)
 	}
 	if got := c.instance("ag-one").Name; "hl-agent-main-"+got != names[0] {
 		t.Fatalf("the control plane recorded the name %q for the instance rented as %q", got, names[0])
@@ -245,7 +253,7 @@ func TestARotatedCredentialReplacesEveryRunningInstance(t *testing.T) {
 
 func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testing.T) {
 	c := newContract(t, hostedAgent("pe-1", "ag-one"))
-	c.store.Coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
+	c.store.Coordinators = []db.LauncherCoordinator{{PlatformExperimentID: "pe-1", EndsBy: contractEndsBy.Add(time.Hour), HostedCoordinator: domain.HostedCoordinator{Launcher: "main", Model: "model-2"}}}
 	c.pass()
 	names := c.rented.Names()
 	if len(names) != 2 || !strings.HasPrefix(names[0], "hl-agent-main-pe1-agone-") || !strings.HasPrefix(names[1], "hl-agent-main-pe1-coordinator-") {
@@ -259,6 +267,9 @@ func TestAHostedCoordinatorIsRentedRestartedAndEndedThroughTheSamePass(t *testin
 	wantEnv := map[string]string{"API_URL": "https://api.example.invalid", "HL_TOKEN": token, "MODEL_CREDENTIAL": oauthToken}
 	if spec := c.rented.Spec(coordinator); !reflect.DeepEqual(spec.Env, wantEnv) || strings.Contains(spec.Name, token) {
 		t.Fatalf("coordinator's env = %v, want %v", spec.Env, wantEnv)
+	}
+	if got, left := c.rented.Spec(coordinator).Lifetime, time.Until(contractEndsBy.Add(time.Hour)); got > left || got < left-time.Minute {
+		t.Fatalf("the coordinator is rented with a lifetime of %s, want the %s left to its platform experiment", got, left)
 	}
 	c.rented.Start(agent)
 	agentIDs := c.rented.IDs(agent)
@@ -466,20 +477,81 @@ func TestAListLongerThanOnePassCanCreateIsRentedOverSeveralPassesAndSpendsNoRest
 	}
 }
 
-func TestTheControlPlanesRefusalOfALaunchersPacingReachesItWithTheArithmetic(t *testing.T) {
-	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+// The control plane refuses a launcher whose pass cannot fit its limits. That stops creation and
+// nothing else: what the launcher holds is still ended by the lists, from its first refused pass,
+// by a process that rented none of it.
+func TestARefusedLauncherEndsWhatItHoldsByTheControlPlanesListsAndRentsNothing(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-kept"), hostedAgent("pe-1", "ag-over"), hostedAgent("pe-1", "ag-winding-down"))
+	c.pass()
+	names := c.rented.Names()
+	if len(names) != 3 {
+		t.Fatalf("rented %v", names)
+	}
+	kept, over, windingDown := names[0], names[1], names[2]
+	for _, name := range names {
+		c.rented.Start(name)
+	}
+	keptIDs := c.rented.IDs(kept)
+
+	c.store.ByLauncher["main"][2].Ended = domain.RunEndClosed
+	c.store.ByLauncher["main"] = append(c.store.ByLauncher["main"][:1], c.store.ByLauncher["main"][2], hostedAgent("pe-2", "ag-new"))
 	cfg := c.launcher.cfg
 	cfg.CreatePause = 4 * time.Second
 	slow, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = slow.Pass(context.Background())
-	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "create_pause 4s") || !strings.Contains(err.Error(), "agents.boot_limit_seconds 5m0s") {
-		t.Fatalf("pass = %v, want the control plane's refusal in its own words", err)
+	for pass := 1; pass <= 2; pass++ {
+		err = slow.Pass(context.Background())
+		if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "pass_does_not_fit") || !strings.Contains(err.Error(), "create_pause 4s") || !strings.Contains(err.Error(), "agents.boot_limit_seconds 5m0s") {
+			t.Fatalf("refused pass %d = %v, want the control plane's refusal in its own words", pass, err)
+		}
+		if !reflect.DeepEqual(c.rented.Names(), []string{kept, windingDown}) || c.rented.Stops(windingDown) != pass || !reflect.DeepEqual(c.rented.IDs(kept), keptIDs) {
+			t.Fatalf("refused pass %d: rented %v with %d stops of the ending one, want %q destroyed, %q told to stop and %q untouched",
+				pass, c.rented.Names(), c.rented.Stops(windingDown), over, windingDown, kept)
+		}
 	}
-	if c.rented.Calls("Create") != 0 {
-		t.Fatal("a refused launcher rented an instance")
+	if c.rented.Calls("Create") != 3 || c.store.Find("pe-2", "ag-new").Name != "" {
+		t.Fatalf("a refused launcher rented or was asked for a new instance: %d creates, asked %q", c.rented.Calls("Create"), c.store.Find("pe-2", "ag-new").Name)
+	}
+
+	// Its wind-down passes while the launcher is still refused: the last machine of the run goes.
+	c.store.ByLauncher["main"] = []db.LauncherAgent{c.store.ByLauncher["main"][0], c.store.ByLauncher["main"][2]}
+	if err := slow.Pass(context.Background()); !errors.Is(err, ErrRefused) {
+		t.Fatalf("pass = %v", err)
+	}
+	if !reflect.DeepEqual(c.rented.Names(), []string{kept}) {
+		t.Fatalf("rented %v, want only %q", c.rented.Names(), kept)
+	}
+
+	// The config is corrected: the agent that waited is rented.
+	c.pass()
+	if got := c.rented.Names(); len(got) != 2 || c.rented.Calls("Create") != 4 || c.store.Find("pe-2", "ag-new").Name == "" {
+		t.Fatalf("once it fits: rented %v with %d creates", got, c.rented.Calls("Create"))
+	}
+}
+
+// An open platform experiment's latest end moves when its owner changes its start or length. The
+// instance rented before keeps the end it was rented with, and one rented after gets the new one.
+func TestALaterEndReplacesNothingAndBoundsTheNextInstanceRented(t *testing.T) {
+	c := newContract(t, hostedAgent("pe-1", "ag-one"))
+	c.pass()
+	first := c.rented.Names()[0]
+	c.rented.Start(first)
+	ids, rentedWith := c.rented.IDs(first), c.rented.Spec(first).Lifetime
+
+	c.store.ByLauncher["main"][0].EndsBy = contractEndsBy.Add(100 * time.Hour)
+	c.pass()
+	if !reflect.DeepEqual(c.rented.IDs(first), ids) || c.rented.Spec(first).Lifetime != rentedWith || c.rented.Calls("Create") != 1 {
+		t.Fatal("a moved end replaced or changed the instance rented before it")
+	}
+
+	// It ends itself at the end it was rented with, which the control plane sees as an exit.
+	c.rented.Exit(first, "killed at its lifetime")
+	c.pass()
+	next := c.rented.Names()[0]
+	if left := time.Until(contractEndsBy.Add(100 * time.Hour)); next == first || c.rented.Spec(next).Lifetime > left || c.rented.Spec(next).Lifetime < left-time.Minute {
+		t.Fatalf("the next instance %q is rented with a lifetime of %s, want the %s now left", next, c.rented.Spec(next).Lifetime, left)
 	}
 }
 

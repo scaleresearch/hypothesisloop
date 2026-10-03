@@ -13,7 +13,7 @@ provider:
     # The longest a sandbox lives. E2B kills it then, with its output, and whoever rented it rents
     # it again on its next pass. The plan caps it: 3600 on the free plan, 86400 on Pro. A value
     # above the cap fails every Create with the vendor's own message. An instance rented with a
-    # shorter lifetime of its own (instance.lifetime_seconds of the launcher) is killed at that.
+    # shorter lifetime of its own (an agent's, which the control plane decides) is killed at that.
     lifetime_seconds: 3600
 
 # What the plan allows, which no setting here changes. A spec beyond it is refused: by the

@@ -19,13 +19,19 @@ type instance struct {
 	name  string
 	image string
 	env   map[string]string
+	// endsAt is the moment after which the instance must not run. It is rented with the time
+	// left until then as its lifetime.
+	endsAt time.Time
 }
 
 // desired is one answer of the control plane, keyed by full instance name: what should run, and
-// what has just stopped being wanted and is left to end by itself.
+// what has just stopped being wanted and is left to end by itself. refusal is the control
+// plane's words while it refuses this launcher's configuration: the lists are acted on and
+// nothing is created.
 type desired struct {
 	instances map[string]instance
 	ending    map[string]bool
+	refusal   string
 }
 
 // reconcileAnswer is the wire shape. Both lists are pointers because an answer without one is
@@ -33,11 +39,16 @@ type desired struct {
 // every agent.
 type reconcileAnswer struct {
 	Instances *[]struct {
-		Name  string            `json:"name"`
-		Image string            `json:"image"`
-		Env   map[string]string `json:"env"`
+		Name   string            `json:"name"`
+		Image  string            `json:"image"`
+		Env    map[string]string `json:"env"`
+		EndsAt time.Time         `json:"ends_at"`
 	} `json:"instances"`
-	Ending *[]string `json:"ending"`
+	Ending  *[]string `json:"ending"`
+	Refusal *struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	} `json:"refusal"`
 }
 
 // maxAnswerBytes bounds what one answer may hold in memory.
@@ -62,8 +73,8 @@ type reconcileQuestion struct {
 	CreatePauseMilliseconds  int `json:"create_pause_milliseconds"`
 }
 
-// ErrRefused is the control plane refusing this launcher's own configuration. The refusal
-// carries no list, so the pass it ends changes nothing.
+// ErrRefused is the control plane refusing this launcher's own configuration. A pass returns it
+// after it stopped and destroyed by the answer's lists, having created nothing.
 var ErrRefused = errors.New("the control plane refuses this launcher's configuration")
 
 func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance) (*desired, error) {
@@ -86,14 +97,6 @@ func (l *Launcher) fetchDesired(ctx context.Context, observed []observedInstance
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
-		var refusal struct {
-			Error string `json:"error"`
-		}
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		_ = json.Unmarshal(raw, &refusal)
-		return nil, fmt.Errorf("%w: %s", ErrRefused, refusal.Error)
-	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -121,8 +124,8 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}}
 	for _, entry := range *answer.Instances {
 		name := l.prefix + entry.Name
-		if entry.Name == "" || entry.Image == "" {
-			return nil, fmt.Errorf("desired instance %q has no name or no image", entry.Name)
+		if entry.Name == "" || entry.Image == "" || entry.EndsAt.IsZero() {
+			return nil, fmt.Errorf("desired instance %q has no name, no image or no ends_at", entry.Name)
 		}
 		if err := provider.ValidateName(name); err != nil {
 			return nil, fmt.Errorf("desired state: %w", err)
@@ -135,7 +138,13 @@ func (l *Launcher) read(answer reconcileAnswer) (*desired, error) {
 				return nil, fmt.Errorf("desired instance %q sets %s, which this launcher adds from its own config", entry.Name, own)
 			}
 		}
-		want.instances[name] = instance{name: name, image: entry.Image, env: entry.Env}
+		want.instances[name] = instance{name: name, image: entry.Image, env: entry.Env, endsAt: entry.EndsAt}
+	}
+	if answer.Refusal != nil {
+		if answer.Refusal.Reason == "" || answer.Refusal.Message == "" {
+			return nil, errors.New("answer carries a refusal with no reason or no message")
+		}
+		want.refusal = answer.Refusal.Reason + ": " + answer.Refusal.Message
 	}
 	for _, short := range *answer.Ending {
 		name := l.prefix + short

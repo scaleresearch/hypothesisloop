@@ -42,7 +42,6 @@ func TestTheShippedConfigLoadsIntoWhatTheLauncherRuns(t *testing.T) {
 		APIURL:        "https://api.example.invalid",
 		Command:       []string{"uv", "run", "python3", "-m", "hypothesisloop_agent.claude.run"},
 		Size:          agentlaunch.Size{CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 10 << 30},
-		Lifetime:      72 * time.Hour,
 		ModelProvider: "anthropic",
 		Env:           map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-secret-value"},
 		Interval:      15 * time.Second,
@@ -98,7 +97,7 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		"no cpu":                  {`cpu: "2"`, `cpu: "0"`},
 		"no storage":              {"storage: 10Gi\n", ""},
 		"misspelled in instance":  {"storage: 10Gi", "disk: 20Gi"},
-		"negative lifetime":       {"lifetime_seconds: 259200", "lifetime_seconds: -1"},
+		"a lifetime of its own":   {"storage: 10Gi", "storage: 10Gi\n  lifetime_seconds: 259200"},
 		"no model provider":       {"model_provider:\n  name: anthropic\n  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN\n", ""},
 		"no model provider name":  {"  name: anthropic", `  name: ""`},
 		"no model provider env":   {"  env:\n    - name: CLAUDE_CODE_OAUTH_TOKEN\n      value_env: CLAUDE_CODE_OAUTH_TOKEN", "  env: []"},
@@ -115,17 +114,6 @@ func TestAConfigThatIsIncompleteOrMisspelledIsRefused(t *testing.T) {
 		if _, err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-	}
-}
-
-func TestAConfigWithoutALifetimeLoadsAndBoundsNoInstance(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-secret-value")
-	cfg, err := loadText(t, strings.Replace(shipped(t), "  lifetime_seconds: 259200\n", "", 1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.launch().Lifetime; got != 0 {
-		t.Fatalf("lifetime = %s", got)
 	}
 }
 

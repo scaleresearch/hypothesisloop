@@ -900,11 +900,15 @@ func TestALauncherWhosePassCannotFitTheBootLimitIsRefusedWithTheArithmetic(t *te
 		body := fits
 		edit(&body)
 		code, raw := reconcileUnder(t, store, cfg, body)
-		if code != http.StatusConflict {
-			t.Fatalf("%s: status = %d %s, want 409", name, code, raw)
+		if code != http.StatusOK {
+			t.Fatalf("%s: status = %d %s, want 200 with the refusal stated", name, code, raw)
+		}
+		refusal := decode(t, raw).Refusal
+		if refusal == nil || refusal.Reason != "pass_does_not_fit" {
+			t.Fatalf("%s: refusal = %+v, want pass_does_not_fit: %s", name, refusal, raw)
 		}
 		for _, part := range []string{"10 new instances per answer", "agents.boot_limit_seconds 50s", "create_pause", "reconcile_interval"} {
-			if !strings.Contains(string(raw), part) {
+			if !strings.Contains(refusal.Message, part) {
 				t.Errorf("%s: the refusal does not say %q: %s", name, part, raw)
 			}
 		}
@@ -918,6 +922,75 @@ func TestALauncherWhosePassCannotFitTheBootLimitIsRefusedWithTheArithmetic(t *te
 		if code, raw := reconcileUnder(t, store, cfg, body); code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d %s, want 400", name, code, raw)
 		}
+	}
+}
+
+// A refused launcher still holds machines only it can end, so the refusal stops creation and
+// nothing else: the lists are answered as ever, and nothing that does not exist is asked for.
+func TestARefusedLauncherIsToldWhatToKeepAndWhatEndsAndIsAskedForNothingNew(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {
+		{AgentSignup: hosted("pe-1", "ag-kept")}, {AgentSignup: hosted("pe-1", "ag-over")},
+	}}}
+	first := mustReconcile(t, store, observed())
+	if len(first.Instances) != 2 || first.Refusal != nil {
+		t.Fatalf("a launcher that fits: %+v", first)
+	}
+	kept, over := first.Instances[0].Name, first.Instances[1].Name
+
+	store.ByLauncher["main"][1].Ended = domain.RunEndClosed
+	store.ByLauncher["main"] = append(store.ByLauncher["main"], db.LauncherAgent{AgentSignup: hosted("pe-2", "ag-new")})
+	slow := func(instances ...ObservedInstance) Observed {
+		body := observed(instances...)
+		body.ReconcileIntervalSeconds = 600
+		return body
+	}
+	refused := mustReconcile(t, store, slow(ObservedInstance{Name: kept, State: "running"}, ObservedInstance{Name: over, State: "running"}))
+	if refused.Refusal == nil || refused.Refusal.Reason != "pass_does_not_fit" || !strings.Contains(refused.Refusal.Message, "agents.boot_limit_seconds") {
+		t.Fatalf("refusal = %+v, want pass_does_not_fit with the arithmetic", refused.Refusal)
+	}
+	if len(refused.Instances) != 1 || refused.Instances[0].Name != kept || !reflect.DeepEqual(refused.Ending, []string{over}) {
+		t.Fatalf("refused answer = %+v, want %q kept and %q ending", refused, kept, over)
+	}
+	if asked := store.Find("pe-2", "ag-new").Name; asked != "" {
+		t.Fatalf("a refused launcher was asked for a new machine, %q", asked)
+	}
+	if !store.Holds["main"] {
+		t.Fatal("a refused launcher that lists machines is recorded as holding none")
+	}
+
+	// An exit is recorded while refused, and its replacement waits for a launcher that fits.
+	exited := mustReconcile(t, store, slow(ObservedInstance{Name: kept, State: "exited", Log: "boom"}, ObservedInstance{Name: over, State: "running"}))
+	if recorded := store.Find("pe-1", "ag-kept"); recorded.Restarts != 1 || recorded.ExitLog != "boom" || recorded.Name != "" {
+		t.Fatalf("an exit reported by a refused launcher: recorded %+v", recorded)
+	}
+	if len(exited.Instances) != 0 || !reflect.DeepEqual(exited.Ending, []string{over}) {
+		t.Fatalf("refused answer after an exit = %+v, want nothing to keep and %q ending", exited, over)
+	}
+
+	fitting := mustReconcile(t, store, observed(ObservedInstance{Name: over, State: "running"}))
+	if fitting.Refusal != nil || len(fitting.Instances) != 2 || fitting.Instances[0].Name == kept || store.Find("pe-2", "ag-new").Name == "" {
+		t.Fatalf("once it fits: %+v, want the replacement and the new machine asked for", fitting)
+	}
+}
+
+func TestEveryInstanceCarriesTheMomentItsPlatformExperimentCanLastUntil(t *testing.T) {
+	agentEnd := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	coordinatorEnd := agentEnd.Add(time.Hour)
+	store := oneAgentAndACoordinator()
+	store.ByLauncher["main"][0].EndsBy = agentEnd.In(time.FixedZone("elsewhere", 7200))
+	store.Coordinators[0].EndsBy = coordinatorEnd
+	code, raw := reconcileUnder(t, store, testSettings, observed())
+	if code != http.StatusOK || !strings.Contains(string(raw), `"ends_at":"2026-03-01T12:00:00Z"`) {
+		t.Fatalf("answer = %d %s, want the agent's ends_at in UTC", code, raw)
+	}
+	answer := decode(t, raw)
+	if !answer.Instances[0].EndsAt.Equal(agentEnd) || !answer.Instances[1].EndsAt.Equal(coordinatorEnd) {
+		t.Fatalf("ends_at = %s and %s", answer.Instances[0].EndsAt, answer.Instances[1].EndsAt)
+	}
+	named := mustReconcile(t, store, observed())
+	store.ByLauncher["main"][0].EndsBy = agentEnd.Add(48 * time.Hour)
+	if moved := mustReconcile(t, store, observed()); moved.Instances[0].Name != named.Instances[0].Name || !moved.Instances[0].EndsAt.Equal(agentEnd.Add(48*time.Hour)) {
+		t.Fatalf("a moved bound: %+v, want the same name with the new ends_at", moved.Instances[0])
 	}
 }
 
@@ -1068,7 +1141,7 @@ func TestProgressOfAnInstanceThatIsNotRunningAndALauncherTooSlowForTheProgressLi
 	cfg := testSettings
 	cfg.MaxNewPerAnswer, cfg.BootLimit, cfg.ProgressLimit = 10, time.Hour, 49*time.Second
 	code, raw := reconcileUnder(t, store, cfg, observed())
-	if code != http.StatusConflict || !strings.Contains(string(raw), "agents.progress_limit_seconds 49s") {
+	if code != http.StatusOK || !strings.Contains(string(raw), `"reason":"pass_does_not_fit"`) || !strings.Contains(string(raw), "agents.progress_limit_seconds 49s") {
 		t.Fatalf("2 x (10 x 1s + 15s) = 50s against a progress limit of 49s: %d %s", code, raw)
 	}
 }

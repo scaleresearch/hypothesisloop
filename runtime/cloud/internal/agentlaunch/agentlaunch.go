@@ -34,10 +34,6 @@ type Config struct {
 	// Command is the argv every instance runs.
 	Command []string
 	Size    Size
-	// Lifetime is the longest any instance runs its command (provider.Spec.Lifetime): the bound on
-	// a machine this launcher can no longer reach to stop or destroy. The control plane sees such
-	// an ending as any other exit. Zero is no bound.
-	Lifetime time.Duration
 	// ModelProvider names whose models the agents run on, and Env is what that provider's
 	// harness needs in every instance: its credential. Env is added here, so what it holds never
 	// passes through the control plane, and the control plane's list may not set any of its names.
@@ -81,9 +77,6 @@ func New(cfg Config) (*Launcher, error) {
 // control plane makes it part of each instance's name, so a changed command, size or credential
 // replaces the running instances as a changed image does. It holds a credential only hashed
 // together with the rest.
-//
-// The lifetime is not part of it: it bounds an instance and changes nothing an agent runs with,
-// so a changed one replaces nothing and holds for the instances rented after it.
 func (cfg Config) launchDigest() (string, error) {
 	inputs, err := json.Marshal(struct {
 		Command       []string          `json:"command"`
@@ -116,9 +109,6 @@ func (cfg Config) Validate() error {
 	if cfg.Size.CPUMillis <= 0 || cfg.Size.MemoryBytes <= 0 || cfg.Size.DiskBytes <= 0 {
 		return errors.New("agentlaunch: the instance size needs positive cpu, memory and storage")
 	}
-	if cfg.Lifetime < 0 || cfg.Lifetime%time.Second != 0 {
-		return errors.New("agentlaunch: Lifetime is whole seconds and not negative")
-	}
 	if cfg.Interval <= 0 {
 		return errors.New("agentlaunch: Interval must be positive")
 	}
@@ -137,19 +127,15 @@ func (cfg Config) Validate() error {
 }
 
 // Run passes until ctx is cancelled. A pass that fails is logged and the next one starts from
-// nothing, like every other. The control plane refusing this launcher's configuration is returned
-// from the first pass alone, where it is a config file to correct before anything is rented under
-// it. Refused later, the launcher holds instances only it can stop and destroy, so it goes on
-// asking: a refused pass creates nothing, and the first answer after it is acted on.
+// nothing, like every other. The control plane refusing this launcher's configuration ends
+// nothing either, on the first pass or a later one: this process is the only thing that stops and
+// destroys the instances under its name, an earlier process's among them, so it goes on passing
+// and says the refusal on every pass until the config or the platform's limits are corrected.
 func (l *Launcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(l.cfg.Interval)
 	defer ticker.Stop()
-	for first := true; ; first = false {
-		err := l.Pass(ctx)
-		if first && errors.Is(err, ErrRefused) {
-			return err
-		}
-		if err != nil {
+	for {
+		if err := l.Pass(ctx); err != nil {
 			l.cfg.Log("pass: %v", err)
 		}
 		select {
@@ -165,6 +151,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 // be reached or answers with anything but a complete list, changes nothing. After that every
 // instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
 // the returned error and the rest of the pass still runs.
+//
+// An answer that states a refusal is acted on like any other, except that nothing is created,
+// and the pass returns ErrRefused with the control plane's words.
 func (l *Launcher) Pass(ctx context.Context) error {
 	rented, err := l.provider.List(ctx, l.prefix)
 	// The launcher pauses nothing yet (see the provider package's comment on capabilities).
@@ -253,7 +242,16 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			l.cfg.Log("%s exited and is still asked for: reported, and left for the control plane's next answer", name)
 			continue
 		}
-		if !cleared {
+		if !cleared || want.refusal != "" {
+			continue
+		}
+		// The instance ends by itself at the moment the control plane names, whether or not
+		// this launcher can still reach it then.
+		lifetime := time.Until(want.instances[name].endsAt).Truncate(time.Second)
+		if lifetime <= 0 {
+			err := fmt.Errorf("create %s: its ends_at %s has passed", name, want.instances[name].endsAt.Format(time.RFC3339))
+			l.cfg.Log("%v", err)
+			failures = append(failures, err)
 			continue
 		}
 		if creates > 0 && !l.pause(ctx) {
@@ -261,7 +259,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			break
 		}
 		creates++
-		spec := l.spec(want.instances[name])
+		spec := l.spec(want.instances[name], lifetime)
 		id, err := l.provider.Create(ctx, spec)
 		if err != nil {
 			err = withoutEnvironment(err, spec.Env)
@@ -271,7 +269,10 @@ func (l *Launcher) Pass(ctx context.Context) error {
 			lastCreateError = err
 			continue
 		}
-		l.cfg.Log("created %s (asked for and not rented), instance %s", name, id)
+		l.cfg.Log("created %s (asked for and not rented), instance %s, which ends itself at %s", name, id, want.instances[name].endsAt.UTC().Format(time.RFC3339))
+	}
+	if want.refusal != "" {
+		failures = append(failures, fmt.Errorf("%w, so nothing is created: %s", ErrRefused, want.refusal))
 	}
 	// Every create failing is rarely one agent's fault, so it is said once more in a line of its
 	// own. Nothing is given up on here: the control plane asks again until a machine has gone
@@ -402,7 +403,7 @@ func withoutEnvironment(err error, env map[string]string) error {
 	return errors.New(text)
 }
 
-func (l *Launcher) spec(i instance) provider.Spec {
+func (l *Launcher) spec(i instance, lifetime time.Duration) provider.Spec {
 	env := make(map[string]string, len(i.env)+len(l.cfg.Env))
 	for name, value := range i.env {
 		env[name] = value
@@ -418,7 +419,7 @@ func (l *Launcher) spec(i instance) provider.Spec {
 		CPUMillis:   l.cfg.Size.CPUMillis,
 		MemoryBytes: l.cfg.Size.MemoryBytes,
 		DiskBytes:   l.cfg.Size.DiskBytes,
-		Lifetime:    l.cfg.Lifetime,
+		Lifetime:    lifetime,
 	}
 }
 
