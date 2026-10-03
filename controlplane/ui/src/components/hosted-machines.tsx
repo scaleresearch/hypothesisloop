@@ -1,8 +1,7 @@
 'use client'
 
-import useSWR from 'swr'
-import { fetchPlatformExperimentAgents } from '@/lib/api'
 import { relTime } from '@/lib/format'
+import { useRoster } from '@/lib/roster'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentInstance, PlatformExperiment } from '@/types'
 
@@ -33,8 +32,7 @@ export function machinesStatus(instances: AgentInstance[], jobs: number): { now:
 
 /** The status of the machines of a running experiment, under its title. Nothing for an experiment with none. */
 export function HostedMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: number }) {
-  // The agents card reads the same key, so this is one request for both.
-  const { data: agents } = useSWR(['pe-agents', pe.id], () => fetchPlatformExperimentAgents(pe.id), { refreshInterval: 15_000 })
+  const { data: agents } = useRoster(pe)
   if (pe.status !== PlatformExperimentStatus.RUNNING || !agents) return null
   const instances = [pe.coordinator?.instance, ...agents.map(a => a.instance)].filter((i): i is AgentInstance => !!i)
   const status = machinesStatus(instances, jobs)

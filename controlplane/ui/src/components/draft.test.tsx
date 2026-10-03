@@ -1,13 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiSend, fetchPlatformExperimentAgents } from '@/lib/api'
 import { DraftView } from '@/components/draft'
 import { formatDate } from '@/lib/format'
 import type { Draft, Proposal } from '@/lib/planning'
 import { PlatformExperimentStatus } from '@/types'
-import type { AgentSignup } from '@/types'
+import type { AgentSignup, JoinedAgent } from '@/types'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -59,13 +59,66 @@ beforeEach(() => {
   ])
 })
 
+const planner = (more: Partial<JoinedAgent>): JoinedAgent => (
+  { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, flavor: 'planner', signed_up_at: '', actor: { kind: 'staff', id: '', name: '' }, ...more }
+)
+const machineStep = () => within(screen.getByRole('list', { name: 'Machine' })).queryAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')?.textContent
+
+// The page said one sentence for as long as planning took, and the same one whether the
+// planner's machine was still being rented or the planner was reading the repository.
 describe('a draft being planned', () => {
-  it('says what the planner and its machine are doing and offers nothing to accept', async () => {
+  it('says the phase and where the planner\'s machine stands, and offers nothing to accept', async () => {
     show(draft('planning'))
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/working out how to measure this\. Its machine is starting/))
+    expect(screen.getByRole('status').textContent).toBe('The planner is working out how to measure this.')
+    expect(await screen.findByText('Its machine is starting, which takes about a minute.')).toBeTruthy()
+    expect(machineStep()).toBe('Machine starting')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
+  })
+
+  it('shows what the planner says it is doing, with how long ago it said so', async () => {
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({
+      instance: { state: 'running', restarts: 0, stopped: false },
+      activity: { text: 'Reading train.py to find what the loss is computed on.', at: new Date(Date.now() - 12_000).toISOString() },
+    })])
+    show(draft('planning'))
+    const said = await screen.findByText('Reading train.py to find what the loss is computed on.')
+    expect(said.parentElement!.textContent).toMatch(/computed on\. 1[2-5]s ago$/)
+    expect(screen.getByText('Its machine is working.')).toBeTruthy()
+    expect(machineStep()).toBe('Working')
+  })
+
+  it.each([
+    [undefined, 'Its machine is being asked for.', 'Machine asked for'],
+    [{ state: 'requested', restarts: 0, stopped: false }, 'Its machine is being asked for.', 'Machine asked for'],
+    [{ state: 'starting', restarts: 2, stopped: false }, 'Its machine ended and another is starting (restart 2).', 'Machine starting'],
+    [{ state: 'stopped', restarts: 3, stopped: true }, 'Its machine stopped and is not asked for again.', undefined],
+  ] as const)('names the machine state it was told and lights no step it was not: %j', async (instance, sentence, step) => {
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([planner({ instance })])
+    show(draft('planning'))
+    expect(await screen.findByText(sentence)).toBeTruthy()
+    await waitFor(() => expect(machineStep()).toBe(step))
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  describe('reads the roster', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+    const reads = () => vi.mocked(fetchPlatformExperimentAgents).mock.calls.length
+
+    it('every 3 s while the planner works and the page is visible, and not while it is hidden', async () => {
+      vi.mocked(fetchPlatformExperimentAgents).mockClear()
+      show(draft('planning'))
+      await vi.advanceTimersByTimeAsync(100)
+      expect(reads()).toBe(1)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(reads()).toBe(2)
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+      await vi.advanceTimersByTimeAsync(9_000)
+      expect(reads()).toBe(2)
+    })
   })
 })
 

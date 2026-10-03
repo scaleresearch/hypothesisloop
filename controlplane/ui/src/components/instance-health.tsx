@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import type { AgentInstance } from '@/types'
 import type { Tone } from '@/lib/colors'
 import { relTime } from '@/lib/format'
+import { useTick } from '@/lib/tick'
 import { Badge } from '@/components/ui/badge'
 import { Disclosure } from '@/components/ui/disclosure'
 
@@ -23,15 +23,6 @@ const END_REASON: Record<NonNullable<AgentInstance['end_reason']>, string> = {
   still_starting: 'it did not come up in time',
   silent: 'it ran and made no progress',
   released: 'the platform took it down',
-}
-
-// Rerenders on a timer, so an age on screen keeps up with the clock between reads of the API.
-function useTick(everyMs: number) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => tick(n => n + 1), everyMs)
-    return () => clearInterval(timer)
-  }, [everyMs])
 }
 
 /**

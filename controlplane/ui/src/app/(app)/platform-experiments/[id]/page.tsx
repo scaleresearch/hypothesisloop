@@ -49,6 +49,7 @@ import { filedAfterVerdict, hypothesisActivity, settings, variedEnvByHypothesis,
 import { graphHref } from '@/lib/hypothesis-graph'
 import { budgetKind, budgetUnit, inFlight, kindOf } from '@/lib/units'
 import type { Draft } from '@/lib/planning'
+import { pollEvery } from '@/lib/roster'
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status}>{status}</Badge>
@@ -90,7 +91,7 @@ function PlatformExperimentDetail({ params }: { params: { id: string } }) {
   const { data: pe, error: peError, isLoading: peLoading } = useSWR<PlatformExperiment>(
     ['pe', id],
     () => fetchPlatformExperiment(id),
-    { refreshInterval: 15_000 },
+    { refreshInterval: pollEvery },
   )
   const { me } = useTenant()
   useRecordScope(pe?.project_id)

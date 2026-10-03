@@ -1,10 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import useSWR from 'swr'
-import {
-  addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent,
-} from '@/lib/api'
+import { addPlatformExperimentAgents, apiURL, fetchPlatformExperimentAgentToken, removePlatformExperimentAgent } from '@/lib/api'
+import { useRoster } from '@/lib/roster'
 import { PlatformExperimentStatus } from '@/types'
 import type { AgentSignup, JoinedAgent, PlatformExperiment } from '@/types'
 import { Badge } from '@/components/ui/badge'
@@ -101,11 +99,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
 
 /** Who takes part in a platform experiment, and while it has not started, adding and removing them. */
 export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
-  const { data: agents, error, mutate } = useSWR(
-    ['pe-agents', pe.id],
-    () => fetchPlatformExperimentAgents(pe.id),
-    { refreshInterval: 15_000 },
-  )
+  const { data: agents, error, mutate } = useRoster(pe)
   const [rowError, setRowError] = useState('')
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])

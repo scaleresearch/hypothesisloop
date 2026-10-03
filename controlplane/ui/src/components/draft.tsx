@@ -1,15 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import useSWR, { useSWRConfig } from 'swr'
-import { fetchPlatformExperimentAgents } from '@/lib/api'
+import { useSWRConfig } from 'swr'
 import { formatAccH, formatDate, relTime } from '@/lib/format'
 import { abandonDraft, acceptDraft, reviseDraft } from '@/lib/planning'
 import type { Draft, Proposal } from '@/lib/planning'
+import { useRoster } from '@/lib/roster'
 import { budgetUnit, kindOf } from '@/lib/units'
 import { useProjectRouter } from '@/lib/query-state'
 import type { MetricDefinition } from '@/types'
 import { actorLabel } from '@/components/actor'
+import { AgentAtWork } from '@/components/agent-at-work'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
@@ -178,18 +179,16 @@ function Revise({ draft, declined, onDone }: { draft: Draft; declined: boolean; 
 
 /** What the planner's machine is doing, while there is no proposal to read. */
 function Planning({ draft, revising }: { draft: Draft; revising: boolean }) {
-  const { data: agents } = useSWR(['pe-agents', draft.id], () => fetchPlatformExperimentAgents(draft.id), { refreshInterval: 10_000 })
-  const planner = agents?.find(a => a.flavor === 'planner')?.instance
-  const machine = !planner ? 'Its machine is being asked for.'
-    : planner.stopped ? 'Its machine stopped and is not asked for again. Abandon this draft and try once more.'
-      : planner.state === 'running' ? `Its machine is running${planner.progress_at ? `, last progress ${relTime(planner.progress_at)}` : ''}.`
-        : 'Its machine is starting, which takes about a minute.'
+  const { data: agents } = useRoster(draft)
+  const planner = agents?.find(a => a.flavor === 'planner')
   return (
-    <Callout tone="info">
-      <span role="status">
-        {revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this.'} {machine}{' '}
+    <Callout tone="info" className="grid gap-2">
+      <p role="status" className="font-semibold">{revising ? 'The planner is changing its proposal.' : 'The planner is working out how to measure this.'}</p>
+      <AgentAtWork agent={planner} />
+      <p className="text-xs text-muted">
+        {planner?.instance?.stopped && 'Abandon this draft and try once more. '}
         It has until {formatDate(draft.planning_ends_at)}; a draft with no proposal by then is closed. This page updates by itself.
-      </span>
+      </p>
     </Callout>
   )
 }

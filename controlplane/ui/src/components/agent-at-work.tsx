@@ -1,0 +1,55 @@
+'use client'
+
+import { clsx } from 'clsx'
+import { relTime } from '@/lib/format'
+import { useTick } from '@/lib/tick'
+import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types'
+import { Steps } from '@/components/ui/steps'
+
+const MACHINE_STEPS = [
+  { key: 'requested', label: 'Machine asked for' },
+  { key: 'starting', label: 'Machine starting' },
+  { key: 'running', label: 'Working' },
+]
+
+/** What an agent's machine is doing now. One asked for after another ended is a restart, and says so. */
+export function machineSentence(instance: AgentInstance | undefined): string {
+  if (!instance) return 'Its machine is being asked for.'
+  const restart = instance.restarts > 0 ? `restart ${instance.restarts}` : ''
+  switch (instance.state) {
+    case 'waiting': return 'Its machine is asked for when the run starts.'
+    case 'requested': return restart ? `Its machine ended and another is being asked for (${restart}).` : 'Its machine is being asked for.'
+    case 'starting': return restart ? `Its machine ended and another is starting (${restart}).` : 'Its machine is starting, which takes about a minute.'
+    case 'running': return restart ? `Its machine is working again (${restart}).` : 'Its machine is working.'
+    case 'stopped': return instance.end_reason === 'released' ? 'Its work is over and its machine was released.' : 'Its machine stopped and is not asked for again.'
+  }
+}
+
+/** The sentence an agent last said of what it is doing, with its age, which keeps up with the clock. */
+export function Activity({ activity, className }: { activity: AgentActivity; className?: string }) {
+  useTick(1_000)
+  return (
+    <p className={clsx('text-xs', className)}>
+      <span aria-live="polite">{activity.text}</span>{' '}
+      <time dateTime={activity.at} title={new Date(activity.at).toLocaleString()} className="whitespace-nowrap text-subtle">{relTime(activity.at)}</time>
+    </p>
+  )
+}
+
+/**
+ * The one agent a phase waits for, a draft's planner or the baseline agent: where its machine
+ * stands, as its launcher reported it, and what the agent says it is doing.
+ */
+export function AgentAtWork({ agent }: { agent: JoinedAgent | undefined }) {
+  const instance = agent?.instance
+  const at = instance?.state ?? 'requested'
+  return (
+    <div className="grid gap-1.5">
+      <Steps label="Machine" steps={MACHINE_STEPS} current={at} live />
+      <p aria-live="polite" className="text-xs text-muted">
+        {agent?.finished_at ? `${agent.name} finished: ${agent.finished_reason}` : machineSentence(instance)}
+      </p>
+      {agent?.activity && <Activity activity={agent.activity} />}
+    </div>
+  )
+}
