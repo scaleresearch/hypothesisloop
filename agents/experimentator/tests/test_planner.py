@@ -66,12 +66,16 @@ class PlannerPromptTest(unittest.TestCase):
         # Its brief named the image by a word of its own and a `uv pip install` that failed in
         # the job: three baseline jobs went to those two lines. A proposal now states its image
         # and is refused for one no job could be submitted with.
-        self.assertIn("the accelerator type, the count or cores per job, and the `image` you propose", flat)
+        self.assertIn("the accelerator type, its count per job and the `image`", flat)
+        # What one node of a job asks for was prose of the brief, which the baseline agent
+        # copied into the job spec. The proposal states it as fields, and `hl repo init` writes them.
+        self.assertIn("`cpu`, `memory`, `storage`: one node's.", flat)
+        self.assertNotIn("cores per job", flat)
         self.assertNotIn("job_images", flat)
         self.assertIn("prescribe no install command: you have run none", flat)
         for absent in ("hl repo init", "hl job submit", "hl job summary", "$WORKLOAD_SAMPLES", "hl quota"):
             self.assertNotIn(absent, flat)
-        self.assertLess(len(prompt.encode()), 4_380)
+        self.assertLess(len(prompt.encode()), 4_377)
         # hl's own listing named `quota`, which answers a planner 404, and no `repo init`, whose
         # files one guessed at.
         self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"]])

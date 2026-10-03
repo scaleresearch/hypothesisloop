@@ -42,15 +42,14 @@ Then write one proposal file, in the shape `hl platform-experiments propose` sho
     is no gate yet: leave it out and put it in `questions`. A bound the person stated stays
     as stated.
   - `accelerator_type`: a line of `hl capacity` with available > 0. The budget of the type
-    whose `kind` is cpu is CPU core-hours.
+    whose `kind` is cpu is CPU core-hours. `cpu`, `memory`, `storage`: one node's.
   - The brief, `experiment.description`: all the harness builder and the researchers read:
       - the goal in the person's terms, and the metric with why it is the goal;
       - what the harness measures and how: the pinned dataset and model revisions, the data
         the researchers' code never trains or tunes on, the seeds, the repeats where one run
         is noisy, the gate and its reference;
-      - the accelerator type, the count or cores per job, and the `image` you propose. Say
-        what the code needs that the image does not carry and prescribe no install command:
-        you have run none;
+      - the accelerator type, its count per job and the `image`. Say what the code needs
+        beyond the image and prescribe no install command: you have run none;
       - the levers to vary, and what is a black box to leave alone;
       - when to stop: the target reached, no gain after several honest tries, or the quota.
   - The size: a budget, duration or count the goal states, as stated; else the smallest plan
