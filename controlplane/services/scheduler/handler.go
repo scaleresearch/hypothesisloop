@@ -44,7 +44,7 @@ type submitRequest struct {
 	ID            string         `json:"id,omitempty" required:"false" doc:"Left out: the platform issues the job's id and answers it."`
 	SubmissionKey string         `json:"submission_key,omitempty" required:"false" maxLength:"128" pattern:"^[A-Za-z0-9._:-]+$" doc:"Makes the submit safe to repeat: a later submit of the same agent in the same platform experiment with this key creates nothing and is answered with the job this one created, as it is then. hl derives it from the request."`
 	Metadata      submitMeta     `json:"metadata"`
-	Job      domain.JobSpec `json:"job"`
+	Job           domain.JobSpec `json:"job"`
 }
 
 // jobIDPrefix starts the id of every job the platform issues (docs/api-conventions.md).

@@ -3,6 +3,7 @@ package registry
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -1094,8 +1095,10 @@ func positions(events []db.Event) []int64 {
 	return out
 }
 
+// agentEnv is the environment of agent-a of pe-1: hl reads who watches from the token's scope.
 func agentEnv(t *testing.T) []string {
-	return []string{"AGENT_ID=agent-a", "PLATFORM_EXPERIMENT_ID=pe-1", "HL_STATE_DIR=" + t.TempDir()}
+	scope := base64.RawURLEncoding.EncodeToString([]byte("agent:pe-1/agent-a"))
+	return []string{"HL_TOKEN=hls_" + scope + ".bWFj", "HL_STATE_DIR=" + t.TempDir()}
 }
 
 // A plain hl watch with no saved cursor returns the current snapshot of the agent's resources. The
@@ -1129,7 +1132,7 @@ func TestHLWatchFallsBackToTheSnapshotWhenTheSavedCursorIsUnknown(t *testing.T) 
 	source.next = 200
 	server := watchServer(t, source)
 	env := agentEnv(t)
-	dir := strings.TrimPrefix(env[2], "HL_STATE_DIR=")
+	dir := strings.TrimPrefix(env[1], "HL_STATE_DIR=")
 	if err := os.WriteFile(filepath.Join(dir, "watch-pe-1-agent-a.json"), []byte(`{"cursor":5000,"seen":[]}`), 0o644); err != nil {
 		t.Fatalf("write cursor file: got = %v, want = nil", err)
 	}

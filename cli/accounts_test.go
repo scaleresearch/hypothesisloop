@@ -432,11 +432,11 @@ func TestACommandAnsweredWithNoBodySaysWhatItDid(t *testing.T) {
 	})
 	setAPIURL(t, url)
 	deletes := map[string]string{
-		"org members remove u-1 --org org-1":                           "removed u-1 from org org-1",
-		"org invites revoke inv-1":                                     "revoked invite inv-1",
-		"api-key revoke key-1":                                         "revoked API key key-1",
-		"cluster remove main --org org-1":                              "DELETE /orgs/org-1/clusters/main: done",
-		"cluster forget-identity main --org org-1":                     "DELETE /orgs/org-1/clusters/main/identity: done",
+		"org members remove u-1 --org org-1":                                 "removed u-1 from org org-1",
+		"org invites revoke inv-1":                                           "revoked invite inv-1",
+		"api-key revoke key-1":                                               "revoked API key key-1",
+		"cluster remove main --org org-1":                                    "DELETE /orgs/org-1/clusters/main: done",
+		"cluster forget-identity main --org org-1":                           "DELETE /orgs/org-1/clusters/main/identity: done",
 		"platform-experiments agents remove ag-1 --platform-experiment pe-1": "removed ag-1 from platform experiment pe-1",
 	}
 	for args, said := range deletes {
