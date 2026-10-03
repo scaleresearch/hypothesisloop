@@ -836,8 +836,12 @@ func TestAWakeEntryNamesAKindOrAKindWithTheValueThatWakesOrTheOneThatDoesNot(t *
 // Every such answer then read as an outage, the router's own 404 for a route this hl is too old
 // or too new for among them. Only a gateway's 502, 503 and 504 and a request that got no answer
 // say the platform could not be reached.
+//
+// That line is the one place an agent reads what an outage asks of it, and it says of the command
+// only what is true: a read changed nothing, and a write may have been carried out.
 func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
-	const unreachable = "the platform could not be reached. Nothing in your request caused this, and the same command works once the platform answers again"
+	const next = "A person runs it again later; an agent ends its turn, and an update arrives when the platform answers again"
+	const unreachable = "the platform could not be reached, and this command changed nothing. " + next
 	const inFront = "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
 	const noRoute = "the platform serves no GET /experiments/job-1: this hl and the platform are of different versions"
 	for status, tc := range map[int]struct{ body, want string }{
@@ -875,6 +879,13 @@ func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
 	stderr.Reset()
 	if code := run([]string{"job", "status", "job-1"}, &stdout, &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "hl: GET /experiments/job-1: "+unreachable+" (") || strings.Count(stderr.String(), "\n") != 1 {
 		t.Errorf("a request that got no answer: exit %d, stderr %q, want one line saying the platform could not be reached and the cause", code, stderr.String())
+	}
+
+	setAPIURL(t, withServer(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusGatewayTimeout) }))
+	stderr.Reset()
+	want := "hl: POST /experiments/job-1/cancel -> HTTP 504: the platform could not be reached, and whether this command took effect is not known: read what it changes before running it again. " + next + "\n"
+	if code := run([]string{"job", "cancel", "job-1"}, &stdout, &stderr); code != 1 || stderr.String() != want {
+		t.Errorf("a write that got no answer: exit %d, stderr %q, want %q", code, stderr.String(), want)
 	}
 }
 

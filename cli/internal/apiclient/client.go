@@ -32,10 +32,17 @@ type HTTPError struct {
 	Body         string
 }
 
-// Unreachable says the platform gave no answer: the request did not reach it, or a proxy in front
-// of it answered 502, 503 or 504 in its place. It tells no reader what to do next, since a
-// person runs the command again and an agent's harness tells it when the platform is back.
-const Unreachable = "the platform could not be reached. Nothing in your request caused this, and the same command works once the platform answers again"
+// unreachable says the platform gave no answer to a request of method: the request did not reach
+// it, or a proxy in front of it answered 502, 503 or 504 in its place. It is the one place an
+// agent reads what to do in an outage, so it says that too. A read changed nothing; a write may
+// have been carried out before the answer was lost, and the line does not claim otherwise.
+func unreachable(method string) string {
+	const next = "A person runs it again later; an agent ends its turn, and an update arrives when the platform answers again"
+	if method == http.MethodGet {
+		return "the platform could not be reached, and this command changed nothing. " + next
+	}
+	return "the platform could not be reached, and whether this command took effect is not known: read what it changes before running it again. " + next
+}
 
 // notThePlatforms is the Body of an answer that is no JSON, which the platform's API never sends,
 // said in one line in place of what may be a whole HTML page. The platform's router answers a
@@ -44,7 +51,7 @@ const Unreachable = "the platform could not be reached. Nothing in your request 
 func notThePlatforms(method, path string, status int) string {
 	switch status {
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return Unreachable
+		return unreachable(method)
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		return fmt.Sprintf("the platform serves no %s %s: this hl and the platform are of different versions", method, strings.SplitN(path, "?", 2)[0])
 	}
@@ -88,7 +95,7 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %s (%w)", method, path, Unreachable, err)
+		return nil, fmt.Errorf("%s %s: %s (%w)", method, path, unreachable(method), err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
