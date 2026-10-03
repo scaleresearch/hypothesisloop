@@ -1,10 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { registerHumanHypothesis, addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api'
-import type { HypothesisSearchHit, SimilarHypothesis } from '@/lib/api'
+import { addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api'
+import type { HypothesisSearchHit } from '@/lib/api'
 import type { HypothesisLinkType, HypothesisWithJobs } from '@/types'
-import { Badge } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
@@ -12,145 +11,6 @@ import { Eyebrow } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypothesis-search'
 import { AgentLabel } from '@/components/agent-label'
 import { useReadOnly } from '@/lib/read-only'
-
-interface IdeaParent {
-  /** A hypothesis id, or the platform_experiment_id for the objective root. */
-  id: string
-  label: string
-}
-
-function TargetList({ label, targets, onRemove }: {
-  label: string
-  targets: HypothesisSearchHit[]
-  onRemove: (id: string) => void
-}) {
-  if (targets.length === 0) return null
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
-      <Eyebrow>{label}</Eyebrow>
-      {targets.map(t => (
-        <div key={t.id} className="flex items-center gap-2 text-xs">
-          <span className="min-w-0 flex-1 truncate" title={t.text}>{t.text}</span>
-          <Button variant="link" size="sm" onClick={() => onRemove(t.id)} aria-label={`Remove ${t.text}`}>Remove</Button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// Anyone watching a run can add an idea to the graph from here, placed under the hypothesis (or
-// objective) they selected. Before this, the only human steering channel was rewriting the
-// platform experiment's description, which rewrites the brief for every agent at once.
-export function AddIdeaForm({ platformExperimentID, parent, onAdded }: {
-  platformExperimentID: string
-  parent: IdeaParent
-  onAdded: (id: string) => void
-}) {
-  const [text, setText] = useState('')
-  const [crossType, setCrossType] = useState<'contradicts' | 'related'>('contradicts')
-  const [contradicts, setContradicts] = useState<HypothesisSearchHit[]>([])
-  const [related, setRelated] = useState<HypothesisSearchHit[]>([])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [existingID, setExistingID] = useState('')
-  const [similar, setSimilar] = useState<SimilarHypothesis[]>([])
-  const readOnly = useReadOnly()
-
-  const picked = [...contradicts, ...related].map(t => t.id)
-
-  function pick(hit: HypothesisSearchHit) {
-    if (crossType === 'contradicts') setContradicts([...contradicts, hit])
-    else setRelated([...related, hit])
-  }
-
-  async function submit(distinctFrom: string[] = []) {
-    setBusy(true)
-    setError('')
-    setExistingID('')
-    setSimilar([])
-    try {
-      const h = await registerHumanHypothesis(platformExperimentID, text.trim(), [
-        { type: 'builds_on', to: parent.id },
-        ...contradicts.map(t => ({ type: 'contradicts' as const, to: t.id })),
-        ...related.map(t => ({ type: 'related' as const, to: t.id })),
-      ], distinctFrom)
-      if ('similar' in h) setSimilar(h.similar)
-      else if (h.already_existed) setExistingID(h.id)
-      else onAdded(h.id)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (readOnly) return null
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] max-w-[760px] gap-2.5">
-      <p className="text-xs text-muted">
-        Your idea joins the graph the agents read and add to, under your name. No job runs against
-        it: an agent that wants to test it registers its own hypothesis building on yours. An idea
-        the graph already holds is not added again.
-      </p>
-      <div className="text-xs">
-        <Eyebrow>Builds on</Eyebrow>{' '}
-        <span title={parent.label}>{parent.label}</span>
-      </div>
-      <Textarea
-        className="min-h-[70px] w-full"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder="e.g. the retry loop is masking a bad learning-rate schedule; try a linear warmup instead"
-      />
-      <details>
-        <summary className="cursor-pointer text-xs text-accent hover:underline">
-          Mark hypotheses it contradicts or relates to (optional)
-        </summary>
-        <div className="grid grid-cols-[minmax(0,1fr)] mt-2 gap-2">
-          <div className="flex gap-1.5">
-            <Chip active={crossType === 'contradicts'} onClick={() => setCrossType('contradicts')}>Contradicts</Chip>
-            <Chip active={crossType === 'related'} onClick={() => setCrossType('related')}>Related</Chip>
-          </div>
-          <HypothesisPicker platformExperimentID={platformExperimentID} exclude={[parent.id, ...picked]} onPick={pick} />
-          <TargetList label="Contradicts" targets={contradicts} onRemove={id => setContradicts(contradicts.filter(t => t.id !== id))} />
-          <TargetList label="Related" targets={related} onRemove={id => setRelated(related.filter(t => t.id !== id))} />
-        </div>
-      </details>
-      <div className="flex items-center gap-2.5">
-        <Button size="sm" variant="primary" disabled={busy || text.trim() === ''} onClick={() => submit()}>
-          {busy ? 'Adding…' : 'Add idea'}
-        </Button>
-        {existingID && (
-          <span className="text-xs text-muted">
-            An equivalent idea already exists, so nothing was added and your links were not applied.{' '}
-            <Button variant="link" size="sm" onClick={() => onAdded(existingID)}>Show it</Button>
-          </span>
-        )}
-        {error && <InlineError>{error}</InlineError>}
-      </div>
-      {similar.length > 0 && (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs">
-          <span className="text-muted">
-            Nothing was added yet: these read close to your idea, or it builds on a refuted one.
-            If one is your idea, open it instead; mark one your idea opposes as Contradicts.
-          </span>
-          {similar.map(h => (
-            <div key={h.id} className="flex items-center gap-2">
-              <Badge status={h.status}>{h.status}</Badge>
-              <span className="min-w-0 flex-1 truncate" title={h.text}>{h.text}</span>
-              <Button variant="link" size="sm" onClick={() => onAdded(h.id)}>Show it</Button>
-            </div>
-          ))}
-          <div>
-            <Button size="sm" disabled={busy} onClick={() => submit(similar.map(h => h.id))}>
-              None of these is my idea, add it
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 const LINK_TYPE_LABELS: Record<HypothesisLinkType, string> = {
   builds_on: 'Builds on',

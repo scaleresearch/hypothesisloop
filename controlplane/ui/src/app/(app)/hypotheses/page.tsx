@@ -1,21 +1,23 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
+import type { KeyedMutator } from 'swr'
 import { clsx } from 'clsx'
 import { fetchHypothesisGraph, fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api'
+import type { HypothesisSearchHit } from '@/lib/api'
+import { PlatformExperimentStatus } from '@/types'
 import type { HypothesisGraph, PlatformExperiment } from '@/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { Button, Chip } from '@/components/ui/button'
-import { Dialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Loading, ErrorMessage, EmptyState } from '@/components/ui/status-message'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
-import { AddIdeaForm } from '@/components/human-idea'
 import { AgentNames, useAgentName } from '@/components/agent-label'
+import { GraphEditorProvider, LinkBar, useGraphEditor } from '@/components/graph-edit'
 import { HypothesisGraphCanvas } from '@/components/hypothesis-graph'
 import { HypothesisOutline } from '@/components/hypothesis-outline'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypothesis-panel'
@@ -23,7 +25,8 @@ import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypothe
 import { useProjectRouter, useQueryParam } from '@/lib/query-state'
 import { useTenant } from '@/lib/tenant'
 import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
-import { HUMAN_OWNER, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
+import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters } from '@/lib/hypothesis-graph'
+import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 
 const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
 
@@ -40,6 +43,31 @@ function OwnerFilter({ graph, value, onChange }: { graph: HypothesisGraph | unde
   return <SearchableSelect value={value} onChange={onChange} allLabel="All agents" options={options} />
 }
 
+interface Layout {
+  /** Counts the times it was laid out whole. */
+  epoch: number
+  positions: Map<string, Position>
+  /** Some node was placed beside the others since the graph was last laid out whole. */
+  extended: boolean
+}
+
+// The graph is laid out whole when it opens and when asked to tidy; a node that joins later is
+// placed beside the others, so nothing already drawn moves under the reader.
+function useStableLayout(graph: HypothesisGraph) {
+  const last = useRef<Layout | null>(null)
+  const [epoch, setEpoch] = useState(0)
+  const layout = useMemo<Layout>(() => {
+    const prev = last.current
+    if (!prev || prev.epoch !== epoch) return { epoch, positions: layoutGraph(graph), extended: false }
+    const positions = extendLayout(graph, prev.positions)
+    return { epoch, positions, extended: prev.extended || graph.nodes.some(n => positions.has(n.id) && !prev.positions.has(n.id)) }
+  }, [graph, epoch])
+  useEffect(() => {
+    last.current = layout
+  }, [layout])
+  return { ...layout, tidy: () => setEpoch(e => e + 1) }
+}
+
 export default function HypothesesPage() {
   return (
     <Suspense fallback={<Loading />}>
@@ -53,12 +81,10 @@ function HypothesesPageContent() {
   const router = useProjectRouter()
   const searchParams = useSearchParams()
   const peID = searchParams.get('pe') ?? ''
-  const [focus, setFocus] = useQueryParam('focus')
   const [view, setView] = useQueryParam('view', 'graph')
   const [statusFilter, setStatusFilter] = useQueryParam('status')
   const [ownerFilter, setOwnerFilter] = useQueryParam('agent')
   const [q, setQ] = useQueryParam('q')
-  const [addUnder, setAddUnder] = useState<string | null>(null)
 
   const { data: platformExperiments, error: peError } = useSWR<PlatformExperiment[]>(
     peID ? null : ['platform-experiment-latest', project.id],
@@ -80,15 +106,9 @@ function HypothesesPageContent() {
     { refreshInterval: 15_000 },
   )
   const search = useHypothesisSearch(peID, q)
-
-  const positions = useMemo(() => graph && layoutGraph(graph), [graph])
-  const nodeByID = useMemo(() => new Map((graph?.nodes ?? []).map(n => [n.id, n])), [graph])
-  const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
   const filters = useMemo(() => ({ status: statusFilter, owner: ownerFilter }), [statusFilter, ownerFilter])
 
-  const selected = focus || graph?.root || ''
   const filtering = statusFilter !== '' || ownerFilter !== ''
-  const showSide = graph !== undefined && (q !== '' || selected !== graph.root)
   const matching = graph ? graph.nodes.filter(n => matchesFilters(n, filters)).length : 0
 
   function selectExperiment(next: string) {
@@ -96,14 +116,8 @@ function HypothesesPageContent() {
     router.push(view === 'graph' ? href : `${href}&view=${view}`)
   }
 
-  function onAdded(id: string) {
-    setAddUnder(null)
-    mutate()
-    setFocus(id)
-  }
-
-  // Nothing is added to a graph whose experiment has not been read yet.
-  const readOnly = pe ? isReadOnly(me, pe) : true
+  // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
+  const readOnly = pe ? isReadOnly(me, pe) || pe.status === PlatformExperimentStatus.CLOSED : true
 
   const page = (
     <ReadOnlyProvider value={readOnly}>
@@ -155,16 +169,58 @@ function HypothesesPageContent() {
       {error && <ErrorMessage>Could not load the hypothesis graph: {error.message}</ErrorMessage>}
       {(peID ? !(graph && pe) && !error && !selectedError : !platformExperiments && !peError) && <Loading />}
 
-      {graph && positions && pe && <ObjectiveBar graph={graph} pe={pe} onAddIdea={setAddUnder} />}
-      {graph && positions && pe && (
-        <div className={clsx('grid min-h-[420px] flex-[1_0_0] grid-rows-[minmax(0,1fr)] gap-4', showSide ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)]')}>
-          <div className="flex flex-col overflow-hidden rounded-lg border bg-surface">
-            {graph.nodes.length === 0 ? (
-              <EmptyState>
-                No hypotheses in this experiment yet. Agents place each idea under the objective or an
-                earlier hypothesis{readOnly ? '.' : '; you can add one under the objective above.'}
-              </EmptyState>
-            ) : view === 'outline' ? (
+      {graph && pe && (
+        <Workspace
+          key={graph.root}
+          graph={graph}
+          pe={pe}
+          mutate={mutate}
+          canWrite={!readOnly}
+          view={view}
+          q={q}
+          setQ={setQ}
+          search={search}
+          filters={filters}
+        />
+      )}
+    </div>
+    </ReadOnlyProvider>
+  )
+  // The names of an experiment's agents are read once there is an experiment to read them of.
+  return peID ? <AgentNames platformExperimentID={peID}>{page}</AgentNames> : page
+}
+
+function Workspace({ graph, pe, mutate, canWrite, view, q, setQ, search, filters }: {
+  graph: HypothesisGraph
+  pe: PlatformExperiment
+  mutate: KeyedMutator<HypothesisGraph>
+  canWrite: boolean
+  view: string
+  q: string
+  setQ: (q: string) => void
+  search: { data?: HypothesisSearchHit[]; isLoading: boolean; error?: Error }
+  filters: GraphFilters
+}) {
+  const [focus, setFocus] = useQueryParam('focus')
+  const layout = useStableLayout(graph)
+  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite, mutate, onSelect: setFocus })
+  const nodeByID = useMemo(() => new Map(graph.nodes.map(n => [n.id, n])), [graph])
+  const hits = useMemo(() => new Set((search.data ?? []).map(h => h.id)), [search.data])
+
+  const selected = focus || graph.root
+  const showSide = q !== '' || selected !== graph.root
+
+  return (
+    <GraphEditorProvider value={editor}>
+      <ObjectiveBar graph={graph} pe={pe} onAddIdea={editor.startAdding} />
+      <div className={clsx('grid min-h-[420px] flex-[1_0_0] grid-rows-[minmax(0,1fr)] gap-4', showSide ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)]')}>
+        <div className="flex flex-col overflow-hidden rounded-lg border bg-surface">
+          <LinkBar />
+          {view === 'outline' ? (
+            <>
+              {graph.nodes.length === 0 && (
+                <p className="px-3 pt-2.5 text-xs text-muted">No hypotheses yet. Agents place each idea under the objective or an earlier one.</p>
+              )}
               <HypothesisOutline
                 graph={graph}
                 rootLabel={pe.name}
@@ -173,61 +229,45 @@ function HypothesesPageContent() {
                 filters={filters}
                 onSelect={setFocus}
               />
-            ) : (
-              <HypothesisGraphCanvas
-                key={graph.root}
-                graph={graph}
-                positions={positions}
-                rootLabel={pe.name}
-                focus={focus}
-                selected={selected}
-                hits={hits}
-                filters={filters}
-                minimap={!showSide}
-                onSelect={setFocus}
-              />
-            )}
-          </div>
-          {showSide && <aside className="overflow-y-auto">
-            {q && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Search results</CardTitle>
-                  <Button variant="link" size="sm" className="ml-auto" onClick={() => setQ('')}>Clear</Button>
-                </CardHeader>
-                <CardContent>
-                  <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
-                </CardContent>
-              </Card>
-            )}
-            {selected !== graph.root && (
-              <HypothesisPanel
-                graph={graph}
-                nodeByID={nodeByID}
-                selected={selected}
-                onSelect={setFocus}
-                onAddIdea={setAddUnder}
-              />
-            )}
-          </aside>}
+            </>
+          ) : (
+            <HypothesisGraphCanvas
+              graph={graph}
+              positions={layout.positions}
+              rootLabel={pe.name}
+              focus={focus}
+              selected={selected}
+              hits={hits}
+              filters={filters}
+              minimap={!showSide}
+              onSelect={setFocus}
+              onTidy={layout.extended ? layout.tidy : undefined}
+            />
+          )}
         </div>
-      )}
-
-      {graph && pe && !readOnly && addUnder !== null && (
-        <Dialog open onClose={() => setAddUnder(null)} title="Add an idea">
-          <AddIdeaForm
-            platformExperimentID={peID}
-            parent={{
-              id: addUnder,
-              label: addUnder === graph.root ? `the objective of ${pe.name}` : nodeByID.get(addUnder)!.text,
-            }}
-            onAdded={onAdded}
-          />
-        </Dialog>
-      )}
-    </div>
-    </ReadOnlyProvider>
+        {showSide && <aside className="overflow-y-auto">
+          {q && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Search results</CardTitle>
+                <Button variant="link" size="sm" className="ml-auto" onClick={() => setQ('')}>Clear</Button>
+              </CardHeader>
+              <CardContent>
+                <SearchHits hits={search.data} onPick={h => setFocus(h.id)} isLoading={search.isLoading} error={search.error} />
+              </CardContent>
+            </Card>
+          )}
+          {selected !== graph.root && (
+            <HypothesisPanel
+              graph={graph}
+              nodeByID={nodeByID}
+              selected={selected}
+              onSelect={setFocus}
+              onAddIdea={editor.startAdding}
+            />
+          )}
+        </aside>}
+      </div>
+    </GraphEditorProvider>
   )
-  // The names of an experiment's agents are read once there is an experiment to read them of.
-  return peID ? <AgentNames platformExperimentID={peID}>{page}</AgentNames> : page
 }
