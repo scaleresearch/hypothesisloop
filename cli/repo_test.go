@@ -61,7 +61,7 @@ func cloneOf(t *testing.T, experiment string) string {
 // colon in it, a brief of several lines, a gate, and the image and the type its jobs run on.
 const proposed = `{"id":"pe-1","name":"ResNet-18: throughput\n","description":"GOAL: images per second.\n\nBASELINE\n  config: fp32\n  measured: not yet established\n",
 "metrics":[{"key":"images_per_s","direction":"maximize","role":"ranking"},{"key":"top1_agreement","direction":"maximize","role":"constraint","bound":0.99}],
-"proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","image":"torch","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
+"proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","image":"torch","cpu":"8","memory":"32Gi","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
 
 func read(t *testing.T, clone, path string) string {
 	t.Helper()
@@ -95,6 +95,12 @@ func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
 		spec.Job["accelerator_type"] != "nvidia.com/gpu.product=RTX-4090" || spec.Job["accelerator_count"] != 1 {
 		t.Fatalf("the job spec states %v, %v, want the proposal's image and accelerator_type", spec.Job, err)
 	}
+	// A planner stated what a node asks for in the prose of its brief, and the baseline agent
+	// copied it into the job spec by hand. What the proposal states is written, and what it
+	// leaves out stays as the template has it.
+	if spec.Job["cpu"] != 8 || spec.Job["memory"] != "32Gi" || spec.Job["storage"] != "4Gi" {
+		t.Fatalf("the job spec asks for cpu %v, memory %v, storage %v, want the proposal's 8 and 32Gi and the template's 4Gi", spec.Job["cpu"], spec.Job["memory"], spec.Job["storage"])
+	}
 	if left := strings.Count(read(t, clone, repotemplate.JobSpec), repotemplate.Placeholder); left != 1 {
 		t.Fatalf("the job spec leaves %d %s, want only the command of one trial", left, repotemplate.Placeholder)
 	}
@@ -123,7 +129,7 @@ func TestRepoInitWritesAJobSpecWithNoAcceleratorForWorkOnCores(t *testing.T) {
 		Job map[string]any `yaml:"job"`
 	}
 	text := read(t, clone, repotemplate.JobSpec)
-	if err := yaml.Unmarshal([]byte(text), &spec); err != nil || spec.Job["accelerator_type"] != nil || spec.Job["accelerator_count"] != nil || spec.Job["cpu"] != 2 ||
+	if err := yaml.Unmarshal([]byte(text), &spec); err != nil || spec.Job["accelerator_type"] != nil || spec.Job["accelerator_count"] != nil || spec.Job["cpu"] != 8 ||
 		!strings.Contains(text, "runs on CPU cores") || strings.Contains(text, "hl capacity`. Work that needs no accelerator") {
 		t.Fatalf("the job spec for work on cores = %v, %v\n%s", spec.Job, err, text)
 	}

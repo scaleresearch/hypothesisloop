@@ -25,8 +25,8 @@ var repoCommands = []subcommand{
 
 const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment: name, description (the brief researchers read) and
                                     metrics, written whole from the platform experiment
-  .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial, with the image
-                                    and the accelerator_type of the experiment's proposal filled in
+  .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial, with the image,
+                                    the accelerator_type and the cpu, memory and storage its proposal states
   README.md                         what is measured, how one trial runs, what to vary, what must not
                                     change, with the experiment's name and what its proposal says is measured
   metrics.py                        how a job reports a metric: post_metric(fraction_complete, value, "key")
@@ -179,6 +179,10 @@ const (
 	acceleratorMark = "REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS"
 	nameMark        = "REPLACE-WITH-THE-NAME-OF-THE-EXPERIMENT"
 	measuredMark    = "REPLACE-WITH the ranked metric, why it is the goal, and the gate that makes a result wrong."
+	// What the template's job spec asks for one node, which a proposal that states them replaces.
+	cpuLine     = "  cpu: 2\n"
+	memoryLine  = "  memory: 8Gi\n"
+	storageLine = "  storage: 4Gi\n"
 	// acceleratorLines is what the job spec says of its accelerator, which work on cores has none of.
 	acceleratorLines = "  # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines, and\n" +
 		"  # its `cpu`, a whole number, is then the cores it holds and pays for.\n" +
@@ -220,9 +224,18 @@ func experimentFiles(template map[string]string, experiment declaredExperiment) 
 		return strings.TrimSpace(string(quoted))
 	}
 	proposal := experiment.Proposal
+	quantity := func(name, stated string) string {
+		if stated == "" {
+			return ""
+		}
+		return "  " + name + ": " + stated + "\n"
+	}
 	fills := []struct{ path, mark, value string }{
 		{repotemplate.Readme, nameMark, strings.TrimSpace(experiment.Name)},
 		{repotemplate.JobSpec, imageMark, scalar(proposal.Image)},
+		{repotemplate.JobSpec, cpuLine, quantity("cpu", proposal.CPU)},
+		{repotemplate.JobSpec, memoryLine, quantity("memory", proposal.Memory)},
+		{repotemplate.JobSpec, storageLine, quantity("storage", proposal.Storage)},
 		{repotemplate.Readme, measuredMark, strings.TrimSpace(strings.TrimSpace(proposal.MetricReason) + "\n\n" + strings.TrimSpace(proposal.Measurement))},
 	}
 	if proposal.AcceleratorType == cpuType {
@@ -326,6 +339,9 @@ type declaredExperiment struct {
 	Proposal    struct {
 		AcceleratorType string `json:"accelerator_type"`
 		Image           string `json:"image"`
+		CPU             string `json:"cpu"`
+		Memory          string `json:"memory"`
+		Storage         string `json:"storage"`
 		MetricReason    string `json:"metric_reason"`
 		Measurement     string `json:"measurement"`
 	} `json:"proposal"`
